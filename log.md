@@ -1204,6 +1204,19 @@
 - **Diagnostics**: 準備針對第二、第三視窗記錄 `cachedWindowData.length` 與原始快取長度，並比對批量優化單跑的 `rawDataUsed.fetchRange`，確認 Worker 僅接收到對應訓練期間的資料。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-03-02 — Patch LB-BATCH-OPT-20250930B
+- **Scope**: 批量優化、交叉優化與局部微調全面導入暖身後的基礎參數覆寫與視窗快取覆用，確保批量面板、手動優化與 Walk-Forward 最佳解一致。
+- **Updates**:
+  - `executeBatchOptimization` 於流程開頭以 `getBacktestParams()`＋`enrichParamsWithLookback` 建立 `baseParamsOverride`，呼叫 `selectCachedDataForParams` 切片暖身＋使用者期間的 `cachedStockData`，並透過 `batchOptimizationSharedOptions` 傳遞至所有 Worker 呼叫。
+  - `optimizeCombinations`、`processStrategyCombinations`、`executeBacktestForCombination` 及 `optimizeCombinationIterative` 全線使用 `baseParamsOverride`／`cachedDataOverride`，回傳結果附帶 `baseSettings`、`dataWindow`、`cachedDataRange`，並由 `loadBatchStrategy` 重新套用日期、資金、分段與手續費設定。
+  - 交叉優化、局部微調與風險優化改以共享覆寫參數執行回測，`performSingleBacktest(Fast)`、`optimizeSingleStrategyParametersFast` 等輔助函式支援覆寫快取；新增 `applyBatchBaseSettings` 確保載入結果時 UI 與批量流程完全同步。
+  - 單策略優化（`optimizeStrategyParameters`／`optimizeMultipleStrategyParameters`）同步讀取 `batchOptimizationSharedOptions`，在風險優化與參數掃描期間沿用暖身後的基礎設定與視窗快取。
+  - `appendBatchResults` 與 `applyBatchResultsSorting` 重整排序流程，移除重複渲染呼叫並在新增結果時即時維持排序。
+- **Diagnostics**:
+  - 以相同測試資料在批量面板、載入後單次優化、Walk-Forward 訓練視窗比對 `bestParams`／`riskManagement` 與 `cachedDataRange`，確認三者一致。
+  - 驗證交叉優化與局部微調結果皆帶有 `baseSettings` 與 `dataWindow`，載入後不再回退至全域 UI 狀態。
+- **Testing**: 受限於容器環境未連線代理，暫未執行實際回測；待可連線後需以 2330／2412／0050 等案例確認 console 無錯誤。
+
 ### Debug Log — LB-ROLLING-TEST-DEBUG-20251001A
 - **Confirmed non-issues**: 迭代上限與優化 scope 已與批量面板一致；`resolveStrategyConfigKey` 未發生多空鍵值錯置。
 - **Active hypothesis**: 滾動優化若未裁切快取會攜帶後續資料，造成第二窗後的最佳解偏離批量優化；此次改為傳遞 `cachedDataOverride` 以驗證。

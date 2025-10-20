@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-BATCH-OPT-20250930B
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -48,6 +48,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let batchOptimizationSharedOptions = null;
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -135,6 +136,117 @@ function enrichParamsWithLookback(params) {
         effectiveStartDate,
         dataStartDate,
         lookbackDays,
+    };
+}
+
+function cloneBatchValue(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => cloneBatchValue(item));
+    }
+    if (value && typeof value === 'object') {
+        return { ...value };
+    }
+    return value;
+}
+
+function buildBatchBaseParamsOverride(params) {
+    if (!params || typeof params !== 'object') return null;
+    const keys = [
+        'stockNo',
+        'startDate',
+        'endDate',
+        'initialCapital',
+        'positionSize',
+        'tradeTiming',
+        'adjustedPrice',
+        'splitAdjustment',
+        'priceMode',
+        'market',
+        'marketType',
+        'positionBasis',
+        'entryStagingMode',
+        'exitStagingMode',
+        'entryStages',
+        'exitStages',
+        'stopLoss',
+        'takeProfit',
+        'enableShorting',
+        'shortEntryStrategy',
+        'shortExitStrategy',
+        'shortEntryParams',
+        'shortExitParams',
+        'buyFee',
+        'sellFee',
+    ];
+    const override = {};
+    keys.forEach((key) => {
+        if (params[key] === undefined) return;
+        override[key] = cloneBatchValue(params[key]);
+    });
+    if (params.dataStartDate) override.dataStartDate = params.dataStartDate;
+    if (params.effectiveStartDate) override.effectiveStartDate = params.effectiveStartDate;
+    if (Number.isFinite(params.lookbackDays)) override.lookbackDays = params.lookbackDays;
+    return Object.keys(override).length > 0 ? override : null;
+}
+
+function resolveIsoTimestampForCache(value) {
+    if (!value) return Number.NaN;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return Number.NaN;
+}
+
+function resolveRowTimestampForCache(row) {
+    if (!row || typeof row !== 'object') return Number.NaN;
+    const candidates = [
+        row.date,
+        row.Date,
+        row.tradeDate,
+        row.trade_date,
+        row.timestamp,
+        row.time,
+        row.t,
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+        const ts = resolveIsoTimestampForCache(candidates[i]);
+        if (Number.isFinite(ts)) return ts;
+    }
+    return Number.NaN;
+}
+
+function selectCachedDataForParams(params) {
+    if (!Array.isArray(cachedStockData) || cachedStockData.length === 0) return null;
+    const startIso = params?.dataStartDate || params?.effectiveStartDate || params?.startDate;
+    const endIso = params?.endDate;
+    if (!startIso || !endIso) return null;
+    const startTime = resolveIsoTimestampForCache(startIso);
+    const endTime = resolveIsoTimestampForCache(endIso);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+    const inclusiveEnd = endTime + (24 * 60 * 60 * 1000) - 1;
+    const filtered = cachedStockData.filter((row) => {
+        const rowTime = resolveRowTimestampForCache(row);
+        return Number.isFinite(rowTime) && rowTime >= startTime && rowTime <= inclusiveEnd;
+    });
+    if (filtered.length === 0) return null;
+    return filtered.map((row) => ({ ...row }));
+}
+
+function deriveCachedDataRange(data) {
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const timestamps = data
+        .map((row) => resolveRowTimestampForCache(row))
+        .filter((ts) => Number.isFinite(ts));
+    if (timestamps.length === 0) return null;
+    const minTs = Math.min(...timestamps);
+    const maxTs = Math.max(...timestamps);
+    return {
+        startDate: new Date(minTs).toISOString().slice(0, 10),
+        endDate: new Date(maxTs).toISOString().slice(0, 10),
+        length: timestamps.length,
     };
 }
 
@@ -767,9 +879,34 @@ async function executeBatchOptimization(config) {
         let sellStrategies = getSelectedStrategies('batch-sell-strategies');
         
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
-        
+
         updateBatchProgress(5, '準備策略參數優化...');
-        
+
+        const uiParams = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const enrichedParams = enrichParamsWithLookback(uiParams || {});
+        const baseParamsOverride = buildBatchBaseParamsOverride(enrichedParams);
+        const cachedDataOverride = selectCachedDataForParams(enrichedParams);
+        const sharedOptions = {
+            baseParamsOverride,
+            cachedDataOverride,
+        };
+        if (cachedDataOverride) {
+            sharedOptions.cachedDataRange = deriveCachedDataRange(cachedDataOverride);
+        }
+        batchOptimizationSharedOptions = sharedOptions;
+
+        if (baseParamsOverride) {
+            console.log('[Batch Optimization] Base params override prepared:', {
+                startDate: baseParamsOverride.startDate,
+                endDate: baseParamsOverride.endDate,
+                dataStartDate: baseParamsOverride.dataStartDate,
+                effectiveStartDate: baseParamsOverride.effectiveStartDate,
+            });
+        }
+        if (sharedOptions.cachedDataRange) {
+            console.log('[Batch Optimization] Cached data override range:', sharedOptions.cachedDataRange);
+        }
+
         // 步驟2：先生成所有選中的策略組合，然後逐個對每個組合依序優化參數
         console.log('[Batch Optimization] Generating strategy combinations...');
         const rawCombinations = generateStrategyCombinations(buyStrategies, sellStrategies);
@@ -779,7 +916,7 @@ async function executeBatchOptimization(config) {
         updateBatchProgress(30, '對每個組合進行參數優化...');
 
         // 步驟3：針對每個組合進行並行的 per-combination 優化
-        const optimizedCombinations = await optimizeCombinations(rawCombinations, config);
+        const optimizedCombinations = await optimizeCombinations(rawCombinations, config, sharedOptions);
 
         const totalCombinations = Math.min(optimizedCombinations.length, config.maxCombinations);
         console.log(`[Batch Optimization] Completed per-combination parameter optimization for ${optimizedCombinations.length} combinations`);
@@ -804,7 +941,7 @@ async function executeBatchOptimization(config) {
         console.log(`[Batch Optimization] Processing in ${batches.length} batches`);
         
         // 開始處理每一批
-        processBatch(batches, 0, config);
+        processBatch(batches, 0, config, sharedOptions);
     } catch (error) {
         console.error('[Batch Optimization] Error in executeBatchOptimization:', error);
         showError('批量優化執行失敗：' + error.message);
@@ -1077,7 +1214,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
 
 
 // 對所有組合依序執行 optimizeCombinationIterative（可改為批次並行以加速）
-async function optimizeCombinations(combinations, config) {
+async function optimizeCombinations(combinations, config, sharedOptions = {}) {
     const optimized = [];
 
     const maxConcurrency = config.optimizeConcurrency || navigator.hardwareConcurrency || 4;
@@ -1105,7 +1242,7 @@ async function optimizeCombinations(combinations, config) {
                 const i = index++;
                 const combo = combinations[i];
 
-                const p = optimizeCombinationIterative(combo, config)
+                const p = optimizeCombinationIterative(combo, config, sharedOptions)
                     .then(res => {
                         optimized[i] = res;
 
@@ -1179,7 +1316,7 @@ function getDefaultStrategyParams(strategy) {
 }
 
 // 分批處理
-function processBatch(batches, batchIndex, config) {
+function processBatch(batches, batchIndex, config, sharedOptions = {}) {
     // 檢查是否被停止
     if (isBatchOptimizationStopped) {
         console.log('[Batch Optimization] Process stopped by user');
@@ -1204,7 +1341,7 @@ function processBatch(batches, batchIndex, config) {
     updateBatchProgress(progressPercentage, `處理批次 ${batchIndex + 1}/${batches.length}...`);
     
     // 處理當前批次
-    processStrategyCombinations(currentBatch, config).then(() => {
+    processStrategyCombinations(currentBatch, config, sharedOptions).then(() => {
         // 檢查是否被停止
         if (isBatchOptimizationStopped) {
             console.log('[Batch Optimization] Process stopped by user');
@@ -1213,7 +1350,7 @@ function processBatch(batches, batchIndex, config) {
         
         // 處理下一批次
         setTimeout(() => {
-            processBatch(batches, batchIndex + 1, config);
+            processBatch(batches, batchIndex + 1, config, sharedOptions);
         }, 100); // 小延遲避免阻塞UI
     }).catch(error => {
         console.error('[Batch Optimization] Error processing batch:', error);
@@ -1222,9 +1359,9 @@ function processBatch(batches, batchIndex, config) {
 }
 
 // 處理策略組合
-async function processStrategyCombinations(combinations, config) {
+async function processStrategyCombinations(combinations, config, sharedOptions = {}) {
     const results = [];
-    
+
     for (let i = 0; i < combinations.length; i++) {
         // 檢查是否被停止
         if (isBatchOptimizationStopped) {
@@ -1244,7 +1381,7 @@ async function processStrategyCombinations(combinations, config) {
         
         try {
             // 執行回測
-            const result = await executeBacktestForCombination(combination);
+            const result = await executeBacktestForCombination(combination, sharedOptions);
             if (result) {
                 // 確保保留原始的策略 ID，不被 worker 結果覆蓋
                 const combinedResult = {
@@ -1255,7 +1392,24 @@ async function processStrategyCombinations(combinations, config) {
                     buyParams: combination.buyParams,
                     sellParams: combination.sellParams
                 };
-                
+
+                if (sharedOptions?.baseParamsOverride) {
+                    const snapshot = prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride);
+                    combinedResult.baseSettings = snapshot;
+                    combinedResult.dataWindow = {
+                        dataStartDate: snapshot.dataStartDate || sharedOptions.baseParamsOverride.dataStartDate || null,
+                        effectiveStartDate: snapshot.effectiveStartDate
+                            || sharedOptions.baseParamsOverride.effectiveStartDate
+                            || snapshot.startDate
+                            || sharedOptions.baseParamsOverride.startDate
+                            || null,
+                        endDate: snapshot.endDate || sharedOptions.baseParamsOverride.endDate || null,
+                    };
+                }
+                if (sharedOptions?.cachedDataRange) {
+                    combinedResult.cachedDataRange = { ...sharedOptions.cachedDataRange };
+                }
+
                 // 保留風險管理參數（如果有的話）
                 if (combination.riskManagement) {
                     combinedResult.riskManagement = combination.riskManagement;
@@ -1282,11 +1436,16 @@ async function processStrategyCombinations(combinations, config) {
             updateBatchProgress(combinationInfo);
         }
     }
-    
+
     // 將結果添加到全局結果中
+    appendBatchResults(results);
+    console.log(`[Batch Optimization] Processed ${results.length} combinations, total results: ${batchOptimizationResults.length}`);
+}
+
+function appendBatchResults(results) {
+    if (!Array.isArray(results) || results.length === 0) return;
     batchOptimizationResults.push(...results);
-    
-    console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
+    applyBatchResultsSorting();
 }
 
 // 執行單個策略組合的回測
@@ -1299,12 +1458,16 @@ async function executeBacktestForCombination(combination, options = {}) {
                 ? prepareBaseParamsForOptimization(baseParamsOverride)
                 : getBacktestParams();
 
-            if (baseParamsOverride) {
-                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
-                    if (baseParamsOverride[key] !== undefined) {
-                        params[key] = Array.isArray(baseParamsOverride[key])
-                            ? [...baseParamsOverride[key]]
-                            : baseParamsOverride[key];
+            if (baseParamsOverride && typeof baseParamsOverride === 'object') {
+                Object.keys(baseParamsOverride).forEach((key) => {
+                    if (baseParamsOverride[key] === undefined) return;
+                    const value = baseParamsOverride[key];
+                    if (Array.isArray(value)) {
+                        params[key] = value.map((item) => cloneBatchValue(item));
+                    } else if (value && typeof value === 'object') {
+                        params[key] = { ...value };
+                    } else {
+                        params[key] = value;
                     }
                 });
             }
@@ -1392,16 +1555,19 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
     return new Promise((resolve) => {
         try {
             const strategyInfo = strategyDescriptions[strategy];
-            
+            const sharedOptions = batchOptimizationSharedOptions || {};
+
             // 檢查是否為風險管理控制策略
             const isRiskManagementStrategy = strategy === 'fixed_stop_loss' || strategy === 'cover_fixed_stop_loss';
-            
+
             if (isRiskManagementStrategy) {
                 console.log(`[Batch Optimization] Optimizing risk management parameters for ${strategy} (${targetMetric})`);
-                
+
                 // 對於風險管理策略，優化停損和停利參數
-                const params = getBacktestParams();
-                
+                const params = sharedOptions.baseParamsOverride
+                    ? prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride)
+                    : prepareBaseParamsForOptimization(getBacktestParams());
+
                 // 修復：使用與單次風險管理優化相同的參數範圍和步長
                 // 確保批量優化和單次優化的搜索空間一致
                 const globalStopLossConfig = globalOptimizeTargets.stopLoss;
@@ -1422,7 +1588,7 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
                 console.log(`[Batch Optimization] Risk management optimization ranges (consistent with single optimization):`, riskOptimizeTargets);
                 
                 // 順序優化兩個參數：先優化停損，再基於最佳停損值優化停利
-                optimizeRiskManagementParameters(params, riskOptimizeTargets, targetMetric, trials)
+                optimizeRiskManagementParameters(params, riskOptimizeTargets, targetMetric, trials, sharedOptions)
                     .then(resolve)
                     .catch(error => {
                         console.error('[Batch Optimization] Risk management optimization error:', error);
@@ -1444,7 +1610,7 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
                 strategyInfo.optimizeTargets.map(t => t.name));
             
             // 對所有可優化參數進行順序優化
-            optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials)
+            optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, 'forward', null, sharedOptions)
                 .then(resolve)
                 .catch(error => {
                     console.error('[Batch Optimization] Strategy parameters optimization error:', error);
@@ -1462,15 +1628,19 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
 // 優化多個策略參數
 // 修復：正確初始化 baseParams，確保包含當前組合的完整參數
 // 這是批量優化無法找到最佳參數的關鍵問題：之前使用默認參數而非組合參數
-async function optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, order = 'forward', baseCombo = null) {
+async function optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, order = 'forward', baseCombo = null, options = {}) {
     console.log(`[Batch Optimization] Starting simplified multi-parameter optimization for ${strategy}...`);
-    
+
     try {
         const optimizeTargets = strategyInfo.optimizeTargets;
-        
+
+        const sharedOptions = (options && typeof options === 'object') ? options : {};
+
         // 修復：使用完整的組合參數作為基礎，而非預設參數
         // 這確保優化時的 baseParams 與用戶手動操作時一致
-        const baseParams = getBacktestParams();
+        const baseParams = sharedOptions.baseParamsOverride
+            ? prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride)
+            : prepareBaseParamsForOptimization(getBacktestParams());
         
         // 每個參數使用使用者指定的優化次數
         const trialsPerParam = Math.max(1, parseInt(trials, 10) || 1);
@@ -1546,11 +1716,12 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             
             // 優化當前參數
             const bestParam = await optimizeSingleStrategyParameter(
-                baseParams, 
-                optimizeTarget, 
-                strategyType, 
-                targetMetric, 
-                trialsPerParam
+                baseParams,
+                optimizeTarget,
+                strategyType,
+                targetMetric,
+                trialsPerParam,
+                sharedOptions
             );
             
             if (bestParam.value !== undefined) {
@@ -1829,12 +2000,9 @@ function showBatchResults() {
             resultsDiv.classList.remove('hidden');
         }
         
-        // 排序結果
+        // 排序結果並渲染表格
         sortBatchResults();
-        
-        // 渲染結果表格
-        renderBatchResultsTable();
-        
+
         // 重置運行狀態
         restoreBatchOptimizationUI();
     } catch (error) {
@@ -1843,42 +2011,49 @@ function showBatchResults() {
     }
 }
 
-// 排序結果
-function sortBatchResults() {
-    const config = batchOptimizationConfig;
+function applyBatchResultsSorting() {
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) return;
+    const config = batchOptimizationConfig || {};
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+
+    const resolveValue = (record) => {
+        if (!record || typeof record !== 'object') return Number.NaN;
+        const raw = record[sortKey];
+        if (raw === undefined || raw === null) return Number.NaN;
+        const numeric = Number(raw);
+        return Number.isNaN(numeric) ? Number.NaN : numeric;
+    };
+
     batchOptimizationResults.sort((a, b) => {
-        let aValue = a[sortKey] || 0;
-        let bValue = b[sortKey] || 0;
-        
-        // 處理特殊情況
+        let aValue = resolveValue(a);
+        let bValue = resolveValue(b);
+
         if (sortKey === 'maxDrawdown') {
-            // 最大回撤越小越好
-            aValue = Math.abs(aValue);
-            bValue = Math.abs(bValue);
-            // 對於回撤，我們要倒序排列（小的值排在前面）
-            if (sortDirection === 'desc') {
-                return aValue - bValue;
-            } else {
-                return bValue - aValue;
-            }
+            aValue = Number.isNaN(aValue) ? Number.NaN : Math.abs(aValue);
+            bValue = Number.isNaN(bValue) ? Number.NaN : Math.abs(bValue);
+            const aNaN = Number.isNaN(aValue);
+            const bNaN = Number.isNaN(bValue);
+            if (aNaN && bNaN) return 0;
+            if (aNaN) return 1;
+            if (bNaN) return -1;
+            return sortDirection === 'desc' ? aValue - bValue : bValue - aValue;
         }
-        
-        // 處理 NaN 值，將它們排到最後
-        if (isNaN(aValue) && isNaN(bValue)) return 0;
-        if (isNaN(aValue)) return 1;
-        if (isNaN(bValue)) return -1;
-        
-        if (sortDirection === 'asc') {
-            return aValue - bValue;
-        } else {
-            return bValue - aValue;
-        }
+
+        const aNaN = Number.isNaN(aValue);
+        const bNaN = Number.isNaN(bValue);
+        if (aNaN && bNaN) return 0;
+        if (aNaN) return 1;
+        if (bNaN) return -1;
+
+        return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
     });
-    
-    // 重新渲染表格
+}
+
+// 排序結果並更新 UI
+function sortBatchResults() {
+    applyBatchResultsSorting();
+    updateSortDirectionButton();
     renderBatchResultsTable();
 }
 
@@ -1899,7 +2074,9 @@ function updateSortDirectionButton() {
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+
+    applyBatchResultsSorting();
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
     
@@ -2251,7 +2428,6 @@ async function startEntryCrossOptimization() {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
             sortBatchResults();
-            renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 進場策略交叉優化完成！新增 ${results.length} 個優化結果`);
         } else {
@@ -2399,7 +2575,6 @@ async function startExitCrossOptimization() {
             // 添加交叉優化結果到總結果中，並進行去重處理
             addCrossOptimizationResults(results);
             sortBatchResults();
-            renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 出場策略交叉優化完成！新增 ${results.length} 個優化結果`);
         } else {
@@ -2683,7 +2858,6 @@ async function startLocalRefinementOptimization() {
         if (refinedResults.length > 0) {
             addCrossOptimizationResults(refinedResults);
             sortBatchResults();
-            renderBatchResultsTable();
             hideCrossOptimizationProgress();
             showSuccess(`✅ 局部微調完成！新增 ${refinedResults.length} 個微調結果`);
         } else {
@@ -2922,7 +3096,10 @@ async function runCEMRefinement(task) {
 }
 
 function buildRefinementBaseTemplate(candidate) {
-    const baseParams = getBacktestParams();
+    const sharedOptions = batchOptimizationSharedOptions || {};
+    const baseParams = sharedOptions.baseParamsOverride
+        ? prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride)
+        : prepareBaseParamsForOptimization(getBacktestParams());
     baseParams.entryStrategy = getWorkerStrategyName(candidate.buyStrategy);
     baseParams.exitStrategy = getWorkerStrategyName(candidate.sellStrategy);
     return baseParams;
@@ -2936,7 +3113,7 @@ async function evaluateLocalRefinementCandidate(baseTemplate, entryParams, exitP
         preparedParams.entryParams = { ...entryParams };
         preparedParams.exitParams = { ...exitParams };
 
-        const evaluation = await performSingleBacktestFast(preparedParams);
+        const evaluation = await performSingleBacktestFast(preparedParams, batchOptimizationSharedOptions || {});
         if (!evaluation) {
             return null;
         }
@@ -2965,6 +3142,21 @@ function prepareRefinementResult(result, task, entryParams, exitParams) {
     enriched.refinedFrom = task.candidate.optimizationType || (Array.isArray(task.candidate.optimizationTypes) ? task.candidate.optimizationTypes.join(', ') : 'batch');
     enriched.refinementIterations = task.iterations;
     enriched.refinementMetric = task.targetMetric;
+    if (batchOptimizationSharedOptions?.baseParamsOverride) {
+        enriched.baseSettings = prepareBaseParamsForOptimization(batchOptimizationSharedOptions.baseParamsOverride);
+        enriched.dataWindow = {
+            dataStartDate: enriched.baseSettings.dataStartDate || batchOptimizationSharedOptions.baseParamsOverride.dataStartDate || null,
+            effectiveStartDate: enriched.baseSettings.effectiveStartDate
+                || batchOptimizationSharedOptions.baseParamsOverride.effectiveStartDate
+                || enriched.baseSettings.startDate
+                || batchOptimizationSharedOptions.baseParamsOverride.startDate
+                || null,
+            endDate: enriched.baseSettings.endDate || batchOptimizationSharedOptions.baseParamsOverride.endDate || null,
+        };
+    }
+    if (batchOptimizationSharedOptions?.cachedDataRange) {
+        enriched.cachedDataRange = { ...batchOptimizationSharedOptions.cachedDataRange };
+    }
     return enriched;
 }
 
@@ -2978,6 +3170,21 @@ function cloneResultForRefinement(candidate, task) {
     clone.sellStrategy = candidate.sellStrategy;
     clone.buyParams = { ...task.initialEntryParams };
     clone.sellParams = { ...task.initialExitParams };
+    if (batchOptimizationSharedOptions?.baseParamsOverride) {
+        clone.baseSettings = prepareBaseParamsForOptimization(batchOptimizationSharedOptions.baseParamsOverride);
+        clone.dataWindow = {
+            dataStartDate: clone.baseSettings.dataStartDate || batchOptimizationSharedOptions.baseParamsOverride.dataStartDate || null,
+            effectiveStartDate: clone.baseSettings.effectiveStartDate
+                || batchOptimizationSharedOptions.baseParamsOverride.effectiveStartDate
+                || clone.baseSettings.startDate
+                || batchOptimizationSharedOptions.baseParamsOverride.startDate
+                || null,
+            endDate: clone.baseSettings.endDate || batchOptimizationSharedOptions.baseParamsOverride.endDate || null,
+        };
+    }
+    if (batchOptimizationSharedOptions?.cachedDataRange) {
+        clone.cachedDataRange = { ...batchOptimizationSharedOptions.cachedDataRange };
+    }
     return clone;
 }
 
@@ -3332,8 +3539,10 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             entryStrategy, entryParams, exitStrategy, optimizationType, exitParams
         });
         
-        // 設定基礎參數
-        const baseParams = getBacktestParams();
+        const sharedOptions = batchOptimizationSharedOptions || {};
+        const baseParams = sharedOptions.baseParamsOverride
+            ? prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride)
+            : prepareBaseParamsForOptimization(getBacktestParams());
         console.log('[Cross Optimization] Base params obtained:', baseParams);
         
         baseParams.entryStrategy = getWorkerStrategyName(entryStrategy);
@@ -3356,7 +3565,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             
             if (exitStrategyInfo && exitStrategyInfo.optimizeTargets) {
                 console.log('[Cross Optimization] Starting exit strategy optimization...');
-                const optimizedExitParams = await optimizeSingleStrategyParametersFast(exitStrategy, 'exit', exitStrategyInfo, baseParams);
+                const optimizedExitParams = await optimizeSingleStrategyParametersFast(exitStrategy, 'exit', exitStrategyInfo, baseParams, sharedOptions);
                 console.log('[Cross Optimization] Optimized exit params:', optimizedExitParams);
                 baseParams.exitParams = optimizedExitParams;
             } else {
@@ -3375,7 +3584,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             
             if (entryStrategyInfo && entryStrategyInfo.optimizeTargets) {
                 console.log('[Cross Optimization] Starting entry strategy optimization...');
-                const optimizedEntryParams = await optimizeSingleStrategyParametersFast(entryStrategy, 'entry', entryStrategyInfo, baseParams);
+                const optimizedEntryParams = await optimizeSingleStrategyParametersFast(entryStrategy, 'entry', entryStrategyInfo, baseParams, sharedOptions);
                 console.log('[Cross Optimization] Optimized entry params:', optimizedEntryParams);
                 baseParams.entryParams = optimizedEntryParams;
             } else {
@@ -3393,7 +3602,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
         
         // 執行回測
         console.log('[Cross Optimization] Starting backtest...');
-        const result = await performSingleBacktestFast(baseParams);
+        const result = await performSingleBacktestFast(baseParams, sharedOptions);
         console.log('[Cross Optimization] Backtest result:', result);
         
         if (result && result.annualizedReturn !== undefined) {
@@ -3405,7 +3614,23 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             result.sellStrategy = exitStrategy;
             result.buyParams = baseParams.entryParams;
             result.sellParams = baseParams.exitParams;
-            
+
+            if (sharedOptions.baseParamsOverride) {
+                result.baseSettings = prepareBaseParamsForOptimization(sharedOptions.baseParamsOverride);
+                result.dataWindow = {
+                    dataStartDate: result.baseSettings.dataStartDate || sharedOptions.baseParamsOverride.dataStartDate || null,
+                    effectiveStartDate: result.baseSettings.effectiveStartDate
+                        || sharedOptions.baseParamsOverride.effectiveStartDate
+                        || result.baseSettings.startDate
+                        || sharedOptions.baseParamsOverride.startDate
+                        || null,
+                    endDate: result.baseSettings.endDate || sharedOptions.baseParamsOverride.endDate || null,
+                };
+            }
+            if (sharedOptions.cachedDataRange) {
+                result.cachedDataRange = { ...sharedOptions.cachedDataRange };
+            }
+
             console.log('[Cross Optimization] Final result with metadata:', result);
             return result;
         } else {
@@ -3420,7 +3645,7 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
 }
 
 // 優化單一策略參數（簡化版）
-async function optimizeSingleStrategyParameters(strategy, strategyType, strategyInfo, baseParams) {
+async function optimizeSingleStrategyParameters(strategy, strategyType, strategyInfo, baseParams, options = {}) {
     try {
         console.log('[Cross Optimization] optimizeSingleStrategyParameters called:', {
             strategy, strategyType, strategyInfo: strategyInfo?.name
@@ -3465,7 +3690,7 @@ async function optimizeSingleStrategyParameters(strategy, strategyType, strategy
             console.log(`[Cross Optimization] Testing step ${i+1}/${steps+1} with value ${testValue}`);
             
             // 執行回測
-            const result = await performSingleBacktest(testBacktestParams);
+            const result = await performSingleBacktest(testBacktestParams, options);
             
             if (result && result.annualizedReturn > bestReturn) {
                 bestReturn = result.annualizedReturn;
@@ -3484,7 +3709,7 @@ async function optimizeSingleStrategyParameters(strategy, strategyType, strategy
 }
 
 // 執行單次回測
-function performSingleBacktest(params) {
+function performSingleBacktest(params, options = {}) {
     console.log('[Cross Optimization] performSingleBacktest called with:', {
         stockNo: params.stockNo,
         entryStrategy: params.entryStrategy,
@@ -3542,10 +3767,18 @@ function performSingleBacktest(params) {
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
             const preparedParams = enrichParamsWithLookback(params);
+            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : null;
+            const cachedPayload = overrideData
+                || (Array.isArray(cachedStockData) ? cachedStockData : null);
+            const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: false
+                useCachedData,
+                cachedData: cachedPayload
             });
             
         } catch (error) {
@@ -3568,6 +3801,86 @@ function formatNumber(value) {
     return value.toFixed(2);
 }
 
+function applyBatchBaseSettings(settings) {
+    if (!settings || typeof settings !== 'object') return;
+
+    const setInputValue = (id, value, events = ['change']) => {
+        if (value === undefined || value === null) return;
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.value = `${value}`;
+        events.forEach((eventName) => {
+            el.dispatchEvent(new Event(eventName, { bubbles: true }));
+        });
+    };
+
+    const setCheckboxState = (id, checked) => {
+        if (checked === undefined) return;
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.checked = Boolean(checked);
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    const setRadioValue = (name, value) => {
+        if (value === undefined || value === null) return;
+        const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+        if (!radio) return;
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    setInputValue('stockNo', settings.stockNo);
+    setInputValue('startDate', settings.startDate);
+    setInputValue('endDate', settings.endDate);
+    setInputValue('initialCapital', settings.initialCapital, ['input', 'change']);
+    setInputValue('positionSize', settings.positionSize, ['input', 'change']);
+    setInputValue('buyFee', settings.buyFee, ['input', 'change']);
+    setInputValue('sellFee', settings.sellFee, ['input', 'change']);
+
+    const marketSelect = document.getElementById('marketSelect');
+    if (marketSelect && settings.market) {
+        marketSelect.value = settings.market;
+        marketSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    setCheckboxState('adjustedPriceCheckbox', settings.adjustedPrice);
+    setCheckboxState('splitAdjustmentCheckbox', settings.splitAdjustment);
+    setRadioValue('tradeTiming', settings.tradeTiming);
+    setRadioValue('positionBasis', settings.positionBasis);
+
+    if (settings.entryStagingMode) {
+        setInputValue('entryStagingMode', settings.entryStagingMode);
+    }
+    if (settings.exitStagingMode) {
+        setInputValue('exitStagingMode', settings.exitStagingMode);
+    }
+
+    if (Array.isArray(settings.entryStages) && window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.setValues === 'function') {
+        window.lazybacktestStagedEntry.setValues(settings.entryStages, { manual: true });
+    }
+    if (Array.isArray(settings.exitStages) && window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.setValues === 'function') {
+        window.lazybacktestStagedExit.setValues(settings.exitStages, { manual: true });
+    }
+
+    setInputValue('stopLoss', settings.stopLoss, ['input', 'change']);
+    setInputValue('takeProfit', settings.takeProfit, ['input', 'change']);
+
+    setCheckboxState('enableShortSelling', settings.enableShorting);
+
+    if (settings.enableShorting) {
+        setInputValue('shortEntryStrategy', settings.shortEntryStrategy);
+        setInputValue('shortExitStrategy', settings.shortExitStrategy);
+
+        if (settings.shortEntryParams) {
+            updateBatchStrategyParams('shortEntry', settings.shortEntryParams, settings.shortEntryStrategy);
+        }
+        if (settings.shortExitParams) {
+            updateBatchStrategyParams('shortExit', settings.shortExitParams, settings.shortExitStrategy);
+        }
+    }
+}
+
 // 載入批量優化策略
 function loadBatchStrategy(index) {
     const result = batchOptimizationResults[index];
@@ -3583,7 +3896,16 @@ function loadBatchStrategy(index) {
     console.log('[Batch Optimization] sellStrategy type:', typeof result.sellStrategy);
     console.log('[Batch Optimization] Has sellStrategy property:', 'sellStrategy' in result);
     console.log('[Batch Optimization] Object keys:', Object.keys(result));
-    
+
+    const baseSettingsSource = result.baseSettings
+        ? prepareBaseParamsForOptimization(result.baseSettings)
+        : (batchOptimizationSharedOptions?.baseParamsOverride
+            ? prepareBaseParamsForOptimization(batchOptimizationSharedOptions.baseParamsOverride)
+            : null);
+    if (baseSettingsSource) {
+        applyBatchBaseSettings(baseSettingsSource);
+    }
+
     // 檢查是否有 exitStrategy 字段（這可能是問題所在）
     if ('exitStrategy' in result) {
         console.warn('[Batch Optimization] Found exitStrategy field:', result.exitStrategy);
@@ -4534,10 +4856,31 @@ function addCrossOptimizationResults(newResults) {
             existing.isDuplicate = true;
             
             console.log(`[Cross Optimization] 合併重複結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 優化類型: ${existingTypes.join(', ')}`);
+            if (!existing.baseSettings && batchOptimizationSharedOptions?.baseParamsOverride) {
+                existing.baseSettings = prepareBaseParamsForOptimization(batchOptimizationSharedOptions.baseParamsOverride);
+            }
+            if (!existing.cachedDataRange && batchOptimizationSharedOptions?.cachedDataRange) {
+                existing.cachedDataRange = { ...batchOptimizationSharedOptions.cachedDataRange };
+            }
         } else {
             // 沒有重複，直接添加新結果
             if (newResult.optimizationType) {
                 newResult.optimizationTypes = [newResult.optimizationType];
+            }
+            if (batchOptimizationSharedOptions?.baseParamsOverride) {
+                newResult.baseSettings = prepareBaseParamsForOptimization(batchOptimizationSharedOptions.baseParamsOverride);
+                newResult.dataWindow = {
+                    dataStartDate: newResult.baseSettings.dataStartDate || batchOptimizationSharedOptions.baseParamsOverride.dataStartDate || null,
+                    effectiveStartDate: newResult.baseSettings.effectiveStartDate
+                        || batchOptimizationSharedOptions.baseParamsOverride.effectiveStartDate
+                        || newResult.baseSettings.startDate
+                        || batchOptimizationSharedOptions.baseParamsOverride.startDate
+                        || null,
+                    endDate: newResult.baseSettings.endDate || batchOptimizationSharedOptions.baseParamsOverride.endDate || null,
+                };
+            }
+            if (batchOptimizationSharedOptions?.cachedDataRange) {
+                newResult.cachedDataRange = { ...batchOptimizationSharedOptions.cachedDataRange };
             }
             batchOptimizationResults.push(newResult);
             console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
@@ -4546,7 +4889,7 @@ function addCrossOptimizationResults(newResults) {
 }
 
 // 快速優化單一策略參數（減少步數，用於交叉優化）
-async function optimizeSingleStrategyParametersFast(strategy, strategyType, strategyInfo, baseParams) {
+async function optimizeSingleStrategyParametersFast(strategy, strategyType, strategyInfo, baseParams, options = {}) {
     try {
         if (!strategyInfo.optimizeTargets || strategyInfo.optimizeTargets.length === 0) {
             return getDefaultStrategyParams(strategy);
@@ -4581,7 +4924,7 @@ async function optimizeSingleStrategyParametersFast(strategy, strategyType, stra
             }
             
             // 執行回測（使用緩存數據）
-            const result = await performSingleBacktestFast(testBacktestParams);
+            const result = await performSingleBacktestFast(testBacktestParams, options);
             
             if (result) {
                 const metric = getMetricFromResult(result, targetMetric);
@@ -4612,7 +4955,7 @@ async function optimizeSingleStrategyParametersFast(strategy, strategyType, stra
 }
 
 // 快速執行單次回測（使用緩存數據，用於交叉優化）
-function performSingleBacktestFast(params) {
+function performSingleBacktestFast(params, options = {}) {
     return new Promise((resolve) => {
         try {
             // 創建 Worker 進行回測
@@ -4654,11 +4997,18 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
+            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : null;
+            const cachedPayload = overrideData
+                || (Array.isArray(cachedStockData) ? cachedStockData : null);
+            const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
+                useCachedData,
+                cachedData: cachedPayload
             });
             
         } catch (error) {
