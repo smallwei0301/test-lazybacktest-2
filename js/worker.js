@@ -11255,6 +11255,97 @@ function instantiateOptimizationParams(template) {
   return params;
 }
 
+function workerCoverageFullyCoversRange(coverage, startISO, endISO) {
+  if (!Array.isArray(coverage) || coverage.length === 0) return false;
+  const normalized = mergeRangeBounds(
+    coverage
+      .map((range) => {
+        if (!range) return null;
+        const start = isoToUTC(range.start);
+        const end = isoToUTC(range.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        return { start, end: end + DAY_MS };
+      })
+      .filter(Boolean),
+  );
+  if (normalized.length === 0) return false;
+  const targetStart = isoToUTC(startISO);
+  const targetEnd = isoToUTC(endISO) + DAY_MS;
+  if (!Number.isFinite(targetStart) || !Number.isFinite(targetEnd)) return false;
+  let cursor = targetStart;
+  for (const segment of normalized) {
+    if (segment.end <= cursor) continue;
+    if (segment.start > cursor) return false;
+    cursor = Math.max(cursor, segment.end);
+    if (cursor >= targetEnd) return true;
+  }
+  return cursor >= targetEnd;
+}
+
+function workerDatasetCoversRange(rows, startISO, endISO) {
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  const startUtc = isoToUTC(startISO);
+  const endUtcExclusive = isoToUTC(endISO) + DAY_MS;
+  if (!Number.isFinite(startUtc) || !Number.isFinite(endUtcExclusive)) return false;
+  const validRows = rows
+    .filter((row) => row && row.date)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  if (validRows.length === 0) return false;
+  const firstUtc = isoToUTC(validRows[0].date);
+  const lastUtcExclusive = isoToUTC(validRows[validRows.length - 1].date) + DAY_MS;
+  if (!Number.isFinite(firstUtc) || !Number.isFinite(lastUtcExclusive)) return false;
+  if (firstUtc > startUtc) return false;
+  if (lastUtcExclusive < endUtcExclusive) return false;
+  return true;
+}
+
+function evaluateOptimizationCache(baseParams, dataset, meta) {
+  if (!baseParams || typeof baseParams !== "object") {
+    return { ok: false, reason: "invalid_params" };
+  }
+  if (!Array.isArray(dataset) || dataset.length === 0) {
+    return { ok: false, reason: "empty_dataset" };
+  }
+  const startISO = baseParams.dataStartDate || baseParams.startDate;
+  const endISO = baseParams.endDate;
+  if (!startISO || !endISO) {
+    return { ok: false, reason: "invalid_range" };
+  }
+  const expectedPriceMode = (
+    baseParams.priceMode ||
+    (baseParams.adjustedPrice ? "adjusted" : "raw") ||
+    "raw"
+  )
+    .toString()
+    .toLowerCase();
+  const metaMode = meta?.priceMode ? meta.priceMode.toString().toLowerCase() : null;
+  if (metaMode && metaMode !== expectedPriceMode) {
+    return { ok: false, reason: "price_mode_mismatch" };
+  }
+  if (
+    typeof meta?.splitAdjustment === "boolean" &&
+    meta.splitAdjustment !== Boolean(baseParams.splitAdjustment)
+  ) {
+    return { ok: false, reason: "split_flag_mismatch" };
+  }
+  const coverageFromMeta = Array.isArray(meta?.coverage) && meta.coverage.length > 0
+    ? meta.coverage
+    : Array.isArray(meta?.diagnostics?.coverage) && meta.diagnostics.coverage.length > 0
+      ? meta.diagnostics.coverage
+      : null;
+  if (coverageFromMeta) {
+    if (!workerCoverageFullyCoversRange(coverageFromMeta, startISO, endISO)) {
+      return { ok: false, reason: "coverage_insufficient" };
+    }
+    return { ok: true, coverage: coverageFromMeta };
+  }
+  if (!workerDatasetCoversRange(dataset, startISO, endISO)) {
+    return { ok: false, reason: "dataset_range_insufficient" };
+  }
+  const derivedCoverage = computeCoverageFromRows(dataset);
+  return { ok: true, coverage: derivedCoverage };
+}
+
 async function runOptimization(
   baseParams,
   optimizeTargetStrategy,
@@ -11262,6 +11353,7 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
+  cachedMeta,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -11281,62 +11373,86 @@ async function runOptimization(
   let stockData = null;
   let dataFetched = false;
 
-  // Data acquisition policy:
-  // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
-  // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
+  const providedDataset = Array.isArray(cachedData) && cachedData.length > 0
+    ? cachedData
+    : null;
+  const workerDataset = Array.isArray(workerLastDataset) && workerLastDataset.length > 0
+    ? workerLastDataset
+    : null;
+  let candidateMeta = cachedMeta || null;
+  if (!candidateMeta && workerDataset && workerLastMeta) {
+    if (!workerLastMeta.stockNo || workerLastMeta.stockNo === baseParams.stockNo) {
+      candidateMeta = workerLastMeta;
+    }
+  }
+
+  let datasetCandidate = null;
   if (useCache) {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
+    datasetCandidate = providedDataset || workerDataset;
+    if (!datasetCandidate) {
       throw new Error(
         "優化失敗: 未提供快取數據；批量優化在快取模式下禁止從遠端抓取資料，請先於主畫面執行回測以建立快取。",
       );
     }
-  } else {
-    if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
+  } else if (providedDataset) {
+    datasetCandidate = providedDataset;
+  } else if (workerDataset) {
+    datasetCandidate = workerDataset;
+    console.log("[Worker Opt] Using worker's cached data.");
+  }
+
+  let shouldFetch = !datasetCandidate;
+  if (datasetCandidate) {
+    const evaluation = evaluateOptimizationCache(
+      baseParams,
+      datasetCandidate,
+      candidateMeta || {},
+    );
+    if (evaluation.ok) {
+      stockData = datasetCandidate;
+      if (!candidateMeta) {
+        candidateMeta = {};
+      }
+      if (evaluation.coverage && (!candidateMeta.coverage || candidateMeta.coverage.length === 0)) {
+        candidateMeta.coverage = evaluation.coverage;
+      }
     } else {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      const fetched = await fetchStockData(
-        baseParams.stockNo,
-        optDataStart,
-        baseParams.endDate,
-        baseParams.marketType || baseParams.market || "TWSE",
-        {
-          adjusted: baseParams.adjustedPrice,
-          splitAdjustment: baseParams.splitAdjustment,
-          effectiveStartDate: optEffectiveStart,
-          lookbackDays: optLookback,
-        },
+      console.warn(
+        `[Worker Opt] Cached dataset invalid (${evaluation.reason}), fallback to fresh fetch.`,
       );
-      stockData = fetched?.data || [];
-      dataFetched = true;
-      if (!Array.isArray(stockData) || stockData.length === 0)
-        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
-        type: "progress",
-        progress: 50,
-        message: "數據獲取完成，開始優化...",
-      });
+      shouldFetch = true;
+      stockData = null;
     }
+  }
+
+  if (!stockData && shouldFetch) {
+    const optDataStart = baseParams.dataStartDate || baseParams.startDate;
+    const optEffectiveStart =
+      baseParams.effectiveStartDate || baseParams.startDate;
+    const optLookback = Number.isFinite(baseParams.lookbackDays)
+      ? baseParams.lookbackDays
+      : null;
+    const fetched = await fetchStockData(
+      baseParams.stockNo,
+      optDataStart,
+      baseParams.endDate,
+      baseParams.marketType || baseParams.market || "TWSE",
+      {
+        adjusted: baseParams.adjustedPrice,
+        splitAdjustment: baseParams.splitAdjustment,
+        effectiveStartDate: optEffectiveStart,
+        lookbackDays: optLookback,
+      },
+    );
+    stockData = fetched?.data || [];
+    dataFetched = true;
+    if (!Array.isArray(stockData) || stockData.length === 0)
+      throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
+    self.postMessage({
+      type: "progress",
+      progress: 50,
+      message: "數據獲取完成，開始優化...",
+    });
   }
 
   if (!stockData) {
@@ -11937,6 +12053,7 @@ self.onmessage = async function (e) {
         optimizeRange,
         useCachedData,
         cachedData || workerLastDataset,
+        e.data.cachedMeta || null,
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {

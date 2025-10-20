@@ -1,5 +1,14 @@
 
 
+## 2026-07-10 — Patch LB-BATCH-CACHE-20260710A
+- **Issue recap**: 批量優化沿用先前短暖身快取時未重新檢查 `dataStartDate`、價格模式或拆分旗標，導致長暖身需求仍用殘缺資料；Worker 在 `useCache=true` 時亦無法偵測覆蓋不足。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `resolveBatchCacheReplay`，統一比對 `coverage`、價格模式與拆分旗標，必要時改為重新抓資料並附上 `cachedMeta`。
+  - `js/worker.js` 擴充 `runOptimization` 支援 `cachedMeta` 覆蓋檢查，快取不足時自動改抓遠端，避免沿用殘缺資料。
+  - `tests/batch-optimization-cache.test.js` 建立「短暖身→長暖身」情境測試，驗證批量優化與組合回測會自動重新抓資料且傳入完整 `cachedMeta`。
+- **Diagnostics**: 透過測試腳本模擬快取覆蓋落後、價格模式不符與完整快取三種情境，檢查發送至 Worker 的 `useCachedData` 與 `cachedMeta.coverage` 是否符合預期。
+- **Testing**: `npm test`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
