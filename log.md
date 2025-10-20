@@ -1,4 +1,18 @@
 
+## 2026-07-16 — Patch LB-STRATEGY-COMPARISON-20260716A
+- **Scope**: 策略比較分頁與儲存流程收斂。
+- **Updates**:
+  - 將策略載入下拉選單的預設選項改寫為 template literal，移除跳脫字元並與比較分頁的即時刷新邏輯對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js','js/loader.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-15 — Patch LB-STRATEGY-COMPARISON-20260715A
+- **Scope**: 策略比較分頁與儲存指標擴充。
+- **Updates**:
+  - 將「初始本金」、「總資金」文案更新為「初始本金-固定金額買入」、「總資金-獲利再投入」，同步調整提示文字與相關模組顯示。
+  - 新增「策略比較」分頁，可多選已儲存策略並自訂欄位，缺漏測試資料時以「請先測試後保存策略」提示。
+  - 儲存策略時一併保存最大回撤、交易次數、敏感度摘要、滾動測試評分與趨勢概況，供比較表使用。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js','js/loader.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
