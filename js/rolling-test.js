@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.0 ---
-// Patch Tag: LB-ROLLING-TEST-20250930A
+// --- 滾動測試模組 - v2.1 ---
+// Patch Tag: LB-ROLLING-SCORING-20251005A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20250930A',
+        version: 'LB-ROLLING-SCORING-20251005A',
         batchOptimizerInitialized: false,
     };
 
@@ -29,18 +29,22 @@
         maxDrawdown: 25,
         winRate: 45,
     };
-
-    const SCORE_WEIGHTS = {
-        annualizedReturn: 0.28,
-        sharpeRatio: 0.24,
-        sortinoRatio: 0.16,
-        maxDrawdown: 0.12,
+    const QUALITY_WEIGHTS = {
+        annualizedReturn: 0.35,
+        sharpeRatio: 0.25,
+        sortinoRatio: 0.2,
+        maxDrawdown: 0.1,
         winRate: 0.1,
-        walkForwardEfficiency: 0.1,
     };
-
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
     const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
+    const DEFAULT_WINDOW_RATIO = { training: 36, testing: 12, step: 6 };
+    const DEFAULT_WINDOW_COUNT = 2;
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    const PSR_CONFIDENCE = 0.95;
+    const WFE_ADJUST_MIN = 0.8;
+    const WFE_ADJUST_MAX = 1.2;
 
     const METRIC_LABELS = {
         annualizedReturn: '年化報酬率',
@@ -72,6 +76,361 @@
         breakoutThreshold: '突破門檻',
     };
 
+    function clampValue(value, min, max) {
+        if (!Number.isFinite(value)) return Number.isFinite(min) ? min : 0;
+        if (Number.isFinite(min) && value < min) return min;
+        if (Number.isFinite(max) && value > max) return max;
+        return value;
+    }
+
+    function clamp01(value) {
+        if (!Number.isFinite(value)) return 0;
+        if (value < 0) return 0;
+        if (value > 1) return 1;
+        return value;
+    }
+
+    function erf(x) {
+        const sign = x >= 0 ? 1 : -1;
+        const absX = Math.abs(x);
+        const a1 = 0.254829592;
+        const a2 = -0.284496736;
+        const a3 = 1.421413741;
+        const a4 = -1.453152027;
+        const a5 = 1.061405429;
+        const p = 0.3275911;
+        const t = 1 / (1 + p * absX);
+        const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+        return sign * y;
+    }
+
+    function normalCdf(x) {
+        if (!Number.isFinite(x)) return x > 0 ? 1 : 0;
+        return 0.5 * (1 + erf(x / Math.sqrt(2)));
+    }
+
+    function inverseErf(x) {
+        const a = 0.147;
+        const clamped = Math.min(Math.max(x, -0.999999), 0.999999);
+        const ln = Math.log(1 - clamped * clamped);
+        const term = 2 / (Math.PI * a) + ln / 2;
+        const inside = term * term - ln / a;
+        if (inside < 0) return 0;
+        const result = Math.sqrt(inside) - term;
+        return Math.sign(clamped) * Math.sqrt(result);
+    }
+
+    function normalInv(p) {
+        const clamped = Math.min(Math.max(p, 1e-10), 1 - 1e-10);
+        return Math.sqrt(2) * inverseErf(2 * clamped - 1);
+    }
+
+    function computeMomentStats(dailyReturns) {
+        const valid = Array.isArray(dailyReturns)
+            ? dailyReturns.filter((value) => Number.isFinite(value))
+            : [];
+        if (valid.length === 0) {
+            return {
+                count: 0,
+                mean: null,
+                standardDeviation: null,
+                skewness: null,
+                kurtosis: null,
+                excessKurtosis: null,
+                annualisedSharpe: null,
+            };
+        }
+        const count = valid.length;
+        const riskFreeAnnual = 0.01;
+        const riskFreeDaily = Math.pow(1 + riskFreeAnnual, 1 / 252) - 1;
+        const mean = valid.reduce((sum, value) => sum + value, 0) / count;
+        let m2 = 0;
+        let m3 = 0;
+        let m4 = 0;
+        valid.forEach((value) => {
+            const diff = value - mean;
+            const diff2 = diff * diff;
+            m2 += diff2;
+            m3 += diff2 * diff;
+            m4 += diff2 * diff2;
+        });
+        const variance = m2 / count;
+        const standardDeviation = variance > 0 ? Math.sqrt(variance) : 0;
+        const skewness =
+            standardDeviation > 0
+                ? (m3 / count) / Math.pow(standardDeviation, 3)
+                : 0;
+        const kurtosis =
+            standardDeviation > 0 && variance > 0
+                ? (m4 / count) / (variance * variance)
+                : 0;
+        const excessKurtosis = Number.isFinite(kurtosis) ? kurtosis - 3 : null;
+        const excessMean = mean - riskFreeDaily;
+        const annualisedSharpe =
+            standardDeviation > 0
+                ? (excessMean / standardDeviation) * Math.sqrt(252)
+                : 0;
+        return {
+            count,
+            mean,
+            standardDeviation,
+            skewness: Number.isFinite(skewness) ? skewness : null,
+            kurtosis: Number.isFinite(kurtosis) ? kurtosis : null,
+            excessKurtosis,
+            annualisedSharpe: Number.isFinite(annualisedSharpe) ? annualisedSharpe : 0,
+            riskFreeAnnual,
+            riskFreeDaily,
+        };
+    }
+
+    function sanitizeReturnStats(stats, dailyReturns) {
+        if (stats && typeof stats === 'object') {
+            const normalized = {
+                count: Number.isFinite(stats.count) ? stats.count : 0,
+                mean: Number.isFinite(stats.mean) ? stats.mean : null,
+                standardDeviation: Number.isFinite(stats.standardDeviation)
+                    ? stats.standardDeviation
+                    : null,
+                skewness: Number.isFinite(stats.skewness) ? stats.skewness : null,
+                kurtosis: Number.isFinite(stats.kurtosis) ? stats.kurtosis : null,
+                excessKurtosis: Number.isFinite(stats.excessKurtosis)
+                    ? stats.excessKurtosis
+                    : (Number.isFinite(stats.kurtosis) ? stats.kurtosis - 3 : null),
+                annualisedSharpe: Number.isFinite(stats.annualisedSharpe)
+                    ? stats.annualisedSharpe
+                    : null,
+                riskFreeAnnual: Number.isFinite(stats.riskFreeAnnual) ? stats.riskFreeAnnual : 0.01,
+                riskFreeDaily: Number.isFinite(stats.riskFreeDaily)
+                    ? stats.riskFreeDaily
+                    : Math.pow(1.01, 1 / 252) - 1,
+            };
+            if (!Number.isFinite(normalized.count) || normalized.count <= 0) {
+                return computeMomentStats(dailyReturns);
+            }
+            return normalized;
+        }
+        return computeMomentStats(dailyReturns);
+    }
+
+    function ensureReturnStats(metrics) {
+        if (!metrics) return computeMomentStats([]);
+        const stats = sanitizeReturnStats(metrics.returnStats, metrics.dailyReturns);
+        if (Number.isFinite(stats.count) && stats.count > 0) return stats;
+        return computeMomentStats(metrics.dailyReturns);
+    }
+
+    function buildNormalizationTargets(thresholds) {
+        const annExcellent = Math.max(15, Number.isFinite(thresholds?.annualizedReturn) ? thresholds.annualizedReturn : 15);
+        const sharpeExcellent = Math.max(1.2, Number.isFinite(thresholds?.sharpeRatio) ? thresholds.sharpeRatio : 1.2);
+        const sortinoExcellent = Math.max(1.5, Number.isFinite(thresholds?.sortinoRatio) ? thresholds.sortinoRatio : 1.5);
+        const maxDrawdownCap = Number.isFinite(thresholds?.maxDrawdown) ? thresholds.maxDrawdown : 25;
+        const ddWorst = Math.max(1, Math.min(25, maxDrawdownCap));
+        let ddBest;
+        if (ddWorst > 15) ddBest = 10;
+        else if (ddWorst > 8) ddBest = ddWorst - 5;
+        else ddBest = Math.max(1, ddWorst * 0.6);
+        const winFloor = Number.isFinite(thresholds?.winRate) ? thresholds.winRate : 45;
+        const winCeil = Math.max(winFloor + 10, 55);
+        return {
+            annualizedReturn: { floor: 0, ceiling: annExcellent },
+            sharpeRatio: { floor: 0, ceiling: sharpeExcellent },
+            sortinoRatio: { floor: 0, ceiling: sortinoExcellent },
+            maxDrawdown: { best: ddBest, worst: ddWorst },
+            winRate: { floor: winFloor, ceiling: winCeil },
+        };
+    }
+
+    function computePositiveScore(value, floor, ceiling) {
+        if (!Number.isFinite(value)) return null;
+        if (!Number.isFinite(ceiling) || ceiling <= floor) return value >= ceiling ? 1 : 0;
+        return clamp01((value - floor) / (ceiling - floor));
+    }
+
+    function computeInverseScore(value, best, worst) {
+        if (!Number.isFinite(value)) return null;
+        if (!Number.isFinite(best) || !Number.isFinite(worst) || worst <= best) {
+            return null;
+        }
+        return clamp01((worst - value) / (worst - best));
+    }
+
+    function computeOOSQuality(metrics, thresholds) {
+        if (!metrics) return null;
+        const normalization = buildNormalizationTargets(thresholds);
+        let weighted = 0;
+        let totalWeight = 0;
+
+        const returnScore = computePositiveScore(
+            metrics.annualizedReturn,
+            normalization.annualizedReturn.floor,
+            normalization.annualizedReturn.ceiling,
+        );
+        if (returnScore !== null) {
+            weighted += QUALITY_WEIGHTS.annualizedReturn * returnScore;
+            totalWeight += QUALITY_WEIGHTS.annualizedReturn;
+        }
+
+        const sharpeScore = computePositiveScore(
+            metrics.sharpeRatio,
+            normalization.sharpeRatio.floor,
+            normalization.sharpeRatio.ceiling,
+        );
+        if (sharpeScore !== null) {
+            weighted += QUALITY_WEIGHTS.sharpeRatio * sharpeScore;
+            totalWeight += QUALITY_WEIGHTS.sharpeRatio;
+        }
+
+        const sortinoScore = computePositiveScore(
+            metrics.sortinoRatio,
+            normalization.sortinoRatio.floor,
+            normalization.sortinoRatio.ceiling,
+        );
+        if (sortinoScore !== null) {
+            weighted += QUALITY_WEIGHTS.sortinoRatio * sortinoScore;
+            totalWeight += QUALITY_WEIGHTS.sortinoRatio;
+        }
+
+        const drawdownScore = computeInverseScore(
+            metrics.maxDrawdown,
+            normalization.maxDrawdown.best,
+            normalization.maxDrawdown.worst,
+        );
+        if (drawdownScore !== null) {
+            weighted += QUALITY_WEIGHTS.maxDrawdown * drawdownScore;
+            totalWeight += QUALITY_WEIGHTS.maxDrawdown;
+        }
+
+        const winRateScore = computePositiveScore(
+            metrics.winRate,
+            normalization.winRate.floor,
+            normalization.winRate.ceiling,
+        );
+        if (winRateScore !== null) {
+            weighted += QUALITY_WEIGHTS.winRate * winRateScore;
+            totalWeight += QUALITY_WEIGHTS.winRate;
+        }
+
+        if (totalWeight === 0) return null;
+        return clamp01(weighted / totalWeight);
+    }
+
+    function computeCredibility(psrProbability, dsrProbability) {
+        const psr = Number.isFinite(psrProbability) ? clamp01(psrProbability) : null;
+        const dsr = Number.isFinite(dsrProbability) ? clamp01(dsrProbability) : null;
+        if (psr === null && dsr === null) return 0;
+        if (psr === null) return dsr;
+        if (dsr === null) return psr;
+        return 0.5 * psr + 0.5 * dsr;
+    }
+
+    function computeMinTrackRecordLength(srHat, srStar, stats, confidence) {
+        if (!Number.isFinite(srHat) || !Number.isFinite(srStar) || srHat <= srStar) return Infinity;
+        const gamma3 = Number.isFinite(stats?.skewness) ? stats.skewness : 0;
+        const gamma4 = Number.isFinite(stats?.kurtosis) ? stats.kurtosis : 3;
+        const z = normalInv(clampValue(confidence, 0.5, 0.999999));
+        const numerator = (1 - gamma3 * srHat + ((gamma4 - 1) / 4) * srHat * srHat) * (z * z);
+        const denominator = (srHat - srStar) * (srHat - srStar);
+        if (denominator <= 0) return Infinity;
+        return 1 + numerator / denominator;
+    }
+
+    function computePSRMetrics(stats, srHat, srStar) {
+        if (!stats || !Number.isFinite(stats.count) || stats.count < 3 || !Number.isFinite(srHat)) {
+            return null;
+        }
+        const gamma3 = Number.isFinite(stats.skewness) ? stats.skewness : 0;
+        const gamma4 = Number.isFinite(stats.kurtosis) ? stats.kurtosis : 3;
+        const denominatorTerm = 1 - gamma3 * srHat + ((gamma4 - 1) / 4) * srHat * srHat;
+        const denominator = Math.sqrt(Math.max(1e-12, denominatorTerm));
+        const z = ((srHat - srStar) * Math.sqrt(Math.max(1, stats.count - 1))) / denominator;
+        const probability = normalCdf(z);
+        const minTrl = computeMinTrackRecordLength(srHat, srStar, stats, PSR_CONFIDENCE);
+        return {
+            probability,
+            zScore: z,
+            minTrackRecordLength: minTrl,
+            denominator,
+        };
+    }
+
+    function computeDSRMetrics(stats, srHat, srStar, trials) {
+        if (!stats || !Number.isFinite(stats.count) || stats.count < 3 || !Number.isFinite(srHat)) {
+            return null;
+        }
+        const gamma3 = Number.isFinite(stats.skewness) ? stats.skewness : 0;
+        const gamma4 = Number.isFinite(stats.kurtosis) ? stats.kurtosis : 3;
+        const sigmaSq = (1 - gamma3 * srHat + ((gamma4 - 1) / 4) * srHat * srHat) / Math.max(1, stats.count - 1);
+        if (sigmaSq <= 0) {
+            return {
+                probability: srHat > srStar ? 1 : 0,
+                zScore: srHat > srStar ? Infinity : -Infinity,
+                criticalSharpe: srStar,
+                sigma: 0,
+                trials: Math.max(1, Math.round(trials || 1)),
+            };
+        }
+        const sigma = Math.sqrt(sigmaSq);
+        const trialCount = Math.max(1, Math.round(trials || 1));
+        const zAlpha = trialCount > 1 ? normalInv(1 - 1 / trialCount) : 0;
+        const criticalSharpe = srStar + sigma * zAlpha;
+        const z = sigma > 0 ? (srHat - criticalSharpe) / sigma : (srHat > criticalSharpe ? Infinity : -Infinity);
+        const probability = normalCdf(z);
+        return {
+            probability,
+            zScore: z,
+            criticalSharpe,
+            sigma,
+            trials: trialCount,
+        };
+    }
+
+    function collectDailyReturns(metrics, rawResult) {
+        if (metrics && Array.isArray(metrics.dailyReturns) && metrics.dailyReturns.length > 0) {
+            return metrics.dailyReturns.filter((value) => Number.isFinite(value));
+        }
+        if (rawResult && Array.isArray(rawResult.dailyReturns)) {
+            return rawResult.dailyReturns.filter((value) => Number.isFinite(value));
+        }
+        return [];
+    }
+
+    function computeAggregateDSR(entries, thresholds, config) {
+        const combined = [];
+        entries.forEach((entry) => {
+            const returns = collectDailyReturns(entry.testing, entry.rawTesting);
+            if (returns.length > 0) combined.push(...returns);
+        });
+        if (combined.length === 0) return null;
+        const stats = computeMomentStats(combined);
+        if (!Number.isFinite(stats?.annualisedSharpe)) return null;
+        const srHat = stats.annualisedSharpe;
+        const srStar = Number.isFinite(thresholds?.sharpeRatio) ? thresholds.sharpeRatio : 0;
+        const trialCount = config?.optimization?.enabled ? config.optimization.trials : 1;
+        const dsr = computeDSRMetrics(stats, srHat, srStar, trialCount);
+        if (!dsr) return null;
+        return {
+            ...dsr,
+            sharpe: srHat,
+            sampleSize: stats.count,
+        };
+    }
+
+    function setAdvancedToggleState(expanded) {
+        const container = document.getElementById('rolling-advanced-settings');
+        const toggle = document.getElementById('toggle-rolling-advanced');
+        if (!container || !toggle) return;
+        if (expanded) container.classList.remove('hidden');
+        else container.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', String(Boolean(expanded)));
+        toggle.textContent = expanded ? '隱藏進階設定' : '顯示進階設定';
+    }
+
+    function isAdvancedSettingsActive() {
+        const container = document.getElementById('rolling-advanced-settings');
+        if (!container) return false;
+        return !container.classList.contains('hidden');
+    }
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -99,6 +458,16 @@
             });
         }
 
+        const advancedToggle = document.getElementById('toggle-rolling-advanced');
+        if (advancedToggle) {
+            setAdvancedToggleState(false);
+            advancedToggle.addEventListener('click', () => {
+                const expanded = !isAdvancedSettingsActive();
+                setAdvancedToggleState(expanded);
+                updateRollingPlanPreview();
+            });
+        }
+
         updateRollingPlanPreview();
         syncRollingOptimizeUI();
         state.initialized = true;
@@ -108,19 +477,20 @@
         if (event) event.preventDefault();
         if (state.running) return;
 
-        const config = getRollingConfig();
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
+        const config = getRollingConfig(availability);
         const windows = computeRollingWindows(config, availability);
 
         if (!Array.isArray(cachedRows) || cachedRows.length === 0) {
-            setPlanWarning(true);
+            setPlanWarning('請先執行一次主回測以產生快取資料');
             setAlert('請先在主畫面執行一次完整回測，以建立快取資料後再啟動滾動測試。', 'error');
             showError?.('滾動測試需要可用的回測快取資料，請先執行一次回測');
             return;
         }
 
         if (!windows || windows.length === 0) {
+            setPlanWarning('目前設定無法建立有效的 Walk-Forward 視窗，請調整滾動測試次數或回測期間。');
             setAlert('目前設定無法建立有效的 Walk-Forward 視窗，請調整視窗長度或日期區間。', 'warning');
             showInfo?.('請調整滾動測試設定，例如延長日期區間或縮短視窗長度');
             return;
@@ -128,9 +498,9 @@
 
         const coverageIssues = validateWindowCoverage(windows, cachedRows, config);
         if (coverageIssues.length > 0) {
-            setPlanWarning(true);
             const primary = coverageIssues[0];
             const detail = coverageIssues.length > 1 ? `（共 ${coverageIssues.length} 項問題）` : '';
+            setPlanWarning(`視窗規劃失敗：${primary}`);
             setAlert(`滾動測試無法啟動：${primary}${detail}`, 'error');
             showError?.(`[Rolling Test] ${primary}`);
             return;
@@ -417,7 +787,12 @@
             };
         });
 
-        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        const aggregate = computeAggregateReport(
+            analysisEntries,
+            state.config?.thresholds || DEFAULT_THRESHOLDS,
+            state.config?.minTrades || 0,
+            state.config || {},
+        );
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
@@ -441,33 +816,44 @@
 
         const cards = [
             {
-                title: 'Walk-Forward 評分',
-                value: `${aggregate.score} 分`,
+                title: 'Walk-Forward 總分',
+                value: formatPercent((aggregate.totalScore || 0) * 100),
                 accent: aggregate.gradeColor,
                 description: [
                     `${aggregate.gradeLabel} · ${aggregate.passCount}/${aggregate.totalWindows} 視窗符合門檻`,
-                    '（含 Walk-Forward Efficiency 及風險門檻加權）',
                 ].join(''),
             },
             {
-                title: '平均年化報酬 (OOS)',
-                value: formatPercent(aggregate.averageAnnualizedReturn),
-                description: 'Out-of-Sample 平均年化報酬率',
+                title: 'OOS 品質（中位）',
+                value: formatPercent((aggregate.oosQualityMedian || 0) * 100),
+                description: '正規化後的年化、Sharpe、Sortino、MaxDD、勝率綜合品質',
             },
             {
-                title: 'Sharpe / Sortino 中位數',
+                title: '統計可信度（中位）',
+                value: formatPercent((aggregate.credibilityMedian || 0) * 100),
+                description: 'PSR 與 DSR 機率平均後的可信度權重',
+            },
+            {
+                title: 'WFE 中位數',
+                value: formatPercent(aggregate.medianWalkForwardEfficiency),
+                description: `Pardo Walk-Forward Efficiency 中位數（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`,
+            },
+            {
+                title: 'Sharpe / Sortino 中位',
                 value: `${formatNumber(aggregate.medianSharpe)} / ${formatNumber(aggregate.medianSortino)}`,
-                description: 'Sharpe 與 Sortino 比率中位數',
+                description: 'Sharpe 與 Sortino 比率的中位數',
             },
             {
-                title: 'Walk-Forward Efficiency',
-                value: formatPercent(aggregate.averageWalkForwardEfficiency),
-                description: `Pardo 定義的 OOS/訓練報酬比率（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`,
+                title: 'PSR ≥95% 視窗',
+                value: formatPercent((aggregate.psr95Ratio || 0) * 100),
+                description: `共 ${aggregate.psr95Count}/${aggregate.totalWindows} 視窗達到 95% 以上機率`,
             },
             {
-                title: '通過視窗比例',
-                value: formatPercent(aggregate.passRate),
-                description: `共有 ${aggregate.passCount} 個視窗達標，勝率門檻 ${aggregate.thresholds.winRate}%`,
+                title: 'DSR 中位數',
+                value: formatPercent((aggregate.dsrMedian || 0) * 100),
+                description: aggregate.aggregateDsr && Number.isFinite(aggregate.aggregateDsr.probability)
+                    ? `整體 DSR ${formatPercent(aggregate.aggregateDsr.probability * 100)}（Sharpe ${formatNumber(aggregate.aggregateDsr.sharpe)}）`
+                    : 'Deflated Sharpe Ratio 機率中位數',
             },
         ];
 
@@ -506,6 +892,7 @@
 
         aggregate.evaluations.forEach((entry) => {
             const tr = document.createElement('tr');
+            const analytics = entry.analytics || {};
 
             const indexCell = document.createElement('td');
             indexCell.className = 'px-3 py-2';
@@ -541,6 +928,32 @@
             winRateCell.className = 'px-3 py-2 text-right';
             winRateCell.textContent = formatPercent(entry.metrics.winRate);
             tr.appendChild(winRateCell);
+
+            const wfeCell = document.createElement('td');
+            wfeCell.className = 'px-3 py-2 text-right';
+            wfeCell.textContent = formatPercent(analytics.wfePercent);
+            tr.appendChild(wfeCell);
+
+            const psrCell = document.createElement('td');
+            psrCell.className = 'px-3 py-2 text-right';
+            psrCell.textContent = Number.isFinite(analytics.psrProbability)
+                ? formatPercent(analytics.psrProbability * 100)
+                : '—';
+            tr.appendChild(psrCell);
+
+            const dsrCell = document.createElement('td');
+            dsrCell.className = 'px-3 py-2 text-right';
+            dsrCell.textContent = Number.isFinite(analytics.dsrProbability)
+                ? formatPercent(analytics.dsrProbability * 100)
+                : '—';
+            tr.appendChild(dsrCell);
+
+            const windowScoreCell = document.createElement('td');
+            windowScoreCell.className = 'px-3 py-2 text-right';
+            windowScoreCell.textContent = Number.isFinite(analytics.windowScore)
+                ? formatPercent(analytics.windowScore * 100)
+                : '—';
+            tr.appendChild(windowScoreCell);
 
             const tradesCell = document.createElement('td');
             tradesCell.className = 'px-3 py-2 text-right';
@@ -704,7 +1117,10 @@
         return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
-    function computeAggregateReport(entries, thresholds, minTrades) {
+    function computeAggregateReport(entries, thresholds, minTrades, config) {
+        const srThreshold = Number.isFinite(thresholds?.sharpeRatio) ? thresholds.sharpeRatio : 0;
+        const trialCount = config?.optimization?.enabled ? config.optimization.trials : 1;
+
         const evaluations = entries.map((entry) => {
             const evaluation = evaluateWindow(entry.testing, thresholds, minTrades);
             const commentParts = [];
@@ -730,6 +1146,28 @@
                     }
                 }
             }
+
+            const stats = ensureReturnStats(entry.testing);
+            const observedSharpe = Number.isFinite(entry.testing?.sharpeRatio)
+                ? entry.testing.sharpeRatio
+                : Number.isFinite(stats?.annualisedSharpe)
+                    ? stats.annualisedSharpe
+                    : null;
+            const psr = computePSRMetrics(stats, observedSharpe, srThreshold);
+            const dsr = computeDSRMetrics(stats, observedSharpe, srThreshold, trialCount);
+            const oosQuality = computeOOSQuality(entry.testing, thresholds);
+            const credibility = computeCredibility(psr?.probability, dsr?.probability);
+            const statWeight = 0.5 + 0.5 * credibility;
+            const windowScore = Number.isFinite(oosQuality) ? oosQuality * statWeight : null;
+            const wfePercent = Number.isFinite(entry.walkForwardEfficiency)
+                ? entry.walkForwardEfficiency
+                : null;
+            const sampleSize = Number.isFinite(stats?.count) ? stats.count : null;
+            const minTrl = psr?.minTrackRecordLength;
+            if (Number.isFinite(minTrl) && Number.isFinite(sampleSize) && sampleSize < minTrl) {
+                commentParts.push(`樣本不足（OOS ${sampleSize} 筆 < MinTRL ${Math.ceil(minTrl)}）`);
+            }
+
             return {
                 index: entry.index,
                 window: entry.window,
@@ -737,6 +1175,21 @@
                 evaluation,
                 paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
+                analytics: {
+                    oosQuality,
+                    credibility,
+                    statWeight,
+                    windowScore,
+                    psrProbability: psr?.probability ?? null,
+                    psrZ: psr?.zScore ?? null,
+                    dsrProbability: dsr?.probability ?? null,
+                    dsrZ: dsr?.zScore ?? null,
+                    minTrackRecordLength: minTrl ?? null,
+                    sampleSize,
+                    wfePercent,
+                    wfeRatio: Number.isFinite(wfePercent) ? wfePercent / 100 : null,
+                    sharpe: observedSharpe,
+                },
             };
         });
 
@@ -744,142 +1197,171 @@
             .map((ev) => ev.metrics)
             .filter((metrics) => metrics && !metrics.error);
 
+        const medianAnnualizedReturn = median(validMetrics.map((m) => m.annualizedReturn));
         const averageAnnualizedReturn = average(validMetrics.map((m) => m.annualizedReturn));
-        const averageSharpe = average(validMetrics.map((m) => m.sharpeRatio));
-        const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
-        const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
+        const averageSharpe = average(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
+        const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
+        const medianMaxDrawdown = median(validMetrics.map((m) => m.maxDrawdown));
+        const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
+        const medianWinRate = median(validMetrics.map((m) => m.winRate));
+
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
-        const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
-        const score = computeCompositeScore(entries, thresholds);
-        const gradeInfo = resolveGrade(score, passRate, passCount, evaluations.length);
+        const totalWindows = evaluations.length;
+        const passRate = totalWindows > 0 ? (passCount / totalWindows) * 100 : 0;
+
+        const oosQualityValues = evaluations
+            .map((ev) => ev.analytics?.oosQuality)
+            .filter((value) => Number.isFinite(value));
+        const credibilityValues = evaluations
+            .map((ev) => ev.analytics?.credibility)
+            .filter((value) => Number.isFinite(value));
+        const statWeightValues = evaluations
+            .map((ev) => ev.analytics?.statWeight)
+            .filter((value) => Number.isFinite(value));
+        const windowScoreValues = evaluations
+            .map((ev) => ev.analytics?.windowScore)
+            .filter((value) => Number.isFinite(value));
+        const wfeValues = evaluations
+            .map((ev) => ev.analytics?.wfePercent)
+            .filter((value) => Number.isFinite(value));
+        const psrProbabilities = evaluations
+            .map((ev) => ev.analytics?.psrProbability)
+            .filter((value) => Number.isFinite(value));
+        const dsrProbabilities = evaluations
+            .map((ev) => ev.analytics?.dsrProbability)
+            .filter((value) => Number.isFinite(value));
+
+        const medianWindowScore = median(windowScoreValues);
+        const medianOosQuality = median(oosQualityValues);
+        const credibilityMedian = median(credibilityValues);
+        const statWeightMedian = median(statWeightValues);
+        const medianWfePercent = median(wfeValues);
+        const medianWfeRatio = Number.isFinite(medianWfePercent) ? medianWfePercent / 100 : null;
+        const wfeAdjusted = Number.isFinite(medianWfeRatio)
+            ? clampValue(medianWfeRatio, WFE_ADJUST_MIN, WFE_ADJUST_MAX)
+            : 1;
+        const totalScore = clamp01((Number.isFinite(medianWindowScore) ? medianWindowScore : 0) * (wfeAdjusted || 1));
+        const psr95Count = evaluations.filter((ev) => Number.isFinite(ev.analytics?.psrProbability) && ev.analytics.psrProbability >= 0.95).length;
+        const psr95Ratio = totalWindows > 0 ? psr95Count / totalWindows : 0;
+        const dsrMedian = median(dsrProbabilities);
+        const aggregateDsr = computeAggregateDSR(entries, thresholds, config);
+
+        const gradeInfo = resolveGrade({
+            totalScore,
+            passRate,
+            passCount,
+            totalWindows,
+            medianWfeRatio,
+            psr95Ratio,
+            dsrMedian,
+            degrade: Number.isFinite(aggregateDsr?.probability) && aggregateDsr.probability <= 0.5,
+        });
 
         const summaryText = buildSummaryText({
             gradeLabel: gradeInfo.label,
-            score,
+            totalScore,
             passCount,
-            total: evaluations.length,
-            averageAnnualizedReturn,
+            total: totalWindows,
+            medianAnnualizedReturn,
             medianSharpe,
             medianSortino,
-            averageMaxDrawdown,
-            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
+            medianMaxDrawdown,
+            medianWinRate,
+            medianWfePercent,
+            medianOosQuality,
+            psr95Ratio,
+            dsrMedian,
             thresholds,
+            credibilityMedian,
+            aggregateDsr,
+            walkForwardAdjustment: wfeAdjusted,
         });
 
         return {
             evaluations,
-            score,
+            totalScore,
+            medianWindowScore,
             passCount,
             passRate,
-            totalWindows: evaluations.length,
+            totalWindows,
             gradeLabel: gradeInfo.label,
             gradeColor: gradeInfo.color,
             summaryText,
-            averageAnnualizedReturn,
-            averageSharpe,
-            averageSortino,
-            averageMaxDrawdown,
-            medianSharpe,
-            medianSortino,
-            averageWalkForwardEfficiency: average(validMetrics.map((m) => m.walkForwardEfficiency)),
             thresholds,
+            medianAnnualizedReturn,
+            averageAnnualizedReturn,
+            medianSharpe,
+            averageSharpe,
+            medianSortino,
+            averageSortino,
+            medianMaxDrawdown,
+            averageMaxDrawdown,
+            medianWinRate,
+            oosQualityMedian,
+            credibilityMedian,
+            statWeightMedian,
+            psr95Ratio,
+            psr95Count,
+            dsrMedian,
+            aggregateDsr,
+            medianWalkForwardEfficiency: Number.isFinite(medianWfePercent) ? medianWfePercent : null,
+            medianWalkForwardEfficiencyRatio: medianWfeRatio,
+            walkForwardAdjustment: wfeAdjusted,
         };
     }
 
     function buildSummaryText(context) {
         const parts = [];
-        parts.push(`${context.gradeLabel} · Walk-Forward 評分 ${context.score} 分`);
-        parts.push(`平均年化報酬 ${formatPercent(context.averageAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}`);
-        if (Number.isFinite(context.averageWalkForwardEfficiency)) {
-            parts.push(`Walk-Forward Efficiency 平均 ${formatPercent(context.averageWalkForwardEfficiency)}（基準 ${formatPercent(WALK_FORWARD_EFFICIENCY_BASELINE)}）`);
+        parts.push(`${context.gradeLabel} · Walk-Forward 總分 ${formatPercent((context.totalScore || 0) * 100)}`);
+        parts.push(`OOS 品質中位數 ${formatPercent((context.medianOosQuality || 0) * 100)}，統計可信度中位數 ${formatPercent((context.credibilityMedian || 0) * 100)}`);
+        parts.push(`年化報酬中位數 ${formatPercent(context.medianAnnualizedReturn)}，Sharpe 中位數 ${formatNumber(context.medianSharpe)}，Sortino 中位數 ${formatNumber(context.medianSortino)}，MaxDD 中位數 ${formatPercent(context.medianMaxDrawdown)}，勝率中位數 ${formatPercent(context.medianWinRate)}`);
+        if (Number.isFinite(context.medianWfePercent)) {
+            parts.push(`Walk-Forward Efficiency 中位數 ${formatPercent(context.medianWfePercent)}，調整權重 ${formatPercent((context.walkForwardAdjustment || 1) * 100)}`);
+        }
+        parts.push(`PSR≥95% 視窗 ${formatPercent((context.psr95Ratio || 0) * 100)}，DSR 中位數 ${formatPercent((context.dsrMedian || 0) * 100)}`);
+        if (context.aggregateDsr && Number.isFinite(context.aggregateDsr.probability)) {
+            parts.push(`整體 OOS Sharpe ${formatNumber(context.aggregateDsr.sharpe)}，DSR ${formatPercent(context.aggregateDsr.probability * 100)}（樣本 ${context.aggregateDsr.sampleSize || 0}）`);
         }
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
         return parts.join('；');
     }
 
-    function computeCompositeScore(entries, thresholds) {
-        if (!Array.isArray(entries) || entries.length === 0) return 0;
-        let weightedScore = 0;
-        let weightSum = 0;
-
-        entries.forEach((entry) => {
-            const metrics = entry?.testing;
-            if (!metrics || metrics.error) return;
-            const annScore = scorePositiveMetric(metrics.annualizedReturn, thresholds.annualizedReturn);
-            if (annScore !== null) {
-                weightedScore += SCORE_WEIGHTS.annualizedReturn * annScore;
-                weightSum += SCORE_WEIGHTS.annualizedReturn;
-            }
-            const sharpeScore = scorePositiveMetric(metrics.sharpeRatio, thresholds.sharpeRatio);
-            if (sharpeScore !== null) {
-                weightedScore += SCORE_WEIGHTS.sharpeRatio * sharpeScore;
-                weightSum += SCORE_WEIGHTS.sharpeRatio;
-            }
-            const sortinoScore = scorePositiveMetric(metrics.sortinoRatio, thresholds.sortinoRatio);
-            if (sortinoScore !== null) {
-                weightedScore += SCORE_WEIGHTS.sortinoRatio * sortinoScore;
-                weightSum += SCORE_WEIGHTS.sortinoRatio;
-            }
-            const drawdownScore = scoreInverseMetric(metrics.maxDrawdown, thresholds.maxDrawdown);
-            if (drawdownScore !== null) {
-                weightedScore += SCORE_WEIGHTS.maxDrawdown * drawdownScore;
-                weightSum += SCORE_WEIGHTS.maxDrawdown;
-            }
-            const winRateScore = scorePositiveMetric(metrics.winRate, thresholds.winRate);
-            if (winRateScore !== null) {
-                weightedScore += SCORE_WEIGHTS.winRate * winRateScore;
-                weightSum += SCORE_WEIGHTS.winRate;
-            }
-            const wfeScore = scorePositiveMetric(metrics.walkForwardEfficiency, WALK_FORWARD_EFFICIENCY_BASELINE);
-            if (wfeScore !== null) {
-                weightedScore += SCORE_WEIGHTS.walkForwardEfficiency * wfeScore;
-                weightSum += SCORE_WEIGHTS.walkForwardEfficiency;
-            }
-        });
-
-        if (weightSum === 0) return 0;
-        return Math.round(weightedScore / weightSum);
-    }
-
-    function scorePositiveMetric(value, baseline) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || baseline <= 0) return null;
-        const ratio = value / baseline;
-        return shapeScoreFromRatio(ratio);
-    }
-
-    function scoreInverseMetric(value, baseline) {
-        if (!Number.isFinite(value) || !Number.isFinite(baseline) || value <= 0 || baseline <= 0) return null;
-        const ratio = baseline / value;
-        return shapeScoreFromRatio(ratio);
-    }
-
-    function shapeScoreFromRatio(ratio) {
-        if (!Number.isFinite(ratio) || ratio <= 0) return 0;
-        if (ratio >= 2) {
-            return Math.min(100, 95 + (ratio - 2) * 10);
-        }
-        if (ratio >= 1) {
-            return 70 + (ratio - 1) * 25;
-        }
-        return Math.max(0, ratio * 70);
-    }
-
-    function resolveGrade(score, passRate, passCount, total) {
-        if (total === 0) {
+    function resolveGrade(context) {
+        if (!context || context.totalWindows === 0) {
             return { label: '尚無結果', color: 'var(--muted-foreground)' };
         }
-        if (score >= 85 && passRate >= 70) {
-            return { label: '專業合格', color: 'var(--primary)' };
+        let label = '未通過建議調整';
+        let color = 'var(--destructive)';
+        if (
+            Number.isFinite(context.totalScore) && context.totalScore >= 0.7 &&
+            Number.isFinite(context.medianWfeRatio) && context.medianWfeRatio >= 0.8 &&
+            Number.isFinite(context.psr95Ratio) && context.psr95Ratio >= 0.5 &&
+            Number.isFinite(context.dsrMedian) && context.dsrMedian >= 0.7
+        ) {
+            label = '專業合格';
+            color = 'var(--primary)';
+        } else if (
+            Number.isFinite(context.totalScore) && context.totalScore >= 0.5 &&
+            Number.isFinite(context.medianWfeRatio) && context.medianWfeRatio >= 0.6 &&
+            Number.isFinite(context.psr95Ratio) && context.psr95Ratio >= 0.3
+        ) {
+            label = '可進一步觀察';
+            color = 'var(--accent)';
         }
-        if (score >= 70 && passRate >= 50) {
-            return { label: '可進一步驗證', color: 'var(--accent)' };
+
+        if (context.degrade) {
+            if (label === '專業合格') {
+                label = '可進一步觀察';
+                color = 'var(--accent)';
+            } else if (label === '可進一步觀察') {
+                label = '未通過建議調整';
+                color = 'var(--destructive)';
+            }
         }
-        if (score >= 55) {
-            return { label: '需要調整', color: 'var(--muted-foreground)' };
-        }
-        return { label: '未通過', color: 'var(--destructive)' };
+
+        return { label, color };
     }
 
     function evaluateWindow(metrics, thresholds, minTrades) {
@@ -940,6 +1422,10 @@
             const wins = result.completedTrades.filter((trade) => Number.isFinite(trade?.profit) && trade.profit > 0).length;
             winRate = wins / tradesCount * 100;
         }
+        const dailyReturns = Array.isArray(result.dailyReturns)
+            ? result.dailyReturns.filter((value) => Number.isFinite(value))
+            : [];
+        const returnStats = sanitizeReturnStats(result.returnStats, dailyReturns);
         return {
             annualizedReturn: toFiniteNumber(result.annualizedReturn),
             sharpeRatio: toFiniteNumber(result.sharpeRatio),
@@ -947,6 +1433,8 @@
             maxDrawdown: toFiniteNumber(result.maxDrawdown),
             winRate: toFiniteNumber(winRate),
             tradesCount: Number.isFinite(tradesCount) ? tradesCount : null,
+            dailyReturns,
+            returnStats,
         };
     }
 
@@ -976,6 +1464,7 @@
         if (!availability) return [];
 
         const windows = [];
+        const targetWindows = Number.isFinite(config?.windowCount) ? Math.max(1, Math.round(config.windowCount)) : null;
         const startDate = new Date(Math.max(new Date(config.baseStart).getTime(), new Date(availability.start).getTime()));
         const finalDate = new Date(Math.min(new Date(config.baseEnd).getTime(), new Date(availability.end).getTime()));
 
@@ -993,6 +1482,8 @@
                 testingStart: formatISODate(testingStart),
                 testingEnd: formatISODate(testingEnd),
             });
+
+            if (targetWindows && windows.length >= targetWindows) break;
 
             currentTrainStart = addMonthsClamped(currentTrainStart, config.stepMonths);
             if (!currentTrainStart || currentTrainStart >= finalDate) break;
@@ -1159,10 +1650,94 @@
         }
     }
 
-    function getRollingConfig() {
-        const trainingMonths = clampNumber(readInputValue('rolling-training-months', 36), 6, 120);
-        const testingMonths = clampNumber(readInputValue('rolling-testing-months', 12), 3, 36);
-        const stepMonths = clampNumber(readInputValue('rolling-step-months', 6), 1, 24);
+    function deriveAutoWindowDurations({ baseStart, baseEnd, availability, windowCount }) {
+        const fallbackAvailability = availability || (baseStart && baseEnd ? { start: baseStart, end: baseEnd } : null);
+        const effectiveStart = baseStart || fallbackAvailability?.start || null;
+        const effectiveEnd = baseEnd || fallbackAvailability?.end || null;
+        const defaultDurations = {
+            trainingMonths: clampNumber(DEFAULT_WINDOW_RATIO.training, 6, 180),
+            testingMonths: clampNumber(DEFAULT_WINDOW_RATIO.testing, 3, 72),
+            stepMonths: clampNumber(DEFAULT_WINDOW_RATIO.step, 1, 36),
+        };
+
+        if (!effectiveStart || !effectiveEnd) {
+            return defaultDurations;
+        }
+
+        const rangeMonths = computeMonthsBetween(effectiveStart, effectiveEnd);
+        const targetCount = Number.isFinite(windowCount) ? Math.max(1, Math.round(windowCount)) : DEFAULT_WINDOW_COUNT;
+        if (!Number.isFinite(rangeMonths) || rangeMonths <= 0) {
+            return defaultDurations;
+        }
+
+        const ratioTotal = DEFAULT_WINDOW_RATIO.training
+            + DEFAULT_WINDOW_RATIO.testing
+            + DEFAULT_WINDOW_RATIO.step * Math.max(0, targetCount - 1);
+        let scale = ratioTotal > 0 ? rangeMonths / ratioTotal : 1;
+        if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+
+        const applyScale = (scaleValue) => ({
+            trainingMonths: clampNumber(Math.max(6, Math.round(DEFAULT_WINDOW_RATIO.training * scaleValue)), 6, 180),
+            testingMonths: clampNumber(Math.max(3, Math.round(DEFAULT_WINDOW_RATIO.testing * scaleValue)), 3, 72),
+            stepMonths: clampNumber(Math.max(1, Math.round(DEFAULT_WINDOW_RATIO.step * scaleValue)), 1, 36),
+        });
+
+        const evaluateDurations = (durations) => {
+            if (!fallbackAvailability) {
+                return { count: targetCount, durations };
+            }
+            const candidateConfig = {
+                trainingMonths: durations.trainingMonths,
+                testingMonths: durations.testingMonths,
+                stepMonths: durations.stepMonths,
+                baseStart: effectiveStart,
+                baseEnd: effectiveEnd,
+                windowCount: targetCount,
+            };
+            const windows = computeRollingWindows(candidateConfig, fallbackAvailability);
+            return { count: Array.isArray(windows) ? windows.length : 0, durations };
+        };
+
+        let best = evaluateDurations(applyScale(scale));
+        let bestDiff = Math.abs(best.count - targetCount);
+
+        if (fallbackAvailability) {
+            let lowScale = scale / 4;
+            let highScale = scale * 4;
+            if (!Number.isFinite(lowScale) || lowScale <= 0) lowScale = scale / 2 || 0.5;
+            if (!Number.isFinite(highScale) || highScale <= lowScale) highScale = lowScale + 1;
+
+            for (let i = 0; i < 10; i += 1) {
+                const testScale = (lowScale + highScale) / 2;
+                const candidate = evaluateDurations(applyScale(testScale));
+                const diff = Math.abs(candidate.count - targetCount);
+
+                if (diff < bestDiff || (diff === bestDiff && candidate.count >= targetCount && best.count < targetCount)) {
+                    best = candidate;
+                    bestDiff = diff;
+                }
+
+                if (candidate.count === targetCount) break;
+                if (candidate.count > targetCount) lowScale = testScale;
+                else highScale = testScale;
+            }
+        }
+
+        return best.durations;
+    }
+
+    function syncAutoDurationInputs(durations) {
+        const trainingEl = document.getElementById('rolling-training-months');
+        const testingEl = document.getElementById('rolling-testing-months');
+        const stepEl = document.getElementById('rolling-step-months');
+        if (trainingEl) trainingEl.value = String(durations.trainingMonths);
+        if (testingEl) testingEl.value = String(durations.testingMonths);
+        if (stepEl) stepEl.value = String(durations.stepMonths);
+    }
+
+    function getRollingConfig(availability) {
+        const windowCountRaw = clampNumber(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT), 1, 24);
+        const windowCount = Math.max(1, Math.round(windowCountRaw));
         const minTrades = clampNumber(readInputValue('rolling-min-trades', 10), 0, 1000);
         const thresholds = {
             annualizedReturn: clampNumber(readInputValue('rolling-threshold-ann', DEFAULT_THRESHOLDS.annualizedReturn), 0, 200),
@@ -1173,15 +1748,40 @@
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
         const optimization = getRollingOptimizationConfig();
+        const baseStart = params?.startDate || availability?.start || lastFetchSettings?.startDate || null;
+        const baseEnd = params?.endDate || availability?.end || lastFetchSettings?.endDate || null;
+
+        let trainingMonths;
+        let testingMonths;
+        let stepMonths;
+
+        if (isAdvancedSettingsActive()) {
+            trainingMonths = clampNumber(readInputValue('rolling-training-months', DEFAULT_WINDOW_RATIO.training), 6, 180);
+            testingMonths = clampNumber(readInputValue('rolling-testing-months', DEFAULT_WINDOW_RATIO.testing), 3, 72);
+            stepMonths = clampNumber(readInputValue('rolling-step-months', DEFAULT_WINDOW_RATIO.step), 1, 36);
+        } else {
+            const durations = deriveAutoWindowDurations({
+                baseStart,
+                baseEnd,
+                availability,
+                windowCount,
+            });
+            trainingMonths = durations.trainingMonths;
+            testingMonths = durations.testingMonths;
+            stepMonths = durations.stepMonths;
+            syncAutoDurationInputs(durations);
+        }
+
         return {
             trainingMonths,
             testingMonths,
             stepMonths,
             minTrades,
             thresholds,
-            baseStart: params?.startDate || lastFetchSettings?.startDate || null,
-            baseEnd: params?.endDate || lastFetchSettings?.endDate || null,
+            baseStart,
+            baseEnd,
             optimization,
+            windowCount,
         };
     }
 
@@ -1988,6 +2588,23 @@
         }, null);
     }
 
+    function computeMonthsBetween(startIso, endIso) {
+        if (!startIso || !endIso) return null;
+        const start = new Date(startIso);
+        const end = new Date(endIso);
+        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return null;
+        const diffMs = end.getTime() - start.getTime();
+        if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+        const days = diffMs / MS_PER_DAY + 1;
+        return days / 30.4375;
+    }
+
+    function computeYearsBetween(startIso, endIso) {
+        const months = computeMonthsBetween(startIso, endIso);
+        if (!Number.isFinite(months)) return null;
+        return months / 12;
+    }
+
     function computeWalkForwardEfficiency(trainingMetrics, testingMetrics) {
         if (!trainingMetrics || !testingMetrics) return null;
         const trainReturn = toFiniteNumber(trainingMetrics.annualizedReturn);
@@ -2011,7 +2628,7 @@
     function updateRollingPlanPreview() {
         const cachedRows = ensureRollingCacheHydrated();
         const availability = getCachedAvailability(cachedRows);
-        const config = getRollingConfig();
+        const config = getRollingConfig(availability);
         const windows = computeRollingWindows(config, availability);
 
         const summaryEl = document.getElementById('rolling-plan-summary');
@@ -2029,19 +2646,41 @@
         if (tbody) tbody.innerHTML = '';
 
         if (!availability || !Array.isArray(cachedRows) || cachedRows.length === 0) {
-            setPlanWarning(true);
+            setPlanWarning('請先執行一次主回測以產生快取資料');
+            setPlanAdvice('');
             if (summaryEl) summaryEl.textContent = '尚未取得快取資料，請先執行一次主回測。';
             return;
         }
 
-        setPlanWarning(false);
+        setPlanWarning('');
         if (!windows || windows.length === 0) {
             if (summaryEl) summaryEl.textContent = '目前設定下無法產生有效視窗，請調整視窗長度或日期區間。';
+            setPlanAdvice('');
             return;
         }
 
+        const summaryParts = [];
+        if (Number.isFinite(config.windowCount)) {
+            summaryParts.push(`目標 ${config.windowCount} 次`);
+        }
+        summaryParts.push(`訓練 ${config.trainingMonths} 個月`);
+        summaryParts.push(`測試 ${config.testingMonths} 個月`);
+        summaryParts.push(`平移 ${config.stepMonths} 個月`);
         if (summaryEl) {
-            summaryEl.textContent = `共 ${windows.length} 個視窗（訓練 ${config.trainingMonths} 個月 / 測試 ${config.testingMonths} 個月 / 平移 ${config.stepMonths} 個月）`;
+            summaryEl.textContent = `共 ${windows.length} 個視窗（${summaryParts.join(' / ')}）`;
+        }
+
+        if (Number.isFinite(config.windowCount) && windows.length < config.windowCount) {
+            setPlanWarning(`可用資料僅能建立 ${windows.length} 個視窗，建議延長回測期間。`);
+        } else {
+            setPlanWarning('');
+        }
+
+        const coverageYears = computeYearsBetween(config.baseStart || availability.start, config.baseEnd || availability.end);
+        if (Number.isFinite(coverageYears) && coverageYears < 5) {
+            setPlanAdvice('建議使用至少五年以上的歷史資料，以提高滾動測試的可信度。');
+        } else {
+            setPlanAdvice('');
         }
 
         if (tbody) {
@@ -2059,11 +2698,28 @@
         }
     }
 
-    function setPlanWarning(visible) {
+    function setPlanWarning(message) {
         const warningEl = document.getElementById('rolling-plan-warning');
         if (!warningEl) return;
-        if (visible) warningEl.classList.remove('hidden');
-        else warningEl.classList.add('hidden');
+        if (message) {
+            warningEl.textContent = message;
+            warningEl.classList.remove('hidden');
+        } else {
+            warningEl.textContent = '';
+            warningEl.classList.add('hidden');
+        }
+    }
+
+    function setPlanAdvice(message) {
+        const adviceEl = document.getElementById('rolling-plan-advice');
+        if (!adviceEl) return;
+        if (message) {
+            adviceEl.textContent = message;
+            adviceEl.classList.remove('hidden');
+        } else {
+            adviceEl.textContent = '';
+            adviceEl.classList.add('hidden');
+        }
     }
 
     function countTradingDays(startIso, endIso, rowsOverride) {

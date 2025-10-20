@@ -1,4 +1,12 @@
 
+## 2026-07-10 — Patch LB-ROLLING-TEST-20250930B
+- **Scope**: Walk-Forward 視窗自動調整與使用者提醒優化。
+- **Updates**:
+  - 以「滾動測試次數」取代固定訓練／測試／平移月份，依既有 36：12：6 比例與回測區間自動縮放視窗長度。
+  - 新增進階設定折疊容器，保留原始欄位供專業使用者手動覆寫，同步更新版本代碼與版面文字。
+  - 視窗預覽顯示目標次數與實際結果，若資料不足或期間少於五年會提示延長回測與建議使用五年以上數據。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
@@ -1185,3 +1193,14 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-10-05 — Patch LB-ROLLING-SCORING-20251005A
+- **Scope**: 重構 Walk-Forward 評分流程，導入 OOS 品質正規化、PSR/DSR 統計可信度與 WFE 中位數調整，對齊使用者提供的新門檻與評級規則。
+- **Front-end**:
+  - `js/rolling-test.js` 新增 PSR、DSR、MinTRL 與 Credibility 計算，改用 WindowScore 中位數 × WFE 調整的 TotalScore，並於表格顯示 WFE、PSR95、DSR 與視窗分數。
+  - `index.html` 調整滾動測試卡片版面：總結置頂、門檻與優化設定收納至進階區且預設啟用自動優化，更新 Walk-Forward 說明為新公式。
+- **Worker**: `js/worker.js` 回傳每日報酬統計（樣本數、偏態、峰度、年化 Sharpe），供前端計算 PSR/DSR 與 MinTRL。
+- **Diagnostics**: 本地重跑滾動測試報告流程，確認 summary、scoreboard 與逐窗表格顯示新欄位；測試樣本不足視窗會顯示提醒，且評級會在整體 DSR 低於 50% 時自動下修。
+- **Testing**:
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('rolling-test.js parsed ok');NODE`
+  - `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('worker.js parsed ok');NODE`
