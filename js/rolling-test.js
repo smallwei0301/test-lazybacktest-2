@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251028B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251028B',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -1737,7 +1737,7 @@
         let passWeight = 0;
 
         const accumulate = (key, score, weight, passed) => {
-            const normalized = Number.isFinite(score) ? clamp01(score) : 0;
+            const normalized = passed ? 1 : Number.isFinite(score) ? clamp01(score) : 0;
             components[key] = normalized;
             weightedSum += weight * normalized;
             weightTotal += weight;
