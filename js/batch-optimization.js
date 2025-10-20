@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// Patch Tag: LB-BATCH-OPT-20250930B
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -1661,17 +1661,23 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
-
-        // 發送優化任務
-        optimizeWorker.postMessage({
+        const payload = {
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
-        });
+            cachedData: cachedPayload,
+        };
+        if (preparedParams) {
+            if (preparedParams.dataStartDate) payload.dataStartDate = preparedParams.dataStartDate;
+            if (preparedParams.effectiveStartDate) payload.effectiveStartDate = preparedParams.effectiveStartDate;
+            if (Number.isFinite(preparedParams.lookbackDays)) payload.lookbackDays = preparedParams.lookbackDays;
+        }
+
+        // 發送優化任務
+        optimizeWorker.postMessage(payload);
         
         // 設定超時
         setTimeout(() => {
@@ -1798,17 +1804,23 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
-
-        // 發送優化任務
-        optimizeWorker.postMessage({
+        const payload = {
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
             useCachedData,
-            cachedData: cachedPayload
-        });
+            cachedData: cachedPayload,
+        };
+        if (preparedParams) {
+            if (preparedParams.dataStartDate) payload.dataStartDate = preparedParams.dataStartDate;
+            if (preparedParams.effectiveStartDate) payload.effectiveStartDate = preparedParams.effectiveStartDate;
+            if (Number.isFinite(preparedParams.lookbackDays)) payload.lookbackDays = preparedParams.lookbackDays;
+        }
+
+        // 發送優化任務
+        optimizeWorker.postMessage(payload);
     });
 }
 
