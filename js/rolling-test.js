@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251030A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251030A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -1641,6 +1641,34 @@
         return clamp01(ratio);
     }
 
+    function computeThresholdScore(value, threshold, spanBelow) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        if (value >= threshold) return 1;
+        let effectiveSpan = Number.isFinite(spanBelow) ? spanBelow : null;
+        if (!effectiveSpan || effectiveSpan <= 0) {
+            effectiveSpan = Math.max(Math.abs(threshold) || 1, 1);
+        }
+        const lowerBound = threshold - effectiveSpan;
+        if (!Number.isFinite(lowerBound) || lowerBound >= threshold) {
+            return clamp01(value / (threshold || 1));
+        }
+        return normalizeRange(value, lowerBound, threshold);
+    }
+
+    function computeInverseThresholdScore(value, threshold, spanAbove) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        if (value <= threshold) return 1;
+        let effectiveSpan = Number.isFinite(spanAbove) ? spanAbove : null;
+        if (!effectiveSpan || effectiveSpan <= 0) {
+            effectiveSpan = Math.max(Math.abs(threshold) || 1, 5);
+        }
+        const worstBound = threshold + effectiveSpan;
+        if (!Number.isFinite(worstBound) || worstBound <= threshold) {
+            return value <= threshold ? 1 : 0;
+        }
+        return normalizeInverseRange(value, threshold, worstBound);
+    }
+
     function standardNormalCDF(x) {
         if (!Number.isFinite(x)) return null;
         return 0.5 * (1 + erf(x / Math.sqrt(2)));
@@ -1747,38 +1775,32 @@
         };
 
         const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
+        const annScore = computeThresholdScore(annValue, annThreshold, QUALITY_OFFSETS.annualizedReturn);
         const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
         accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
+        const sharpeScore = computeThresholdScore(sharpeValue, sharpeThreshold, QUALITY_OFFSETS.sharpeRatio);
         const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
         accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
+        const sortinoScore = computeThresholdScore(sortinoValue, sortinoThreshold, QUALITY_OFFSETS.sortinoRatio);
         const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
         accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
+        const drawdownScore = computeInverseThresholdScore(drawdownValue, drawdownThreshold, QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
         accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
+        const winRateScore = computeThresholdScore(winRateValue, winRateThreshold, QUALITY_TARGETS.winRateBonus);
         const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
         accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
 
