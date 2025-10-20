@@ -1,5 +1,28 @@
 
 
+## 2026-11-02 — Patch LB-ROLLING-TEST-20251102A
+- **Issue recap**: 使用者希望 OOS 品質在指標達到最低門檻時直接給予滿分，避免再被額外加權稀釋；同時需要策略比較可讀取最新的 Walk-Forward 分數。
+- **Fix**:
+  - `js/rolling-test.js` 調整 `computeOosQualityScore`，改為指標達門檻即給滿分、未達門檻時依距離門檻線性遞減，並新增閾值正向/反向正規化函式。
+  - 更新品質細節說明，強調「指標達最低門檻即給滿分」，同步提升模組版本碼至 `LB-ROLLING-TEST-20251102A`。
+  - `js/backtest.js` 儲存策略快照時改存 Walk-Forward `totalScore` 轉換後的 0～100 分，確保策略比較表顯示正確。
+- **Docs**: `README.md` 與 `index.html` 說明 OOS 品質改為達標即滿分的邏輯。
+- **Testing**: 需於瀏覽器環境重新執行回測與滾動測試，確認 console 無錯誤並檢視策略比較表（本地容器無法啟動瀏覽器）。
+
+## 2026-11-02 — Patch LB-BATCH-OPT-20251102A
+- **Issue recap**: 批量優化結果與單獨優化不一致，推測 Worker 未帶到與單次優化相同的暖身與測試區間資訊。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `enrichParamsWithLookback` 新增 `originalStartDate` 與 `warmupStartDate`，並在所有 `postMessage` 時同步傳遞 `effectiveStartDate`、`dataStartDate`、`lookbackDays`。
+  - 將批量優化模組版本碼更新為 `LB-BATCH-OPT-20251102A`，方便比對快取與調整紀錄。
+- **Testing**: 建議於瀏覽器環境執行批量優化與單次優化並比較結果（本地容器無法啟動瀏覽器）。
+
+## 2026-11-02 — Patch LB-STRATEGY-COMPARE-20251102A
+- **Scope**: 策略比較儲存分數與提示文字修正。
+- **Updates**:
+  - `js/backtest.js` 的策略快照版本碼調整為 `LB-STRATEGY-COMPARE-20251102A`，滾動測試分數改為儲存 0～100 分的 `totalScore`。
+  - 修正比較表在儲存滾動測試後仍顯示「請先測試後保存策略」的情況，確保分數欄位正常顯示。
+- **Testing**: 需在瀏覽器重新儲存策略並檢查比較表資料（本地容器無法啟動瀏覽器）。
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:

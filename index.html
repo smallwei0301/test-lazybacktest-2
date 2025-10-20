@@ -2154,7 +2154,7 @@
                                             <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
                                                 <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
                                                 <ol class="list-decimal pl-4 space-y-1">
-                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤分別映射至 0～1，採 0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
+                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤達到最低門檻即取得滿分，未達門檻時依距離門檻的差距線性遞減，並以 0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
                                                     <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，平均後轉為 0.5～1 的 <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。</li>
                                                     <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，跨窗取中位數，再以 WFE 中位數（取 0.8～1.2 區間）進行調整取得 Walk-Forward 總分。</li>
                                                     <li>評級門檻：總分 ≥ 0.70、WFE 中位 ≥ 0.8、PSR≥95% 視窗比 ≥ 50%、DSR 中位 ≥ 0.7 判定「專業合格」；總分 ≥ 0.50、WFE 中位 ≥ 0.6、PSR≥95% 視窗比 ≥ 30% 判定「可進一步觀察」；其餘為「未通過建議調整」。若整體 DSR ≤ 0 會再下修一級。</li>

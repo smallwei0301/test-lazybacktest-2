@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2 ---
+// Patch Tag: LB-BATCH-OPT-20251102A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -120,7 +120,7 @@ function enrichParamsWithLookback(params) {
             ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
             : Math.max(90, fallbackMaxPeriod * 2);
     }
-    const effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
+    const effectiveStartDate = windowDecision?.effectiveStartDate || params.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
     let dataStartDate = windowDecision?.dataStartDate || null;
     if (!dataStartDate && effectiveStartDate && typeof sharedUtils.computeBufferedStartDate === 'function') {
         dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
@@ -130,11 +130,14 @@ function enrichParamsWithLookback(params) {
         }) || effectiveStartDate;
     }
     if (!dataStartDate) dataStartDate = effectiveStartDate;
+    const originalStartDate = params.originalStartDate || params.startDate || null;
     return {
         ...params,
         effectiveStartDate,
         dataStartDate,
         lookbackDays,
+        originalStartDate: originalStartDate || params.startDate || effectiveStartDate,
+        warmupStartDate: dataStartDate,
     };
 }
 
@@ -1364,9 +1367,16 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
+                const effectiveStartDate = preparedParams?.effectiveStartDate || null;
+                const dataStartDate = preparedParams?.dataStartDate || null;
+                const lookbackDays = Number.isFinite(preparedParams?.lookbackDays) ? preparedParams.lookbackDays : null;
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
+                    effectiveStartDate,
+                    dataStartDate,
+                    lookbackDays,
+                    originalStartDate: preparedParams?.originalStartDate || preparedParams?.startDate || null,
                     useCachedData,
                     cachedData: cachedPayload
                 });
@@ -1661,11 +1671,18 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        const effectiveStartDate = preparedParams?.effectiveStartDate || null;
+        const dataStartDate = preparedParams?.dataStartDate || null;
+        const lookbackDays = Number.isFinite(preparedParams?.lookbackDays) ? preparedParams.lookbackDays : null;
 
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
             params: preparedParams,
+            effectiveStartDate,
+            dataStartDate,
+            lookbackDays,
+            originalStartDate: preparedParams?.originalStartDate || preparedParams?.startDate || null,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
@@ -1798,11 +1815,18 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
+        const effectiveStartDate = preparedParams?.effectiveStartDate || null;
+        const dataStartDate = preparedParams?.dataStartDate || null;
+        const lookbackDays = Number.isFinite(preparedParams?.lookbackDays) ? preparedParams.lookbackDays : null;
 
         // 發送優化任務
         optimizeWorker.postMessage({
             type: 'runOptimization',
             params: preparedParams,
+            effectiveStartDate,
+            dataStartDate,
+            lookbackDays,
+            originalStartDate: preparedParams?.originalStartDate || preparedParams?.startDate || null,
             optimizeTargetStrategy: 'risk',
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
@@ -3542,9 +3566,16 @@ function performSingleBacktest(params) {
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
             const preparedParams = enrichParamsWithLookback(params);
+            const effectiveStartDate = preparedParams?.effectiveStartDate || null;
+            const dataStartDate = preparedParams?.dataStartDate || null;
+            const lookbackDays = Number.isFinite(preparedParams?.lookbackDays) ? preparedParams.lookbackDays : null;
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
+                effectiveStartDate,
+                dataStartDate,
+                lookbackDays,
+                originalStartDate: preparedParams?.originalStartDate || preparedParams?.startDate || null,
                 useCachedData: false
             });
             
@@ -4654,9 +4685,16 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
+            const effectiveStartDate = preparedParams?.effectiveStartDate || null;
+            const dataStartDate = preparedParams?.dataStartDate || null;
+            const lookbackDays = Number.isFinite(preparedParams?.lookbackDays) ? preparedParams.lookbackDays : null;
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
+                effectiveStartDate,
+                dataStartDate,
+                lookbackDays,
+                originalStartDate: preparedParams?.originalStartDate || preparedParams?.startDate || null,
                 useCachedData: true,
                 cachedData: cachedStockData
             });
