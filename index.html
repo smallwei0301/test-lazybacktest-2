@@ -5,6 +5,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📈 LazyBacktest - 台股回測系統 v0.1.1</title>
+    <!-- 基本 SEO -->
+    <link rel="canonical" href="https://lazybacktest.com/" />
+    <meta name="description" content="LazyBacktest 台股回測系統：支援台股/ETF 回測、策略優化、走勢分析、AI 預測（LSTM/ANNS）。新手也能快速上手的免費回測工具。">
+
+    <!-- Open Graph（Facebook/LINE 等會用到）-->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="LazyBacktest">
+    <meta property="og:title" content="LazyBacktest - 台股回測系統">
+    <meta property="og:description" content="支援台股/ETF 回測、策略優化、走勢分析、AI 預測；新手也能快速上手的免費回測工具。">
+    <meta property="og:url" content="https://lazybacktest.com/">
+    <meta property="og:image" content="https://lazybacktest.com/og-image.png">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="LazyBacktest - 台股回測系統">
+    <meta name="twitter:description" content="支援台股/ETF 回測、策略優化、走勢分析、AI 預測；新手也能快速上手的免費回測工具。">
+    <meta name="twitter:image" content="https://lazybacktest.com/og-image.png">
+
+    <!-- robots（可視情況打開/關閉索引）-->
+    <meta name="robots" content="index,follow">
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
     <script>
@@ -24,6 +44,69 @@
       href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
     />
     <link rel="stylesheet" href="css/style.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebApplication",
+            "name": "LazyBacktest",
+            "url": "https://lazybacktest.com/",
+            "description": "LazyBacktest 台股回測系統提供台股與 ETF 回測、策略優化、走勢分析與 AI 預測（LSTM/ANNS），協助投資人快速驗證交易想法。",
+            "applicationCategory": "FinanceApplication",
+            "operatingSystem": "Web Browser",
+            "inLanguage": "zh-TW",
+            "creator": {
+              "@type": "Organization",
+              "name": "LazyBacktest"
+            },
+            "featureList": [
+              "台股與 ETF 回測",
+              "策略優化與多階段進出場模擬",
+              "AI 預測模型（LSTM 與 ANNS）",
+              "走勢分析與診斷卡片"
+            ],
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "TWD",
+              "category": "Free"
+            }
+          },
+          {
+            "@type": "FAQPage",
+            "url": "https://lazybacktest.com/",
+            "inLanguage": "zh-TW",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "LazyBacktest 支援哪些回測商品？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "LazyBacktest 以台股市場為核心，支援上市櫃股票與 ETF，並搭配官方與備援資料來源，確保策略回測所需的歷史價格與股利資訊完整。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "LazyBacktest 是否需要付費？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "LazyBacktest 目前提供免費使用，您可以直接透過瀏覽器設定策略參數、啟動回測與查看診斷卡片，不需額外付費。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "LazyBacktest 的 AI 預測功能可以做什麼？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "系統整合 LSTM 與 ANNS 等模型，讓使用者在回測流程中啟動 AI 預測，評估勝率、單次與年度報酬率，並搭配多階段進出場策略來優化決策。"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
     <style>
       :root {
         --background: #ffffff;
