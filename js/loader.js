@@ -14,6 +14,11 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             console.warn('[Loader] populateSavedStrategiesDropdown 尚未定義，略過初始化。');
         }
+        if (typeof initStrategyComparisonPanel === 'function') {
+            initStrategyComparisonPanel();
+        } else {
+            console.warn('[Loader] initStrategyComparisonPanel 尚未定義，略過初始化。');
+        }
 
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
         document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
