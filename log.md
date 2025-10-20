@@ -1310,3 +1310,11 @@ NODE`
 - **Diagnostics**: 於瀏覽器先執行滾動測試訓練期優化，再切換至批量優化面板確認 `window.batchOptimizationRunning`、進度條與最佳結果均重置且與單獨執行批量優化時一致，無需重新整理即可取得最佳參數。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-18 — Patch LB-BATCH-OPT-20260717B
+- **Issue recap**: Walk-Forward 優化完成後再次開啟批量優化仍可能讀到訓練窗裁切後的快取資料或診斷快照，造成最佳解偏離面板預期。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 會在 headless 呼叫前完整快照 `cachedStockData`、資料診斷與總結結果，於優化完成後強制回復，同時輸出 `headless-cache-state/headless-cache-restore` 除錯事件以追蹤資料範圍。
+  - 新增 `summarizeDatasetRange` 將快取筆數與起訖日期標準化，供除錯事件與後續追蹤使用；模組版本碼同步更新為 `LB-BATCH-OPT-20260717B`。
+- **Diagnostics**: 實機流程中先執行滾動測試訓練期優化再切回批量面板，透過除錯 log 比對 headless cache 範圍恢復情形並確認面板重跑後的最佳解與獨立批量優化一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

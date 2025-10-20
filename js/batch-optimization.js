@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.2.3 ---
-// Patch Tag: LB-BATCH-OPT-20260717A
+// Patch Tag: LB-BATCH-OPT-20260717B
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717A';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717B';
 
 let batchDebugSession = null;
 
@@ -135,6 +135,26 @@ function clonePlainObject(value) {
         console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
         return { ...value };
     }
+}
+
+function summarizeDatasetRange(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return { length: 0, startDate: null, endDate: null };
+    }
+
+    const first = rows[0] || {};
+    const last = rows[rows.length - 1] || {};
+
+    const extractDate = (row) => {
+        if (!row || typeof row !== 'object') return null;
+        return row.date || row.Date || row.tradeDate || row.trade_date || row.timestamp || row.time || row.t || null;
+    };
+
+    return {
+        length: rows.length,
+        startDate: extractDate(first),
+        endDate: extractDate(last)
+    };
 }
 
 function ensureBatchDebugSession(context = {}) {
@@ -4920,6 +4940,12 @@ async function runCombinationOptimizationHeadless(combination, config, options =
         preparedOptions.sessionContext = { source: 'external-headless' };
     }
 
+    const previousCachedStockData = typeof cachedStockData !== 'undefined' ? cachedStockData : undefined;
+    const previousDiagnostics = typeof lastDatasetDiagnostics !== 'undefined' ? lastDatasetDiagnostics : undefined;
+    const previousOverallResult = typeof lastOverallResult !== 'undefined' ? lastOverallResult : undefined;
+    const baselineCacheSummary = summarizeDatasetRange(previousCachedStockData);
+    const overrideCacheSummary = summarizeDatasetRange(preparedOptions.cachedDataOverride);
+
     const previousDebugSession = batchDebugSession;
     const previousProgress = { ...currentBatchProgress };
     const previousStopFlag = isBatchOptimizationStopped;
@@ -4935,6 +4961,13 @@ async function runCombinationOptimizationHeadless(combination, config, options =
             mode: 'headless'
         });
 
+        recordBatchDebug('headless-cache-state', {
+            baselineCache: baselineCacheSummary,
+            overrideCache: overrideCacheSummary,
+            diagnosticsPreserved: Boolean(previousDiagnostics),
+            overallResultPreserved: Boolean(previousOverallResult)
+        }, { phase: 'external', console: false });
+
         const result = await optimizeCombinationIterative(preparedCombination, preparedConfig, preparedOptions);
 
         if (headlessSession && batchDebugSession === headlessSession) {
@@ -4947,6 +4980,24 @@ async function runCombinationOptimizationHeadless(combination, config, options =
 
         return cloneCombinationResult(result);
     } finally {
+        if (headlessSession && batchDebugSession === headlessSession) {
+            recordBatchDebug('headless-cache-restore', {
+                restoredBaseline: baselineCacheSummary,
+                restoredDiagnostics: Boolean(previousDiagnostics),
+                restoredOverallResult: Boolean(previousOverallResult)
+            }, { phase: 'external', console: false });
+        }
+
+        if (typeof cachedStockData !== 'undefined') {
+            cachedStockData = previousCachedStockData;
+        }
+        if (typeof lastDatasetDiagnostics !== 'undefined') {
+            lastDatasetDiagnostics = previousDiagnostics;
+        }
+        if (typeof lastOverallResult !== 'undefined') {
+            lastOverallResult = previousOverallResult;
+        }
+
         if (headlessSession && batchDebugSession === headlessSession) {
             batchDebugSession = previousDebugSession || null;
         } else if (previousDebugSession) {
