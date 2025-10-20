@@ -1,6 +1,9 @@
 // --- 批量策略優化功能 - v1.1 ---
 // Patch Tag: LB-BATCH-OPT-20250930A
 
+import { runStage4SPSA } from './spsa-stage4.js';
+import { runStage4CEM } from './cem-stage4.js';
+
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
     const strategyNameMap = {
@@ -4078,6 +4081,246 @@ function hideBatchProgress() {
     }
 }
 
+function canonicalizeComboParams(params) {
+    if (!params || typeof params !== 'object') return {};
+    const orderedKeys = Object.keys(params).sort();
+    const result = {};
+    orderedKeys.forEach((key) => {
+        const value = params[key];
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            result[key] = canonicalizeComboParams(value);
+        } else if (Array.isArray(value)) {
+            result[key] = value.map((item) => {
+                if (item && typeof item === 'object') {
+                    return canonicalizeComboParams(item);
+                }
+                const numeric = Number(item);
+                return Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : item;
+            });
+        } else {
+            const numeric = Number(value);
+            result[key] = Number.isFinite(numeric) ? Number(numeric.toFixed(6)) : value;
+        }
+    });
+    return result;
+}
+
+export function paramKeyFromCombo(combo) {
+    if (!combo || typeof combo !== 'object') return '';
+    const normalized = {
+        buyStrategy: combo.buyStrategy || '',
+        sellStrategy: combo.sellStrategy || '',
+        buyParams: canonicalizeComboParams(combo.buyParams || {}),
+        sellParams: canonicalizeComboParams(combo.sellParams || {}),
+        riskManagement: canonicalizeComboParams(combo.riskManagement || {})
+    };
+    try {
+        return JSON.stringify(normalized);
+    } catch (error) {
+        console.warn('[Stage4] Failed to stringify combo params:', error);
+        return '';
+    }
+}
+
+export function toBatchResultRow({ combo, result, source }) {
+    if (!combo || !result) return null;
+
+    const normalizedResult = clonePlainObject(result) || {};
+    normalizedResult.buyStrategy = combo.buyStrategy;
+    normalizedResult.sellStrategy = combo.sellStrategy;
+    normalizedResult.buyParams = clonePlainObject(combo.buyParams || {});
+    normalizedResult.sellParams = clonePlainObject(combo.sellParams || {});
+
+    const riskManagement = clonePlainObject(combo.riskManagement || {});
+    if (Object.keys(riskManagement).length > 0) {
+        normalizedResult.riskManagement = riskManagement;
+    } else if (normalizedResult.riskManagement && Object.keys(normalizedResult.riskManagement).length === 0) {
+        delete normalizedResult.riskManagement;
+    }
+
+    delete normalizedResult.entryStrategy;
+    delete normalizedResult.exitStrategy;
+    delete normalizedResult.entryParams;
+    delete normalizedResult.exitParams;
+
+    normalizedResult.source = source;
+    normalizedResult.stage4 = { method: source };
+    normalizedResult.optimizationType = source || normalizedResult.optimizationType || 'stage4';
+
+    const typeList = Array.isArray(normalizedResult.optimizationTypes)
+        ? normalizedResult.optimizationTypes.filter(Boolean)
+        : [];
+    if (source && !typeList.includes(source)) {
+        typeList.push(source);
+    }
+    if (!typeList.length) {
+        typeList.push(normalizedResult.optimizationType);
+    }
+    normalizedResult.optimizationTypes = typeList;
+    normalizedResult.crossOptimization = Boolean(normalizedResult.crossOptimization);
+
+    const nowIso = new Date().toISOString();
+    normalizedResult.updatedAt = nowIso;
+    if (!normalizedResult.createdAt) {
+        normalizedResult.createdAt = nowIso;
+    }
+
+    const totalTrades = Number.isFinite(Number(normalizedResult.totalTrades))
+        ? Number(normalizedResult.totalTrades)
+        : Number.isFinite(Number(normalizedResult.tradeCount))
+            ? Number(normalizedResult.tradeCount)
+            : Number.isFinite(Number(normalizedResult.trades))
+                ? Number(normalizedResult.trades)
+                : null;
+    if (Number.isFinite(totalTrades)) {
+        normalizedResult.totalTrades = totalTrades;
+        normalizedResult.tradeCount = totalTrades;
+        normalizedResult.trades = totalTrades;
+    }
+
+    if (!normalizedResult.buyStrategyName && typeof strategyDescriptions === 'object') {
+        normalizedResult.buyStrategyName = strategyDescriptions?.[combo.buyStrategy]?.name || combo.buyStrategy;
+    }
+    if (!normalizedResult.sellStrategyName && typeof strategyDescriptions === 'object') {
+        normalizedResult.sellStrategyName = strategyDescriptions?.[combo.sellStrategy]?.name || combo.sellStrategy;
+    }
+
+    normalizedResult.fromStage4 = true;
+
+    return normalizedResult;
+}
+
+export function upsertBatchResultRow(row) {
+    if (!row) return;
+    const keyNew = paramKeyFromCombo({
+        buyStrategy: row.buyStrategy,
+        sellStrategy: row.sellStrategy,
+        buyParams: row.buyParams,
+        sellParams: row.sellParams,
+        riskManagement: row.riskManagement
+    });
+    const i = batchOptimizationResults.findIndex(r => {
+        const keyOld = paramKeyFromCombo({
+            buyStrategy: r.buyStrategy,
+            sellStrategy: r.sellStrategy,
+            buyParams: r.buyParams,
+            sellParams: r.sellParams,
+            riskManagement: r.riskManagement
+        });
+        return keyOld === keyNew;
+    });
+    if (i >= 0) {
+        const oldScore = Number.isFinite(batchOptimizationResults[i]?.annualizedReturn)
+            ? batchOptimizationResults[i].annualizedReturn
+            : -Infinity;
+        const newScore = Number.isFinite(row?.annualizedReturn) ? row.annualizedReturn : -Infinity;
+        if (newScore > oldScore) {
+            batchOptimizationResults[i] = row;
+        }
+    } else {
+        batchOptimizationResults.push(row);
+    }
+    if (typeof sortBatchResults === 'function') {
+        sortBatchResults();
+    } else if (typeof renderBatchResultsTable === 'function') {
+        renderBatchResultsTable();
+    }
+    if (typeof showBatchResults === 'function') {
+        showBatchResults();
+    }
+}
+
+function createComboFromRow(row) {
+    if (!row) return null;
+    const combo = {
+        buyStrategy: row.buyStrategy,
+        sellStrategy: row.sellStrategy,
+        buyParams: clonePlainObject(row.buyParams || {}),
+        sellParams: clonePlainObject(row.sellParams || {})
+    };
+    const risk = clonePlainObject(row.riskManagement || {});
+    if (!('stopLoss' in risk) && Number.isFinite(Number(row.usedStopLoss))) {
+        risk.stopLoss = Number(row.usedStopLoss);
+    }
+    if (!('takeProfit' in risk) && Number.isFinite(Number(row.usedTakeProfit))) {
+        risk.takeProfit = Number(row.usedTakeProfit);
+    }
+    if (Object.keys(risk).length > 0) {
+        combo.riskManagement = risk;
+    }
+    return combo;
+}
+
+export function getCurrentBestComboForStage4() {
+    if (!batchOptimizationResults || batchOptimizationResults.length === 0) {
+        return null;
+    }
+
+    const config = batchOptimizationConfig || {};
+    const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
+    const sortDirection = config.sortDirection || 'desc';
+
+    const sorted = batchOptimizationResults
+        .filter(Boolean)
+        .map(item => item);
+
+    sorted.sort((a, b) => {
+        let aValue = Number(a?.[sortKey]);
+        let bValue = Number(b?.[sortKey]);
+        if (sortKey === 'maxDrawdown') {
+            aValue = Number.isFinite(aValue) ? Math.abs(aValue) : Infinity;
+            bValue = Number.isFinite(bValue) ? Math.abs(bValue) : Infinity;
+            if (sortDirection === 'desc') {
+                return aValue - bValue;
+            }
+            return bValue - aValue;
+        }
+        if (!Number.isFinite(aValue)) {
+            aValue = sortDirection === 'asc' ? Infinity : -Infinity;
+        }
+        if (!Number.isFinite(bValue)) {
+            bValue = sortDirection === 'asc' ? Infinity : -Infinity;
+        }
+        if (sortDirection === 'asc') {
+            return aValue - bValue;
+        }
+        return bValue - aValue;
+    });
+
+    const bestRow = sorted[0] || batchOptimizationResults[0];
+    return createComboFromRow(bestRow);
+}
+
+export async function runStage4(method, { onProgress } = {}) {
+    const startCombo = getCurrentBestComboForStage4();
+    if (!startCombo) {
+        console.warn('[Stage4] No available combination to refine');
+        return null;
+    }
+
+    let output = null;
+    if (method === 'spsa') {
+        output = await runStage4SPSA({ startCombo, onProgress, evaluate: executeBacktestForCombination });
+    } else if (method === 'cem') {
+        output = await runStage4CEM({ startCombo, onProgress, evaluate: executeBacktestForCombination });
+    } else {
+        console.warn('[Stage4] Unknown method:', method);
+        return null;
+    }
+
+    if (!output || !output.bestResult) {
+        console.warn('[Stage4] No improved result produced');
+        return null;
+    }
+
+    const bestCombo = output.bestCombo || startCombo;
+    const row = toBatchResultRow({ combo: bestCombo, result: output.bestResult, source: `stage4-${method}` });
+    if (row) {
+        upsertBatchResultRow(row);
+    }
+    return row;
+}
+
 // 導出函數供外部使用
 window.batchOptimization = {
     init: initBatchOptimization,
@@ -4086,6 +4329,8 @@ window.batchOptimization = {
     getWorkerStrategyName: getWorkerStrategyName,
     runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
 };
+window.batchOptimization.runStage4 = runStage4;
+window.batchOptimization.getCurrentBestComboForStage4 = getCurrentBestComboForStage4;
 
 // 測試風險管理優化功能
 function testRiskManagementOptimization() {
@@ -4667,3 +4912,5 @@ function performSingleBacktestFast(params) {
         }
     });
 }
+
+export { executeBacktestForCombination };
