@@ -1921,7 +1921,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-content hidden" id="rolling-test-tab">
+                            <div class="tab-content hidden space-y-6" id="rolling-test-tab">
                                 <div class="space-y-6">
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
@@ -1934,25 +1934,41 @@
                                         <div class="card-content">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練視窗（月）
-                                                    <input id="rolling-training-months" data-rolling-input type="number" min="6" max="120" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    測試視窗（月）
-                                                    <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="36" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    視窗平移（月）
-                                                    <input id="rolling-step-months" data-rolling-input type="number" min="1" max="24" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
+                                                    滾動測試次數
+                                                    <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                 </label>
                                                 <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                     測試至少成交筆數
                                                     <input id="rolling-min-trades" data-rolling-input type="number" min="1" max="200" step="1" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若小於門檻，將標註樣本不足。</span>
                                                 </label>
+                                                <div class="md:col-span-2 xl:col-span-3 flex flex-col gap-3">
+                                                    <button type="button" id="toggle-rolling-advanced" class="self-start text-xs font-semibold inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">
+                                                        顯示進階設定
+                                                    </button>
+                                                    <div id="rolling-advanced-settings" class="hidden space-y-4">
+                                                        <p class="text-[11px]" style="color: var(--muted-foreground);">進階模式沿用訓練：測試：平移 = 36：12：6 的比例，方便需要調整的人員手動覆寫。</p>
+                                                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                訓練視窗（月）
+                                                                <input id="rolling-training-months" data-rolling-input type="number" min="6" max="180" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                測試視窗（月）
+                                                                <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="72" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                視窗平移（月）
+                                                                <input id="rolling-step-months" data-rolling-input type="number" min="1" max="36" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                                 <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
                                                     <legend class="font-medium">通過門檻（滾動測試）</legend>
                                                     <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
@@ -1988,7 +2004,7 @@
                                                     </div>
                                                 </div>
                                                 <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
-                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" />
+                                                    <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" checked />
                                                     <span>啟用訓練期自動優化</span>
                                                 </label>
                                                 <div id="rolling-optimize-settings" class="hidden space-y-3">
@@ -2053,7 +2069,8 @@
                                         <div class="card-content space-y-4">
                                             <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
                                                 <span id="rolling-plan-summary">尚未建立視窗</span>
-                                                <span id="rolling-plan-warning" class="hidden px-2 py-1 rounded bg-amber-100 text-amber-700">請先執行一次主回測以產生快取資料</span>
+                                                <span id="rolling-plan-warning" class="hidden px-2 py-1 rounded bg-amber-100 text-amber-700"></span>
+                                                <span id="rolling-plan-advice" class="hidden px-2 py-1 rounded bg-blue-100 text-blue-700"></span>
                                             </div>
                                             <div class="overflow-x-auto">
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
@@ -2111,7 +2128,7 @@
                                             <p id="rolling-report-intro" class="text-xs" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div class="card-content space-y-6">
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="rolling-scoreboard"></div>
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5 2xl:grid-cols-6" id="rolling-scoreboard"></div>
                                             <div class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
                                                 <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">總結</h4>
                                                 <p id="rolling-score-summary" class="text-xs leading-relaxed" style="color: var(--muted-foreground);"></p>
@@ -2130,6 +2147,11 @@
                                                                 <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">勝率%</th>
                                                                 <th class="px-3 py-2 text-right font-semibold">交易數</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">PSR95</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">DSR</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">WFE</th>
+                                                                <th class="px-3 py-2 text-right font-semibold">視窗分數</th>
+                                                                <th class="px-3 py-2 text-left font-semibold">樣本檢查</th>
                                                                 <th class="px-3 py-2 text-left font-semibold">參數摘要</th>
                                                                 <th class="px-3 py-2 text-left font-semibold">評語</th>
                                                             </tr>
@@ -2139,12 +2161,12 @@
                                                 </div>
                                             </div>
                                             <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
-                                                <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
+                                                <p>Walk-Forward 評分依照 PSR / DSR 文獻與 Pardo (2014) 建議，將品質、統計可信度與穩健度一併納入：</p>
                                                 <ol class="list-decimal pl-4 space-y-1">
-                                                    <li>先計算測試期的年化報酬、Sharpe、Sortino、勝率與最大回撤相對門檻的比率；門檻分別為 8%、1、1.2、45% 與 25%。比率轉換為分數時套用分段函數：ratio ≥ 2 給 95 分起跳並以每增加 0.1 再加 1 分；1 ≤ ratio &lt; 2 時在 70~95 分間線性插值；ratio &lt; 1 時以 70 × ratio 換算。</li>
-                                                    <li>計算 WFE = (測試期年化報酬 ÷ 訓練期年化報酬) × 100%，並以 67% 作為基準，同樣透過上述分段函數換算分數，以對應 Pardo (2014) 建議的 Walk-Forward 檢核。</li>
-                                                    <li>依權重 28%（年化報酬）、24%（Sharpe）、16%（Sortino）、12%（最大回撤）、10%（勝率）、10%（WFE）加總分數後除以權重總和並四捨五入，即得 0~100 分的 Walk-Forward 評分。</li>
-                                                    <li>評級門檻沿用 TradeStation 與資產管理機構常用標準：總分 ≥ 85 且合格視窗 ≥ 70% 為「專業合格」，70~84 分為「可進一步驗證」，55~69 分建議調整或加風控，低於 55 分視為未通過。</li>
+                                                    <li>把測試期的年化報酬、Sharpe、Sortino、勝率與最大回撤依預設門檻正規化到 0～1，形成 OOS 品質分數。</li>
+                                                    <li>計算 Probabilistic Sharpe Ratio（PSR）與 Deflated Sharpe Ratio（DSR），平均後得到 0.5～1 倍的統計權重，避免一次性高分。</li>
+                                                    <li>單窗分數 = OOS 品質 × 統計權重；總分取所有視窗分數的中位數，再乘上中位數 WFE（限制在 0.8～1.2 倍）以反映穩健度。</li>
+                                                    <li>等級門檻：總分 ≥ 70%、median WFE ≥ 0.8、PSR ≥ 95% 視窗比 ≥ 50%、DSR 機率中位數 ≥ 70% 為「專業合格」。總分 ≥ 50%、median WFE ≥ 0.6、PSR ≥ 95% 視窗比 ≥ 30% 為「可進一步觀察」，其餘視為「未通過建議調整」。若整體 DSR 落在 0 以下，評級會再下修一級。</li>
                                                 </ol>
                                             </div>
                                         </div>
