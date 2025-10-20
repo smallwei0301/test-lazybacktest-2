@@ -1,4 +1,10 @@
 
+## 2026-07-10 — Patch LB-ROLLING-TEST-20251028B / LB-BATCH-OPT-20250930B
+- **Issue recap**: 使用者回報 OOS 品質細項只要有指標未過門檻就不應拿到滿分，且批量優化回傳的最佳參數與單次優化不一致，懷疑暖身/測試日期未同步。
+- **Fix**: `js/rolling-test.js` 將 OOS 品質改為達標即給滿分、未達標按門檻前一段線性衰減並維持權重加權；`js/batch-optimization.js` 在派送優化任務時同步傳遞 `dataStartDate`、`effectiveStartDate`、`lookbackDays`，讓 Worker 與單次優化沿用相同暖身窗口。
+- **Diagnostics**: Walk-Forward 儀表板明細會顯示每項指標分數（達標顯示 1.00），批量優化 Worker 訊息可檢視裁切後的 `dataStartDate` 是否與主回測一致。
+- **Testing**: 受限於環境無法連線實際 Proxy，透過程式碼靜態檢查與既有 `node - <<'NODE' ... vm.Script` 編譯驗證（未重跑）。
+
 ## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
 - **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
 - **Fix**:
@@ -1232,4 +1238,5 @@
   - `js/main.js` 更新 `applyLoadingMascotHiddenState` 配合新樣式維持顯示狀態與 aria 屬性，同步提升版本碼至 `LB-PROGRESS-MASCOT-20260709A`。
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 
