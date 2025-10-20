@@ -1,5 +1,14 @@
 
 
+## 2026-07-15 — Patch LB-BATCH-CACHE-20260715A
+- **Scope**: 批量優化與主執行緒共享資料快取檢查，避免沿用過期區間。
+- **Updates**:
+  - 新增 `js/worker-dataset-helpers.js` 將快取設定生成與 `cachedMeta`／`cachedData` 判斷集中成 helper，支援瀏覽器與 Node 測試環境。
+  - `js/backtest.js` 的 `runOptimizationInternal` 改用 helper 判斷快取覆蓋範圍並回傳 meta，維持與批量模組一致的檢查邏輯。
+  - `js/batch-optimization.js` 在單參數優化與組合回測前檢查 `needsDataFetch`/快取 key，比對失敗時停用舊快取並提示 Worker 重新抓取資料。
+  - `index.html` 載入新 helper，以確保主程式與批量模組皆可共用統一的快取判斷。
+- **Testing**: `node tests/worker-cache-helpers.test.js`
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
