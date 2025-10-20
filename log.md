@@ -1,4 +1,5 @@
 
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
@@ -23,6 +24,55 @@
   - 新增「策略比較」分頁，可多選策略與欄位，缺漏資訊時提示「請先測試後保存策略」，資料來源連動儲存結果。
   - 滾動測試模組記錄彙總評分至 `state.aggregate`，供策略比較表讀取滾動測試分數與產出時間。
 - **Testing**: 尚未執行自動化測試（需於瀏覽器環境驗證 UI 互動）。
+
+## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
+- **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
+- **Fix**:
+  - `index.html` 將「判定等級」卡片移至報告頂端僅顯示評級，新增可展開的總結說明、移除最少成交筆數欄位，並把逐窗表格改為指標列 × 視窗欄的轉置排版。
+  - `js/rolling-test.js` 擴充 `computeAggregateReport` 與儀表卡，加入 OOS 指標分數、PSR／DSR／WFE／窗分數等可展開細節，調整總分卡片、評級卡與轉置後的逐窗渲染，並完全移除成交筆數門檻判定。
+  - `clearRollingReport`、`renderSummaryDetails` 與相關說明改為支援新的 grade 卡與可折疊總結，確保回報資料時能重設狀態。
+- **Docs**: `README.md` 更新為 LB-ROLLING-TEST-20251028A，說明評級卡片、詳細分數明細、轉置表格與成交筆數門檻調整。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-10-22 — Patch LB-ROLLING-TEST-20251022A
+- **Issue recap**: 使用者回報 OOS 品質在多數指標未達門檻時仍顯示滿分、Walk-Forward 總分可能超過 100 分，且主回測完成後滾動測試面板仍出現「請先執行一次主回測」提示。
+- **Fix**:
+  - `js/rolling-test.js` 為 OOS 品質新增達標權重比，將品質分數限制在指標達標比例之內，並調整狀態文字改用「合格／略低／不足」等白話語句。
+  - 將 Walk-Forward 總分截斷於 0～1 後再換算 0～100 分，避免 WFE 調整造成超過 100 分的顯示。
+  - 監聽 `lazybacktest:visible-data-changed` 事件，自動刷新滾動測試預覽以移除「請先回測」提醒。
+  - `computeOosQualityScore` 回傳指標達標比，摘要文字新增指標達標資訊，並更新模組版本碼至 `LB-ROLLING-TEST-20251022A`。
+- **Docs**: `README.md` 更新為 LB-ROLLING-TEST-20251022A 的評分流程與介面調整說明。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-10-18 — Patch LB-ROLLING-TEST-20251018A
+- **Issue recap**: OOS 品質在多項指標未達門檻時仍可能顯示滿分，總分僅顯示 0～1 小數且儀表板說明過於制式。
+- **Fix**:
+  - `js/rolling-test.js` 以使用者門檻作為 OOS 正規化起點並補齊缺漏指標的權重，確保未達門檻時不再出現滿分，並加入 0～100 分顯示與指標狀態提示。
+  - 更新 Walk-Forward 總分卡片與報告敘述，轉為 0～100 分並在各卡片下方以白話呈現「合格／待加強」訊息。
+  - 新增 `formatScorePoints` 與狀態描述函式，統一單窗分數與總分的顯示格式。
+- **Docs**: `README.md` 說明新版正規化方式、0～100 分顯示與卡片提示；`log.md` 紀錄本次調整。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-10-12 — Patch LB-ROLLING-TEST-20251012A
+- **Issue recap**: Walk-Forward 評分仍採 0~100 分加權與平均 WFE，缺乏 PSR／DSR 統計可信度與中位數穩健檢查，亦未揭露視窗樣本、MinTRL 與新版評級條件。
+- **Fix**:
+  - `js/worker.js` 新增 `computeReturnMomentSums` 並於 `runStrategy` 回傳 `oosDailyStats`，提供樣本數、動差、偏度、峰度等資料以支援 PSR／DSR／MinTRL 計算。
+  - `js/rolling-test.js` 導入新版評分流程，計算 OOS 品質、PSR95、DSR、StatWeight、WindowScore、WFE 中位數與 TotalScore，並依 Credibility 與 DSR 調整評級；同時更新 UI 渲染、摘要文字與模組版號 `LB-ROLLING-TEST-20251012A`。
+  - `index.html` 將訓練期優化與門檻欄位移入進階設定、預設開啟自動優化、擴充卡片／表格欄位顯示 PSR、DSR、可信度、WFE、窗分數與樣本資訊，調整排版間距與說明文字。
+  - `README.md` 補充 Walk-Forward 新公式與評級門檻，協助使用者了解 OOS 品質 × 統計可信度 × WFE 的評分邏輯。
+- **Diagnostics**:
+  - 逐窗計算 WFE 中位數、PSR95、DSR、MinTRL，確認無交易或樣本不足時能標記並提示延長資料。
+  - 驗證 `syncRollingOptimizeUI` 在預設勾選下展開設定，並於進階收合後保持狀態同步。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-10 — Patch LB-ROLLING-TEST-20250930B
+- **Scope**: Walk-Forward 視窗自動調整與使用者提醒優化。
+- **Updates**:
+  - 以「滾動測試次數」取代固定訓練／測試／平移月份，依既有 36：12：6 比例與回測區間自動縮放視窗長度。
+  - 新增進階設定折疊容器，保留原始欄位供專業使用者手動覆寫，同步更新版本代碼與版面文字。
+  - 視窗預覽顯示目標次數與實際結果，若資料不足或期間少於五年會提示延長回測與建議使用五年以上數據。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
