@@ -6208,6 +6208,70 @@ function calculateDailyReturns(portfolioValues) {
   return returns;
 }
 
+function computeReturnMomentStats(dailyReturns) {
+  if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) {
+    return {
+      count: 0,
+      mean: null,
+      standardDeviation: null,
+      skewness: null,
+      kurtosis: null,
+      excessKurtosis: null,
+      annualisedSharpe: null,
+    };
+  }
+
+  const count = dailyReturns.length;
+  const riskFreeAnnual = 0.01;
+  const riskFreeDaily = Math.pow(1 + riskFreeAnnual, 1 / 252) - 1;
+  const mean =
+    dailyReturns.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0) /
+    count;
+
+  let m2 = 0;
+  let m3 = 0;
+  let m4 = 0;
+  for (let i = 0; i < count; i += 1) {
+    const value = Number.isFinite(dailyReturns[i]) ? dailyReturns[i] : mean;
+    const diff = value - mean;
+    const diff2 = diff * diff;
+    m2 += diff2;
+    m3 += diff2 * diff;
+    m4 += diff2 * diff2;
+  }
+
+  const variance = m2 / count;
+  const standardDeviation = variance > 0 ? Math.sqrt(variance) : 0;
+  const denom = standardDeviation > 0 ? Math.pow(standardDeviation, 3) : Infinity;
+  const skewness =
+    standardDeviation > 0 && Number.isFinite(denom) && denom !== 0
+      ? (m3 / count) / denom
+      : 0;
+  const kurtosis =
+    standardDeviation > 0
+      ? (m4 / count) / (variance > 0 ? variance * variance : Infinity)
+      : 0;
+  const excessKurtosis = Number.isFinite(kurtosis) ? kurtosis - 3 : null;
+
+  const excessMean = mean - riskFreeDaily;
+  const annualisedSharpe =
+    standardDeviation > 0
+      ? (excessMean / standardDeviation) * Math.sqrt(252)
+      : 0;
+
+  return {
+    count,
+    mean,
+    standardDeviation,
+    skewness: Number.isFinite(skewness) ? skewness : null,
+    kurtosis: Number.isFinite(kurtosis) ? kurtosis : null,
+    excessKurtosis,
+    annualisedSharpe: Number.isFinite(annualisedSharpe) ? annualisedSharpe : 0,
+    riskFreeAnnual,
+    riskFreeDaily,
+  };
+}
+
 function calculateSharpeRatio(dailyReturns, annualReturnPct) {
   if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
   const riskFreeRate = 0.01;
@@ -9891,10 +9955,11 @@ function runStrategy(data, params, options = {}) {
     const validPortfolioSlice = portfolioVal
       .slice(startIdx)
       .filter((v) => check(v));
-    const dailyR = calculateDailyReturns(
-      validPortfolioSlice,
-      dates.slice(startIdx),
-    );
+  const dailyR = calculateDailyReturns(
+    validPortfolioSlice,
+    dates.slice(startIdx),
+  );
+  const returnMomentStats = computeReturnMomentStats(dailyR);
     const sharpeR = calculateSharpeRatio(dailyR, annualR);
     const sortinoR = calculateSortinoRatio(dailyR, annualR);
 
@@ -10217,7 +10282,7 @@ function runStrategy(data, params, options = {}) {
         );
       }
     }
-    const result = {
+  const result = {
 
       stockNo: params.stockNo,
       initialCapital: initialCapital,
@@ -10267,11 +10332,13 @@ function runStrategy(data, params, options = {}) {
       annReturnHalf2: annReturnHalf2,
       sharpeHalf2: sharpeHalf2,
       subPeriodResults: subPeriodResults,
-      priceIndicatorSeries: trimmedIndicatorDisplay,
-      positionStates: trimmedPositionStates,
+    priceIndicatorSeries: trimmedIndicatorDisplay,
+    positionStates: trimmedPositionStates,
       longEntryStageStates: trimmedEntryStageStates,
       longExitStageStates: trimmedExitStageStates,
-      diagnostics: runtimeDiagnostics,
+    diagnostics: runtimeDiagnostics,
+    dailyReturns: dailyR.slice(),
+    returnStats: returnMomentStats,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
     };
