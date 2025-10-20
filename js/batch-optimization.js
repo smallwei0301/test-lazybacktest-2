@@ -1330,13 +1330,6 @@ async function executeBacktestForCombination(combination, options = {}) {
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
 
-                const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-                    ? options.cachedDataOverride
-                    : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
-
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
                         const result = e.data.data;
@@ -1364,12 +1357,46 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
-                tempWorker.postMessage({
+                let cacheDecision = null;
+                if (typeof resolveWorkerDatasetCache === 'function') {
+                    cacheDecision = resolveWorkerDatasetCache(preparedParams, {
+                        cachedDataOverride: options?.cachedDataOverride,
+                        cachedMetaOverride: options?.cachedMetaOverride,
+                    }) || null;
+                }
+                if (!cacheDecision) {
+                    const fallbackPayload = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                        ? options.cachedDataOverride
+                        : (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+                    cacheDecision = {
+                        useCachedData: Array.isArray(fallbackPayload) && fallbackPayload.length > 0,
+                        cachedData: fallbackPayload,
+                        cachedMeta: options?.cachedMetaOverride || null,
+                        needsFetch: !(Array.isArray(fallbackPayload) && fallbackPayload.length > 0),
+                        source: Array.isArray(options?.cachedDataOverride) ? 'override' : 'fallback',
+                    };
+                }
+                const useCachedData = Boolean(cacheDecision.useCachedData && Array.isArray(cacheDecision.cachedData));
+
+                const workerMessage = {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
-                });
+                };
+                if (useCachedData) {
+                    workerMessage.cachedData = cacheDecision.cachedData;
+                    if (cacheDecision.cachedMeta) {
+                        workerMessage.cachedMeta = cacheDecision.cachedMeta;
+                    }
+                } else {
+                    console.log('[Batch Optimization] Cache skipped for executeBacktestForCombination.', {
+                        buyStrategy: combination.buyStrategy,
+                        sellStrategy: combination.sellStrategy,
+                        reason: cacheDecision.needsFetch ? 'needsFetch' : 'validationFailed',
+                        cacheDecision,
+                    });
+                }
+                tempWorker.postMessage(workerMessage);
 
                 // 設定超時
                 setTimeout(() => {
@@ -1582,13 +1609,6 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
 
         const optimizeWorker = new Worker(workerUrl);
 
-        const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-            ? options.cachedDataOverride
-            : null;
-        const cachedPayload = overrideData
-            || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
-        
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
             
@@ -1661,17 +1681,50 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        let cacheDecision = null;
+        if (typeof resolveWorkerDatasetCache === 'function') {
+            cacheDecision = resolveWorkerDatasetCache(preparedParams, {
+                cachedDataOverride: options?.cachedDataOverride,
+                cachedMetaOverride: options?.cachedMetaOverride,
+            }) || null;
+        }
+        if (!cacheDecision) {
+            const fallbackPayload = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+            cacheDecision = {
+                useCachedData: Array.isArray(fallbackPayload) && fallbackPayload.length > 0,
+                cachedData: fallbackPayload,
+                cachedMeta: options?.cachedMetaOverride || null,
+                needsFetch: !(Array.isArray(fallbackPayload) && fallbackPayload.length > 0),
+                source: Array.isArray(options?.cachedDataOverride) ? 'override' : 'fallback',
+            };
+        }
+        const useCachedData = Boolean(cacheDecision.useCachedData && Array.isArray(cacheDecision.cachedData));
 
         // 發送優化任務
-        optimizeWorker.postMessage({
+        const workerMessage = {
             type: 'runOptimization',
             params: preparedParams,
             optimizeTargetStrategy: strategyType,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
-        });
+        };
+        if (useCachedData) {
+            workerMessage.cachedData = cacheDecision.cachedData;
+            if (cacheDecision.cachedMeta) {
+                workerMessage.cachedMeta = cacheDecision.cachedMeta;
+            }
+        } else {
+            console.log('[Batch Optimization] Cache skipped for optimizeSingleStrategyParameter.', {
+                strategyType,
+                param: optimizeTarget.name,
+                reason: cacheDecision.needsFetch ? 'needsFetch' : 'validationFailed',
+                cacheDecision,
+            });
+        }
+        optimizeWorker.postMessage(workerMessage);
         
         // 設定超時
         setTimeout(() => {
