@@ -1302,3 +1302,11 @@ NODE`
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-17 — Patch LB-BATCH-OPT-20260717A
+- **Issue recap**: Walk-Forward 訓練期透過 `window.batchOptimization.runCombinationOptimization` 呼叫批量引擎時會沿用主面板的除錯工作階段與停用旗標，導致後續在 UI 啟動批量優化時沿用滾動測試的暫存進度與資料覆寫，進而出現「批量優化找不到最佳解」的狀態污染。
+- **Fix**:
+  - `js/batch-optimization.js` 導入 `runCombinationOptimizationHeadless`，在外部呼叫時複製組合與訓練設定、獨立建立 headless 除錯工作階段並於完成後恢復 `batchDebugSession`、`currentBatchProgress` 與停止旗標，確保滾動測試不會修改批量優化 UI 的狀態。
+  - 同步提供 `cloneCombinationResult`、`sanitizeOptimizationConfig` 等工具，避免 headless 期間直接操作原始參考，並更新批量優化模組版號至 `LB-BATCH-OPT-20260717A`。
+- **Diagnostics**: 於瀏覽器先執行滾動測試訓練期優化，再切換至批量優化面板確認 `window.batchOptimizationRunning`、進度條與最佳結果均重置且與單獨執行批量優化時一致，無需重新整理即可取得最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

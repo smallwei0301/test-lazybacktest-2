@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.2 ---
-// Patch Tag: LB-BATCH-OPT-20260716C
+// --- 批量策略優化功能 - v1.2.3 ---
+// Patch Tag: LB-BATCH-OPT-20260717A
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260716C';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717A';
 
 let batchDebugSession = null;
 
@@ -4800,13 +4800,171 @@ function hideBatchProgress() {
     }
 }
 
+function cloneCombinationInput(combination) {
+    if (!combination || typeof combination !== 'object') {
+        return null;
+    }
+
+    const clone = {
+        buyStrategy: combination.buyStrategy || null,
+        sellStrategy: combination.sellStrategy || null,
+        buyParams: clonePlainObject(combination.buyParams || {}),
+        sellParams: clonePlainObject(combination.sellParams || {}),
+    };
+
+    if (combination.riskManagement) {
+        clone.riskManagement = clonePlainObject(combination.riskManagement);
+    }
+    if (combination.shortEntryStrategy) {
+        clone.shortEntryStrategy = combination.shortEntryStrategy;
+    }
+    if (combination.shortExitStrategy) {
+        clone.shortExitStrategy = combination.shortExitStrategy;
+    }
+    if (combination.shortEntryParams) {
+        clone.shortEntryParams = clonePlainObject(combination.shortEntryParams);
+    }
+    if (combination.shortExitParams) {
+        clone.shortExitParams = clonePlainObject(combination.shortExitParams);
+    }
+
+    return clone;
+}
+
+function cloneCombinationResult(result) {
+    if (!result || typeof result !== 'object') {
+        return null;
+    }
+
+    const clone = cloneCombinationInput(result) || {};
+
+    if (result.optimizationType) {
+        clone.optimizationType = result.optimizationType;
+    }
+    if (Array.isArray(result.optimizationTypes)) {
+        clone.optimizationTypes = [...result.optimizationTypes];
+    }
+    if (result.__finalResult) {
+        clone.__finalResult = clonePlainObject(result.__finalResult);
+    }
+    if (result.__finalMetric !== undefined) {
+        clone.__finalMetric = result.__finalMetric;
+    }
+    if (result.__metricLabel !== undefined) {
+        clone.__metricLabel = result.__metricLabel;
+    }
+
+    return clone;
+}
+
+function sanitizeOptimizationConfig(config = {}) {
+    const sanitized = clonePlainObject(config) || {};
+
+    if (!sanitized.targetMetric) {
+        sanitized.targetMetric = 'annualizedReturn';
+    }
+
+    const parsedTrials = parseInt(sanitized.parameterTrials, 10);
+    sanitized.parameterTrials = Number.isFinite(parsedTrials) && parsedTrials > 0
+        ? parsedTrials
+        : 100;
+
+    const parsedIterations = parseInt(sanitized.iterationLimit, 10);
+    sanitized.iterationLimit = Number.isFinite(parsedIterations) && parsedIterations > 0
+        ? parsedIterations
+        : 6;
+
+    if (sanitized.optimizeTargets && !Array.isArray(sanitized.optimizeTargets)) {
+        sanitized.optimizeTargets = [sanitized.optimizeTargets];
+    }
+
+    return sanitized;
+}
+
+function sanitizeOptimizationOptions(options = {}) {
+    if (!options || typeof options !== 'object') {
+        return {};
+    }
+
+    const sanitized = {};
+
+    if (Array.isArray(options.enabledScopes)) {
+        sanitized.enabledScopes = [...options.enabledScopes];
+    }
+
+    if (options.baseParamsOverride && typeof options.baseParamsOverride === 'object') {
+        sanitized.baseParamsOverride = prepareBaseParamsForOptimization(options.baseParamsOverride);
+    }
+
+    if (Array.isArray(options.cachedDataOverride)) {
+        sanitized.cachedDataOverride = options.cachedDataOverride.slice();
+    }
+
+    if (options.sessionContext && typeof options.sessionContext === 'object') {
+        sanitized.sessionContext = clonePlainObject(options.sessionContext);
+    }
+
+    return sanitized;
+}
+
+async function runCombinationOptimizationHeadless(combination, config, options = {}) {
+    const preparedCombination = cloneCombinationInput(combination);
+    if (!preparedCombination) {
+        throw new Error('[Batch Optimization] Invalid combination payload for optimization');
+    }
+
+    const preparedConfig = sanitizeOptimizationConfig(config);
+    const preparedOptions = sanitizeOptimizationOptions(options);
+
+    if (!preparedOptions.sessionContext) {
+        preparedOptions.sessionContext = { source: 'external-headless' };
+    }
+
+    const previousDebugSession = batchDebugSession;
+    const previousProgress = { ...currentBatchProgress };
+    const previousStopFlag = isBatchOptimizationStopped;
+
+    let headlessSession = null;
+
+    try {
+        isBatchOptimizationStopped = false;
+        headlessSession = startBatchDebugSession({
+            phase: 'external',
+            source: preparedOptions.sessionContext.source,
+            quiet: true,
+            mode: 'headless'
+        });
+
+        const result = await optimizeCombinationIterative(preparedCombination, preparedConfig, preparedOptions);
+
+        if (headlessSession && batchDebugSession === headlessSession) {
+            finalizeBatchDebugSession({
+                status: 'completed',
+                mode: 'headless',
+                combination: summarizeCombination(result)
+            });
+        }
+
+        return cloneCombinationResult(result);
+    } finally {
+        if (headlessSession && batchDebugSession === headlessSession) {
+            batchDebugSession = previousDebugSession || null;
+        } else if (previousDebugSession) {
+            batchDebugSession = previousDebugSession;
+        }
+
+        isBatchOptimizationStopped = previousStopFlag;
+        Object.assign(currentBatchProgress, previousProgress);
+    }
+}
+
 // 導出函數供外部使用
 window.batchOptimization = {
     init: initBatchOptimization,
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options),
+    runCombinationOptimization: (combination, config, options = {}) => runCombinationOptimizationHeadless(combination, config, options),
     getDebugLog: getBatchDebugSnapshot,
     downloadDebugLog: () => downloadBatchDebugLog('batch-optimization'),
     finalizeDebugSession: finalizeBatchDebugSession,
