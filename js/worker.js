@@ -6208,6 +6208,105 @@ function calculateDailyReturns(portfolioValues) {
   return returns;
 }
 
+function computeReturnMomentSums(returns) {
+  if (!Array.isArray(returns) || returns.length === 0) {
+    return {
+      sampleCount: 0,
+      sum1: 0,
+      sum2: 0,
+      sum3: 0,
+      sum4: 0,
+      mean: null,
+      variance: null,
+      stdDev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+
+  let sampleCount = 0;
+  let sum1 = 0;
+  let sum2 = 0;
+  let sum3 = 0;
+  let sum4 = 0;
+
+  for (let i = 0; i < returns.length; i += 1) {
+    const value = returns[i];
+    if (!Number.isFinite(value)) continue;
+    sampleCount += 1;
+    sum1 += value;
+    const squared = value * value;
+    sum2 += squared;
+    sum3 += squared * value;
+    sum4 += squared * squared;
+  }
+
+  if (sampleCount === 0) {
+    return {
+      sampleCount: 0,
+      sum1: 0,
+      sum2: 0,
+      sum3: 0,
+      sum4: 0,
+      mean: null,
+      variance: null,
+      stdDev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+
+  const mean = sum1 / sampleCount;
+  let diff2Sum = 0;
+  let diff3Sum = 0;
+  let diff4Sum = 0;
+
+  for (let i = 0; i < returns.length; i += 1) {
+    const value = returns[i];
+    if (!Number.isFinite(value)) continue;
+    const diff = value - mean;
+    const diff2 = diff * diff;
+    diff2Sum += diff2;
+    diff3Sum += diff2 * diff;
+    diff4Sum += diff2 * diff2;
+  }
+
+  const variance = sampleCount > 1 ? diff2Sum / (sampleCount - 1) : 0;
+  const stdDev = variance > 0 ? Math.sqrt(variance) : 0;
+
+  let skewness = null;
+  if (sampleCount > 2 && diff2Sum > 0) {
+    const numerator = Math.sqrt(sampleCount * (sampleCount - 1)) * diff3Sum;
+    const denominator = (sampleCount - 2) * Math.pow(diff2Sum, 1.5);
+    skewness = denominator !== 0 ? numerator / denominator : null;
+  }
+
+  let kurtosis = null;
+  if (sampleCount > 3 && stdDev > 0) {
+    const denominator =
+      (sampleCount - 1) * (sampleCount - 2) * (sampleCount - 3) * Math.pow(stdDev, 4);
+    const correction =
+      (3 * (sampleCount - 1) * (sampleCount - 1)) /
+      ((sampleCount - 2) * (sampleCount - 3));
+    const numerator = sampleCount * (sampleCount + 1) * diff4Sum;
+    const excess = denominator !== 0 ? numerator / denominator - correction : null;
+    kurtosis = excess !== null ? excess + 3 : null;
+  }
+
+  return {
+    sampleCount,
+    sum1,
+    sum2,
+    sum3,
+    sum4,
+    mean,
+    variance,
+    stdDev,
+    skewness,
+    kurtosis,
+  };
+}
+
 function calculateSharpeRatio(dailyReturns, annualReturnPct) {
   if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
   const riskFreeRate = 0.01;
@@ -9897,6 +9996,7 @@ function runStrategy(data, params, options = {}) {
     );
     const sharpeR = calculateSharpeRatio(dailyR, annualR);
     const sortinoR = calculateSortinoRatio(dailyR, annualR);
+    const oosMomentSums = computeReturnMomentSums(dailyR);
 
     let annReturnHalf1 = null,
       sharpeHalf1 = null,
@@ -10274,6 +10374,7 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      oosDailyStats: oosMomentSums,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
