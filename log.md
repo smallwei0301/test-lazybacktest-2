@@ -1260,3 +1260,19 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
+- **Issue recap**: OOS 品質達標後分數未顯示滿分，總分卡片缺少窗分數計算說明。
+- **Fix**:
+  - `js/rolling-test.js` 達標指標直接給予滿分，同步保留加權原值供達標權重比比較，確保詳細明細呈現 1.00 分。
+  - 彙總結果新增 `scorePoints` 與 `passRatePercent`，供其他模組讀取 0～100 分的 Walk-Forward 評分與視窗達標率。
+  - 總分卡片新增「品質 × 統計權重」的中文說明，明確標示窗分數、品質分數、加權原值的對應關係。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-11-05 — Patch LB-STRATEGY-COMPARE-20260710D
+- **Issue recap**: 滾動測試完成後儲存策略，策略比較表仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/backtest.js` 儲存策略快照時使用 Walk-Forward 總分（0～100）與達標率百分比，並兼容舊版 0～1 數據。
+  - 策略比較表在呈現滾動測試欄位時自動換算 0～1、0～100 的舊新格式，避免提示文字誤觸發。
+  - 更新快照版本碼為 `LB-STRATEGY-COMPARE-20260710D` 以利追蹤資料格式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
