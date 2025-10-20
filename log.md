@@ -1,4 +1,12 @@
 
+## 2026-07-11 — Patch LB-STRATEGY-COMPARE-20260711A
+- **Scope**: 策略比較分頁與資金用語調整。
+- **Updates**:
+  - 將部位基準改名為「初始本金-固定金額買入」與「總資金-獲利再投入」，同步更新提示文字與相關工具提示。
+  - 新增「策略比較」分頁，可勾選多個已儲存策略生成表格，呈現年化報酬率、夏普值、最大回撤、交易次數、敏感度與滾動測試指標及趨勢摘要。
+  - 儲存策略時一併封存敏感度、滾動測試與趨勢區間評估等指標，缺漏資料會於比較表格提醒「請先測試後保存策略」。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
