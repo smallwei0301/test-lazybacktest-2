@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2 ---
+// Patch Tag: LB-BATCH-OPT-20251030A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -130,8 +130,10 @@ function enrichParamsWithLookback(params) {
         }) || effectiveStartDate;
     }
     if (!dataStartDate) dataStartDate = effectiveStartDate;
+    const originalStartDate = params.originalStartDate || params.startDate || null;
     return {
         ...params,
+        originalStartDate,
         effectiveStartDate,
         dataStartDate,
         lookbackDays,

@@ -1,5 +1,22 @@
 
 
+## 2026-10-30 — Patch LB-ROLLING-TEST-20251030A
+- **Issue recap**: OOS 品質/信度仍會將超過門檻的指標視為追加加分，導致部分結果在單指標剛達標時分數被壓低，且未明確以門檻為滿分基準。
+- **Fix**:
+  - `js/rolling-test.js` 導入 `computeThresholdScore`/`computeInverseThresholdScore`，當年化、Sharpe、Sortino、勝率一旦達標即給予滿分，僅在未達標時依門檻下緣線性扣分；最大回撤改為超過門檻後再扣分，維持同樣的 0～100 分權重。
+  - 更新模組版本碼為 `LB-ROLLING-TEST-20251030A`，確保前端能識別新的評分邏輯。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-10-30 — Patch LB-BATCH-OPT-20251030A
+- **Issue recap**: 批量優化在複寫視窗參數時未穩定保留原始起始日資訊，疑慮其與單次優化的暖身/測試範圍不同步。
+- **Fix**: `js/batch-optimization.js` 在 `enrichParamsWithLookback` 中補寫 `originalStartDate`，確保 Worker 端與單次優化相同地套用暖身窗口與效期起點，並更新模組版號為 `LB-BATCH-OPT-20251030A`。
+- **Testing**: （同上段 Node 腳本）
+
+## 2026-10-30 — Patch LB-STRATEGY-COMPARE-20261030A
+- **Issue recap**: 策略比較儲存後仍顯示「請先測試後保存策略」，原因為滾動測試總分欄位指向舊的 `score` 屬性且未換算成 0～100 分。
+- **Fix**: `js/backtest.js` 將儲存快照改讀取 `aggregate.totalScore` ×100 與 `passRate`，並將版本號升級為 `LB-STRATEGY-COMPARE-20261030A` 以觸發快照更新。
+- **Testing**: （同上段 Node 腳本）
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:

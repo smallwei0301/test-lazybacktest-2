@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710C';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20261030A';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8920,6 +8920,12 @@ function collectStrategyMetricSnapshot() {
         ? window.rollingTest.state
         : null;
     const rollingAggregate = rollingState?.aggregate || null;
+    const rollingScoreRaw = Number.isFinite(rollingAggregate?.totalScore)
+        ? rollingAggregate.totalScore * 100
+        : null;
+    const rollingPassRateRaw = Number.isFinite(rollingAggregate?.passRate)
+        ? rollingAggregate.passRate
+        : null;
     const trendSummary = trendAnalysisState?.summary || null;
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
@@ -8945,8 +8951,8 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
-        rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
+        rollingScore: normaliseMetricNumber(rollingScoreRaw),
+        rollingPassRate: normaliseMetricNumber(rollingPassRateRaw),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
             ? rollingState.aggregateGeneratedAt
