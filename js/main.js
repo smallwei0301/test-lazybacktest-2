@@ -43,6 +43,7 @@ let sortState = { key: 'annualizedReturn', direction: 'desc' };
 let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
+let batchDebugLogUnsubscribe = null;
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
@@ -1591,6 +1592,181 @@ function initDataSourceTester() {
     window.applyMarketPreset = applyMarketPreset;
 }
 
+function formatBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    let date;
+    if (value instanceof Date) {
+        date = value;
+    } else if (typeof value === 'number') {
+        date = new Date(value);
+    } else {
+        date = new Date(String(value));
+    }
+    if (!Number.isFinite(date.getTime())) {
+        return typeof value === 'string' ? value : String(value);
+    }
+    try {
+        return date.toLocaleString('zh-TW', { hour12: false });
+    } catch (error) {
+        return date.toISOString().replace('T', ' ').replace('Z', 'Z');
+    }
+}
+
+function initBatchDebugLogPanel() {
+    const container = document.getElementById('batchDebugLogContainer');
+    if (!container) return;
+
+    const metaEl = document.getElementById('batchDebugSessionMeta');
+    const listEl = document.getElementById('batchDebugEventList');
+    const emptyEl = document.getElementById('batchDebugEmptyHint');
+    const refreshBtn = document.getElementById('batchDebugRefreshBtn');
+    const downloadBtn = document.getElementById('batchDebugDownloadBtn');
+    const clearBtn = document.getElementById('batchDebugClearBtn');
+
+    const applySnapshot = (snapshot) => {
+        if (!metaEl || !listEl || !emptyEl) return;
+
+        if (!snapshot) {
+            metaEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">尚未啟動批量優化除錯。</div>';
+            listEl.innerHTML = '';
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '尚未建立批量優化除錯事件。';
+            return;
+        }
+
+        const headerLines = [];
+        const idLineParts = [];
+        if (snapshot.sessionId) idLineParts.push(`#${snapshot.sessionId}`);
+        if (snapshot.version) idLineParts.push(`版本 ${snapshot.version}`);
+        headerLines.push(idLineParts.join('｜') || '批量優化除錯會話');
+
+        const statusParts = [];
+        if (snapshot.outcome?.status) statusParts.push(snapshot.outcome.status);
+        if (Array.isArray(snapshot.events)) statusParts.push(`事件 ${snapshot.events.length} 筆`);
+        if (statusParts.length > 0) {
+            headerLines.push(statusParts.join(' ・ '));
+        }
+
+        const timeParts = [];
+        if (snapshot.startedAtIso) {
+            timeParts.push(`開始 ${formatBatchDebugTime(snapshot.startedAtIso)}`);
+        }
+        if (snapshot.completedAtIso) {
+            timeParts.push(`結束 ${formatBatchDebugTime(snapshot.completedAtIso)}`);
+        }
+        if (timeParts.length > 0) {
+            headerLines.push(timeParts.join(' ・ '));
+        }
+
+        metaEl.innerHTML = headerLines.map((line) => (
+            `<div class="text-[11px]" style="color: var(--foreground);">${testerEscapeHtml(line)}</div>`
+        )).join('');
+
+        const events = Array.isArray(snapshot.events)
+            ? snapshot.events.slice(Math.max(snapshot.events.length - 50, 0))
+            : [];
+
+        listEl.innerHTML = '';
+        if (events.length === 0) {
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '尚未產生批量優化除錯事件。';
+        } else {
+            emptyEl.classList.add('hidden');
+            listEl.classList.remove('hidden');
+
+            events.forEach((event) => {
+                const li = document.createElement('li');
+                li.className = 'border rounded-md px-3 py-2 bg-white/70 shadow-sm';
+
+                const timeLabel = testerEscapeHtml(formatBatchDebugTime(event.iso || event.ts));
+                const levelLabel = testerEscapeHtml((event.level || 'info').toUpperCase());
+                const phaseLabel = event.phase ? ` ・ ${testerEscapeHtml(event.phase)}` : '';
+                const eventLabel = testerEscapeHtml(event.label || '事件');
+
+                let detailMarkup = '';
+                if (event.detail) {
+                    try {
+                        const detailString = JSON.stringify(event.detail, null, 2) || '';
+                        const truncated = detailString.length > 800
+                            ? `${detailString.slice(0, 800)}…`
+                            : detailString;
+                        if (truncated) {
+                            detailMarkup = `<pre class="mt-1 text-[10px] whitespace-pre-wrap break-all" style="color: var(--muted-foreground);">${testerEscapeHtml(truncated)}</pre>`;
+                        }
+                    } catch (error) {
+                        detailMarkup = `<pre class="mt-1 text-[10px] whitespace-pre-wrap break-all" style="color: var(--muted-foreground);">${testerEscapeHtml(String(event.detail))}</pre>`;
+                    }
+                }
+
+                li.innerHTML = `
+                    <div class="flex items-center justify-between text-[11px]" style="color: var(--foreground);">
+                        <span>${timeLabel}</span>
+                        <span class="text-[10px]" style="color: var(--muted-foreground);">${levelLabel}${phaseLabel}</span>
+                    </div>
+                    <div class="text-[11px] font-semibold mt-1" style="color: var(--foreground);">${eventLabel}</div>
+                    ${detailMarkup}
+                `;
+
+                listEl.appendChild(li);
+            });
+        }
+    };
+
+    const getSnapshot = () => {
+        if (window.batchOptimization && typeof window.batchOptimization.getDebugLog === 'function') {
+            return window.batchOptimization.getDebugLog();
+        }
+        return null;
+    };
+
+    const ensureSubscription = () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.subscribeDebugLog !== 'function') {
+            return false;
+        }
+        if (typeof batchDebugLogUnsubscribe === 'function') {
+            batchDebugLogUnsubscribe();
+            batchDebugLogUnsubscribe = null;
+        }
+        batchDebugLogUnsubscribe = window.batchOptimization.subscribeDebugLog((snapshot) => {
+            applySnapshot(snapshot);
+        });
+        applySnapshot(getSnapshot());
+        return true;
+    };
+
+    const attemptSubscription = (retry = 0) => {
+        if (ensureSubscription()) {
+            return;
+        }
+        if (retry < 5) {
+            setTimeout(() => attemptSubscription(retry + 1), 300 * (retry + 1));
+        }
+    };
+
+    refreshBtn?.addEventListener('click', () => {
+        applySnapshot(getSnapshot());
+    });
+
+    downloadBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.downloadDebugLog === 'function') {
+            window.batchOptimization.downloadDebugLog('batch-optimization-debug');
+        }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.clearDebugLog === 'function') {
+            window.batchOptimization.clearDebugLog();
+        }
+    });
+
+    applySnapshot(getSnapshot());
+    attemptSubscription();
+}
+
 function initDeveloperAreaToggle() {
     const toggleBtn = document.getElementById('developerAreaToggle');
     const wrapper = document.getElementById('developerAreaWrapper');
@@ -2825,6 +3001,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initBatchDebugLogPanel();
 
         // 初始化頁籤功能
         initTabs();

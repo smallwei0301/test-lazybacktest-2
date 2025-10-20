@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.4 ---
-// Patch Tag: LB-BATCH-OPT-20260717C
+// --- 批量策略優化功能 - v1.2.5 ---
+// Patch Tag: LB-BATCH-OPT-20260718A
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,9 +48,10 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260717C';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718A';
 
 let batchDebugSession = null;
+const batchDebugListeners = new Set();
 
 function hydrateStrategyNameMap() {
     if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
@@ -138,6 +139,82 @@ function clonePlainObject(value) {
     }
 }
 
+function cloneStructuredValue(value) {
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            console.warn('[Batch Optimization] structuredClone failed, falling back to JSON clone:', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
+        if (Array.isArray(value)) {
+            return value.slice();
+        }
+        if (value && typeof value === 'object') {
+            return { ...value };
+        }
+        return value;
+    }
+}
+
+function getActiveCacheStore() {
+    if (typeof cachedDataStore !== 'undefined' && cachedDataStore instanceof Map) {
+        return cachedDataStore;
+    }
+    if (typeof window !== 'undefined' && window.cachedDataStore instanceof Map) {
+        return window.cachedDataStore;
+    }
+    return null;
+}
+
+function captureCacheStoreSnapshot(store = getActiveCacheStore()) {
+    if (!(store instanceof Map)) {
+        return null;
+    }
+    const snapshot = [];
+    store.forEach((value, key) => {
+        snapshot.push([key, cloneStructuredValue(value)]);
+    });
+    return snapshot;
+}
+
+function restoreCacheStoreSnapshot(snapshot, store = getActiveCacheStore()) {
+    if (!(store instanceof Map)) {
+        return;
+    }
+    store.clear();
+    if (!Array.isArray(snapshot)) {
+        return;
+    }
+    snapshot.forEach(([key, value]) => {
+        store.set(key, cloneStructuredValue(value));
+    });
+}
+
+function captureLastFetchSettingsSnapshot() {
+    if (typeof lastFetchSettings !== 'undefined') {
+        return clonePlainObject(lastFetchSettings);
+    }
+    if (typeof window !== 'undefined' && typeof window.lastFetchSettings !== 'undefined') {
+        return clonePlainObject(window.lastFetchSettings);
+    }
+    return undefined;
+}
+
+function restoreLastFetchSettingsSnapshot(snapshot) {
+    if (typeof lastFetchSettings !== 'undefined') {
+        lastFetchSettings = snapshot ? clonePlainObject(snapshot) : snapshot;
+        return;
+    }
+    if (typeof window !== 'undefined' && typeof window.lastFetchSettings !== 'undefined') {
+        window.lastFetchSettings = snapshot ? clonePlainObject(snapshot) : snapshot;
+    }
+}
+
 function summarizeDatasetRange(rows) {
     if (!Array.isArray(rows) || rows.length === 0) {
         return { length: 0, startDate: null, endDate: null };
@@ -165,6 +242,35 @@ function ensureBatchDebugSession(context = {}) {
     return batchDebugSession;
 }
 
+function notifyBatchDebugListeners() {
+    if (batchDebugListeners.size === 0) {
+        return;
+    }
+    const snapshot = getBatchDebugSnapshot();
+    batchDebugListeners.forEach((listener) => {
+        try {
+            listener(snapshot);
+        } catch (error) {
+            console.error('[Batch Debug] Listener error:', error);
+        }
+    });
+}
+
+function subscribeBatchDebugLog(listener) {
+    if (typeof listener !== 'function') {
+        return () => {};
+    }
+    batchDebugListeners.add(listener);
+    try {
+        listener(getBatchDebugSnapshot());
+    } catch (error) {
+        console.error('[Batch Debug] Initial listener dispatch failed:', error);
+    }
+    return () => {
+        batchDebugListeners.delete(listener);
+    };
+}
+
 function startBatchDebugSession(context = {}) {
     const timestamp = Date.now();
     batchDebugSession = {
@@ -190,6 +296,8 @@ function startBatchDebugSession(context = {}) {
     if (context.quiet !== true) {
         console.log('[Batch Debug][session-start]', initEvent.detail);
     }
+
+    notifyBatchDebugListeners();
 
     return batchDebugSession;
 }
@@ -230,6 +338,8 @@ function recordBatchDebug(event, detail = {}, options = {}) {
         }
     }
 
+    notifyBatchDebugListeners();
+
     return entry;
 }
 
@@ -255,6 +365,8 @@ function finalizeBatchDebugSession(outcome = {}) {
         phase: 'complete',
         consoleLevel: 'log'
     });
+
+    notifyBatchDebugListeners();
 
     return batchDebugSession;
 }
@@ -290,6 +402,11 @@ function downloadBatchDebugLog(filenamePrefix = 'batch-debug-log') {
     } catch (error) {
         console.error('[Batch Debug] Failed to export log:', error);
     }
+}
+
+function clearBatchDebugSession() {
+    batchDebugSession = null;
+    notifyBatchDebugListeners();
 }
 
 function summarizeCombination(combination) {
@@ -5121,6 +5238,13 @@ async function runCombinationOptimizationHeadless(combination, config, options =
     const previousConfigSnapshot = clonePlainObject(batchOptimizationConfig);
     const previousRunningFlag = Boolean(window.batchOptimizationRunning);
     const previousWorkerInstance = batchOptimizationWorker;
+    const activeCacheStore = getActiveCacheStore();
+    const previousCacheStoreSnapshot = captureCacheStoreSnapshot(activeCacheStore);
+    const previousCacheEntryCount = Array.isArray(previousCacheStoreSnapshot) ? previousCacheStoreSnapshot.length : 0;
+    const previousCacheKeysPreview = Array.isArray(previousCacheStoreSnapshot)
+        ? previousCacheStoreSnapshot.slice(0, 5).map(([key]) => key)
+        : [];
+    const previousLastFetchSettings = captureLastFetchSettingsSnapshot();
 
     let headlessSession = null;
 
@@ -5142,14 +5266,18 @@ async function runCombinationOptimizationHeadless(combination, config, options =
                 : 0,
             runningFlag: previousRunningFlag,
             stopFlag: previousStopFlag,
-            progress: clonePlainObject(previousProgress)
+            progress: clonePlainObject(previousProgress),
+            cacheEntries: previousCacheEntryCount,
+            cacheKeysPreview: previousCacheKeysPreview,
+            lastFetchSettingsPreserved: Boolean(previousLastFetchSettings)
         }, { phase: 'external', console: false });
 
         recordBatchDebug('headless-cache-state', {
             baselineCache: baselineCacheSummary,
             overrideCache: overrideCacheSummary,
             diagnosticsPreserved: Boolean(previousDiagnostics),
-            overallResultPreserved: Boolean(previousOverallResult)
+            overallResultPreserved: Boolean(previousOverallResult),
+            cacheEntries: previousCacheEntryCount
         }, { phase: 'external', console: false });
 
         const result = await optimizeCombinationIterative(preparedCombination, preparedConfig, preparedOptions);
@@ -5196,11 +5324,22 @@ async function runCombinationOptimizationHeadless(combination, config, options =
 
         return cloneCombinationResult(result);
     } finally {
+        restoreCacheStoreSnapshot(previousCacheStoreSnapshot, activeCacheStore);
+        restoreLastFetchSettingsSnapshot(previousLastFetchSettings);
+
+        const restoredCacheEntryCount = activeCacheStore instanceof Map ? activeCacheStore.size : previousCacheEntryCount;
+        const restoredCacheKeysPreview = activeCacheStore instanceof Map
+            ? Array.from(activeCacheStore.keys()).slice(0, 5)
+            : previousCacheKeysPreview;
+
         if (headlessSession && batchDebugSession === headlessSession) {
             recordBatchDebug('headless-cache-restore', {
                 restoredBaseline: baselineCacheSummary,
                 restoredDiagnostics: Boolean(previousDiagnostics),
-                restoredOverallResult: Boolean(previousOverallResult)
+                restoredOverallResult: Boolean(previousOverallResult),
+                cacheEntriesRestored: restoredCacheEntryCount,
+                cacheKeysPreview: restoredCacheKeysPreview,
+                lastFetchSettingsRestored: Boolean(previousLastFetchSettings)
             }, { phase: 'external', console: false });
         }
 
@@ -5234,6 +5373,8 @@ async function runCombinationOptimizationHeadless(combination, config, options =
         } else if (previousDebugSession) {
             batchDebugSession = previousDebugSession;
         }
+
+        notifyBatchDebugListeners();
     }
 }
 
@@ -5247,7 +5388,9 @@ window.batchOptimization = {
     getDebugLog: getBatchDebugSnapshot,
     downloadDebugLog: () => downloadBatchDebugLog('batch-optimization'),
     finalizeDebugSession: finalizeBatchDebugSession,
-    startDebugSession: startBatchDebugSession
+    startDebugSession: startBatchDebugSession,
+    subscribeDebugLog: subscribeBatchDebugLog,
+    clearDebugLog: clearBatchDebugSession
 };
 
 // 測試風險管理優化功能

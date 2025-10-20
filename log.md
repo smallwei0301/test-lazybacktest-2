@@ -1,5 +1,13 @@
 
 
+## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
+- **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
+- **Updates**:
+  - `js/batch-optimization.js` 擴充 headless 執行的快取快照機制，新增資料集 Map 與 `lastFetchSettings` 複本，結束後完整還原，並在除錯 log 記錄快取筆數、鍵值摘要與復原狀態，避免 Walk-Forward 影響批量優化最佳解。
+  - 建立除錯訂閱通知，`window.batchOptimization.subscribeDebugLog/clearDebugLog` 對外提供即時監看與清除功能，所有事件、結案與清除行為皆會同步更新監聽端。
+  - `index.html` × `js/main.js` 於開發者模式卡片新增「批量優化除錯」卡，提供刷新、下載、清除按鈕與最多 50 筆事件的滾動列表，協助直接在前台檢視排查時間線。
+- **Testing**: `node - <<'NODE' const fs = require('fs'); const vm = require('vm'); ['js/batch-optimization.js'].forEach((file) => { const code = fs.readFileSync(file, 'utf8'); new vm.Script(code, { filename: file }); }); console.log('scripts compile'); NODE`
+
 ## 2026-07-15 — Patch LB-BATCH-OPT-20260715B
 - **Scope**: 批量優化策略映射 hydration 修正。
 - **Updates**:
