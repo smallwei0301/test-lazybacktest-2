@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710B';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710C';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8955,11 +8955,7 @@ function collectStrategyMetricSnapshot() {
         trendLatestDate: typeof trendSummary?.latest?.date === 'string' ? trendSummary.latest.date : null,
         trendLatestReturnPct: normaliseMetricNumber(latestReturn),
         trendLatestCoveragePct: normaliseMetricNumber(latestCoverage),
-        trendAverageConfidence: normaliseMetricNumber(
-            Number.isFinite(trendSummary?.averageConfidence)
-                ? trendSummary.averageConfidence * 100
-                : null,
-        ),
+        trendAverageConfidence: normaliseMetricNumber(trendSummary?.averageConfidence),
     };
 }
 
@@ -9240,14 +9236,14 @@ function formatStrategyComparisonValue(metricKey, metrics) {
             const label = resolveStrategyComparisonTrendLabel(metrics.trendLatestLabel);
             if (!label) return placeholder;
             const returnText = normaliseMetricNumber(metrics.trendLatestReturnPct);
-            const confidenceText = normaliseMetricNumber(metrics.trendAverageConfidence);
+            const confidenceRaw = normaliseMetricNumber(metrics.trendAverageConfidence);
             const parts = [label];
             if (returnText !== null) parts.push(`近況 ${formatPercentSigned(returnText, 2)}`);
-            if (confidenceText !== null) {
-                parts.push(`平均狀態信心 ${formatPercentPlain(confidenceText, 1)}`);
-            } else {
+            if (confidenceRaw === null) {
                 return placeholder;
             }
+            const confidencePercent = confidenceRaw > 1 ? confidenceRaw : confidenceRaw * 100;
+            parts.push(`平均狀態信心 ${formatPercentPlain(confidencePercent, 1)}`);
             return parts.join('｜');
         }
         default:
