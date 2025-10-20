@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251105A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251105A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -657,6 +657,14 @@
         addItem('通過視窗', `${aggregate.passCount}/${aggregate.totalWindows}`);
 
         container.appendChild(list);
+        const explanation = document.createElement('p');
+        explanation.className = 'mt-2 text-[11px] leading-relaxed';
+        const windowScoreText = formatScore(aggregate.medianWindowScore);
+        const qualityScoreText = formatScore(aggregate.medianOosQuality);
+        const statWeightText = formatScore(aggregate.medianStatWeight);
+        const rawQualityText = formatScore(aggregate.medianOosQualityRaw);
+        explanation.textContent = `窗分數中位 ${windowScoreText} = 品質分數中位 ${qualityScoreText} × 統計權重中位 ${statWeightText}；品質分數會先比較加權原值 ${rawQualityText} 與達標權重比後再取最終值。`;
+        container.appendChild(explanation);
         return container;
     }
 
@@ -1332,6 +1340,8 @@
             : 1;
         const totalScoreRaw = Number.isFinite(medianWindowScore) ? medianWindowScore * wfeAdjustment : null;
         const totalScore = Number.isFinite(totalScoreRaw) ? clampNumber(totalScoreRaw, 0, 1) : null;
+        const scorePoints = Number.isFinite(totalScore) ? totalScore * 100 : null;
+        const passRatePercent = Number.isFinite(passRate) ? passRate : null;
 
         const oosQualityValues = analyses.map((analysis) => (Number.isFinite(analysis?.oosQuality?.value) ? analysis.oosQuality.value : null));
         const medianOosQuality = median(oosQualityValues);
@@ -1464,6 +1474,8 @@
             sampleCounts,
             minTrackRecordValues,
             oosQualityRawValues,
+            scorePoints,
+            passRatePercent,
         };
     }
 
@@ -1737,9 +1749,10 @@
         let passWeight = 0;
 
         const accumulate = (key, score, weight, passed) => {
-            const normalized = Number.isFinite(score) ? clamp01(score) : 0;
-            components[key] = normalized;
-            weightedSum += weight * normalized;
+            const normalizedRaw = Number.isFinite(score) ? clamp01(score) : 0;
+            const normalizedFinal = passed ? 1 : normalizedRaw;
+            components[key] = normalizedFinal;
+            weightedSum += weight * normalizedRaw;
             weightTotal += weight;
             if (passed) {
                 passWeight += weight;

@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710C';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710D';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8920,6 +8920,18 @@ function collectStrategyMetricSnapshot() {
         ? window.rollingTest.state
         : null;
     const rollingAggregate = rollingState?.aggregate || null;
+    const rollingScorePoints = Number.isFinite(rollingAggregate?.scorePoints)
+        ? rollingAggregate.scorePoints
+        : Number.isFinite(rollingAggregate?.totalScore)
+            ? rollingAggregate.totalScore * 100
+            : Number.isFinite(rollingAggregate?.score)
+                ? rollingAggregate.score
+                : null;
+    const rollingPassRatePercent = Number.isFinite(rollingAggregate?.passRatePercent)
+        ? rollingAggregate.passRatePercent
+        : Number.isFinite(rollingAggregate?.passRate)
+            ? rollingAggregate.passRate
+            : null;
     const trendSummary = trendAnalysisState?.summary || null;
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
@@ -8945,8 +8957,8 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
-        rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
+        rollingScore: normaliseMetricNumber(rollingScorePoints),
+        rollingPassRate: normaliseMetricNumber(rollingPassRatePercent),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
             ? rollingState.aggregateGeneratedAt
@@ -9226,11 +9238,17 @@ function formatStrategyComparisonValue(metricKey, metrics) {
             return parts.join('｜');
         }
         case 'rollingScore': {
-            const score = normaliseMetricNumber(metrics.rollingScore);
-            if (score === null) return placeholder;
-            const passRate = normaliseMetricNumber(metrics.rollingPassRate);
-            const passText = passRate === null ? '達標率 —' : `達標率 ${formatPercentPlain(passRate, 1)}`;
-            return `${Math.round(score)} 分｜${passText}`;
+            const scoreRaw = normaliseMetricNumber(metrics.rollingScore);
+            if (scoreRaw === null) return placeholder;
+            const scorePoints = scoreRaw <= 1 ? scoreRaw * 100 : scoreRaw;
+            const passRateRaw = normaliseMetricNumber(metrics.rollingPassRate);
+            const passRatePercent = passRateRaw === null
+                ? null
+                : passRateRaw <= 1
+                    ? passRateRaw * 100
+                    : passRateRaw;
+            const passText = passRatePercent === null ? '達標率 —' : `達標率 ${formatPercentPlain(passRatePercent, 1)}`;
+            return `${Math.round(scorePoints)} 分｜${passText}`;
         }
         case 'trendCurrent': {
             const label = resolveStrategyComparisonTrendLabel(metrics.trendLatestLabel);
