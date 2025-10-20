@@ -8933,6 +8933,10 @@ function collectStrategyMetricSnapshot() {
         latestReturn = Number(trendSummary.latest.returnPct);
     }
 
+    const rollingScoreValue = Number.isFinite(rollingAggregate?.totalScore)
+        ? rollingAggregate.totalScore * 100
+        : null;
+
     return {
         version: STRATEGY_COMPARISON_VERSION,
         capturedAt: new Date().toISOString(),
@@ -8945,7 +8949,7 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
+        rollingScore: normaliseMetricNumber(rollingScoreValue),
         rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'

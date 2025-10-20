@@ -1732,14 +1732,17 @@
             return { value: null, components: {}, passRatio: 0, rawValue: null };
         }
         const components = {};
+        let rawWeightedSum = 0;
         let weightedSum = 0;
         let weightTotal = 0;
         let passWeight = 0;
 
         const accumulate = (key, score, weight, passed) => {
             const normalized = Number.isFinite(score) ? clamp01(score) : 0;
-            components[key] = normalized;
-            weightedSum += weight * normalized;
+            const finalScore = passed ? 1 : normalized;
+            components[key] = finalScore;
+            rawWeightedSum += weight * normalized;
+            weightedSum += weight * finalScore;
             weightTotal += weight;
             if (passed) {
                 passWeight += weight;
@@ -1782,9 +1785,10 @@
         const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
         accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
 
-        const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;
+        const rawValue = weightTotal > 0 ? rawWeightedSum / weightTotal : null;
+        const finalValue = weightTotal > 0 ? weightedSum / weightTotal : null;
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;
-        const value = Number.isFinite(rawValue) ? Math.min(rawValue, passRatio) : null;
+        const value = Number.isFinite(finalValue) ? Math.min(finalValue, passRatio) : null;
         return { value, components, passRatio, rawValue };
     }
 

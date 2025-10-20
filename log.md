@@ -1260,3 +1260,12 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-07-11 — Patch LB-OOS-BATCH-COMPARE-20260711A
+- **Scope**: OOS 品質評分、批量優化暖身同步與策略比較快照。
+- **Updates**:
+  - `js/rolling-test.js` 調整 OOS 品質計算，只要指標達到門檻即給予該指標滿分，同時保留原始連續分數作為參考。
+  - `js/batch-optimization.js` 將批量優化與交叉回測傳入 Worker 的日期與暖身資訊統一封裝，確保與單次優化共享相同資料窗口。
+  - `js/backtest.js` 儲存策略時改用 Walk-Forward 總分（0～100）並避免比較表出現「請先測試後保存策略」。
+- **Testing**: 本地環境僅進行靜態檔案檢查，尚未於瀏覽器實際回測。
+
