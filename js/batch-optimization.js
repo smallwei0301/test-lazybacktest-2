@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2 ---
+// Patch Tag: LB-BATCH-OPT-20250930B
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -120,8 +120,14 @@ function enrichParamsWithLookback(params) {
             ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
             : Math.max(90, fallbackMaxPeriod * 2);
     }
-    const effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
-    let dataStartDate = windowDecision?.dataStartDate || null;
+    const effectiveStartDate = windowDecision?.effectiveStartDate
+        || params.effectiveStartDate
+        || params.startDate
+        || windowDecision?.minDataDate
+        || windowOptions.defaultStartDate;
+    let dataStartDate = windowDecision?.dataStartDate
+        || params.dataStartDate
+        || null;
     if (!dataStartDate && effectiveStartDate && typeof sharedUtils.computeBufferedStartDate === 'function') {
         dataStartDate = sharedUtils.computeBufferedStartDate(effectiveStartDate, lookbackDays, {
             minDate: sharedUtils?.MIN_DATA_DATE,
@@ -129,12 +135,11 @@ function enrichParamsWithLookback(params) {
             extraCalendarDays: windowDecision?.extraCalendarDays || windowOptions.extraCalendarDays,
         }) || effectiveStartDate;
     }
-    if (!dataStartDate) dataStartDate = effectiveStartDate;
     return {
         ...params,
-        effectiveStartDate,
-        dataStartDate,
         lookbackDays,
+        effectiveStartDate,
+        dataStartDate: dataStartDate || effectiveStartDate || params.startDate,
     };
 }
 
@@ -1006,7 +1011,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 : getBacktestParams();
 
             if (baseParamsOverride) {
-                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                ['stockNo', 'startDate', 'endDate', 'effectiveStartDate', 'dataStartDate', 'lookbackDays', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
                     if (baseParamsOverride[key] !== undefined) {
                         baseParams[key] = Array.isArray(baseParamsOverride[key])
                             ? [...baseParamsOverride[key]]
@@ -1300,7 +1305,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 : getBacktestParams();
 
             if (baseParamsOverride) {
-                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                ['stockNo', 'startDate', 'endDate', 'effectiveStartDate', 'dataStartDate', 'lookbackDays', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
                     if (baseParamsOverride[key] !== undefined) {
                         params[key] = Array.isArray(baseParamsOverride[key])
                             ? [...baseParamsOverride[key]]

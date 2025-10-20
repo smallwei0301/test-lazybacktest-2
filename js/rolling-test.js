@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251028B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251028B',
         batchOptimizerInitialized: false,
     };
 
@@ -659,7 +659,7 @@
         container.className = 'mt-1 space-y-2';
 
         const summary = document.createElement('p');
-        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權原值 ${formatScore(aggregate.medianOosQualityRaw)}），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
+        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權分數 ${formatScore(aggregate.medianOosQualityRaw)}，達標指標直接給滿分），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
         container.appendChild(summary);
 
         const credibilityLine = document.createElement('p');
@@ -1730,8 +1730,13 @@
         let weightTotal = 0;
         let passWeight = 0;
 
-        const accumulate = (key, score, weight, passed) => {
-            const normalized = Number.isFinite(score) ? clamp01(score) : 0;
+        const accumulate = (key, weight, { passed, fallbackScore }) => {
+            let normalized = 0;
+            if (passed) {
+                normalized = 1;
+            } else if (Number.isFinite(fallbackScore)) {
+                normalized = clamp01(fallbackScore);
+            }
             components[key] = normalized;
             weightedSum += weight * normalized;
             weightTotal += weight;
@@ -1741,40 +1746,75 @@
         };
 
         const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
         const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
-        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
+        const annFloor = Number.isFinite(annThreshold)
+            ? annThreshold - QUALITY_OFFSETS.annualizedReturn
+            : null;
+        const annScore = annPass
+            ? 1
+            : normalizeRange(annValue, annFloor, annThreshold);
+        accumulate('annualizedReturn', QUALITY_WEIGHTS.annualizedReturn, {
+            passed: annPass,
+            fallbackScore: annPass ? 1 : annScore,
+        });
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
         const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
-        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
+        const sharpeFloor = Number.isFinite(sharpeThreshold)
+            ? sharpeThreshold - QUALITY_OFFSETS.sharpeRatio
+            : null;
+        const sharpeScore = sharpePass
+            ? 1
+            : normalizeRange(sharpeValue, sharpeFloor, sharpeThreshold);
+        accumulate('sharpeRatio', QUALITY_WEIGHTS.sharpeRatio, {
+            passed: sharpePass,
+            fallbackScore: sharpePass ? 1 : sharpeScore,
+        });
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
         const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
-        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
+        const sortinoFloor = Number.isFinite(sortinoThreshold)
+            ? sortinoThreshold - QUALITY_OFFSETS.sortinoRatio
+            : null;
+        const sortinoScore = sortinoPass
+            ? 1
+            : normalizeRange(sortinoValue, sortinoFloor, sortinoThreshold);
+        accumulate('sortinoRatio', QUALITY_WEIGHTS.sortinoRatio, {
+            passed: sortinoPass,
+            fallbackScore: sortinoPass ? 1 : sortinoScore,
+        });
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
         const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
-        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
+        const drawdownFallbackWorst = Math.max(
+            drawdownThreshold + QUALITY_TARGETS.maxDrawdownSpan,
+            QUALITY_TARGETS.maxDrawdownFloor + QUALITY_TARGETS.maxDrawdownSpan,
+        );
+        const drawdownScore = drawdownPass
+            ? 1
+            : normalizeInverseRange(drawdownValue, drawdownThreshold, drawdownFallbackWorst);
+        accumulate('maxDrawdown', QUALITY_WEIGHTS.maxDrawdown, {
+            passed: drawdownPass,
+            fallbackScore: drawdownPass ? 1 : drawdownScore,
+        });
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
         const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
-        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
+        const winRateFloor = Number.isFinite(winRateThreshold)
+            ? winRateThreshold - QUALITY_TARGETS.winRateBonus
+            : null;
+        const winRateScore = winRatePass
+            ? 1
+            : normalizeRange(winRateValue, winRateFloor, winRateThreshold);
+        accumulate('winRate', QUALITY_WEIGHTS.winRate, {
+            passed: winRatePass,
+            fallbackScore: winRatePass ? 1 : winRateScore,
+        });
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;

@@ -1,4 +1,11 @@
 
+## 2026-10-30 — Patch LB-ROLLING-TEST-20251028B / LB-BATCH-OPT-20250930B
+- **Issue recap**: OOS 品質卡片在指標達標後仍會以額外分數累計，造成品質分數與達標比率不一致；批量優化執行後再以單次參數優化驗證仍能找到更佳參數，研判暖身日期與測試區間未與單次流程對齊。
+- **Fix**:
+  - `js/rolling-test.js` 將 OOS 品質改為「達標即滿分」，未達標時依門檻距離線性折減，同時保留達標權重比限制總分；更新明細敘述說明新計分邏輯並提升模組版號為 `LB-ROLLING-TEST-20251028B`。
+  - `js/batch-optimization.js` 在建立批量優化 Payload 時保留 `effectiveStartDate`／`dataStartDate`／`lookbackDays`，並沿用單次優化的暖身推算流程，更新模組版號為 `LB-BATCH-OPT-20250930B`。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
 - **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
 - **Fix**:
