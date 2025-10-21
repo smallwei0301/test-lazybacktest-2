@@ -1,5 +1,22 @@
 
 
+## 2026-07-27 — Patch LB-INDEX-UX-20250727A
+- **Scope**: 指數輸入互動、快速回測操作與文案更新。
+- **Updates**:
+  - `index.html` 市場下拉新增「指數」選項並即時切換，基本設定文案改為「台灣/美國股票與指數代碼 (非即時資訊)」，初始本金區塊加入「立刻回測」按鈕。
+  - `js/backtest.js` 自動偵測 `^` 前綴代碼切換到指數市場、避免重複查詢，並在費率預設時套用指數 0 成本。
+  - `js/loader.js` 讓新按鈕沿用既有回測流程，點擊即可依當前設定啟動回測。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機執行回測流程確認無 console error。
+
+## 2026-07-26 — Patch LB-INDEX-YAHOO-20250726A
+- **Scope**: 指數代碼（^ 前綴）輸入流程與資料來源擴充。
+- **Updates**:
+  - `js/main.js` 偵測 ^ 開頭代碼，自動切換為指數市場，調整資料來源測試面板與回測參數，並停用還原價與拆分選項。
+  - `js/backtest.js` 新增指數名稱查詢流程、快取與預設費率處理，支援 Yahoo Finance 指數資訊。
+  - `js/worker.js` 將指數視為獨立市場，透過新 proxy 串接 Yahoo 指數資料並沿用快取管線。
+  - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
+- **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:

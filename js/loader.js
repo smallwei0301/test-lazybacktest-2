@@ -1,4 +1,5 @@
 // --- Loader Script ---
+// Patch Tag: LB-INDEX-UX-20250727A
 document.addEventListener('DOMContentLoaded', function() {
      console.log("[Loader] DOMContentLoaded event fired.");
      if (typeof workerUrl === 'undefined' || workerUrl === null) {
@@ -17,6 +18,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
         document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
+        const quickRunBacktestBtn = document.getElementById('quickRunBacktestBtn');
+        if (quickRunBacktestBtn) {
+            quickRunBacktestBtn.addEventListener('click', runBacktestInternal);
+        }
         document.getElementById('optimizeEntryBtn').addEventListener('click', () => runOptimizationInternal('entry'));
         document.getElementById('optimizeExitBtn').addEventListener('click', () => runOptimizationInternal('exit'));
         document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));
