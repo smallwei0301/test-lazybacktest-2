@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251105A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251105A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -642,6 +642,10 @@
         const container = document.createElement('div');
         container.className = 'mt-1';
 
+        const intro = document.createElement('p');
+        intro.textContent = '總分 = 窗分數中位 × WFE 調整，其中窗分數 = 品質分數中位 × 統計權重中位。';
+        container.appendChild(intro);
+
         const list = document.createElement('ul');
         list.className = 'list-disc pl-4 space-y-1';
 
@@ -665,19 +669,31 @@
         container.className = 'mt-1 space-y-2';
 
         const summary = document.createElement('p');
-        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權原值 ${formatScore(aggregate.medianOosQualityRaw)}），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
+        summary.textContent = `窗分數中位 ${formatScore(aggregate.medianWindowScore)}（= 品質分數中位 ${formatScore(aggregate.medianOosQuality)} × 統計權重中位 ${formatScore(aggregate.medianStatWeight)}），加權原值 ${formatScore(aggregate.medianOosQualityRaw)}，達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
         container.appendChild(summary);
 
         const credibilityLine = document.createElement('p');
-        credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}、統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
+        credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}，統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
         container.appendChild(credibilityLine);
+
+        const scoringLine = document.createElement('p');
+        scoringLine.textContent = '指標達門檻即給 1 分，未達門檻會依差距線性遞減至 0 分。';
+        container.appendChild(scoringLine);
+
+        const annualNote = document.createElement('p');
+        if (Number.isFinite(aggregate.medianBenchmarkAnnualizedReturn)) {
+            annualNote.textContent = `年化報酬門檻採用各測試視窗的買入持有年化報酬率（中位 ${formatPercent(aggregate.medianBenchmarkAnnualizedReturn)}）。`;
+        } else {
+            annualNote.textContent = '年化報酬門檻採用各測試視窗的買入持有年化報酬率作為基準。';
+        }
+        container.appendChild(annualNote);
 
         const gridWrapper = document.createElement('div');
         gridWrapper.className = 'space-y-1';
 
         const header = document.createElement('div');
         header.className = 'grid grid-cols-4 gap-2 font-medium';
-        header.innerHTML = '<span>指標</span><span class="text-right">中位值</span><span class="text-right">門檻</span><span class="text-right">分數</span>';
+        header.innerHTML = '<span>指標</span><span class="text-right">中位值</span><span class="text-right">門檻/基準</span><span class="text-right">分數</span>';
         gridWrapper.appendChild(header);
 
         const thresholds = aggregate.thresholds || DEFAULT_THRESHOLDS;
@@ -687,7 +703,9 @@
                 key: 'annualizedReturn',
                 label: '年化報酬',
                 median: aggregate.medianAnnualizedReturn,
-                threshold: thresholds.annualizedReturn,
+                threshold: Number.isFinite(aggregate.medianBenchmarkAnnualizedReturn)
+                    ? aggregate.medianBenchmarkAnnualizedReturn
+                    : thresholds.annualizedReturn,
                 comparator: '≥',
                 formatter: formatPercent,
             },
@@ -1316,6 +1334,8 @@
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const medianMaxDrawdown = median(validMetrics.map((m) => m.maxDrawdown));
+        const benchmarkAnnualizedValues = validMetrics.map((m) => m.buyHoldAnnualizedReturn);
+        const medianBenchmarkAnnualizedReturn = median(benchmarkAnnualizedValues);
         const medianWinRate = median(validMetrics.map((m) => m.winRate));
         const medianTrades = median(validMetrics.map((m) => m.tradesCount));
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
@@ -1436,6 +1456,7 @@
             medianSharpe,
             medianSortino,
             medianMaxDrawdown,
+            medianBenchmarkAnnualizedReturn,
             medianWinRate,
             medianTrades,
             medianOosQuality,
@@ -1464,6 +1485,7 @@
             sampleCounts,
             minTrackRecordValues,
             oosQualityRawValues,
+            benchmarkAnnualizedValues,
         };
     }
 
@@ -1473,6 +1495,9 @@
         parts.push(`OOS 品質中位 ${formatScore(context.medianOosQuality)}，統計可信度中位 ${formatProbability(context.medianCredibility)}`);
         if (Number.isFinite(context.medianOosPassRatio)) {
             parts.push(`指標達標權重比 ${formatProbability(context.medianOosPassRatio)}`);
+        }
+        if (Number.isFinite(context.medianBenchmarkAnnualizedReturn)) {
+            parts.push(`年化門檻採測試期買入持有 ${formatPercent(context.medianBenchmarkAnnualizedReturn)}`);
         }
         if (Number.isFinite(context.medianWfePercent)) {
             parts.push(`WFE 中位 ${formatPercent(context.medianWfePercent)}，PSR≥95% 視窗比 ${formatProbability(context.psrAbove95Ratio)}`);
@@ -1521,8 +1546,21 @@
 
         const checks = [];
         if (Number.isFinite(metrics.annualizedReturn)) {
-            const pass = metrics.annualizedReturn >= thresholds.annualizedReturn;
-            if (!pass) reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
+            const dynamicThreshold = Number.isFinite(metrics?.buyHoldAnnualizedReturn)
+                ? metrics.buyHoldAnnualizedReturn
+                : resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
+            const pass = Number.isFinite(dynamicThreshold)
+                ? metrics.annualizedReturn >= dynamicThreshold
+                : false;
+            if (!pass) {
+                if (Number.isFinite(dynamicThreshold)) {
+                    reasons.push(`年化報酬低於 ${formatPercent(dynamicThreshold)}`);
+                } else if (Number.isFinite(thresholds.annualizedReturn)) {
+                    reasons.push(`年化報酬低於 ${formatPercent(thresholds.annualizedReturn)}`);
+                } else {
+                    reasons.push('年化報酬未達門檻');
+                }
+            }
             checks.push(pass);
         }
         if (Number.isFinite(metrics.sharpeRatio)) {
@@ -1571,6 +1609,7 @@
             maxDrawdown: toFiniteNumber(result.maxDrawdown),
             winRate: toFiniteNumber(winRate),
             tradesCount: Number.isFinite(tradesCount) ? tradesCount : null,
+            buyHoldAnnualizedReturn: toFiniteNumber(result.buyHoldAnnualizedReturn),
             oosStats: sanitizeOosStats(result.oosDailyStats),
         };
     }
@@ -1639,6 +1678,31 @@
         if (worst <= best) return value <= best ? 1 : 0;
         const ratio = (worst - value) / (worst - best);
         return clamp01(ratio);
+    }
+
+    function computeThresholdScore(value, threshold, lowerBound) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        let minBound = Number.isFinite(lowerBound) ? lowerBound : null;
+        if (!Number.isFinite(minBound)) {
+            const span = Math.max(Math.abs(threshold) * 0.5, 0.01);
+            minBound = threshold - span;
+        }
+        if (minBound >= threshold) {
+            const span = Math.max(Math.abs(threshold) * 0.5, 0.01);
+            minBound = threshold - span;
+        }
+        if (minBound >= threshold) {
+            return value >= threshold ? 1 : 0;
+        }
+        const ratio = (value - minBound) / (threshold - minBound);
+        return clamp01(ratio);
+    }
+
+    function computeInverseThresholdScore(value, threshold, span) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        const width = Math.max(Number(span) || 0, 1);
+        const worst = threshold + width;
+        return normalizeInverseRange(value, threshold, worst);
     }
 
     function standardNormalCDF(x) {
@@ -1746,40 +1810,59 @@
             }
         };
 
-        const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
+        const annBenchmark = toFiniteNumber(metrics.buyHoldAnnualizedReturn);
+        const annThreshold = Number.isFinite(annBenchmark)
+            ? annBenchmark
+            : resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
+        const annLowerBound = Number.isFinite(annThreshold)
+            ? annThreshold - QUALITY_OFFSETS.annualizedReturn
+            : null;
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
-        const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
+        const annScore = computeThresholdScore(annValue, annThreshold, annLowerBound);
+        const annPass = Number.isFinite(annValue) && Number.isFinite(annThreshold) && annValue >= annThreshold;
         accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
+        const sharpeLower = Number.isFinite(sharpeThreshold)
+            ? sharpeThreshold - QUALITY_OFFSETS.sharpeRatio
+            : null;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
-        const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
+        const sharpeScore = computeThresholdScore(sharpeValue, sharpeThreshold, sharpeLower);
+        const sharpePass = Number.isFinite(sharpeValue) && Number.isFinite(sharpeThreshold) && sharpeValue >= sharpeThreshold;
         accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
+        const sortinoLower = Number.isFinite(sortinoThreshold)
+            ? sortinoThreshold - QUALITY_OFFSETS.sortinoRatio
+            : null;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
-        const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
+        const sortinoScore = computeThresholdScore(sortinoValue, sortinoThreshold, sortinoLower);
+        const sortinoPass = Number.isFinite(sortinoValue) && Number.isFinite(sortinoThreshold) && sortinoValue >= sortinoThreshold;
         accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
+        const drawdownBest = Number.isFinite(drawdownThreshold)
+            ? drawdownThreshold
+            : QUALITY_TARGETS.maxDrawdownFloor;
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
-        const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
+        const drawdownScore = computeInverseThresholdScore(drawdownValue, drawdownBest, QUALITY_TARGETS.maxDrawdownSpan);
+        const drawdownPass = Number.isFinite(drawdownValue)
+            && Number.isFinite(drawdownThreshold)
+            && drawdownValue <= drawdownThreshold;
         accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
+        let winRateLower = Number.isFinite(winRateThreshold)
+            ? winRateThreshold - QUALITY_TARGETS.winRateBonus
+            : null;
+        if (Number.isFinite(winRateLower) && winRateLower >= winRateThreshold) {
+            winRateLower = winRateThreshold - 0.01;
+        }
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
-        const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
+        const winRateScore = computeThresholdScore(winRateValue, winRateThreshold, winRateLower);
+        const winRatePass = Number.isFinite(winRateValue)
+            && Number.isFinite(winRateThreshold)
+            && winRateValue >= winRateThreshold;
         accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;

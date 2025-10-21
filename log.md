@@ -1394,3 +1394,12 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-ROLLING-TEST-20251105A
+- **Issue recap**: 使用者反映 OOS 品質在達標後仍須額外拉高才能拿滿分、年化報酬門檻未能貼近買入持有基準，另在完成滾動測試後儲存策略，策略比較表仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/rolling-test.js` 改為達到門檻即給滿分、未達門檻線性遞減，並將年化報酬門檻切換為各視窗買入持有年化報酬率，同步在卡片細節說明「窗分數中位／品質分數中位／加權原值」的計算關係，模組版號更新至 `LB-ROLLING-TEST-20251105A`。
+  - `js/rolling-test.js` 於視窗評估與 OOS 明細中揭露新的門檻資訊（含基準中位值），維持達標權重比計算且保留 raw value 參考。
+  - `js/backtest.js` 將滾動測試總分以 0～100 分儲存到策略比較資料，避免儲存後仍顯示 Placeholder，並調整策略比較版本碼為 `LB-STRATEGY-COMPARE-20260710D`。
+  - `README.md` 更新 OOS 品質敘述以反映門檻改動。
+- **Testing**: 待前端實際執行滾動測試與策略儲存流程確認（本地環境僅更新前端邏輯，無額外自動化測試）。
