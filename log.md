@@ -1,4 +1,12 @@
 
+## 2026-09-18 — Patch LB-YH-INDEX-20260918A
+- **Scope**: Yahoo Finance 指數代號自動偵測與資料管線整合。
+- **Updates**:
+  - `js/main.js` 檢測 `^` 開頭的指數符號，自動停用還原選項並更新資料來源提示為「Yahoo 指數」。
+  - `js/worker.js` 支援 `isYahooIndex` 旗標，透過 Netlify 指數 API 抓取 Yahoo 行情並寫入快取診斷。
+  - `netlify/functions/stock-range.js` 新增 `YH_INDEX` 市場類型，直接向 Yahoo Finance 抓取並篩選指數資料。
+  - `js/backtest.js` 新增 Yahoo 指數市場中繼資料、快取鍵處理與名稱查詢捷徑，避免對台股/美股來源發送無效查詢。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/worker.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 ## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
 - **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。

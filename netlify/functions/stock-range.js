@@ -1,5 +1,6 @@
-// netlify/functions/stock-range.js (v3.0 - yearly blob cache)
+// netlify/functions/stock-range.js (v3.1 - yearly blob cache + Yahoo 指數)
 // Patch Tag: LB-CACHE-TIER-20250720A
+// Patch Tag: LB-YH-INDEX-20260918A
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
 
@@ -7,13 +8,24 @@ const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const YEAR_CACHE_TWSE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const YEAR_CACHE_TPEX_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const YAHOO_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const YAHOO_INDEX_SOURCE_LABEL = 'Yahoo Finance (Index)';
 
 const inFlightTwseMonthCache = new Map();
 
 const isQuotaError = (error) => Boolean(error && (error.status === 402 || error.status === 429));
 
+function isYahooIndexSymbol(value) {
+    if (!value) return false;
+    const trimmed = String(value).trim().toUpperCase();
+    return trimmed.startsWith('^') && trimmed.length > 1;
+}
+
 function normalizeMarketType(marketType = 'TWSE') {
     const upper = String(marketType).toUpperCase();
+    if (upper === 'YH_INDEX' || upper === 'YAHOO_INDEX' || upper === 'YAHOO-INDEX') {
+        return 'YH_INDEX';
+    }
     if (upper.includes('TPEX') || upper.includes('OTC') || upper.includes('TWO')) return 'TPEX';
     return 'TWSE';
 }
@@ -163,7 +175,8 @@ async function composeTwseRange(stockNo, startDate, endDate) {
 }
 
 async function fetchFromYahoo(stockNo, symbol) {
-    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=20y&interval=1d`;
+    const resolvedSymbol = encodeURIComponent(symbol || stockNo);
+    const yahooUrl = `${YAHOO_ENDPOINT}${resolvedSymbol}?range=max&interval=1d`;
     const response = await fetch(yahooUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!response.ok) throw new Error(`Yahoo HTTP ${response.status}`);
     const data = await response.json();
@@ -193,10 +206,15 @@ async function fetchFromYahoo(stockNo, symbol) {
         rows.push([formattedDate, stockNo, '', open, high, low, close, spread, volume]);
     }
 
+    const stockName = result?.meta?.shortName || result?.meta?.longName || stockNo;
     return {
-        stockName: stockNo,
+        stockName,
         aaData: rows,
         dataSource: 'Yahoo Finance',
+        meta: {
+            timezone: result?.meta?.timezone || null,
+            instrumentType: result?.meta?.instrumentType || null,
+        },
     };
 }
 
@@ -405,7 +423,8 @@ export default async (req) => {
         const stockNo = params.get('stockNo');
         const startDateStr = params.get('startDate');
         const endDateStr = params.get('endDate');
-        const marketType = normalizeMarketType(params.get('marketType') || params.get('market'));
+        const rawMarketParam = params.get('marketType') || params.get('market');
+        const marketType = normalizeMarketType(rawMarketParam || 'TWSE');
 
         if (!stockNo || !startDateStr || !endDateStr) {
             return new Response(JSON.stringify({ error: 'Missing required parameters stockNo/startDate/endDate' }), { status: 400 });
@@ -415,6 +434,28 @@ export default async (req) => {
         const endDate = parseISODate(endDateStr);
         if (!startDate || !endDate || startDate > endDate) {
             return new Response(JSON.stringify({ error: 'Invalid date range' }), { status: 400 });
+        }
+
+        const isYahooIndexRequest = marketType === 'YH_INDEX' || isYahooIndexSymbol(stockNo);
+        if (isYahooIndexRequest) {
+            const yahooData = await fetchFromYahoo(stockNo, stockNo);
+            const filteredAaData = filterAaDataByRange(yahooData.aaData, startDate, endDate);
+            const responsePayload = {
+                stockNo,
+                stockName: yahooData.stockName || stockNo,
+                iTotalRecords: filteredAaData.length,
+                aaData: filteredAaData,
+                dataSource: yahooData.dataSource || YAHOO_INDEX_SOURCE_LABEL,
+                marketType: 'YH_INDEX',
+                meta: {
+                    provider: 'yahoo-index',
+                    returnedRows: filteredAaData.length,
+                    timezone: yahooData.meta?.timezone || null,
+                    instrumentType: yahooData.meta?.instrumentType || null,
+                },
+            };
+
+            return new Response(JSON.stringify(responsePayload), { headers: { 'Content-Type': 'application/json' } });
         }
 
         const years = buildYearList(startDate, endDate);
