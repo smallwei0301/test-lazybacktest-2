@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251028B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251028B',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -40,21 +40,6 @@
         sortinoRatio: 0.20,
         maxDrawdown: 0.10,
         winRate: 0.10,
-    };
-
-    const QUALITY_TARGETS = {
-        annualizedReturn: 15,
-        sharpeRatio: 1.2,
-        sortinoRatio: 1.5,
-        maxDrawdownSpan: 15,
-        maxDrawdownFloor: 5,
-        winRateBonus: 10,
-    };
-
-    const QUALITY_OFFSETS = {
-        annualizedReturn: Math.max(QUALITY_TARGETS.annualizedReturn - DEFAULT_THRESHOLDS.annualizedReturn, 0.01),
-        sharpeRatio: Math.max(QUALITY_TARGETS.sharpeRatio - DEFAULT_THRESHOLDS.sharpeRatio, 0.01),
-        sortinoRatio: Math.max(QUALITY_TARGETS.sortinoRatio - DEFAULT_THRESHOLDS.sortinoRatio, 0.01),
     };
 
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
@@ -642,6 +627,12 @@
         const container = document.createElement('div');
         container.className = 'mt-1';
 
+        const note = document.createElement('p');
+        note.className = 'text-[11px] leading-relaxed';
+        note.style.color = 'var(--muted-foreground)';
+        note.textContent = '窗分數中位 = 各視窗的 OOS 品質 × 統計權重後取中位；Walk-Forward 總分 = 窗分數中位乘上 WFE 調整係數（限制在 0.8～1.2 範圍內）。';
+        container.appendChild(note);
+
         const list = document.createElement('ul');
         list.className = 'list-disc pl-4 space-y-1';
 
@@ -664,6 +655,12 @@
         const container = document.createElement('div');
         container.className = 'mt-1 space-y-2';
 
+        const note = document.createElement('p');
+        note.className = 'text-[11px] leading-relaxed';
+        note.style.color = 'var(--muted-foreground)';
+        note.textContent = '品質分數中位為各視窗指標分數的中位數，指標達門檻即得 1 分，未達門檻依差距線性遞減；加權原值為未扣除達標權重比例前的加權平均。年化報酬門檻改採同期間買入持有的年化報酬率。';
+        container.appendChild(note);
+
         const summary = document.createElement('p');
         summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權原值 ${formatScore(aggregate.medianOosQualityRaw)}），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
         container.appendChild(summary);
@@ -681,13 +678,13 @@
         gridWrapper.appendChild(header);
 
         const thresholds = aggregate.thresholds || DEFAULT_THRESHOLDS;
+        const thresholdMedians = aggregate.qualityThresholdMedians || {};
         const componentScores = aggregate.qualityComponentMedians || {};
         const componentConfig = [
             {
                 key: 'annualizedReturn',
                 label: '年化報酬',
                 median: aggregate.medianAnnualizedReturn,
-                threshold: thresholds.annualizedReturn,
                 comparator: '≥',
                 formatter: formatPercent,
             },
@@ -695,7 +692,6 @@
                 key: 'sharpeRatio',
                 label: 'Sharpe',
                 median: aggregate.medianSharpe,
-                threshold: thresholds.sharpeRatio,
                 comparator: '≥',
                 formatter: formatNumber,
             },
@@ -703,7 +699,6 @@
                 key: 'sortinoRatio',
                 label: 'Sortino',
                 median: aggregate.medianSortino,
-                threshold: thresholds.sortinoRatio,
                 comparator: '≥',
                 formatter: formatNumber,
             },
@@ -711,7 +706,6 @@
                 key: 'maxDrawdown',
                 label: '最大回撤',
                 median: aggregate.medianMaxDrawdown,
-                threshold: thresholds.maxDrawdown,
                 comparator: '≤',
                 formatter: formatPercent,
             },
@@ -719,7 +713,6 @@
                 key: 'winRate',
                 label: '勝率',
                 median: aggregate.medianWinRate,
-                threshold: thresholds.winRate,
                 comparator: '≥',
                 formatter: formatPercent,
             },
@@ -738,8 +731,11 @@
 
             const thresholdEl = document.createElement('span');
             thresholdEl.className = 'text-right';
-            thresholdEl.textContent = Number.isFinite(config.threshold)
-                ? `${config.comparator} ${config.formatter(config.threshold)}`
+            const thresholdValue = Number.isFinite(thresholdMedians[config.key])
+                ? thresholdMedians[config.key]
+                : thresholds[config.key];
+            thresholdEl.textContent = Number.isFinite(thresholdValue)
+                ? `${config.comparator} ${config.formatter(thresholdValue)}`
                 : '—';
 
             const scoreEl = document.createElement('span');
@@ -1249,15 +1245,23 @@
     }
 
     function computeAggregateReport(entries, thresholds, options = {}) {
-        const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : thresholds.sharpeRatio;
+        const resolvedThresholds = {
+            annualizedReturn: resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn),
+            sharpeRatio: resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio),
+            sortinoRatio: resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio),
+            maxDrawdown: resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown),
+            winRate: resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate),
+        };
+
+        const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : resolvedThresholds.sharpeRatio;
         const optimizationTrials = options?.optimizationEnabled
             ? Math.max(1, Number(options?.optimizationTrials) || 60)
             : 1;
 
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds);
+            const evaluation = evaluateWindow(entry.testing, resolvedThresholds);
             const commentParts = [];
-            const analysis = computeWindowAnalysis(entry.testing, thresholds, {
+            const analysis = computeWindowAnalysis(entry.testing, resolvedThresholds, {
                 srBenchmark,
                 trialCount: optimizationTrials,
             });
@@ -1343,6 +1347,11 @@
             ? analysis.oosQuality.components
             : null));
         const qualityComponentMedians = computeMedianComponents(qualityComponentsList);
+        const qualityThresholdList = analyses
+            .map((analysis) => (analysis?.oosQuality?.thresholds && typeof analysis.oosQuality.thresholds === 'object'
+                ? analysis.oosQuality.thresholds
+                : null));
+        const qualityThresholdMedians = computeMedianComponents(qualityThresholdList);
         const credibilityValues = analyses.map((analysis) => (Number.isFinite(analysis?.credibility) ? analysis.credibility : null));
         const medianCredibility = median(credibilityValues);
         const statWeightValues = analyses.map((analysis) => (Number.isFinite(analysis?.statWeight) ? analysis.statWeight : null));
@@ -1394,6 +1403,11 @@
             }
         }
 
+        const effectiveThresholds = { ...resolvedThresholds };
+        if (Number.isFinite(qualityThresholdMedians?.annualizedReturn)) {
+            effectiveThresholds.annualizedReturn = qualityThresholdMedians.annualizedReturn;
+        }
+
         const summaryText = buildSummaryText({
             gradeLabel: grade.label,
             totalScore,
@@ -1409,13 +1423,14 @@
             overallPsr,
             overallDsr,
             passRate,
-            thresholds,
+            thresholds: effectiveThresholds,
             gradeDowngraded,
         });
 
         return {
             evaluations,
             totalScore,
+            scorePoints: Number.isFinite(totalScore) ? totalScore * 100 : null,
             medianWindowScore,
             wfeAdjustment,
             medianWfePercent,
@@ -1450,9 +1465,10 @@
             overallSharpe,
             overallPsr,
             overallDsr,
-            thresholds,
+            thresholds: effectiveThresholds,
             medianOosQualityRaw,
             qualityComponentMedians,
+            qualityThresholdMedians,
             qualityComponents: qualityComponentsList,
             oosQualityValues,
             oosPassRatios,
@@ -1521,9 +1537,12 @@
 
         const checks = [];
         if (Number.isFinite(metrics.annualizedReturn)) {
-            const pass = metrics.annualizedReturn >= thresholds.annualizedReturn;
-            if (!pass) reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
-            checks.push(pass);
+            const annThreshold = resolveAnnualizedReturnThreshold(metrics, thresholds);
+            if (Number.isFinite(annThreshold)) {
+                const pass = metrics.annualizedReturn >= annThreshold;
+                if (!pass) reasons.push(`年化報酬低於 ${formatPercent(annThreshold)}`);
+                checks.push(pass);
+            }
         }
         if (Number.isFinite(metrics.sharpeRatio)) {
             const pass = metrics.sharpeRatio >= thresholds.sharpeRatio;
@@ -1571,6 +1590,7 @@
             maxDrawdown: toFiniteNumber(result.maxDrawdown),
             winRate: toFiniteNumber(winRate),
             tradesCount: Number.isFinite(tradesCount) ? tradesCount : null,
+            buyHoldAnnualizedReturn: toFiniteNumber(result.buyHoldAnnualizedReturn),
             oosStats: sanitizeOosStats(result.oosDailyStats),
         };
     }
@@ -1727,18 +1747,68 @@
         return fallback;
     }
 
+    function resolveAnnualizedReturnThreshold(metrics, thresholds) {
+        const baseline = toFiniteNumber(metrics?.buyHoldAnnualizedReturn);
+        if (Number.isFinite(baseline)) {
+            return baseline;
+        }
+        return resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
+    }
+
+    function computePositiveMetricScore(value, threshold) {
+        const numericValue = toFiniteNumber(value);
+        const numericThreshold = toFiniteNumber(threshold);
+        if (!Number.isFinite(numericValue) || !Number.isFinite(numericThreshold)) {
+            return null;
+        }
+        if (numericValue >= numericThreshold) {
+            return 1;
+        }
+        const range = Math.max(Math.abs(numericThreshold), 1);
+        const floor = numericThreshold - range;
+        const denominator = numericThreshold - floor;
+        if (!Number.isFinite(denominator) || denominator <= 0) {
+            return 0;
+        }
+        const ratio = (numericValue - floor) / denominator;
+        return clamp01(ratio);
+    }
+
+    function computeNegativeMetricScore(value, threshold) {
+        const numericValue = toFiniteNumber(value);
+        const numericThreshold = toFiniteNumber(threshold);
+        if (!Number.isFinite(numericValue) || !Number.isFinite(numericThreshold)) {
+            return null;
+        }
+        if (numericValue <= numericThreshold) {
+            return 1;
+        }
+        const range = Math.max(Math.abs(numericThreshold), 5);
+        const ceiling = numericThreshold + range;
+        const denominator = ceiling - numericThreshold;
+        if (!Number.isFinite(denominator) || denominator <= 0) {
+            return 0;
+        }
+        const ratio = (ceiling - numericValue) / denominator;
+        return clamp01(ratio);
+    }
+
     function computeOosQualityScore(metrics, thresholds) {
         if (!metrics || metrics.error) {
-            return { value: null, components: {}, passRatio: 0, rawValue: null };
+            return { value: null, components: {}, passRatio: 0, rawValue: null, thresholds: {} };
         }
         const components = {};
+        const thresholdsUsed = {};
         let weightedSum = 0;
         let weightTotal = 0;
         let passWeight = 0;
 
-        const accumulate = (key, score, weight, passed) => {
+        const accumulate = (key, score, weight, passed, thresholdValue) => {
             const normalized = Number.isFinite(score) ? clamp01(score) : 0;
             components[key] = normalized;
+            if (Number.isFinite(thresholdValue)) {
+                thresholdsUsed[key] = thresholdValue;
+            }
             weightedSum += weight * normalized;
             weightTotal += weight;
             if (passed) {
@@ -1746,46 +1816,46 @@
             }
         };
 
-        const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
+        const annThreshold = resolveAnnualizedReturnThreshold(metrics, thresholds);
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
-        const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
-        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
+        const annScore = computePositiveMetricScore(annValue, annThreshold);
+        const annPass = Number.isFinite(annValue) && Number.isFinite(annThreshold) && annValue >= annThreshold;
+        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass, annThreshold);
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
-        const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
-        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
+        const sharpeScore = computePositiveMetricScore(sharpeValue, sharpeThreshold);
+        const sharpePass = Number.isFinite(sharpeValue) && Number.isFinite(sharpeThreshold) && sharpeValue >= sharpeThreshold;
+        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass, sharpeThreshold);
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
-        const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
-        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
+        const sortinoScore = computePositiveMetricScore(sortinoValue, sortinoThreshold);
+        const sortinoPass = Number.isFinite(sortinoValue) && Number.isFinite(sortinoThreshold) && sortinoValue >= sortinoThreshold;
+        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass, sortinoThreshold);
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
-        const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
-        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
+        const drawdownScore = computeNegativeMetricScore(drawdownValue, drawdownThreshold);
+        const drawdownPass = Number.isFinite(drawdownValue) && Number.isFinite(drawdownThreshold) && drawdownValue <= drawdownThreshold;
+        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass, drawdownThreshold);
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
-        const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
-        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
+        const winRateScore = computePositiveMetricScore(winRateValue, winRateThreshold);
+        const winRatePass = Number.isFinite(winRateValue) && Number.isFinite(winRateThreshold) && winRateValue >= winRateThreshold;
+        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass, winRateThreshold);
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;
         const value = Number.isFinite(rawValue) ? Math.min(rawValue, passRatio) : null;
-        return { value, components, passRatio, rawValue };
+        return {
+            value,
+            components,
+            passRatio,
+            rawValue,
+            thresholds: thresholdsUsed,
+        };
     }
 
     function computeMedianComponents(componentList) {
