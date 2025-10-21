@@ -12,6 +12,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
+// Patch Tag: LB-YH-INDEX-20260918A
 
 // 全局變量
 let stockChart = null;
@@ -782,8 +783,16 @@ function getStockNoValue() {
     return (input?.value || '').trim().toUpperCase();
 }
 
+function isYahooIndexSymbol(value) {
+    const normalized = (value || '').trim().toUpperCase();
+    return normalized.startsWith('^') && normalized.length > 1;
+}
+
 function normalizeMarketValue(value) {
     const normalized = (value || 'TWSE').toUpperCase();
+    if (normalized === 'YH_INDEX' || normalized === 'YAHOO_INDEX' || normalized === 'YAHOO-INDEX') {
+        return 'YH_INDEX';
+    }
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
     return normalized;
 }
@@ -794,6 +803,7 @@ function getCurrentMarketFromUI() {
 }
 
 function getMarketLabel(market) {
+    if (market === 'YH_INDEX') return 'Yahoo 指數';
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
     return '上市 (TWSE)';
@@ -802,7 +812,7 @@ function getMarketLabel(market) {
 function applyMarketPreset(market) {
     const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
     const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
-    const disableAdjusted = market === 'US';
+    const disableAdjusted = market === 'US' || market === 'YH_INDEX';
 
     if (adjustedCheckbox) {
         if (disableAdjusted && adjustedCheckbox.checked) {
@@ -884,6 +894,11 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
                 label: 'Netlify 還原備援',
                 description: netlifyDescription,
             },
+        ];
+    }
+    if (market === 'YH_INDEX') {
+        return [
+            { id: 'yahoo', label: 'Yahoo 指數', description: 'Yahoo Finance 指數行情' },
         ];
     }
     if (market === 'US') {
@@ -1479,11 +1494,13 @@ function refreshDataSourceTester() {
     const hintEl = document.getElementById('dataSourceTesterHint');
     if (!modeEl || !hintEl) return;
     syncSplitAdjustmentState();
-    const market = getCurrentMarketFromUI();
-    const adjusted = isAdjustedMode();
-    const splitEnabled = isSplitAdjustmentEnabled();
-    const { start, end } = getDateRangeFromUI();
+    const rawMarket = getCurrentMarketFromUI();
     const stockNo = getStockNoValue();
+    const isIndex = isYahooIndexSymbol(stockNo);
+    const market = isIndex ? 'YH_INDEX' : rawMarket;
+    const adjusted = isIndex ? false : isAdjustedMode();
+    const splitEnabled = isIndex ? false : isSplitAdjustmentEnabled();
+    const { start, end } = getDateRangeFromUI();
     const sources = getTesterSourceConfigs(market, adjusted, splitEnabled);
     const missingInputs = !stockNo || !start || !end;
     const modeText = adjusted
@@ -1498,6 +1515,8 @@ function refreshDataSourceTester() {
     if (missingInputs) {
         messageLines.push('請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。');
         clearTesterResult();
+    } else if (isIndex) {
+        messageLines.push('Yahoo Finance 為指數行情唯一來源，系統將直接抓取 Yahoo 指數資料。');
     } else if (adjusted) {
         messageLines.push(
             splitEnabled
@@ -3512,6 +3531,7 @@ function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; c
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
+    const isIndexSymbol = isYahooIndexSymbol(stockNo);
     const startDate = document.getElementById('startDate')?.value;
     const endDate = document.getElementById('endDate')?.value;
     const initialCapital = parseFloat(document.getElementById('initialCapital')?.value) || 100000;
@@ -3535,8 +3555,18 @@ function getBacktestParams() {
     const stopLoss = parseFloat(document.getElementById('stopLoss')?.value) || 0;
     const takeProfit = parseFloat(document.getElementById('takeProfit')?.value) || 0;
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
-    const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
-    const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
+    const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
+    const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
+    let adjustedPrice = adjustedCheckbox?.checked ?? false;
+    if (isIndexSymbol && adjustedCheckbox && adjustedCheckbox.checked) {
+        adjustedCheckbox.checked = false;
+        adjustedPrice = false;
+        showInfo('指數不支援還原股價，已自動改用原始價格。');
+    }
+    if (isIndexSymbol && splitCheckbox && splitCheckbox.checked) {
+        splitCheckbox.checked = false;
+    }
+    const splitAdjustment = adjustedPrice && splitCheckbox?.checked;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitStrategy = document.getElementById('exitStrategy')?.value;
     const entryParams = getStrategyParams('entry');
@@ -3589,8 +3619,9 @@ function getBacktestParams() {
         sellFee,
         positionBasis,
         market,
-        marketType: currentMarket,
+        marketType: market,
         entryStages,
+        isYahooIndex: isIndexSymbol,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
@@ -3600,6 +3631,9 @@ function validateStockNoByMarket(stockNo, market) {
     if (!stockNo) {
         showError('請輸入有效代碼');
         return false;
+    }
+    if (isYahooIndexSymbol(stockNo)) {
+        return true;
     }
     const normalizedMarket = normalizeMarketValue(market || currentMarket || 'TWSE');
     if (normalizedMarket === 'US') {
@@ -3617,8 +3651,17 @@ function validateStockNoByMarket(stockNo, market) {
 }
 
 function validateBacktestParams(p) {
+    const isIndexSymbol = isYahooIndexSymbol(p.stockNo);
     const normalizedMarket = normalizeMarketValue(p.market || p.marketType || currentMarket || 'TWSE');
-    if (!validateStockNoByMarket(p.stockNo, normalizedMarket)) return false;
+    if (!isIndexSymbol && !validateStockNoByMarket(p.stockNo, normalizedMarket)) return false;
+    if (isIndexSymbol && p.adjustedPrice) {
+        showError('指數不支援還原股價，請改用原始價格。');
+        return false;
+    }
+    if (isIndexSymbol && p.splitAdjustment) {
+        showError('指數不支援拆分還原，請取消拆分設定。');
+        return false;
+    }
     if (!p.startDate || !p.endDate) { showError('請選擇日期'); return false; }
     if (new Date(p.startDate) >= new Date(p.endDate)) { showError('結束日期需晚於開始日期'); return false; }
     if (p.initialCapital <= 0) { showError('本金需>0'); return false; }

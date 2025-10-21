@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-YH-INDEX-20260918A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -3471,6 +3472,7 @@ function normaliseFetchDiagnosticsForCacheReplay(diagnostics, options = {}) {
 
 function normalizeMarketKeyForCache(market) {
     const normalized = (market || 'TWSE').toString().toUpperCase();
+    if (normalized === 'YH_INDEX' || normalized === 'YAHOO_INDEX') return 'YH_INDEX';
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
     return normalized;
 }
@@ -3479,6 +3481,7 @@ function getDatasetCacheTTLMs(market) {
     const normalized = normalizeMarketKeyForCache(market);
     if (normalized === 'US') return US_DATA_CACHE_TTL_MS;
     if (normalized === 'TPEX' || normalized === 'TWSE') return TW_DATA_CACHE_TTL_MS;
+    if (normalized === 'YH_INDEX') return DEFAULT_DATA_CACHE_TTL_MS;
     return DEFAULT_DATA_CACHE_TTL_MS;
 }
 
@@ -3486,6 +3489,7 @@ function getYearStorageTtlMs(market) {
     const normalized = normalizeMarketKeyForCache(market);
     if (normalized === 'US') return YEAR_STORAGE_US_TTL_MS;
     if (normalized === 'TPEX' || normalized === 'TWSE') return YEAR_STORAGE_TW_TTL_MS;
+    if (normalized === 'YH_INDEX') return YEAR_STORAGE_DEFAULT_TTL_MS;
     return YEAR_STORAGE_DEFAULT_TTL_MS;
 }
 
@@ -9496,6 +9500,7 @@ const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
+    YH_INDEX: { label: 'Yahoo 指數' },
 };
 
 function loadPersistentTaiwanNameCache() {
@@ -10079,6 +10084,11 @@ function findStockNameCacheEntry(stockCode, markets) {
     return null;
 }
 
+function isYahooIndexSymbol(value) {
+    const normalized = (value || '').trim().toUpperCase();
+    return normalized.startsWith('^') && normalized.length > 1;
+}
+
 function isLikelyTaiwanETF(symbol) {
     const normalized = (symbol || '').trim().toUpperCase();
     if (!normalized.startsWith('00')) return false;
@@ -10091,6 +10101,7 @@ function deriveNameSourceLabel(market) {
     if (normalized === 'US') return 'FinMind USStockInfo';
     if (normalized === 'TPEX') return 'TPEX 公開資訊';
     if (normalized === 'TWSE') return 'TWSE 日成交資訊';
+    if (normalized === 'YH_INDEX') return 'Yahoo Finance (Index)';
     return '';
 }
 
@@ -10100,6 +10111,9 @@ function getMarketDisplayName(market) {
 
 function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const normalizedCode = (stockCode || '').trim().toUpperCase();
+    if (isYahooIndexSymbol(normalizedCode)) {
+        return [];
+    }
     const hasAlpha = /[A-Z]/.test(normalizedCode);
     const isNumeric = /^\d+$/.test(normalizedCode);
     const leadingDigits = getLeadingDigitCount(normalizedCode);
@@ -10278,6 +10292,10 @@ function debouncedFetchStockName(stockCode, options = {}) {
     clearTimeout(stockNameTimeout);
     const normalizedCode = (stockCode || '').trim().toUpperCase();
     if (!normalizedCode || normalizedCode === 'TAIEX') return;
+    if (isYahooIndexSymbol(normalizedCode)) {
+        showStockName('Yahoo 指數', 'success');
+        return;
+    }
     const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
     if (!options.force && enforceGate) {
         const leadingDigits = getLeadingDigitCount(normalizedCode);
@@ -10307,6 +10325,10 @@ async function resolveStockName(fetcher, stockCode, market) {
 async function fetchStockName(stockCode, options = {}) {
     if (!stockCode || stockCode === 'TAIEX') return;
     const normalizedCode = stockCode.trim().toUpperCase();
+    if (isYahooIndexSymbol(normalizedCode)) {
+        showStockName('Yahoo 指數', 'success');
+        return;
+    }
     const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
     if (!options.force && enforceGate) {
         const leadingDigits = getLeadingDigitCount(normalizedCode);

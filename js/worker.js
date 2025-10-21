@@ -13,6 +13,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-YH-INDEX-20260918A — Yahoo 指數行情支援。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -2131,6 +2132,7 @@ function getFallbackForceSource(marketKey, adjusted) {
 
 function getMarketKey(marketType) {
   const normalized = (marketType || "TWSE").toUpperCase();
+  if (normalized === "YH_INDEX" || normalized === "YAHOO_INDEX") return "YH_INDEX";
   if (normalized === "NASDAQ" || normalized === "NYSE") return "US";
   return normalized;
 }
@@ -4897,6 +4899,9 @@ async function fetchStockData(
   marketType,
   options = {},
 ) {
+  const treatAsYahooIndex =
+    Boolean(options.isYahooIndex) ||
+    (typeof stockNo === "string" && stockNo.trim().startsWith("^"));
   if (!marketType) {
     throw new Error(
       "fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。",
@@ -4905,7 +4910,8 @@ async function fetchStockData(
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
   const adjusted = Boolean(options.adjusted || options.adjustedPrice);
-  const split = Boolean(options.splitAdjustment);
+  const splitRequested = Boolean(options.splitAdjustment);
+  const split = treatAsYahooIndex ? false : splitRequested;
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -4919,9 +4925,16 @@ async function fetchStockData(
   if (startDateObj > endDateObj) {
     throw new Error("開始日期需早於結束日期");
   }
-  const marketKey = getMarketKey(marketType);
-  const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
-  const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
+  if (treatAsYahooIndex && (adjusted || splitRequested)) {
+    throw new Error("指數不支援還原股價或拆分還原，請改用原始價格。");
+  }
+  const marketKey = treatAsYahooIndex ? "YH_INDEX" : getMarketKey(marketType);
+  const primaryForceSource = treatAsYahooIndex
+    ? null
+    : getPrimaryForceSource(marketKey, adjusted);
+  const fallbackForceSource = treatAsYahooIndex
+    ? null
+    : getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(
     stockNo,
     startDate,
@@ -4943,6 +4956,7 @@ async function fetchStockData(
     dataStartDate: startDate,
     months: [],
     usedCache: Boolean(cachedEntry),
+    symbolType: treatAsYahooIndex ? "yahoo-index" : "equity",
   };
   if (cachedEntry) {
     const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
@@ -5077,6 +5091,98 @@ async function fetchStockData(
       progress: fallbackProgress,
       message: fallbackMessage,
     });
+  }
+
+  if (treatAsYahooIndex) {
+    self.postMessage({
+      type: "progress",
+      progress: 8,
+      message: "抓取 Yahoo 指數行情...",
+    });
+    const payload = await fetchYahooIndexRange(stockNo, startDate, endDate);
+    const rows = Array.isArray(payload?.aaData) ? payload.aaData : [];
+    const normalizedRows = rows
+      .map((row) =>
+        normalizeProxyRow(row, false, startDateObj, endDateObj),
+      )
+      .filter((row) => row !== null)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const overview = summariseDatasetRows(normalizedRows, {
+      requestedStart: optionEffectiveStart || startDate,
+      effectiveStartDate: optionEffectiveStart || startDate,
+      warmupStartDate: startDate,
+      dataStartDate: startDate,
+      endDate,
+    });
+    fetchDiagnostics.usedCache = false;
+    fetchDiagnostics.overview = overview;
+    fetchDiagnostics.rangeFetch = {
+      provider: "yahoo-index",
+      status: "success",
+      cacheHit: false,
+      rows: normalizedRows.length,
+    };
+    const dataSourceLabel =
+      payload?.dataSource || "Yahoo Finance (Index)";
+    const stockName = payload?.stockName || stockNo;
+    const entry = {
+      data: normalizedRows,
+      dataSource: dataSourceLabel,
+      stockName,
+      timestamp: Date.now(),
+      splitAdjustment: false,
+      priceMode: getPriceModeKey(false),
+      meta: {
+        stockNo,
+        startDate,
+        endDate,
+        dataStartDate: startDate,
+        effectiveStartDate: optionEffectiveStart,
+        priceMode: getPriceModeKey(false),
+        splitAdjustment: false,
+        lookbackDays: optionLookbackDays,
+        fetchRange: { start: startDate, end: endDate },
+        summary: payload?.summary || null,
+        adjustments: [],
+        priceSource: dataSourceLabel,
+        dataSource: dataSourceLabel,
+        adjustmentFallbackApplied: false,
+        adjustmentFallbackInfo: null,
+        debugSteps: [],
+        dividendDiagnostics: null,
+        dividendEvents: [],
+        splitDiagnostics: null,
+        finmindStatus: null,
+        adjustmentDebugLog: [],
+        adjustmentChecks: [],
+        diagnostics: prepareDiagnosticsForCacheReplay(fetchDiagnostics, {
+          source: "yahoo-index",
+          requestedRange: { start: startDate, end: endDate },
+        }),
+      },
+    };
+    setWorkerCacheEntry(marketKey, cacheKey, entry);
+    return {
+      data: normalizedRows,
+      dataSource: dataSourceLabel,
+      stockName,
+      summary: payload?.summary || null,
+      adjustments: [],
+      priceSource: dataSourceLabel,
+      adjustmentFallbackApplied: false,
+      adjustmentFallbackInfo: null,
+      dividendDiagnostics: null,
+      dividendEvents: [],
+      splitDiagnostics: null,
+      finmindStatus: null,
+      adjustmentDebugLog: [],
+      adjustmentChecks: [],
+      fetchRange: { start: startDate, end: endDate },
+      dataStartDate: startDate,
+      effectiveStartDate: optionEffectiveStart,
+      lookbackDays: optionLookbackDays,
+      diagnostics: fetchDiagnostics,
+    };
   }
 
   if (adjusted) {
@@ -5771,6 +5877,31 @@ async function fetchStockData(
     lookbackDays: optionLookbackDays,
     diagnostics: fetchDiagnostics,
   };
+}
+
+async function fetchYahooIndexRange(stockNo, startDate, endDate) {
+  const params = new URLSearchParams({
+    stockNo,
+    startDate,
+    endDate,
+    marketType: "YH_INDEX",
+  });
+  const response = await fetch(
+    `/.netlify/functions/stock-range?${params.toString()}`,
+    { headers: { Accept: "application/json" } },
+  );
+  const rawText = await response.text();
+  let payload = {};
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    throw new Error("指數資料來源回傳格式錯誤");
+  }
+  if (!response.ok || payload?.error) {
+    const message = payload?.error || `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return payload;
 }
 
 // --- TAIEX 數據獲取 ---
@@ -11325,6 +11456,7 @@ async function runOptimization(
           splitAdjustment: baseParams.splitAdjustment,
           effectiveStartDate: optEffectiveStart,
           lookbackDays: optLookback,
+          isYahooIndex: Boolean(baseParams.isYahooIndex),
         },
       );
       stockData = fetched?.data || [];
@@ -11731,6 +11863,7 @@ self.onmessage = async function (e) {
             splitAdjustment: params.splitAdjustment,
             effectiveStartDate: effectiveStartDate || params.startDate,
             lookbackDays,
+            isYahooIndex: Boolean(params.isYahooIndex),
           },
         );
         dataToUse = outcome.data;
@@ -12002,6 +12135,7 @@ self.onmessage = async function (e) {
           splitAdjustment: params.splitAdjustment,
           effectiveStartDate,
           lookbackDays: resolvedLookback,
+          isYahooIndex: Boolean(params.isYahooIndex),
         },
       );
 
