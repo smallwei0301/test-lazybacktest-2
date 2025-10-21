@@ -1,4 +1,19 @@
+## 2026-07-27 — Patch LB-INDEX-UI-20250727A
+- **Scope**: 指數輸入體驗與快速回測捷徑。
+- **Updates**:
+  - `index.html` 基本設定卡片新增指數市場選項、調整代碼提示文案，並在初始本金欄位下方加入「立刻回測」按鈕。
+  - `js/main.js` 針對美股與指數市場顯示專屬股價提醒，保持還原選項狀態同步。
+  - `js/loader.js` 為新按鈕掛載回測事件，方便快速依現有設定執行回測。
+- **Testing**: 尚未執行（容器環境無法啟動前端互動測試）。
 
+## 2026-07-26 — Patch LB-INDEX-YAHOO-20250726A
+- **Scope**: 指數代碼（^ 前綴）輸入流程與資料來源擴充。
+- **Updates**:
+  - `js/main.js` 偵測 ^ 開頭代碼，自動切換為指數市場，調整資料來源測試面板與回測參數，並停用還原價與拆分選項。
+  - `js/backtest.js` 新增指數名稱查詢流程、快取與預設費率處理，支援 Yahoo Finance 指數資訊。
+  - `js/worker.js` 將指數視為獨立市場，透過新 proxy 串接 Yahoo 指數資料並沿用快取管線。
+  - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
+- **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
 
 ## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
 - **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。
