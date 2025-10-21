@@ -1,4 +1,13 @@
 
+## 2026-07-15 — Patch LB-AI-TF-LAZYLOAD-20260715A / LB-ICON-LITE-20260715A / LB-PROGRESS-MASCOT-20260715A / LB-PROGRESS-MASCOT-HTTPS-20260715A
+- **Scope**: 背景 AI 模組延後載入 TensorFlow.js、全面導入 CSP/SRI 與本地化圖示、進度吉祥物優化。
+- **Updates**:
+  - `js/worker.js` 新增 `ensureTensorflowBackendReady`，改為 AI 任務觸發時才載入 TFJS 與 WASM 後端，維持後端設定與種子一致性。
+  - `index.html` 建立嚴格 CSP、為 Google Tag Manager 加上 SRI 與跨來源設定、載入本地 `icons-lite`，並替進度吉祥物圖片加入 `width/height` 與延遲載入。
+  - 新增 `js/icons-lite.js` 以 SVG 產生器取代外部 Lucide 依賴，確保既有 `lucide.createIcons()` 呼叫仍可運作。
+  - `js/main.js` 更新進度吉祥物版本碼、預設圖片尺寸與載入屬性；`js/loading-mascot-sources.js` 統一轉為 HTTPS 清單。
+- **Testing**: 容器環境無法啟動瀏覽器與外部 API，待 Netlify 實機回測驗證 CSP、AI 訓練與圖示渲染。
+
 ## 2026-07-27 — Patch LB-INDEX-UI-20250727A
 - **Scope**: 指數市場輸入提示與快速回測控制。
 - **Updates**:
