@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.2.7 ---
-// Patch Tag: LB-BATCH-OPT-20260718C
+// Patch Tag: LB-BATCH-OPT-20260718D
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718C';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718D';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -232,6 +232,119 @@ function summarizeDatasetRange(rows) {
         length: rows.length,
         startDate: extractDate(first),
         endDate: extractDate(last)
+    };
+}
+
+const DATASET_COVERAGE_TOLERANCE_MS = 48 * 60 * 60 * 1000; // 48 小時容忍，允許時區/假日差異
+
+function normaliseDateLikeToMs(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (value instanceof Date) {
+        const time = value.getTime();
+        return Number.isFinite(time) ? time : null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (value > 1e12) {
+            return value;
+        }
+        if (value > 1e10) {
+            return value * 1000;
+        }
+        const asInt = Math.trunc(value);
+        if (asInt >= 1e6) {
+            const str = String(asInt);
+            if (str.length === 8) {
+                const year = parseInt(str.slice(0, 4), 10);
+                const month = parseInt(str.slice(4, 6), 10) - 1;
+                const day = parseInt(str.slice(6, 8), 10);
+                const timestamp = Date.UTC(year, month, day);
+                return Number.isFinite(timestamp) ? timestamp : null;
+            }
+        }
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+        if (/^\d{8}$/.test(trimmed)) {
+            const year = parseInt(trimmed.slice(0, 4), 10);
+            const month = parseInt(trimmed.slice(4, 6), 10) - 1;
+            const day = parseInt(trimmed.slice(6, 8), 10);
+            const timestamp = Date.UTC(year, month, day);
+            return Number.isFinite(timestamp) ? timestamp : null;
+        }
+        const normalised = trimmed.replace(/\//g, '-');
+        const parsed = Date.parse(normalised);
+        if (!Number.isNaN(parsed)) {
+            return parsed;
+        }
+        const numeric = Number(normalised);
+        if (Number.isFinite(numeric)) {
+            return normaliseDateLikeToMs(numeric);
+        }
+    }
+
+    return null;
+}
+
+function summarizeRequiredRangeFromParams(params = {}) {
+    const dataStartDate = params.dataStartDate || params.bufferedStartDate || null;
+    const effectiveStartDate = params.effectiveStartDate || params.startDate || null;
+    const startDate = params.startDate || null;
+    const endDate = params.endDate || null;
+
+    return {
+        lookbackDays: Number.isFinite(params.lookbackDays) ? params.lookbackDays : null,
+        dataStartDate,
+        effectiveStartDate,
+        startDate,
+        endDate
+    };
+}
+
+function evaluateDatasetCoverage(summary, requiredRange) {
+    const datasetStartTs = normaliseDateLikeToMs(summary?.startDate || null);
+    const datasetEndTs = normaliseDateLikeToMs(summary?.endDate || null);
+    const requiredStartTs = normaliseDateLikeToMs(requiredRange?.dataStartDate || requiredRange?.effectiveStartDate || requiredRange?.startDate || null);
+    const requiredEndTs = normaliseDateLikeToMs(requiredRange?.endDate || null);
+
+    let coverageSatisfied = true;
+    const reasons = [];
+
+    if (requiredStartTs !== null && datasetStartTs !== null && datasetStartTs - requiredStartTs > DATASET_COVERAGE_TOLERANCE_MS) {
+        coverageSatisfied = false;
+        reasons.push('dataset-start-after-required-start');
+    }
+
+    if (requiredEndTs !== null && datasetEndTs !== null && requiredEndTs - datasetEndTs > DATASET_COVERAGE_TOLERANCE_MS) {
+        coverageSatisfied = false;
+        reasons.push('dataset-end-before-required-end');
+    }
+
+    if (requiredEndTs !== null && datasetEndTs === null) {
+        coverageSatisfied = false;
+        reasons.push('dataset-end-missing');
+    }
+
+    if (requiredStartTs !== null && datasetStartTs === null) {
+        coverageSatisfied = false;
+        reasons.push('dataset-start-missing');
+    }
+
+    return {
+        coverageSatisfied,
+        reason: reasons.length > 0 ? reasons.join('|') : 'ok',
+        datasetStartTs,
+        datasetEndTs,
+        requiredStartTs,
+        requiredEndTs
     };
 }
 
@@ -689,7 +802,9 @@ function buildBatchDebugDigest(snapshot) {
         sortKey: null,
         sortDirection: null,
         topResults: [],
-        paramOptimizations: []
+        paramOptimizations: [],
+        datasetCoverage: null,
+        datasetCoverageWarnings: []
     };
 
     if (Array.isArray(snapshot.events)) {
@@ -705,6 +820,17 @@ function buildBatchDebugDigest(snapshot) {
             digest.baseParams = clonePlainObject(batchStartEvent.detail.baseParams || null);
             digest.selectedStrategies = clonePlainObject(batchStartEvent.detail.selectedStrategies || null);
         }
+
+        const coverageEvents = snapshot.events
+            .filter((entry) => entry.label === 'cached-data-evaluation' && entry.detail)
+            .map((entry) => clonePlainObject(entry.detail));
+        if (coverageEvents.length > 0) {
+            digest.datasetCoverage = coverageEvents[coverageEvents.length - 1];
+        }
+
+        digest.datasetCoverageWarnings = snapshot.events
+            .filter((entry) => entry.label === 'cached-data-coverage-mismatch' && entry.detail)
+            .map((entry) => clonePlainObject(entry.detail));
 
         const resultsSortedEvent = extractLastDebugEventByLabel(snapshot.events, 'results-sorted');
         if (resultsSortedEvent?.detail) {
@@ -935,6 +1061,59 @@ function formatParamOptimizationList(label, list) {
     return `${label}：\n${lines.join('\n')}`;
 }
 
+function formatCoverageDate(value) {
+    const timestamp = normaliseDateLikeToMs(value);
+    if (timestamp !== null) {
+        try {
+            return new Date(timestamp).toISOString().slice(0, 10);
+        } catch (error) {
+            return String(value);
+        }
+    }
+    if (value === null || value === undefined) {
+        return '無';
+    }
+    return String(value);
+}
+
+function formatDatasetCoverageSummary(label, digest) {
+    if (!digest || !digest.datasetCoverage) {
+        return `${label}：未記錄資料覆蓋檢查`;
+    }
+
+    const detail = digest.datasetCoverage;
+    const summary = detail.summary || {};
+    const required = detail.requiredRange || {};
+    const coverage = detail.coverage || {};
+
+    const datasetLength = typeof detail.datasetLength === 'number'
+        ? detail.datasetLength
+        : (typeof summary.length === 'number' ? summary.length : null);
+    const datasetRange = `${formatCoverageDate(summary.startDate)}～${formatCoverageDate(summary.endDate)}`;
+    const requiredStart = required.dataStartDate || required.effectiveStartDate || required.startDate;
+    const requiredRange = `${formatCoverageDate(requiredStart)}～${formatCoverageDate(required.endDate)}`;
+    const status = coverage.coverageSatisfied ? '符合' : `不符（${coverage.reason || '未知原因'}）`;
+
+    return `${label}：來源=${detail.source || '未知'}｜筆數=${formatSimpleValue(datasetLength)}｜資料範圍=${datasetRange}｜需求範圍=${requiredRange}｜檢查=${status}`;
+}
+
+function formatDatasetCoverageWarnings(label, warnings) {
+    if (!Array.isArray(warnings) || warnings.length === 0) {
+        return `${label}：無覆蓋異常`; 
+    }
+
+    const lines = warnings.slice(0, 3).map((item, index) => {
+        const summary = item.summary || {};
+        const required = item.requiredRange || {};
+        const coverage = item.coverage || {};
+        const requiredStart = required.dataStartDate || required.effectiveStartDate || required.startDate;
+        return `- #${index + 1} 來源=${item.source || '未知'}｜資料=${formatCoverageDate(summary.startDate)}～${formatCoverageDate(summary.endDate)}｜需求=${formatCoverageDate(requiredStart)}～${formatCoverageDate(required.endDate)}｜原因=${coverage.reason || item.reason || '未知'}`;
+    });
+
+    const suffix = warnings.length > 3 ? `\n（共 ${warnings.length} 筆，僅列前 3 筆）` : '';
+    return `${label}：\n${lines.join('\n')}${suffix}`;
+}
+
 function formatDebugSnapshotLabel(snapshot) {
     const digest = buildBatchDebugDigest(snapshot);
     if (!digest) {
@@ -1029,6 +1208,16 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
     } else {
         lines.push('- 未記錄基礎參數');
     }
+
+    lines.push('');
+    lines.push('## 資料覆蓋檢查');
+    lines.push(formatDatasetCoverageSummary('A', digestA));
+    lines.push(formatDatasetCoverageSummary('B', digestB));
+
+    lines.push('');
+    lines.push('## 資料覆蓋異常');
+    lines.push(formatDatasetCoverageWarnings('A', digestA?.datasetCoverageWarnings));
+    lines.push(formatDatasetCoverageWarnings('B', digestB?.datasetCoverageWarnings));
 
     lines.push('');
     lines.push('## Top 3 結果');
@@ -2693,21 +2882,70 @@ async function executeBacktestForCombination(combination, options = {}) {
                 console.log(`[Batch Optimization] Applied risk management:`, combination.riskManagement);
             }
 
+            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : null;
+            let cachedPayload = overrideData
+                || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+            const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
+
+            const preparedParams = enrichParamsWithLookback(params);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedSummary = summarizeDatasetRange(cachedPayload);
+            let coverageEvaluation = {
+                coverageSatisfied: Boolean(Array.isArray(cachedPayload) && cachedPayload.length > 0),
+                reason: Array.isArray(cachedPayload) && cachedPayload.length > 0 ? 'ok' : 'dataset-empty',
+                datasetStartTs: normaliseDateLikeToMs(cachedSummary.startDate),
+                datasetEndTs: normaliseDateLikeToMs(cachedSummary.endDate),
+                requiredStartTs: normaliseDateLikeToMs(requiredRange.dataStartDate || requiredRange.effectiveStartDate || requiredRange.startDate),
+                requiredEndTs: normaliseDateLikeToMs(requiredRange.endDate)
+            };
+
+            let useCachedData = coverageEvaluation.coverageSatisfied;
+            if (Array.isArray(cachedPayload) && cachedPayload.length > 0) {
+                coverageEvaluation = evaluateDatasetCoverage(cachedSummary, requiredRange);
+                useCachedData = coverageEvaluation.coverageSatisfied;
+            }
+
+            recordBatchDebug('cached-data-evaluation', {
+                combination: summarizeCombination(combination),
+                source: cachedSource,
+                summary: cachedSummary,
+                requiredRange,
+                coverage: coverageEvaluation,
+                datasetLength: cachedSummary.length,
+                useCachedData,
+                overrideProvided: Boolean(overrideData)
+            }, { phase: 'worker', console: false });
+
+            if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+                recordBatchDebug('cached-data-coverage-mismatch', {
+                    combination: summarizeCombination(combination),
+                    source: cachedSource,
+                    summary: cachedSummary,
+                    requiredRange,
+                    coverage: coverageEvaluation
+                }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+                cachedPayload = null;
+            }
+
+            if (!useCachedData) {
+                cachedPayload = null;
+            }
+
+            const cachedDataForWorker = useCachedData ? cachedPayload : null;
+
             recordBatchDebug('worker-run-start', {
                 combination: summarizeCombination(combination),
-                useOverride: Boolean(baseParamsOverride)
+                useOverride: Boolean(baseParamsOverride),
+                useCachedData,
+                cachedSource,
+                datasetLength: cachedSummary.length
             }, { phase: 'worker', console: false });
 
             // 創建臨時worker執行回測
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
-
-                const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-                    ? options.cachedDataOverride
-                    : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
@@ -2750,12 +2988,11 @@ async function executeBacktestForCombination(combination, options = {}) {
                     resolve(null);
                 };
 
-                const preparedParams = enrichParamsWithLookback(params);
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
+                    cachedData: cachedDataForWorker
                 });
 
                 // 設定超時

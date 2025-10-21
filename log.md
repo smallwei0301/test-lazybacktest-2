@@ -1352,3 +1352,11 @@ NODE`
   - 建立 `formatSimpleValue`、`formatParamOptimizationList` 等共用格式化函式，確保複雜物件（如策略清單、參數組合）也能輸出成精簡、適合貼上的文字，開發者模式的比較報告因此更完整。
 - **Diagnostics**: 於本地重現「先跑滾動測試再跑批量」情境，透過新比較文本即可看到停損/停利、排序鍵或參數優化值的差異，協助鎖定最佳解偏移的根本原因。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-22 — Patch LB-BATCH-OPT-20260718D
+- **Issue recap**: 改變結束日期後即使復原成原本設定再次執行批量優化，最佳參數仍與第一次不同，排查發現舊的股價快取沒有覆蓋最新需求區間，導致後續組合沿用截短資料。
+- **Fix**:
+  - `js/batch-optimization.js` 在執行 `executeBacktestForCombination` 前先比對 `cachedStockData` 的起訖與需求範圍，若不足則記錄 `cached-data-coverage-mismatch` 並停用快取改以最新資料回測，確保批量優化與滾動測試共用時不會殘留過期資料。
+  - 同步擴充除錯摘要與比較輸出，新增資料覆蓋檢查與異常清單，讓開發者模式卡片能直接顯示各次批量優化使用的資料範圍與不足原因，便於後續追蹤。
+- **Diagnostics**: 先以新結束日期執行一般回測，再切回原始日期進行兩次批量優化；確認除錯卡片顯示第一次沿用快取、第二次出現覆蓋警示並改為重抓資料，兩次比較文本的「資料覆蓋檢查」區塊應相符且最佳解一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
