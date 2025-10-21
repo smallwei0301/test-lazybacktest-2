@@ -1,5 +1,14 @@
 
 
+## 2026-07-26 — Patch LB-INDEX-YAHOO-20250726A
+- **Scope**: 指數代碼（^ 前綴）輸入流程與資料來源擴充。
+- **Updates**:
+  - `js/main.js` 偵測 ^ 開頭代碼，自動切換為指數市場，調整資料來源測試面板與回測參數，並停用還原價與拆分選項。
+  - `js/backtest.js` 新增指數名稱查詢流程、快取與預設費率處理，支援 Yahoo Finance 指數資訊。
+  - `js/worker.js` 將指數視為獨立市場，透過新 proxy 串接 Yahoo 指數資料並沿用快取管線。
+  - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
+- **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:
