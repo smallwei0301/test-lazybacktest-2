@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📈 LazyBacktest - 台股回測系統 v0.1.1</title>
     <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K" crossorigin="anonymous"></script>
     <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
@@ -14,9 +14,9 @@
 
     gtag('config', 'G-VNX2RVHZ5K');
     </script>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" crossorigin="anonymous"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
     <link
       rel="stylesheet"
       as="style"
@@ -327,9 +327,9 @@
         height: 1rem;
       }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8" crossorigin="anonymous"></script>
     <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -1275,10 +1275,12 @@
                                                 </div>
                                                 <img
                                                     class="loading-mascot-image"
-                                                    src="https://i.imgur.com/zwj3cZQ.gif"
-                                                    alt="LazyBacktest 進度吉祥物動畫"
+                                                    src="assets/mascot/hachiware-dance-fallback.svg"
+                                                    alt="LazyBacktest 進度吉祥物插圖"
+                                                    width="320"
+                                                    height="320"
                                                     decoding="async"
-                                                    loading="eager"
+                                                    loading="lazy"
                                                     referrerpolicy="no-referrer"
                                                     aria-hidden="false"
                                                 />

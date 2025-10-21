@@ -35,3 +35,10 @@
 [[scheduled_functions]]
   name = "cache-warmer"
   cron = "0 18 * * *"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'sha256-gsKD2BRQg4u8Z6W8snuLtaaQoGJd5hmqRtNZEhw6JfI=' 'sha256-BW3z3BkvUx1jYjlTz2tP8TX+zlB/1IdiyGV51oflbK8=' https://www.googletagmanager.com https://www.google-analytics.com https://cdn.tailwindcss.com https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://www.googletagmanager.com https://www.google-analytics.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://www.googletagmanager.com https://www.google-analytics.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; worker-src 'self' blob:"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"

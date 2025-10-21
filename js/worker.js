@@ -13,11 +13,14 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-TF-LAZYLOAD-20251021A — 延後載入 TensorFlow.js 並保留既有後端設定流程。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
 const TF_BACKEND_TARGET = 'wasm';
+const TFJS_CDN_ROOT = `https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist`;
+const TFJS_WASM_ROOT = `https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`;
 const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
@@ -336,19 +339,35 @@ function clampProbability(value) {
 }
 
 let tfBackendReadyPromise = Promise.resolve();
+let tfModuleLoaded = false;
+let tfWasmModuleLoaded = false;
+let tfReady = false;
 
-try {
-  if (typeof tf === 'undefined') {
-    importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist/tf.min.js`);
+async function ensureTF() {
+  if (tfReady && typeof tf !== 'undefined') {
+    await tfBackendReadyPromise;
+    return;
   }
-  if (typeof tf !== 'undefined' && typeof tf?.setBackend === 'function') {
-    try {
-      importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/tf-backend-wasm.min.js`);
-    } catch (wasmError) {
-      console.warn('[Worker][AI] 無法載入 TFJS WASM 後端：', wasmError);
+  try {
+    if (typeof tf === 'undefined') {
+      importScripts(`${TFJS_CDN_ROOT}/tf.min.js`);
+      tfModuleLoaded = true;
+    } else if (!tfModuleLoaded) {
+      tfModuleLoaded = true;
+    }
+    if (typeof tf === 'undefined' || typeof tf?.setBackend !== 'function') {
+      throw new Error('TensorFlow.js 無法載入');
+    }
+    if (!tfWasmModuleLoaded) {
+      try {
+        importScripts(`${TFJS_WASM_ROOT}tf-backend-wasm.min.js`);
+        tfWasmModuleLoaded = true;
+      } catch (wasmError) {
+        console.warn('[Worker][AI] 無法載入 TFJS WASM 後端：', wasmError);
+      }
     }
     if (tf?.wasm?.setWasmPaths) {
-      tf.wasm.setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`);
+      tf.wasm.setWasmPaths(TFJS_WASM_ROOT);
     }
     if (typeof tf?.util?.seedrandom === 'function') {
       tf.util.seedrandom(ANN_DEFAULT_SEED);
@@ -369,9 +388,12 @@ try {
       await tf.ready();
       return tf.getBackend();
     })();
+    tfReady = true;
+    await tfBackendReadyPromise;
+  } catch (error) {
+    console.warn('[Worker][AI] 無法初始化 TensorFlow.js：', error);
+    throw error;
   }
-} catch (error) {
-  console.warn('[Worker][AI] 無法初始化 TensorFlow.js：', error);
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -543,7 +565,7 @@ async function handleAITrainLSTMMessage(message) {
   const seedToUse = overrideSeed || hyperSeed || LSTM_DEFAULT_SEED;
 
   try {
-    await tfBackendReadyPromise;
+    await ensureTF();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
@@ -1599,7 +1621,7 @@ async function handleAITrainANNMessage(message) {
   const seedToUse = Number.isFinite(overrideSeed) ? overrideSeed : ANN_DEFAULT_SEED;
 
   try {
-    await tfBackendReadyPromise;
+    await ensureTF();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }

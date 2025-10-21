@@ -1463,3 +1463,23 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+## 2026-10-21 — Patch LB-SECURITY-CSP-20251021A
+- **Scope**: 外部腳本安全政策強化與跨來源設定。
+- **Updates**:
+  - `index.html` 為 Google Tag、Tailwind、Lucide、Chart.js、zoom 插件與 Hammer.js 增加 `crossorigin="anonymous"`，配合後續 SRI 產出。
+  - `netlify.toml` 新增全站 CSP、Referrer-Policy 與 X-Content-Type-Options 標頭，限制腳本來源並允許必要的 Google 追蹤與 CDN。
+- **Testing**: 容器無法啟動瀏覽器，待 Netlify 上線後以 Chrome DevTools 驗證 CSP 命中與腳本載入狀態。
+
+## 2026-10-21 — Patch LB-AI-TF-LAZYLOAD-20251021A
+- **Scope**: TensorFlow.js 惰性載入與 Worker 後端初始化治理。
+- **Updates**:
+  - `js/worker.js` 改以 `ensureTF()` 動態匯入 TFJS 與 WASM 後端，僅在訓練訊息到達時載入，保留既有後端切換與種子設定流程。
+  - LSTM 與 ANN 訊息處理程式於執行前呼叫 `ensureTF()`，確保未使用 AI 功能時不會提早下載 1MB 以上資源。
+- **Testing**: 無法在容器內呼叫遠端 Proxy 與瀏覽器，待實機回測 LSTM/ANN 訓練確認 console 無錯誤。
+
+## 2026-10-21 — Patch LB-ASSET-LAZYIMG-20251021A
+- **Scope**: 吉祥物圖片載入優化。
+- **Updates**:
+  - `index.html` 將 loading mascot 改為站內 SVG、標註 width/height，並啟用 `loading="lazy"` 降低首屏負載。
+- **Testing**: 容器無法啟動瀏覽器，待 Netlify 實機檢查圖片載入與可及性屬性。
+
