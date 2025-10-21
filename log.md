@@ -1,5 +1,13 @@
 
 
+## 2026-07-07 — Patch LB-ROLLING-TEST-20260707A
+- **Scope**: 滾動測試嚴格模式門檻換算、PSR/DSR 詳細資訊與策略比較顯示調整。
+- **Updates**:
+  - `js/rolling-test.js` 將嚴格模式 Sharpe 基準改為每日值 `1/√252`，統一以常數管理並更新卡片、摘要與說明文字（顯示日 Sharpe ≈ 0.063）。
+  - 擴充 PSR/DSR 詳細資訊，逐窗顯示 SR_hat(每期)、SR*、n_eff、γ3、γ4、MinTRL，移除 DSR 的 SR* 標示，PSR≥95% 視窗比為 0% 時提醒拉長區間。
+  - `js/backtest.js` 策略比較表僅保留滾動測試總分顯示，避免與報告細節重複。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機驗證嚴格模式下的 PSR/DSR 顯示與計算。
+
 ## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
 - **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。
 - **Fix**:
@@ -1420,4 +1428,13 @@ NODE`
   - `README.md` 同步說明新版 Walk-Forward 評分邏輯與嚴格模式行為。
 - **Diagnostics**: 尚待具備 Proxy 的環境實測啟用/停用嚴格模式、檢視樣本極少與高相關參數組合案例，確認 PSR/DSR、統計權重與分數變化符合預期。
 - **Testing**: 未執行（容器無法連線 Proxy，需於實機環境執行滾動測試確認 console 無錯誤）。
+
+## 2026-07-29 — Patch LB-ROLLING-TEST-20260709A
+- **Issue recap**: 滾動測試逐窗表格仍以長段文字呈現，難以快速辨識重要參數與評語；數值也缺乏門檻色彩指引。總覽卡片僅顯示「合格」等簡述，無法提供具體改善建議。
+- **Fix**:
+  - `js/rolling-test.js` 更新為 `LB-ROLLING-TEST-20260709A`，逐窗表格的參數與評語改成條列顯示，所有指標與樣本資訊依達標結果套用綠/紅色提示，樣本行同時對應 MinTRL 判斷。
+  - Scoreboard 描述整合 γ₄ 厚尾、PSR/DSR 門檻、樣本充足度與通過率判準，依情境給出具體動作（延長測試區間、調整策略、加入停損等）。
+  - 滾動測試彙總保留 `commentItems` 陣列供 UI 條列化使用，新增 overall skew/kurtosis 供建議邏輯參考。
+- **Diagnostics**: 以嚴格/寬鬆模式生成多組視窗，檢查逐窗表格是否以條列呈現、顏色依門檻變化，同時確認卡片說明會隨厚尾、樣本不足與低通過率給出對應建議。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
