@@ -2028,10 +2028,15 @@
                                         </div>
                                         <div class="card-content">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    滾動測試次數
+                                                <label id="rolling-window-count-wrapper" class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    <div class="flex items-center justify-between gap-2">
+                                                        <span>滾動測試次數</span>
+                                                        <button type="button" id="rolling-window-mode-toggle" class="text-[11px] font-semibold inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">
+                                                            改用自訂視窗
+                                                        </button>
+                                                    </div>
                                                     <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
+                                                    <span id="rolling-window-count-hint" class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                 </label>
                                                 <div class="md:col-span-2 xl:col-span-3 flex flex-col gap-3">
                                                     <button type="button" id="toggle-rolling-advanced" class="self-start text-xs font-semibold inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">
@@ -2242,9 +2247,9 @@
                                             <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
                                                 <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
                                                 <ol class="list-decimal pl-4 space-y-1">
-                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤分別映射至 0～1，採 0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
-                                                    <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，平均後轉為 0.5～1 的 <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。</li>
-                                                    <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，跨窗取中位數，再以 WFE 中位數（取 0.8～1.2 區間）進行調整取得 Walk-Forward 總分。</li>
+                                                    <li>OOS 指標轉換：年化報酬以同窗買入持有年化報酬為門檻，達標即給 1 分，未達則依差距線性遞減至 0；Sharpe、Sortino、勝率與最大回撤亦採達標滿分、未達線性遞減，並以 0.35／0.25／0.20／0.10／0.10 的權重加總取得 <strong>OOS 品質</strong>，同時保留未截斷的加權原值供參考。</li>
+                                                    <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，兩者平均後得到 <strong>可信度</strong>，再換算成 <strong>StatWeight = 0.5 + 0.5 × 可信度</strong>，並評估最短樣本需求（MinTRL）。</li>
+                                                    <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，最後取各窗分數的中位數，再以 WFE 中位數（截斷於 0.8～1.2）調整成 Walk-Forward 總分。</li>
                                                     <li>評級門檻：總分 ≥ 0.70、WFE 中位 ≥ 0.8、PSR≥95% 視窗比 ≥ 50%、DSR 中位 ≥ 0.7 判定「專業合格」；總分 ≥ 0.50、WFE 中位 ≥ 0.6、PSR≥95% 視窗比 ≥ 30% 判定「可進一步觀察」；其餘為「未通過建議調整」。若整體 DSR ≤ 0 會再下修一級。</li>
                                                 </ol>
                                             </div>
