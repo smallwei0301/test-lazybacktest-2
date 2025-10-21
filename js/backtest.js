@@ -572,11 +572,250 @@ const todaySuggestionDeveloperLog = (() => {
 
 window.lazybacktestTodaySuggestionLog = todaySuggestionDeveloperLog;
 
+const batchOptimizationDeveloperLog = (() => {
+    const entries = [];
+    let container = null;
+    let clearBtn = null;
+    let panel = null;
+    let toggleBtn = null;
+    let toggleLabel = null;
+    let initialised = false;
+    let panelExpanded = false;
+
+    function ensureElements() {
+        if (initialised) return;
+        container = document.getElementById('batch-optimization-log-body');
+        clearBtn = document.getElementById('batchOptimizationLogClear');
+        panel = document.getElementById('batchOptimizationLogPanel');
+        toggleBtn = document.getElementById('batchOptimizationLogToggle');
+        toggleLabel = toggleBtn ? toggleBtn.querySelector('.toggle-label') : null;
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                entries.length = 0;
+                renderEntries();
+            });
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                setPanelExpanded(!panelExpanded);
+            });
+        }
+
+        setPanelExpanded(false);
+        initialised = true;
+    }
+
+    function setPanelExpanded(open) {
+        panelExpanded = Boolean(open);
+        if (panel) {
+            panel.classList.toggle('hidden', !panelExpanded);
+            panel.setAttribute('aria-hidden', panelExpanded ? 'false' : 'true');
+        }
+        if (toggleBtn) {
+            toggleBtn.setAttribute('aria-expanded', panelExpanded ? 'true' : 'false');
+            const indicator = toggleBtn.querySelector('.toggle-indicator');
+            if (indicator) {
+                indicator.textContent = panelExpanded ? '－' : '＋';
+            }
+        }
+        if (toggleLabel) {
+            toggleLabel.textContent = panelExpanded ? '收合' : '展開';
+        }
+    }
+
+    function formatTimestamp(timestamp) {
+        const date = new Date(Number(timestamp));
+        if (Number.isNaN(date.getTime())) return '—';
+        if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+            try {
+                return new Intl.DateTimeFormat('zh-TW', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).format(date);
+            } catch (error) {
+                console.warn('[BatchDeveloperLog] Failed to format timestamp with Intl.', error);
+            }
+        }
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function resolveSeverity(entry) {
+        const statusKey = (entry?.payload?.status || '').toString().toLowerCase();
+        if (entry?.kind === 'error' || statusKey === 'error') return 'error';
+        if (entry?.kind === 'warning' || statusKey === 'warning') return 'warning';
+        if (entry?.kind === 'success' || statusKey === 'success') return 'success';
+        return 'info';
+    }
+
+    function cloneEntryValue(value) {
+        if (value === null || typeof value !== 'object') return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+                console.warn('[BatchDeveloperLog] structuredClone failed, fallback to JSON clone.', error);
+            }
+        }
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            if (Array.isArray(value)) {
+                return value.slice();
+            }
+            return { ...value };
+        }
+    }
+
+    function handleCopy(text) {
+        if (!text) return;
+        const normalised = text.replace(/\r\n|\r/g, '\n');
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(normalised).catch((error) => {
+                console.warn('[BatchDeveloperLog] clipboard.writeText failed, fallback to textarea.', error);
+                fallbackCopy(normalised);
+            });
+            return;
+        }
+        fallbackCopy(normalised);
+    }
+
+    function fallbackCopy(text) {
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', 'readonly');
+            textarea.style.position = 'absolute';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        } catch (error) {
+            console.warn('[BatchDeveloperLog] Fallback copy failed.', error);
+        }
+    }
+
+    function renderEntries() {
+        ensureElements();
+        if (!container) return;
+        const html = entries.map((entry) => {
+            const severity = resolveSeverity(entry);
+            const badgeClass = severity === 'error'
+                ? 'bg-red-100 text-red-700'
+                : severity === 'warning'
+                    ? 'bg-amber-100 text-amber-700'
+                    : severity === 'success'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-blue-100 text-blue-700';
+            const status = entry?.payload?.status || entry?.payload?.reason || severity;
+            const notes = Array.isArray(entry?.payload?.developerNotes)
+                ? entry.payload.developerNotes
+                : Array.isArray(entry?.payload?.notes)
+                    ? entry.payload.notes
+                    : [];
+            const detailList = notes
+                .map((note) => `<li>${escapeHtml(String(note))}</li>`)
+                .join('');
+            const summary = entry?.payload?.summary || null;
+            const summaryLines = [];
+            if (summary) {
+                if (summary.start || summary.end) {
+                    summaryLines.push(`資料範圍：${summary.start || '未知'} → ${summary.end || '未知'}`);
+                }
+                if (Number.isFinite(summary.valid) || Number.isFinite(summary.length)) {
+                    const rows = Number.isFinite(summary.valid) ? summary.valid : summary.length;
+                    summaryLines.push(`有效筆數：${rows}`);
+                }
+            }
+            const summaryHtml = summaryLines.length > 0
+                ? `<div class="space-y-1">${summaryLines.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>`
+                : '';
+            const copyText = entry?.meta?.copyText || entry?.payload?.copyText || '';
+            const copyButton = copyText
+                ? `<button type="button" class="px-2 py-1 text-[10px] rounded-md border transition-colors copy-log-button" data-copy-text="${escapeHtml(copyText)}" style="border-color: var(--border); color: var(--foreground); background-color: var(--background);">複製比較</button>`
+                : '';
+            const developerNotes = detailList
+                ? `<ul class="list-disc list-inside space-y-1 mt-1">${detailList}</ul>`
+                : '';
+            return `
+                <div class="border rounded-md px-3 py-2 space-y-1 text-[11px]" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="font-medium" style="color: var(--foreground);">${escapeHtml(entry?.payload?.label || '批量快取診斷')}</span>
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] ${badgeClass}">
+                                <span>${escapeHtml(severity.toUpperCase())}</span>
+                                <span style="color: var(--muted-foreground);">${escapeHtml(String(status))}</span>
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${copyButton}
+                            <span class="text-[10px]" style="color: var(--muted-foreground);">${escapeHtml(formatTimestamp(entry.timestamp))}</span>
+                        </div>
+                    </div>
+                    ${summaryHtml}
+                    ${developerNotes}
+                </div>
+            `;
+        }).join('');
+        container.innerHTML = html;
+
+        const buttons = container.querySelectorAll('.copy-log-button');
+        buttons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const text = btn.getAttribute('data-copy-text');
+                handleCopy(text);
+            });
+        });
+    }
+
+    return {
+        record(kind, payload = {}, meta = {}) {
+            ensureElements();
+            const entry = {
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                timestamp: Date.now(),
+                kind: kind || 'info',
+                payload: cloneEntryValue(payload),
+                meta: cloneEntryValue(meta),
+            };
+            entries.unshift(entry);
+            if (entries.length > 50) {
+                entries.length = 50;
+            }
+            renderEntries();
+        },
+        clear() {
+            entries.length = 0;
+            renderEntries();
+        },
+        render() {
+            renderEntries();
+        },
+        getEntries() {
+            return entries.slice();
+        },
+    };
+})();
+
+window.lazybacktestBatchDeveloperLog = batchOptimizationDeveloperLog;
+
 document.addEventListener('DOMContentLoaded', () => {
     try {
         todaySuggestionDeveloperLog.render();
     } catch (error) {
         console.warn('[TodaySuggestionLog] Failed to render on DOMContentLoaded.', error);
+    }
+    try {
+        batchOptimizationDeveloperLog.render();
+    } catch (error) {
+        console.warn('[BatchDeveloperLog] Failed to render on DOMContentLoaded.', error);
     }
 });
 

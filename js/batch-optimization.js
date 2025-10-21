@@ -5,6 +5,7 @@
 // Patch Tag: LB-BATCH-CACHE-20251022A
 // Patch Tag: LB-BATCH-CACHE-20251024A
 // Patch Tag: LB-BATCH-CACHE-20251027A
+// Patch Tag: LB-BATCH-CACHE-20251030A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -55,8 +56,12 @@ let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
 let lastBatchPreflightDecision = null;
 const batchOptimizationRunHistory = [];
+let batchCacheBypassMode = null;
 
 const CACHE_DATE_TOLERANCE_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const STRICT_START_LAG_TOLERANCE_DAYS = 3;
+const STRICT_END_LAG_TOLERANCE_DAYS = 3;
 
 function formatDebugDate(ts) {
     if (!Number.isFinite(ts)) return null;
@@ -343,6 +348,8 @@ function resolveWorkerCachePayload(params, options = {}) {
     result.required.start = requestedStart;
     result.required.end = requestedEnd;
 
+    const forceBypass = Boolean(options?.forceBypassCache);
+
     if (overrideData) {
         if (datasetCoversRange(overrideData, requestedStart, requestedEnd)) {
             result.useCachedData = true;
@@ -506,6 +513,14 @@ function resolveWorkerCachePayload(params, options = {}) {
     result.datasetSummary = summariseDatasetRangeForDebug(selectedDataset.rows);
     result.reason = 'globalCacheReusable';
     result.source = selectedDataset.source;
+
+    if (forceBypass) {
+        result.useCachedData = false;
+        result.cachedData = null;
+        result.cachedMeta = null;
+        result.reason = options.forceReason || batchCacheBypassMode?.reason || result.reason;
+        result.source = options.forceSource || 'forced-bypass';
+    }
     return result;
 }
 
@@ -542,9 +557,11 @@ function logBatchCacheDecision(context, params, cachePayload) {
 }
 
 function recordBatchDeveloperLog(kind, details = {}) {
-    if (typeof window === 'undefined' || !window.lazybacktestTodaySuggestionLog) return;
+    if (typeof window === 'undefined') return;
     try {
-        const log = window.lazybacktestTodaySuggestionLog;
+        const log = window.lazybacktestBatchDeveloperLog
+            || window.lazybacktestTodaySuggestionLog;
+        if (!log || typeof log.record !== 'function') return;
         const severity = kind === 'warning' || kind === 'error'
             ? 'warning'
             : kind === 'success'
@@ -587,6 +604,21 @@ function recordBatchDeveloperLog(kind, details = {}) {
                 : String(details.priceMode);
             developerNotes.push(`價格模式：${modeText}`);
         }
+        if (details.deviation && (Number.isFinite(details.deviation.startLagDays)
+            || Number.isFinite(details.deviation.endLagDays))) {
+            const startLag = Number.isFinite(details.deviation.startLagDays)
+                ? details.deviation.startLagDays.toFixed(2)
+                : null;
+            const endLag = Number.isFinite(details.deviation.endLagDays)
+                ? details.deviation.endLagDays.toFixed(2)
+                : null;
+            if (startLag !== null) {
+                developerNotes.push(`快取起點落後 ${startLag} 日`);
+            }
+            if (endLag !== null) {
+                developerNotes.push(`快取終點落後 ${endLag} 日`);
+            }
+        }
         if (Array.isArray(details.notes)) {
             details.notes.forEach((note) => {
                 if (note) developerNotes.push(note);
@@ -604,13 +636,162 @@ function recordBatchDeveloperLog(kind, details = {}) {
         }
 
         log.record(severity, {
-            label: '批量快取診斷',
+            label: details.label || '批量快取診斷',
             status: details.status || details.reason || kind,
             developerNotes,
         }, meta);
     } catch (error) {
         console.warn('[Batch Optimization] Failed to record batch developer log:', error);
     }
+}
+
+function appendBatchCacheOptions(options = {}) {
+    if (options && options.ignoreGlobalBypass) {
+        return { ...options };
+    }
+    if (batchCacheBypassMode?.force) {
+        return {
+            ...options,
+            forceBypassCache: true,
+            forceReason: options.forceReason || batchCacheBypassMode.reason,
+        };
+    }
+    return { ...options };
+}
+
+function computeCoverageDeviation(requiredStart, requiredEnd, summary) {
+    const deviation = {
+        startLagDays: null,
+        endLagDays: null,
+        requiredStart: requiredStart || null,
+        requiredEnd: requiredEnd || null,
+        actualStart: summary?.start || null,
+        actualEnd: summary?.end || null,
+    };
+    if (requiredStart && summary?.start) {
+        const requiredTs = parseIsoDateToUtcSafe(requiredStart);
+        const actualTs = parseIsoDateToUtcSafe(summary.start);
+        if (Number.isFinite(requiredTs) && Number.isFinite(actualTs)) {
+            deviation.startLagDays = (actualTs - requiredTs) / ONE_DAY_MS;
+        }
+    }
+    if (requiredEnd && summary?.end) {
+        const requiredTs = parseIsoDateToUtcSafe(requiredEnd);
+        const actualTs = parseIsoDateToUtcSafe(summary.end);
+        if (Number.isFinite(requiredTs) && Number.isFinite(actualTs)) {
+            deviation.endLagDays = (requiredTs - actualTs) / ONE_DAY_MS;
+        }
+    }
+    return deviation;
+}
+
+function evaluateCacheCoverageForBypass(params, payload) {
+    const evaluation = {
+        shouldBypass: false,
+        reason: null,
+        summary: null,
+        deviation: null,
+    };
+    if (!params || typeof params !== 'object' || !payload) {
+        return evaluation;
+    }
+    const summary = payload.datasetSummary
+        || (payload.cachedData ? summariseDatasetRangeForDebug(payload.cachedData) : null);
+    evaluation.summary = summary;
+
+    const requiredStart = params.dataStartDate || params.startDate || null;
+    const requiredEnd = params.endDate || null;
+    const deviation = computeCoverageDeviation(requiredStart, requiredEnd, summary);
+    evaluation.deviation = deviation;
+
+    if (!payload.useCachedData) {
+        evaluation.shouldBypass = true;
+        evaluation.reason = payload.reason || 'cacheUnavailable';
+        return evaluation;
+    }
+
+    if (!summary) {
+        evaluation.shouldBypass = true;
+        evaluation.reason = payload.reason || 'missingSummary';
+        return evaluation;
+    }
+
+    const endLag = Number.isFinite(deviation.endLagDays) ? deviation.endLagDays : null;
+    if (endLag !== null && endLag > STRICT_END_LAG_TOLERANCE_DAYS) {
+        evaluation.shouldBypass = true;
+        evaluation.reason = 'endCoverageLag';
+        return evaluation;
+    }
+
+    const startLag = Number.isFinite(deviation.startLagDays) ? deviation.startLagDays : null;
+    if (startLag !== null && startLag > STRICT_START_LAG_TOLERANCE_DAYS) {
+        evaluation.shouldBypass = true;
+        evaluation.reason = 'startCoverageLag';
+    }
+
+    return evaluation;
+}
+
+function formatDeviationNotes(deviation) {
+    if (!deviation) return [];
+    const notes = [];
+    if (Number.isFinite(deviation.startLagDays) && deviation.startLagDays > 0) {
+        notes.push(`快取起點落後 ${deviation.startLagDays.toFixed(2)} 日`);
+    }
+    if (Number.isFinite(deviation.endLagDays) && deviation.endLagDays > 0) {
+        notes.push(`快取終點落後 ${deviation.endLagDays.toFixed(2)} 日`);
+    }
+    return notes;
+}
+
+function buildDeviationCopyText(evaluation) {
+    if (!evaluation) return null;
+    const lines = [];
+    if (evaluation.summary) {
+        lines.push(`快取資料：${evaluation.summary.start || '未知'} → ${evaluation.summary.end || '未知'}`);
+    }
+    if (evaluation.deviation) {
+        const startLag = Number.isFinite(evaluation.deviation.startLagDays)
+            ? evaluation.deviation.startLagDays.toFixed(2)
+            : '未知';
+        const endLag = Number.isFinite(evaluation.deviation.endLagDays)
+            ? evaluation.deviation.endLagDays.toFixed(2)
+            : '未知';
+        lines.push(`起點落後：${startLag} 日`);
+        lines.push(`終點落後：${endLag} 日`);
+    }
+    if (evaluation.reason) {
+        lines.push(`原因：${evaluation.reason}`);
+    }
+    return lines.join('\n');
+}
+
+function applyBatchCacheBypassDecision(params, evaluation) {
+    if (!evaluation || !evaluation.shouldBypass) {
+        batchCacheBypassMode = null;
+        return;
+    }
+    batchCacheBypassMode = {
+        force: true,
+        reason: evaluation.reason || 'forcedBypass',
+        timestamp: Date.now(),
+        deviation: evaluation.deviation || null,
+    };
+    const notes = formatDeviationNotes(evaluation.deviation);
+    recordBatchDeveloperLog('warning', {
+        label: '批量快取預檢',
+        status: '快取改為重新抓取',
+        context: 'batch-preflight',
+        reason: evaluation.reason || 'forcedBypass',
+        required: {
+            start: params?.dataStartDate || params?.startDate || null,
+            end: params?.endDate || null,
+        },
+        summary: evaluation.summary || null,
+        deviation: evaluation.deviation || null,
+        notes,
+        copyText: buildDeviationCopyText(evaluation),
+    });
 }
 
 function applyBatchWorkerResultToCache(preparedParams, workerResult, cachePayload, extra = {}) {
@@ -703,6 +884,13 @@ function applyBatchWorkerResultToCache(preparedParams, workerResult, cachePayloa
         fetchRange: workerResult?.dataDebug?.fetchRange || null,
         priceMode: settings.priceMode,
         market: settings.market,
+        copyText: [
+            'Worker 已重建快取',
+            `需求區間：${(cachePayload.required?.start) || '未知'} → ${(cachePayload.required?.end) || '未知'}`,
+            `抓取範圍：${(workerResult?.dataDebug?.fetchRange?.start) || settings.dataStartDate || '未知'} → ${(workerResult?.dataDebug?.fetchRange?.end) || settings.endDate || '未知'}`,
+            `資料範圍：${summary.start || '未知'} → ${summary.end || '未知'}`,
+            `資料筆數：${Number.isFinite(summary.valid) ? summary.valid : summary.length || 0}`,
+        ].join('\n'),
     });
 }
 
@@ -758,7 +946,7 @@ async function ensureBatchCachePrimed(params) {
     const state = { timestamp: Date.now(), initial: null, refreshed: null };
     if (!params || typeof params !== 'object') return state;
 
-    const initialPayload = resolveWorkerCachePayload(params, {});
+    const initialPayload = resolveWorkerCachePayload(params, appendBatchCacheOptions({ ignoreGlobalBypass: true }));
     state.initial = initialPayload;
     logBatchCacheDecision('preflight-initial', params, initialPayload);
 
@@ -809,7 +997,7 @@ async function ensureBatchCachePrimed(params) {
 
     try {
         await waitForDatasetCoverage(initialPayload.required?.start || null, initialPayload.required?.end || null);
-        const refreshedPayload = resolveWorkerCachePayload(params, {});
+        const refreshedPayload = resolveWorkerCachePayload(params, appendBatchCacheOptions({ ignoreGlobalBypass: true }));
         state.refreshed = refreshedPayload;
         logBatchCacheDecision('preflight-refreshed', params, refreshedPayload);
         recordBatchDeveloperLog(refreshedPayload.useCachedData ? 'success' : 'warning', {
@@ -1068,7 +1256,9 @@ async function startBatchOptimization() {
         console.log('[Batch Optimization] Already running, skipping...');
         return;
     }
-    
+
+    batchCacheBypassMode = null;
+
     // 重置停止標誌和開始時間
     isBatchOptimizationStopped = false;
     batchOptimizationStartTime = Date.now();
@@ -1118,6 +1308,17 @@ async function startBatchOptimization() {
     } catch (error) {
         console.warn('[Batch Optimization] Cache preflight error:', error);
         lastBatchPreflightDecision = lastBatchPreflightDecision || { timestamp: Date.now(), initial: null, refreshed: null };
+    }
+
+    try {
+        const targetParams = preparedBaseParams || {};
+        const preflightPayload = lastBatchPreflightDecision?.refreshed
+            || lastBatchPreflightDecision?.initial
+            || null;
+        const evaluation = evaluateCacheCoverageForBypass(targetParams, preflightPayload);
+        applyBatchCacheBypassDecision(targetParams, evaluation);
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to evaluate cache bypass decision:', error);
     }
 
     if (!Array.isArray(cachedStockData) || cachedStockData.length < 20) {
@@ -2078,7 +2279,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 const preparedParams = enrichParamsWithLookback(params);
-                const cachePayload = resolveWorkerCachePayload(preparedParams, options);
+                const cachePayload = resolveWorkerCachePayload(preparedParams, appendBatchCacheOptions(options));
                 logBatchCacheDecision('executeBacktestForCombination', preparedParams, cachePayload);
                 if (!cachePayload.useCachedData) {
                     console.info('[Batch Optimization] executeBacktestForCombination will bypass cached data:', cachePayload.reason);
@@ -2387,7 +2588,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
 
         const preparedParams = enrichParamsWithLookback(params);
-        const cachePayload = resolveWorkerCachePayload(preparedParams, options);
+        const cachePayload = resolveWorkerCachePayload(preparedParams, appendBatchCacheOptions(options));
         logBatchCacheDecision('optimizeSingleStrategyParameter', preparedParams, cachePayload);
         if (!cachePayload.useCachedData) {
             console.info('[Batch Optimization] optimizeSingleStrategyParameter will bypass cached data:', cachePayload.reason);
@@ -2536,7 +2737,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         
         const preparedParams = enrichParamsWithLookback(params);
 
-        const cachePayload = resolveWorkerCachePayload(preparedParams, options);
+        const cachePayload = resolveWorkerCachePayload(preparedParams, appendBatchCacheOptions(options));
         if (!cachePayload.useCachedData) {
             console.info('[Batch Optimization] optimizeSingleRiskParameter will bypass cached data:', cachePayload.reason);
         }
@@ -2639,28 +2840,38 @@ function recordBatchRunSummary() {
     }
 
     const notes = [];
+    const copyLines = [];
+    copyLines.push(`批量優化完成於 ${formatDebugTimestamp(summary.timestamp)}`);
     if (summary.best) {
         notes.push(`最佳策略：${summary.best.buyStrategy} / ${summary.best.sellStrategy}`);
         if (Number.isFinite(summary.best.metricValue)) {
             notes.push(`最佳 ${summary.best.metricKey}：${summary.best.metricValue.toFixed(4)}`);
+            copyLines.push(`最佳 ${summary.best.metricKey}：${summary.best.metricValue.toFixed(4)}`);
         }
         if (Number.isFinite(summary.best.totalReturn)) {
             notes.push(`總報酬：${(summary.best.totalReturn * 100).toFixed(2)}%`);
+            copyLines.push(`總報酬：${(summary.best.totalReturn * 100).toFixed(2)}%`);
         }
+        copyLines.push(`策略組合：${summary.best.buyStrategy} / ${summary.best.sellStrategy}`);
     } else {
         notes.push('本輪未產生有效結果');
+        copyLines.push('本輪未產生有效結果');
     }
     if (summary.datasetSummary?.hasData) {
         notes.push(`資料範圍：${summary.datasetSummary.start || '未知'} → ${summary.datasetSummary.end || '未知'}（${summary.datasetSummary.valid || summary.datasetSummary.length || 0} 筆）`);
+        copyLines.push(`資料範圍：${summary.datasetSummary.start || '未知'} → ${summary.datasetSummary.end || '未知'}`);
     }
     if (summary.preflight?.initialReason && summary.preflight.initialReason !== 'globalCacheReusable') {
         notes.push(`啟動前快取：${summary.preflight.initialReason}`);
+        copyLines.push(`啟動前快取：${summary.preflight.initialReason}`);
     }
     if (summary.preflight?.refreshedReason && summary.preflight.refreshedReason !== summary.preflight.initialReason) {
         notes.push(`重檢快取：${summary.preflight.refreshedReason}`);
+        copyLines.push(`重檢快取：${summary.preflight.refreshedReason}`);
     }
 
     recordBatchDeveloperLog('info', {
+        label: '批量優化完成',
         status: '批量優化完成',
         context: 'batch-run',
         reason: summary.preflight?.refreshedReason || summary.preflight?.initialReason || 'completed',
@@ -2668,11 +2879,13 @@ function recordBatchRunSummary() {
         notes,
         priceMode: lastFetchSettings?.priceMode || null,
         market: lastFetchSettings?.market || lastFetchSettings?.marketType || null,
+        copyText: copyLines.join('\n'),
     });
 
     if (batchOptimizationRunHistory.length >= 2) {
         const comparison = buildBatchRunComparison(batchOptimizationRunHistory[0], batchOptimizationRunHistory[1]);
         recordBatchDeveloperLog('info', {
+            label: '批量優化比較',
             status: '批量優化比較',
             context: 'batch-run-compare',
             reason: 'comparison',

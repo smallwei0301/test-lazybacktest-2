@@ -1,5 +1,14 @@
 
 
+
+## 2025-10-30 — Patch LB-BATCH-CACHE-20251030A
+- **Issue recap**: 滾動測試或異動區間後批量優化仍可能沿用落後數日的快取資料，使得最佳參數與首次回測不一致，同時開發者模式缺少可複製的批量優化紀錄。
+- **Fix**:
+  - `js/batch-optimization.js` 新增快取覆寫評估與強制 bypass 機制，只要預檢發現起訖落後超過 3 日就改由 Worker 重新抓資料，並在開發者日誌記錄原因與差異。
+  - 補強批量開發者日誌輸出，包含重建後的資料範圍、快取決策、跨次比較摘要，以及一鍵複製文字以利問題回報。
+  - `js/backtest.js` 新增「批量優化除錯紀錄」面板與可複製按鈕，支援專用日誌管道避免與今日建議混淆。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-24 — Patch LB-BATCH-CACHE-20251024A
 - **Issue recap**: 滾動測試啟動後僅裁切視窗資料傳給 Worker，但批量優化仍沿用舊的全域快取或 Session 快取，導致最佳參數落在舊資料範圍；重新整理頁面後仍可能沿用殘缺快取。
 - **Fix**: `js/batch-optimization.js` 在快取檢查判定需要重新抓取時，於 Worker 回傳結果後同步更新 `cachedStockData`、`lastFetchSettings` 與 Session 快取條目，並在開發者模式卡片記錄快取決策與資料範圍。
