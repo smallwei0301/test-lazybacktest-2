@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-YAHOO-INDEX-20260715A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -1110,6 +1111,12 @@ const DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
 const TW_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const US_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 3;
 const DEFAULT_DATA_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9.\-]{0,14}$/;
+
+function isYahooIndexSymbol(symbol) {
+    if (typeof symbol !== 'string') return false;
+    return YAHOO_INDEX_PATTERN.test(symbol.trim().toUpperCase());
+}
 
 const SESSION_DATA_CACHE_VERSION = 'LB-SUPERSET-CACHE-20250723A';
 const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
@@ -4627,7 +4634,11 @@ function runBacktestInternal() {
         params.dataStartDate = dataStartDate;
         params.lookbackDays = lookbackDays;
 
-        const marketKey = (params.marketType || params.market || currentMarket || 'TWSE').toUpperCase();
+        const symbolType = params.symbolType || (isYahooIndexSymbol(params.stockNo) ? 'yahooIndex' : 'equity');
+        const marketSource = params.marketType || params.market || currentMarket || 'TWSE';
+        const marketKey = symbolType === 'yahooIndex'
+            ? 'US'
+            : String(marketSource || 'TWSE').toUpperCase();
         const priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
         const curSettings={
             stockNo:params.stockNo,
@@ -4640,6 +4651,7 @@ function runBacktestInternal() {
             splitAdjustment: params.splitAdjustment,
             priceMode: priceMode,
             lookbackDays,
+            symbolType,
         };
         const cacheKey = buildCacheKey(curSettings);
         hydrateDatasetFromStorage(cacheKey, curSettings);
@@ -8801,9 +8813,17 @@ function setDefaultFees(stockNo) {
     if (!buyFeeInput || !sellFeeInput) return;
 
     const stockCode = typeof stockNo === 'string' ? stockNo.trim().toUpperCase() : '';
+    const isYahooIndex = isYahooIndexSymbol(stockCode);
     const isETF = stockCode.startsWith('00');
     const isTAIEX = stockCode === 'TAIEX';
     const isUSMarket = currentMarket === 'US';
+
+    if (isYahooIndex) {
+        buyFeeInput.value = '0.0000';
+        sellFeeInput.value = '0.0000';
+        console.log(`[Fees] Yahoo 指數預設費率 for ${stockCode || '(未輸入)'}`);
+        return;
+    }
 
     if (isUSMarket) {
         buyFeeInput.value = '0.0000';
@@ -10307,6 +10327,10 @@ async function resolveStockName(fetcher, stockCode, market) {
 async function fetchStockName(stockCode, options = {}) {
     if (!stockCode || stockCode === 'TAIEX') return;
     const normalizedCode = stockCode.trim().toUpperCase();
+    if (isYahooIndexSymbol(normalizedCode)) {
+        showStockName(`Yahoo 指數（${normalizedCode}）`, 'info');
+        return;
+    }
     const enforceGate = shouldEnforceNumericLookupGate(normalizedCode);
     if (!options.force && enforceGate) {
         const leadingDigits = getLeadingDigitCount(normalizedCode);

@@ -13,6 +13,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-YAHOO-INDEX-20260715A
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -421,6 +422,12 @@ const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9.\-]{0,14}$/;
+
+function isYahooIndexSymbol(symbol) {
+  if (typeof symbol !== "string") return false;
+  return YAHOO_INDEX_PATTERN.test(symbol.trim().toUpperCase());
+}
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -4336,7 +4343,12 @@ async function fetchCurrentMonthGapPatch({
       end: monthEndISO,
     });
 
-    const candidateSources = [null];
+    const candidateSources = [];
+    const skipAutoSource =
+      primaryForceSource === "yahoo" && !fallbackForceSource;
+    if (!skipAutoSource) {
+      candidateSources.push(null);
+    }
     if (primaryForceSource) candidateSources.push(primaryForceSource);
     if (
       fallbackForceSource &&
@@ -4904,8 +4916,11 @@ async function fetchStockData(
   }
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
-  const adjusted = Boolean(options.adjusted || options.adjustedPrice);
-  const split = Boolean(options.splitAdjustment);
+  const isIndexSymbol = isYahooIndexSymbol(stockNo);
+  const adjusted = isIndexSymbol
+    ? false
+    : Boolean(options.adjusted || options.adjustedPrice);
+  const split = adjusted && Boolean(options.splitAdjustment);
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -4919,9 +4934,16 @@ async function fetchStockData(
   if (startDateObj > endDateObj) {
     throw new Error("開始日期需早於結束日期");
   }
-  const marketKey = getMarketKey(marketType);
-  const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
-  const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
+  let marketKey = getMarketKey(marketType);
+  if (isIndexSymbol) {
+    marketKey = "US";
+  }
+  const primaryForceSource = isIndexSymbol
+    ? "yahoo"
+    : getPrimaryForceSource(marketKey, adjusted);
+  const fallbackForceSource = isIndexSymbol
+    ? null
+    : getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(
     stockNo,
     startDate,
@@ -4937,6 +4959,7 @@ async function fetchStockData(
     marketKey,
     adjusted,
     split,
+    symbolType: isIndexSymbol ? "yahooIndex" : "equity",
     requested: { start: startDate, end: endDate },
     effectiveStartDate: optionEffectiveStart || null,
     lookbackDays: optionLookbackDays,
@@ -5398,17 +5421,23 @@ async function fetchStockData(
           const rangeKey = `${missingRange.start}-${missingRange.end}`;
           const shouldForceRange =
             forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+          const primaryYahooOnly =
+            primaryForceSource === "yahoo" && !fallbackForceSource;
           const candidateSources = [];
-          if (shouldForceRange) {
+          if (primaryYahooOnly) {
             if (primaryForceSource) candidateSources.push(primaryForceSource);
-            if (
-              fallbackForceSource &&
-              fallbackForceSource !== primaryForceSource
-            ) {
-              candidateSources.push(fallbackForceSource);
+          } else {
+            if (shouldForceRange) {
+              if (primaryForceSource) candidateSources.push(primaryForceSource);
+              if (
+                fallbackForceSource &&
+                fallbackForceSource !== primaryForceSource
+              ) {
+                candidateSources.push(fallbackForceSource);
+              }
             }
+            candidateSources.push(null);
           }
-          candidateSources.push(null);
 
           let payload = null;
           let lastError = null;
