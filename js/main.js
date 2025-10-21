@@ -2769,6 +2769,167 @@ function initTabs() {
     console.log("[Main] Tab initialization - handled by HTML event listeners");
 }
 
+// --- Stage4 Local Refinement Panel (LB-STAGE4-20250930A) ---
+function initStage4RefinementPanel() {
+    const container = document.getElementById('stage4-refine');
+    if (!container) return;
+
+    const toggle = container.querySelector('[data-stage4-toggle]');
+    const body = document.getElementById('stage4-body');
+    const methodSelect = document.getElementById('stage4-method');
+    const runButton = document.getElementById('stage4-run');
+    const progressEl = document.getElementById('stage4-progress');
+    const advanced = document.getElementById('stage4-advanced');
+    const spsaPanel = container.querySelector('[data-stage4-params="spsa"]');
+    const cemPanel = container.querySelector('[data-stage4-params="cem"]');
+
+    if (!body || !methodSelect || !runButton) return;
+
+    const collapse = (expand) => {
+        if (!body) return;
+        const shouldExpand = Boolean(expand);
+        body.classList.toggle('hidden', !shouldExpand);
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
+            const icon = toggle.querySelector('[data-stage4-toggle-icon]');
+            if (icon) icon.textContent = shouldExpand ? '−' : '+';
+        }
+    };
+
+    if (toggle) {
+        toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            const expanded = toggle.getAttribute('aria-expanded') === 'true';
+            collapse(!expanded);
+        });
+    }
+
+    const showMethodFields = (method) => {
+        const normalized = method === 'cem' ? 'cem' : 'spsa';
+        if (spsaPanel) spsaPanel.classList.toggle('hidden', normalized !== 'spsa');
+        if (cemPanel) cemPanel.classList.toggle('hidden', normalized !== 'cem');
+    };
+
+    const readNumber = (input, fallback) => {
+        if (!input) return fallback;
+        const value = parseFloat(input.value);
+        return Number.isFinite(value) ? value : fallback;
+    };
+
+    const getMethodOptions = (method) => {
+        if (method === 'cem') {
+            const opts = {
+                iters: readNumber(document.getElementById('stage4-cem-iters'), 10),
+                popSize: readNumber(document.getElementById('stage4-cem-pop'), 40),
+                eliteRatio: readNumber(document.getElementById('stage4-cem-elite'), 0.2),
+                initSigma: readNumber(document.getElementById('stage4-cem-sigma'), 0.15)
+            };
+            return opts;
+        }
+        const opts = {
+            steps: readNumber(document.getElementById('stage4-spsa-steps'), 30),
+            a0: readNumber(document.getElementById('stage4-spsa-a0'), 0.2),
+            c0: readNumber(document.getElementById('stage4-spsa-c0'), 0.1),
+            alpha: readNumber(document.getElementById('stage4-spsa-alpha'), 0.602),
+            gamma: readNumber(document.getElementById('stage4-spsa-gamma'), 0.101)
+        };
+        return opts;
+    };
+
+    const getCurrentBest = () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.getCurrentBestResult !== 'function') {
+            return null;
+        }
+        return window.batchOptimization.getCurrentBestResult();
+    };
+
+    const ensureContext = (currentBest) => {
+        if (!window.batchOptimization || typeof window.batchOptimization.buildStage4Context !== 'function') {
+            throw new Error('Stage4: 無法建立微調環境');
+        }
+        return window.batchOptimization.buildStage4Context(currentBest);
+    };
+
+    const resetProgress = () => {
+        if (progressEl) {
+            progressEl.textContent = '';
+            progressEl.classList.add('hidden');
+        }
+    };
+
+    const updateProgress = (payload) => {
+        if (!progressEl) return;
+        const { stage4, step, iter, bestScore } = payload || {};
+        const methodLabel = stage4 === 'cem' ? 'CEM' : 'SPSA';
+        const progressLabel = typeof step === 'number'
+            ? `第 ${step} 步`
+            : (typeof iter === 'number' ? `第 ${iter} 回合` : '進行中');
+        const scoreText = Number.isFinite(bestScore) ? bestScore.toFixed(4) : '—';
+        progressEl.textContent = `${methodLabel} ${progressLabel} · 最佳分數 ${scoreText}`;
+        progressEl.classList.remove('hidden');
+    };
+
+    const setRunningState = (running) => {
+        runButton.disabled = running;
+        if (running) {
+            runButton.dataset.originalLabel = runButton.dataset.originalLabel || runButton.textContent;
+            runButton.textContent = '執行中…';
+        } else {
+            runButton.textContent = runButton.dataset.originalLabel || '執行微調';
+        }
+        if (advanced) {
+            advanced.classList.toggle('pointer-events-none', running);
+            advanced.classList.toggle('opacity-60', running);
+        }
+    };
+
+    methodSelect.addEventListener('change', () => {
+        showMethodFields(methodSelect.value);
+    });
+
+    runButton.addEventListener('click', async () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.runStage4 !== 'function') {
+            showError('第四階段微調模組未就緒');
+            return;
+        }
+        const method = methodSelect.value === 'cem' ? 'cem' : 'spsa';
+        const currentBest = getCurrentBest();
+        if (!currentBest) {
+            showError('請先完成批量優化或交叉優化，取得最佳結果後再微調。');
+            return;
+        }
+        try {
+            setRunningState(true);
+            if (progressEl) {
+                progressEl.textContent = '初始化微調…';
+                progressEl.classList.remove('hidden');
+            }
+            const context = ensureContext(currentBest);
+            context.methodOptions = getMethodOptions(method);
+            context.uiProgress = updateProgress;
+            const row = await window.batchOptimization.runStage4(method, context);
+            const action = row && row.stage4Action ? row.stage4Action : 'inserted';
+            if (action === 'replaced') {
+                showSuccess('第四階段完成：已覆蓋最佳結果');
+            } else if (action === 'inserted') {
+                showSuccess('第四階段完成：已新增最佳結果');
+            } else {
+                showInfo('第四階段完成：維持原有最佳結果');
+            }
+        } catch (error) {
+            console.error('[Stage4] Refinement error:', error);
+            showError(error?.message || '第四階段微調失敗');
+        } finally {
+            setRunningState(false);
+            resetProgress();
+        }
+    });
+
+    collapse(false);
+    showMethodFields(methodSelect.value);
+    resetProgress();
+}
+
 // --- 新增：初始化批量優化功能 ---
 function initBatchOptimizationFeature() {
     // 等待DOM加載完成後初始化
@@ -2828,7 +2989,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化頁籤功能
         initTabs();
-        
+
+        // 初始化第四階段微調面板
+        initStage4RefinementPanel();
+
         // 延遲初始化批量優化功能，確保所有依賴都已載入
         setTimeout(() => {
             initBatchOptimizationFeature();

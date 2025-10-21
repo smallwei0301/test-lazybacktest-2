@@ -1923,6 +1923,75 @@
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <section id="stage4-refine" class="mt-6">
+                                                    <div class="card border border-border" style="border-color: var(--border);">
+                                                        <button type="button" data-stage4-toggle aria-expanded="false" class="w-full flex items-center justify-between px-4 py-3 text-left">
+                                                            <div>
+                                                                <span class="font-semibold text-base" style="color: var(--foreground);">第四階段：局部微調</span>
+                                                                <div class="text-xs mt-1" style="color: var(--muted-foreground);">選擇演算法後按下「執行微調」即可在現有最佳參數附近探索</div>
+                                                            </div>
+                                                            <span data-stage4-toggle-icon class="text-xl" style="color: var(--muted-foreground);">+</span>
+                                                        </button>
+                                                        <div id="stage4-body" class="hidden border-t border-border px-4 py-4 space-y-4" style="border-color: var(--border);">
+                                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                                                                <div>
+                                                                    <label for="stage4-method" class="block text-xs font-medium mb-1" style="color: var(--muted-foreground);">微調方法</label>
+                                                                    <select id="stage4-method" class="w-full px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                        <option value="spsa">SPSA（同時估計隨機近似）</option>
+                                                                        <option value="cem">CEM（交叉熵方法）</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div class="md:col-span-2 flex md:justify-end">
+                                                                    <button id="stage4-run" type="button" class="px-4 py-2 btn-primary text-sm">執行微調</button>
+                                                                </div>
+                                                            </div>
+                                                            <details id="stage4-advanced" class="rounded border border-dashed border-border px-4 py-3 text-sm space-y-3" style="border-color: var(--border);">
+                                                                <summary class="cursor-pointer font-medium" style="color: var(--foreground);">進階參數</summary>
+                                                                <div data-stage4-params="spsa" class="grid grid-cols-1 md:grid-cols-5 gap-3">
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        步數
+                                                                        <input id="stage4-spsa-steps" type="number" min="1" value="30" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        a₀
+                                                                        <input id="stage4-spsa-a0" type="number" step="0.01" value="0.2" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        c₀
+                                                                        <input id="stage4-spsa-c0" type="number" step="0.01" value="0.1" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        α
+                                                                        <input id="stage4-spsa-alpha" type="number" step="0.001" value="0.602" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        γ
+                                                                        <input id="stage4-spsa-gamma" type="number" step="0.001" value="0.101" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                </div>
+                                                                <div data-stage4-params="cem" class="grid grid-cols-1 md:grid-cols-4 gap-3 hidden">
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        回合數
+                                                                        <input id="stage4-cem-iters" type="number" min="1" value="10" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        母體大小
+                                                                        <input id="stage4-cem-pop" type="number" min="4" value="40" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        精英比例
+                                                                        <input id="stage4-cem-elite" type="number" step="0.05" min="0.05" max="0.9" value="0.2" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                    <label class="flex flex-col text-xs" style="color: var(--muted-foreground);">
+                                                                        初始σ
+                                                                        <input id="stage4-cem-sigma" type="number" step="0.01" value="0.15" class="mt-1 px-3 py-2 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);" />
+                                                                    </label>
+                                                                </div>
+                                                            </details>
+                                                            <p id="stage4-progress" class="hidden text-xs" style="color: var(--muted-foreground);"></p>
+                                                        </div>
+                                                    </div>
+                                                </section>
                                             </div>
                                         </div>
                                     </div>
@@ -2536,7 +2605,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
-    <script src="js/batch-optimization.js"></script>
+    <script type="module" src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
     <script>
