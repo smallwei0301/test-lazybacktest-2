@@ -1360,3 +1360,11 @@ NODE`
   - 同步擴充除錯摘要與比較輸出，新增資料覆蓋檢查與異常清單，讓開發者模式卡片能直接顯示各次批量優化使用的資料範圍與不足原因，便於後續追蹤。
 - **Diagnostics**: 先以新結束日期執行一般回測，再切回原始日期進行兩次批量優化；確認除錯卡片顯示第一次沿用快取、第二次出現覆蓋警示並改為重抓資料，兩次比較文本的「資料覆蓋檢查」區塊應相符且最佳解一致。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-23 — Patch LB-BATCH-OPT-20260718E
+- **Issue recap**: 切換結束日期後再回到原設定，批量優化仍可能沿用含未來日期的快取，導致比較紀錄顯示需求範圍止於 2024-02-19 卻實際載入到 2025-10-20，最終最佳參數與初次結果不一致。
+- **Fix**:
+  - `js/batch-optimization.js` 導入 `sliceDatasetRowsByRange` 與 `buildCachedDatasetUsage`，在批量回測、單參數優化、風險優化與交叉回測等流程皆以需求範圍裁切快取資料，必要時回退至重新抓取，並記錄裁切前後筆數與日期。
+  - `cached-data-evaluation` 除錯事件新增裁切摘要與移除統計，並在裁切發生時輸出 `cached-data-slice-applied`，方便在開發者卡片比對兩次批量優化實際使用的資料視窗。
+- **Diagnostics**: 依重現步驟（結束日 2024-02-19 → 2025-10-20 → 2025-02-19，再跑批量）驗證第二次批量除錯記錄中的 `sliceSummary.endDate` 為 2025-02-19，與需求範圍一致，且最佳參數回到首次結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

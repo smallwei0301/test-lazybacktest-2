@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.2.7 ---
-// Patch Tag: LB-BATCH-OPT-20260718D
+// Patch Tag: LB-BATCH-OPT-20260718E
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718D';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718E';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -215,6 +215,11 @@ function restoreLastFetchSettingsSnapshot(snapshot) {
     }
 }
 
+function extractRowDateValue(row) {
+    if (!row || typeof row !== 'object') return null;
+    return row.date || row.Date || row.tradeDate || row.trade_date || row.timestamp || row.time || row.t || null;
+}
+
 function summarizeDatasetRange(rows) {
     if (!Array.isArray(rows) || rows.length === 0) {
         return { length: 0, startDate: null, endDate: null };
@@ -223,15 +228,10 @@ function summarizeDatasetRange(rows) {
     const first = rows[0] || {};
     const last = rows[rows.length - 1] || {};
 
-    const extractDate = (row) => {
-        if (!row || typeof row !== 'object') return null;
-        return row.date || row.Date || row.tradeDate || row.trade_date || row.timestamp || row.time || row.t || null;
-    };
-
     return {
         length: rows.length,
-        startDate: extractDate(first),
-        endDate: extractDate(last)
+        startDate: extractRowDateValue(first),
+        endDate: extractRowDateValue(last)
     };
 }
 
@@ -292,6 +292,104 @@ function normaliseDateLikeToMs(value) {
     }
 
     return null;
+}
+
+function sliceDatasetRowsByRange(rows, requiredRange) {
+    const tolerance = DATASET_COVERAGE_TOLERANCE_MS;
+    const startBound = normaliseDateLikeToMs(requiredRange?.dataStartDate
+        || requiredRange?.effectiveStartDate
+        || requiredRange?.startDate
+        || null);
+    const endBound = normaliseDateLikeToMs(requiredRange?.endDate || null);
+
+    const summaryBefore = summarizeDatasetRange(rows);
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return {
+            rows: [],
+            summaryBefore,
+            summaryAfter: { length: 0, startDate: null, endDate: null },
+            removedCount: 0,
+            removedBreakdown: { beforeStart: 0, afterEnd: 0, undetermined: 0 },
+            bounds: { startTs: startBound, endTs: endBound }
+        };
+    }
+
+    const filtered = [];
+    const removedBreakdown = { beforeStart: 0, afterEnd: 0, undetermined: 0 };
+
+    rows.forEach((row) => {
+        const rowDateValue = extractRowDateValue(row);
+        const rowTs = normaliseDateLikeToMs(rowDateValue);
+
+        if (rowTs === null) {
+            removedBreakdown.undetermined += 1;
+            filtered.push(row);
+            return;
+        }
+
+        if (startBound !== null && (rowTs + tolerance) < startBound) {
+            removedBreakdown.beforeStart += 1;
+            return;
+        }
+
+        if (endBound !== null && (rowTs - tolerance) > endBound) {
+            removedBreakdown.afterEnd += 1;
+            return;
+        }
+
+        filtered.push(row);
+    });
+
+    return {
+        rows: filtered,
+        summaryBefore,
+        summaryAfter: summarizeDatasetRange(filtered),
+        removedCount: rows.length - filtered.length,
+        removedBreakdown,
+        bounds: { startTs: startBound, endTs: endBound }
+    };
+}
+
+function buildCachedDatasetUsage(rows, requiredRange) {
+    const summary = summarizeDatasetRange(rows);
+    const hasDataset = Array.isArray(rows) && rows.length > 0;
+
+    let evaluation = {
+        coverageSatisfied: hasDataset,
+        reason: hasDataset ? 'ok' : 'dataset-empty',
+        datasetStartTs: normaliseDateLikeToMs(summary.startDate),
+        datasetEndTs: normaliseDateLikeToMs(summary.endDate),
+        requiredStartTs: normaliseDateLikeToMs(requiredRange?.dataStartDate
+            || requiredRange?.effectiveStartDate
+            || requiredRange?.startDate
+            || null),
+        requiredEndTs: normaliseDateLikeToMs(requiredRange?.endDate || null)
+    };
+
+    if (hasDataset) {
+        evaluation = evaluateDatasetCoverage(summary, requiredRange);
+    }
+
+    let sliceInfo = null;
+    let datasetForWorker = null;
+    let useCachedData = evaluation.coverageSatisfied && hasDataset;
+
+    if (useCachedData) {
+        sliceInfo = sliceDatasetRowsByRange(rows, requiredRange);
+        datasetForWorker = sliceInfo.rows;
+        if (!Array.isArray(datasetForWorker) || datasetForWorker.length === 0) {
+            useCachedData = false;
+        }
+    }
+
+    return {
+        summary,
+        evaluation,
+        sliceInfo,
+        datasetForWorker,
+        useCachedData
+    };
 }
 
 function summarizeRequiredRangeFromParams(params = {}) {
@@ -2885,35 +2983,39 @@ async function executeBacktestForCombination(combination, options = {}) {
             const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                 ? options.cachedDataOverride
                 : null;
-            let cachedPayload = overrideData
+            const cachedPayload = overrideData
                 || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
             const preparedParams = enrichParamsWithLookback(params);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-            const cachedSummary = summarizeDatasetRange(cachedPayload);
-            let coverageEvaluation = {
-                coverageSatisfied: Boolean(Array.isArray(cachedPayload) && cachedPayload.length > 0),
-                reason: Array.isArray(cachedPayload) && cachedPayload.length > 0 ? 'ok' : 'dataset-empty',
-                datasetStartTs: normaliseDateLikeToMs(cachedSummary.startDate),
-                datasetEndTs: normaliseDateLikeToMs(cachedSummary.endDate),
-                requiredStartTs: normaliseDateLikeToMs(requiredRange.dataStartDate || requiredRange.effectiveStartDate || requiredRange.startDate),
-                requiredEndTs: normaliseDateLikeToMs(requiredRange.endDate)
-            };
+            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+            const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
-            let useCachedData = coverageEvaluation.coverageSatisfied;
-            if (Array.isArray(cachedPayload) && cachedPayload.length > 0) {
-                coverageEvaluation = evaluateDatasetCoverage(cachedSummary, requiredRange);
-                useCachedData = coverageEvaluation.coverageSatisfied;
+            if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+                recordBatchDebug('cached-data-slice-applied', {
+                    combination: summarizeCombination(combination),
+                    source: cachedSource,
+                    requiredRange,
+                    summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                    summaryAfter: sliceSummary,
+                    removedCount: cachedUsage.sliceInfo.removedCount,
+                    removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                    bounds: cachedUsage.sliceInfo.bounds
+                }, { phase: 'worker', console: false });
             }
 
             recordBatchDebug('cached-data-evaluation', {
                 combination: summarizeCombination(combination),
                 source: cachedSource,
-                summary: cachedSummary,
+                summary: cachedUsage.summary,
                 requiredRange,
                 coverage: coverageEvaluation,
-                datasetLength: cachedSummary.length,
+                datasetLength: cachedUsage.summary.length,
+                sliceSummary,
+                sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+                sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
                 useCachedData,
                 overrideProvided: Boolean(overrideData)
             }, { phase: 'worker', console: false });
@@ -2922,25 +3024,26 @@ async function executeBacktestForCombination(combination, options = {}) {
                 recordBatchDebug('cached-data-coverage-mismatch', {
                     combination: summarizeCombination(combination),
                     source: cachedSource,
-                    summary: cachedSummary,
+                    summary: cachedUsage.summary,
                     requiredRange,
                     coverage: coverageEvaluation
                 }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
-                cachedPayload = null;
             }
 
-            if (!useCachedData) {
-                cachedPayload = null;
-            }
+            const cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
 
-            const cachedDataForWorker = useCachedData ? cachedPayload : null;
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
 
             recordBatchDebug('worker-run-start', {
                 combination: summarizeCombination(combination),
                 useOverride: Boolean(baseParamsOverride),
                 useCachedData,
                 cachedSource,
-                datasetLength: cachedSummary.length
+                datasetLength: cachedUsage.summary.length,
+                sliceLength: sliceSummary ? sliceSummary.length : null
             }, { phase: 'worker', console: false });
 
             // 創建臨時worker執行回測
@@ -3234,7 +3337,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             : null;
         const cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -3332,6 +3435,59 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+            recordBatchDebug('cached-data-slice-applied', {
+                context: 'optimize-single-param',
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                requiredRange,
+                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                summaryAfter: sliceSummary,
+                removedCount: cachedUsage.sliceInfo.removedCount,
+                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                bounds: cachedUsage.sliceInfo.bounds
+            }, { phase: 'optimize', console: false });
+        }
+
+        recordBatchDebug('cached-data-evaluation', {
+            context: 'optimize-single-param',
+            strategyType,
+            optimizeTarget: optimizeTarget.name,
+            source: cachedSource,
+            summary: cachedUsage.summary,
+            requiredRange,
+            coverage: coverageEvaluation,
+            datasetLength: cachedUsage.summary.length,
+            sliceSummary,
+            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+            useCachedData,
+            overrideProvided: Boolean(overrideData)
+        }, { phase: 'optimize', console: false });
+
+        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+            recordBatchDebug('cached-data-coverage-mismatch', {
+                context: 'optimize-single-param',
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                summary: cachedUsage.summary,
+                requiredRange,
+                coverage: coverageEvaluation
+            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+            useCachedData = false;
+            cachedDataForWorker = null;
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -3341,7 +3497,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedDataForWorker
         });
         
         // 設定超時
@@ -3421,7 +3577,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             : null;
         const cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -3469,6 +3625,56 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
+        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+            recordBatchDebug('cached-data-slice-applied', {
+                context: 'optimize-risk-param',
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                requiredRange,
+                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                summaryAfter: sliceSummary,
+                removedCount: cachedUsage.sliceInfo.removedCount,
+                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                bounds: cachedUsage.sliceInfo.bounds
+            }, { phase: 'optimize', console: false });
+        }
+
+        recordBatchDebug('cached-data-evaluation', {
+            context: 'optimize-risk-param',
+            optimizeTarget: optimizeTarget.name,
+            source: cachedSource,
+            summary: cachedUsage.summary,
+            requiredRange,
+            coverage: coverageEvaluation,
+            datasetLength: cachedUsage.summary.length,
+            sliceSummary,
+            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+            useCachedData,
+            overrideProvided: Boolean(overrideData)
+        }, { phase: 'optimize', console: false });
+
+        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+            recordBatchDebug('cached-data-coverage-mismatch', {
+                context: 'optimize-risk-param',
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                summary: cachedUsage.summary,
+                requiredRange,
+                coverage: coverageEvaluation
+            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+            useCachedData = false;
+            cachedDataForWorker = null;
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -3478,7 +3684,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedDataForWorker
         });
     });
 }
@@ -6837,11 +7043,24 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedUsage = buildCachedDatasetUsage(
+                Array.isArray(cachedStockData) ? cachedStockData : null,
+                requiredRange
+            );
+            let { useCachedData } = cachedUsage;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
+
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
+                useCachedData,
+                cachedData: cachedDataForWorker
             });
             
         } catch (error) {
