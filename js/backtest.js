@@ -8920,6 +8920,9 @@ function collectStrategyMetricSnapshot() {
         ? window.rollingTest.state
         : null;
     const rollingAggregate = rollingState?.aggregate || null;
+    const rollingScoreRaw = normaliseMetricNumber(rollingAggregate?.totalScore);
+    const rollingScorePoints = rollingScoreRaw === null ? null : rollingScoreRaw * 100;
+    const rollingPassRate = normaliseMetricNumber(rollingAggregate?.passRate);
     const trendSummary = trendAnalysisState?.summary || null;
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
@@ -8945,8 +8948,8 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
-        rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
+        rollingScore: rollingScorePoints,
+        rollingPassRate,
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
             ? rollingState.aggregateGeneratedAt
