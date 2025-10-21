@@ -694,7 +694,7 @@
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div>
-                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票代碼 (目前無提供指數)</label>
+                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票與指數代碼 (非即時資訊)</label>
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <div class="flex-1 min-w-[160px] sm:min-w-[200px]">
                                                     <input
@@ -716,6 +716,7 @@
                                                         <option value="TWSE">上市</option>
                                                         <option value="TPEX">上櫃</option>
                                                         <option value="US">美股</option>
+                                                        <option value="INDEX">指數</option>
                                                     </select>
                                                 </div>
                                             </div>
@@ -781,14 +782,26 @@
                                         </div>
                                         <div>
                                             <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金-固定金額買入 (元)</label>
-                                            <input 
-                                                type="number" 
-                                                id="initialCapital" 
-                                                value="100000" 
-                                                step="1000" 
+                                            <input
+                                                type="number"
+                                                id="initialCapital"
+                                                value="100000"
+                                                step="1000"
                                                 class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                 style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                             />
+                                        </div>
+                                        <!-- Patch Tag: LB-INDEX-UI-20250727A -->
+                                        <div class="mt-2 flex justify-end">
+                                            <button
+                                                id="quickRunBacktestBtn"
+                                                type="button"
+                                                class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-xs font-medium rounded-md shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 hover:opacity-90"
+                                                style="background-color: var(--primary);"
+                                            >
+                                                <i data-lucide="zap" class="lucide w-4 h-4"></i>
+                                                立刻回測
+                                            </button>
                                         </div>
                                     </div>
                                 </div>

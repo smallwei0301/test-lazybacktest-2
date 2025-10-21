@@ -1,4 +1,19 @@
 
+## 2026-07-27 — Patch LB-INDEX-UI-20250727A
+- **Scope**: 指數市場輸入提示與快速回測控制。
+- **Updates**:
+  - `index.html` 市場下拉新增「指數」選項、輸入說明改為含指數提示，並在基本設定卡片加入「立刻回測」按鈕。
+  - `js/loader.js` 綁定新按鈕至 `runBacktestInternal`，與主要回測按鈕共用流程。
+- **Testing**: 尚未執行（容器環境無法模擬瀏覽器操作與 Yahoo Proxy 連線）。
+
+## 2026-07-26 — Patch LB-INDEX-YAHOO-20250726A
+- **Scope**: 指數代碼（^ 前綴）輸入流程與資料來源擴充。
+- **Updates**:
+  - `js/main.js` 偵測 ^ 開頭代碼，自動切換為指數市場，調整資料來源測試面板與回測參數，並停用還原價與拆分選項。
+  - `js/backtest.js` 新增指數名稱查詢流程、快取與預設費率處理，支援 Yahoo Finance 指數資訊。
+  - `js/worker.js` 將指數視為獨立市場，透過新 proxy 串接 Yahoo 指數資料並沿用快取管線。
+  - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
+- **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
 
 ## 2026-07-07 — Patch LB-ROLLING-TEST-20260707A
 - **Scope**: 滾動測試嚴格模式門檻換算、PSR/DSR 詳細資訊與策略比較顯示調整。
@@ -1411,6 +1426,15 @@ NODE`
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+## 2026-07-27 — Patch LB-INDEX-UI-20250727B
+- **Issue recap**: 「立刻回測」按鈕觸發後仍停留在設定卡片，無法立即看到進度條，完成後右側報表也維持舊的捲動位置，使用者需手動滑動才能檢視最新摘要。
+- **Fix**:
+  - `js/main.js` 新增 `scrollElementIntoViewSmooth`，在 `showLoading` 顯示進度卡片時自動捲動到進度條，確保「立刻回測」與「開始回測」擁有一致體驗。
+  - `js/backtest.js` 在回測結果回傳後重置右側內容區捲動位置，並在 `scrollIntoView` 失敗時使用新的平滑捲動輔助方法，避免不同瀏覽器下的焦點落差。
+- **Diagnostics**: 於桌機與手機尺寸測試快速回測，確認按下按鈕後畫面自動捲動到進度條，回測完成時右側「摘要」等分頁回到頂部並顯示最新結果。
+- **Testing**: （待在可連線 Yahoo Finance 的實際環境重新回測驗證畫面捲動與結果渲染）
+
 ## 2026-07-27 — Patch LB-ROLLING-TEST-20251108A
 - **Issue recap**: Walk-Forward 報表缺乏品質中位與統計可信度的計算說明，逐窗資訊僅以文字列出不易對照；此外，保存策略後比較表仍顯示「請先測試後保存策略」，推估為滾動測試分數被覆寫為空值。
 - **Fix**:
@@ -1437,4 +1461,5 @@ NODE`
   - 聚合報表回傳整體樣本 Sharpe 與 γ₄ 指標，並以版本碼 `LB-ROLLING-TEST-20260709A` 標示。
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 

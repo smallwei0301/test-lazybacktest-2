@@ -12,6 +12,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
+// Patch Tag: LB-INDEX-YAHOO-20250726A
 
 // 全局變量
 let stockChart = null;
@@ -782,6 +783,11 @@ function getStockNoValue() {
     return (input?.value || '').trim().toUpperCase();
 }
 
+function isIndexSymbol(stockNo) {
+    if (!stockNo) return false;
+    return stockNo.startsWith('^') && stockNo.length > 1;
+}
+
 function normalizeMarketValue(value) {
     const normalized = (value || 'TWSE').toUpperCase();
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
@@ -796,13 +802,14 @@ function getCurrentMarketFromUI() {
 function getMarketLabel(market) {
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
+    if (market === 'INDEX') return '指數 (Yahoo)';
     return '上市 (TWSE)';
 }
 
 function applyMarketPreset(market) {
     const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
     const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
-    const disableAdjusted = market === 'US';
+    const disableAdjusted = market === 'US' || market === 'INDEX';
 
     if (adjustedCheckbox) {
         if (disableAdjusted && adjustedCheckbox.checked) {
@@ -884,6 +891,11 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
                 label: 'Netlify 還原備援',
                 description: netlifyDescription,
             },
+        ];
+    }
+    if (market === 'INDEX') {
+        return [
+            { id: 'yahoo', label: 'Yahoo 指數資料', description: 'Yahoo Finance 指數日線' },
         ];
     }
     if (market === 'US') {
@@ -981,7 +993,8 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
         return;
     }
-    const market = getCurrentMarketFromUI();
+    const uiMarket = getCurrentMarketFromUI();
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : uiMarket;
     const adjusted = isAdjustedMode();
     const splitEnabled = isSplitAdjustmentEnabled();
     let requestUrl = '';
@@ -1015,6 +1028,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         let endpoint = '/api/twse/';
         if (market === 'TPEX') endpoint = '/api/tpex/';
         else if (market === 'US') endpoint = '/api/us/';
+        else if (market === 'INDEX') endpoint = '/api/index/';
         const params = new URLSearchParams({
             stockNo,
             start,
@@ -1479,11 +1493,12 @@ function refreshDataSourceTester() {
     const hintEl = document.getElementById('dataSourceTesterHint');
     if (!modeEl || !hintEl) return;
     syncSplitAdjustmentState();
-    const market = getCurrentMarketFromUI();
-    const adjusted = isAdjustedMode();
-    const splitEnabled = isSplitAdjustmentEnabled();
     const { start, end } = getDateRangeFromUI();
     const stockNo = getStockNoValue();
+    const uiMarket = getCurrentMarketFromUI();
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : uiMarket;
+    const adjusted = market === 'INDEX' ? false : isAdjustedMode();
+    const splitEnabled = adjusted && isSplitAdjustmentEnabled();
     const sources = getTesterSourceConfigs(market, adjusted, splitEnabled);
     const missingInputs = !stockNo || !start || !end;
     const modeText = adjusted
@@ -1504,6 +1519,8 @@ function refreshDataSourceTester() {
                 ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
                 : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。',
         );
+    } else if (market === 'INDEX') {
+        messageLines.push('Yahoo Finance 為唯一資料來源，支援常見指數（例如 ^TWII、^GSPC）。');
     } else if (market === 'US') {
         messageLines.push('FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。');
     } else if (market === 'TPEX') {
@@ -3286,9 +3303,45 @@ function renderLoadingMessage(percent) {
     }
 }
 
+function scrollElementIntoViewSmooth(element) {
+    if (!element) return;
+
+    const performScroll = () => {
+        let scrolled = false;
+        if (typeof element.scrollIntoView === 'function') {
+            try {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+                scrolled = true;
+            } catch (error) {
+                console.warn('[Loading] scrollIntoView failed, falling back to window scroll:', error);
+            }
+        }
+        if (!scrolled && typeof element.getBoundingClientRect === 'function') {
+            const rect = element.getBoundingClientRect();
+            if (rect && Number.isFinite(rect.top)) {
+                const offsetTop = Math.max(0, (window.scrollY || window.pageYOffset || 0) + rect.top - 24);
+                if (typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+                } else {
+                    window.scrollY = offsetTop;
+                }
+            }
+        }
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(performScroll);
+    } else {
+        setTimeout(performScroll, 16);
+    }
+}
+
 function showLoading(m = "處理中...") {
     const el = document.getElementById("loading");
-    if (el) el.classList.remove("hidden");
+    if (el) {
+        el.classList.remove("hidden");
+        scrollElementIntoViewSmooth(el);
+    }
 
     refreshLoadingMascotImage({ forceNew: true });
 
@@ -3558,7 +3611,8 @@ function getBacktestParams() {
     const sellFee = parseFloat(document.getElementById('sellFee')?.value) || 0;
     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital';
     const marketSelect = document.getElementById('marketSelect');
-    const market = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const rawMarket = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
 
     return {
@@ -3589,7 +3643,7 @@ function getBacktestParams() {
         sellFee,
         positionBasis,
         market,
-        marketType: currentMarket,
+        marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
     };
 }
@@ -3600,6 +3654,9 @@ function validateStockNoByMarket(stockNo, market) {
     if (!stockNo) {
         showError('請輸入有效代碼');
         return false;
+    }
+    if (isIndexSymbol(stockNo)) {
+        return true;
     }
     const normalizedMarket = normalizeMarketValue(market || currentMarket || 'TWSE');
     if (normalizedMarket === 'US') {

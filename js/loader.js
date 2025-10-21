@@ -17,6 +17,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
         document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
+        // Patch Tag: LB-INDEX-UI-20250727A
+        const quickRunBacktestBtn = document.getElementById('quickRunBacktestBtn');
+        if (quickRunBacktestBtn) {
+            quickRunBacktestBtn.addEventListener('click', runBacktestInternal);
+        }
         document.getElementById('optimizeEntryBtn').addEventListener('click', () => runOptimizationInternal('entry'));
         document.getElementById('optimizeExitBtn').addEventListener('click', () => runOptimizationInternal('exit'));
         document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));

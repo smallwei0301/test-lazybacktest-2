@@ -13,6 +13,7 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-INDEX-YAHOO-20250726A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -6235,14 +6236,40 @@ function handleBacktestResult(result, stockName, dataSource) {
         activateTab('summary');
 
         setTimeout(() => {
+            const rightPanel = document.querySelector('.right-panel');
+            if (rightPanel) {
+                try {
+                    if (typeof rightPanel.scrollTo === 'function') {
+                        rightPanel.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                        rightPanel.scrollTop = 0;
+                    }
+                } catch (panelError) {
+                    console.warn('[Main] Failed to reset right panel scroll:', panelError);
+                }
+            }
             const strategyCard = document.getElementById('strategy-status-card');
             if (strategyCard) {
-                strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                try {
+                    strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (scrollError) {
+                    console.warn('[Main] scrollIntoView for strategy card failed:', scrollError);
+                    if (typeof scrollElementIntoViewSmooth === 'function') {
+                        scrollElementIntoViewSmooth(strategyCard);
+                    }
+                }
                 return;
             }
             const chartContainer = document.getElementById('chart-container');
             if (chartContainer) {
-                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                try {
+                    chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (chartScrollError) {
+                    console.warn('[Main] scrollIntoView for chart failed:', chartScrollError);
+                    if (typeof scrollElementIntoViewSmooth === 'function') {
+                        scrollElementIntoViewSmooth(chartContainer);
+                    }
+                }
             }
         }, 400);
 
@@ -8811,11 +8838,12 @@ function setDefaultFees(stockNo) {
     const isETF = stockCode.startsWith('00');
     const isTAIEX = stockCode === 'TAIEX';
     const isUSMarket = currentMarket === 'US';
+    const isIndex = isIndexTicker(stockCode);
 
-    if (isUSMarket) {
+    if (isUSMarket || isIndex) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
-        console.log(`[Fees] US market defaults applied for ${stockCode || '(未輸入)'}`);
+        console.log(`[Fees] ${(isUSMarket ? 'US market' : 'Index')} defaults applied for ${stockCode || '(未輸入)'}`);
         return;
     }
 
@@ -9520,6 +9548,7 @@ const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
+    INDEX: { label: '指數', fetchName: fetchStockNameFromIndex },
 };
 
 function loadPersistentTaiwanNameCache() {
@@ -9759,6 +9788,11 @@ function getLeadingDigitCount(symbol) {
     if (!symbol) return 0;
     const match = symbol.match(/^\d+/);
     return match ? match[0].length : 0;
+}
+
+function isIndexTicker(symbol) {
+    if (!symbol) return false;
+    return symbol.startsWith('^') && symbol.length > 1;
 }
 
 function shouldEnforceNumericLookupGate(symbol) {
@@ -10131,6 +10165,9 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const restrictToTaiwan = shouldRestrictToTaiwanMarkets(normalizedCode);
     const preferred = normalizeMarketValue(preferredMarket || '');
     const baseOrder = [];
+    if (isIndexTicker(normalizedCode)) {
+        baseOrder.push('INDEX');
+    }
     if (restrictToTaiwan || startsWithFourDigits) {
         baseOrder.push('TWSE', 'TPEX');
     } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
@@ -10558,6 +10595,46 @@ async function fetchStockNameFromUS(stockCode) {
         console.error('[US Name] 查詢股票名稱失敗:', error);
         return null;
     }
+}
+
+async function fetchStockNameFromIndex(stockCode) {
+    const normalized = (stockCode || '').trim().toUpperCase();
+    if (!normalized) return null;
+    try {
+        const params = new URLSearchParams({ stockNo: normalized, mode: 'info' });
+        const response = await fetch(`/api/index/?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+            const payload = await response.json();
+            if (payload && typeof payload === 'object') {
+                const name = (payload.stockName || payload.shortName || payload.displayName || '').toString().trim();
+                if (name) {
+                    const info = {
+                        name,
+                        market: 'INDEX',
+                        marketLabel: '指數 (Yahoo)',
+                        source: payload.source || 'Yahoo Finance',
+                        symbol: normalized,
+                    };
+                    storeStockNameCacheEntry('INDEX', normalized, info, { persistent: true });
+                    return info;
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('[Index Name] 透過 Yahoo 取得指數名稱失敗:', error);
+    }
+    const fallbackName = normalized.replace(/^\^/, '') || normalized;
+    const info = {
+        name: fallbackName,
+        market: 'INDEX',
+        marketLabel: '指數 (Yahoo)',
+        source: 'Yahoo Finance',
+        symbol: normalized,
+    };
+    storeStockNameCacheEntry('INDEX', normalized, info, { persistent: true });
+    return info;
 }
 
 // 使用代理伺服器獲取TPEX股票名稱
