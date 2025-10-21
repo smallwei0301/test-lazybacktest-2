@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.5 ---
-// Patch Tag: LB-BATCH-OPT-20260718A
+// --- 批量策略優化功能 - v1.2.6 ---
+// Patch Tag: LB-BATCH-OPT-20260718B
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718A';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718B';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -233,6 +233,130 @@ function summarizeDatasetRange(rows) {
         startDate: extractDate(first),
         endDate: extractDate(last)
     };
+}
+
+function getWindowLocalStorage() {
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            return window.localStorage;
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Unable to access localStorage:', error);
+    }
+    return null;
+}
+
+function getWindowSessionStorage() {
+    try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+            return window.sessionStorage;
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Unable to access sessionStorage:', error);
+    }
+    return null;
+}
+
+function captureWebStorageSnapshot(storage) {
+    if (!storage || typeof storage.length !== 'number') {
+        return null;
+    }
+
+    const snapshot = {};
+    try {
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (typeof key === 'string') {
+                snapshot[key] = storage.getItem(key);
+            }
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to capture storage snapshot:', error);
+        return null;
+    }
+
+    return snapshot;
+}
+
+function summarizeStorageSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return { count: 0, keys: [] };
+    }
+
+    const keys = Object.keys(snapshot);
+    return {
+        count: keys.length,
+        keys: keys.slice(0, 5)
+    };
+}
+
+function diffStorageSnapshots(previousSnapshot, currentSnapshot) {
+    const diff = { added: [], removed: [], changed: [] };
+
+    if (!previousSnapshot && !currentSnapshot) {
+        return diff;
+    }
+
+    const prevKeys = new Set(Object.keys(previousSnapshot || {}));
+    const currKeys = new Set(Object.keys(currentSnapshot || {}));
+
+    currKeys.forEach((key) => {
+        if (!prevKeys.has(key)) {
+            diff.added.push(key);
+        } else if (previousSnapshot[key] !== currentSnapshot[key]) {
+            diff.changed.push(key);
+        }
+    });
+
+    prevKeys.forEach((key) => {
+        if (!currKeys.has(key)) {
+            diff.removed.push(key);
+        }
+    });
+
+    if (diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0) {
+        return { added: [], removed: [], changed: [], empty: true };
+    }
+
+    return diff;
+}
+
+function restoreWebStorageSnapshot(storage, snapshot) {
+    if (!storage || typeof storage.length !== 'number') {
+        return;
+    }
+
+    try {
+        const keys = [];
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (typeof key === 'string') {
+                keys.push(key);
+            }
+        }
+
+        keys.forEach((key) => {
+            if (!snapshot || !Object.prototype.hasOwnProperty.call(snapshot, key)) {
+                storage.removeItem(key);
+            }
+        });
+
+        if (snapshot && typeof snapshot === 'object') {
+            Object.keys(snapshot).forEach((key) => {
+                try {
+                    if (snapshot[key] === null || snapshot[key] === undefined) {
+                        storage.removeItem(key);
+                    } else {
+                        storage.setItem(key, snapshot[key]);
+                    }
+                } catch (error) {
+                    console.warn('[Batch Optimization] Failed to restore storage key:', key, error);
+                }
+            });
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to restore storage snapshot:', error);
+    }
 }
 
 function ensureBatchDebugSession(context = {}) {
@@ -476,6 +600,235 @@ function summarizeResult(result) {
     }
 
     return summary;
+}
+
+function extractLastDebugEventByLabel(events, label) {
+    if (!Array.isArray(events)) {
+        return null;
+    }
+
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+        const entry = events[i];
+        if ((entry.label || entry.event) === label) {
+            return clonePlainObject(entry);
+        }
+    }
+
+    return null;
+}
+
+function buildBatchDebugDigest(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    const digest = {
+        sessionId: snapshot.sessionId || null,
+        version: snapshot.version || BATCH_DEBUG_VERSION_TAG,
+        startedAt: snapshot.startedAtIso || null,
+        completedAt: snapshot.completedAtIso || null,
+        status: snapshot.outcome?.status || null,
+        outcome: clonePlainObject(snapshot.outcome || {}),
+        bestResult: clonePlainObject(snapshot.outcome?.bestResult || null),
+        summary: clonePlainObject(snapshot.summary || null),
+        eventCount: Array.isArray(snapshot.events) ? snapshot.events.length : 0,
+        eventCounts: {},
+        headlessCompare: null
+    };
+
+    if (Array.isArray(snapshot.events)) {
+        snapshot.events.forEach((entry) => {
+            const label = entry.label || entry.event || 'unknown';
+            digest.eventCounts[label] = (digest.eventCounts[label] || 0) + 1;
+        });
+        digest.headlessCompare = extractLastDebugEventByLabel(snapshot.events, 'headless-compare');
+    }
+
+    return digest;
+}
+
+function formatDebugMetric(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    if (Math.abs(value) >= 1000 || Math.abs(value) < 0.01) {
+        return value.toExponential(4);
+    }
+    return value.toFixed(4);
+}
+
+function formatBestResultSummary(bestResult) {
+    if (!bestResult || typeof bestResult !== 'object') {
+        return '（無最佳結果紀錄）';
+    }
+
+    const parts = [];
+    const strategyLabel = `${bestResult.buyStrategy || '無'} ➜ ${bestResult.sellStrategy || '無'}`;
+    parts.push(`策略：${strategyLabel}`);
+
+    if (typeof bestResult.metric === 'number' && Number.isFinite(bestResult.metric)) {
+        const metricLabel = bestResult.metricLabel || '目標指標';
+        parts.push(`${metricLabel}=${formatDebugMetric(bestResult.metric)}`);
+    } else if (typeof bestResult.annualizedReturn === 'number') {
+        parts.push(`年化報酬=${formatDebugMetric(bestResult.annualizedReturn)}`);
+    }
+
+    if (bestResult.riskManagement && typeof bestResult.riskManagement === 'object') {
+        const rmParts = [];
+        if (Number.isFinite(bestResult.riskManagement.stopLoss)) {
+            rmParts.push(`停損=${bestResult.riskManagement.stopLoss}`);
+        }
+        if (Number.isFinite(bestResult.riskManagement.takeProfit)) {
+            rmParts.push(`停利=${bestResult.riskManagement.takeProfit}`);
+        }
+        if (rmParts.length > 0) {
+            parts.push(`風控：${rmParts.join('、')}`);
+        }
+    }
+
+    return parts.join('｜');
+}
+
+function formatHeadlessCompareSummary(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return '（尚未進行 Headless 對拍）';
+    }
+
+    const detail = entry.detail || {};
+    const parts = [];
+    if (typeof detail.metricDelta === 'number' && Number.isFinite(detail.metricDelta)) {
+        parts.push(`Δ=${formatDebugMetric(detail.metricDelta)}`);
+    }
+    if (detail.metricLabel) {
+        parts.push(`指標=${detail.metricLabel}`);
+    }
+    if (detail.headlessMetric !== undefined) {
+        parts.push(`Headless=${formatDebugMetric(detail.headlessMetric)}`);
+    }
+    if (detail.batchMetric !== undefined) {
+        parts.push(`Batch=${formatDebugMetric(detail.batchMetric)}`);
+    }
+    if (detail.differences) {
+        const diffKeys = Object.keys(detail.differences);
+        if (diffKeys.length > 0) {
+            parts.push(`差異欄位=${diffKeys.join(',')}`);
+        }
+    }
+    if (parts.length === 0) {
+        parts.push('（無差異）');
+    }
+    return parts.join('｜');
+}
+
+function formatEventCountsForComparison(eventCounts, label) {
+    const entries = Object.entries(eventCounts || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+    if (entries.length === 0) {
+        return `${label}：無事件紀錄`;
+    }
+    return [`${label}（前 8 筆）：`]
+        .concat(entries.map(([event, count]) => `- ${event} × ${count}`))
+        .join('\n');
+}
+
+function formatEventCountDiff(digestA, digestB) {
+    const diffLines = [];
+    const keys = new Set([
+        ...Object.keys(digestA?.eventCounts || {}),
+        ...Object.keys(digestB?.eventCounts || {})
+    ]);
+
+    keys.forEach((key) => {
+        const countA = digestA?.eventCounts?.[key] || 0;
+        const countB = digestB?.eventCounts?.[key] || 0;
+        if (countA !== countB) {
+            diffLines.push(`- ${key}：A=${countA}｜B=${countB}`);
+        }
+    });
+
+    if (diffLines.length === 0) {
+        return '兩次事件次數相同。';
+    }
+
+    return diffLines.join('\n');
+}
+
+function formatDebugSnapshotLabel(snapshot) {
+    const digest = buildBatchDebugDigest(snapshot);
+    if (!digest) {
+        return '尚未設定';
+    }
+
+    const parts = [];
+    if (digest.sessionId) {
+        parts.push(`#${digest.sessionId}`);
+    }
+    if (digest.status) {
+        parts.push(digest.status);
+    }
+    if (digest.completedAt) {
+        try {
+            parts.push(new Date(digest.completedAt).toLocaleString('zh-TW', { hour12: false }));
+        } catch (error) {
+            parts.push(digest.completedAt);
+        }
+    } else if (digest.startedAt) {
+        try {
+            parts.push(new Date(digest.startedAt).toLocaleString('zh-TW', { hour12: false }));
+        } catch (error) {
+            parts.push(digest.startedAt);
+        }
+    }
+    return parts.join('｜') || '批量優化紀錄';
+}
+
+function diffBatchDebugLogs(snapshotA, snapshotB) {
+    const digestA = buildBatchDebugDigest(snapshotA);
+    const digestB = buildBatchDebugDigest(snapshotB);
+
+    const lines = [];
+    lines.push('# 批量優化除錯比較');
+    lines.push(`版本：A ${digestA?.version || '未知'}｜B ${digestB?.version || '未知'}`);
+    lines.push(`狀態：A ${digestA?.status || '未完成'}｜B ${digestB?.status || '未完成'}`);
+    lines.push(`事件總數：A ${digestA?.eventCount ?? 0}｜B ${digestB?.eventCount ?? 0}`);
+
+    const startedA = digestA?.startedAt || null;
+    const startedB = digestB?.startedAt || null;
+    if (startedA || startedB) {
+        lines.push(`開始時間：A ${startedA || '未知'}｜B ${startedB || '未知'}`);
+    }
+    const completedA = digestA?.completedAt || null;
+    const completedB = digestB?.completedAt || null;
+    if (completedA || completedB) {
+        lines.push(`結束時間：A ${completedA || '未結束'}｜B ${completedB || '未結束'}`);
+    }
+
+    lines.push('');
+    lines.push('## 最佳結果');
+    lines.push(`A：${formatBestResultSummary(digestA?.bestResult)}`);
+    lines.push(`B：${formatBestResultSummary(digestB?.bestResult)}`);
+
+    lines.push('');
+    lines.push('## Headless 對拍');
+    lines.push(`A：${formatHeadlessCompareSummary(digestA?.headlessCompare)}`);
+    lines.push(`B：${formatHeadlessCompareSummary(digestB?.headlessCompare)}`);
+
+    lines.push('');
+    lines.push('## 事件次數差異');
+    lines.push(formatEventCountDiff(digestA, digestB));
+
+    lines.push('');
+    lines.push('## 事件統計');
+    lines.push(formatEventCountsForComparison(digestA?.eventCounts, 'A'));
+    lines.push(formatEventCountsForComparison(digestB?.eventCounts, 'B'));
+
+    return {
+        text: lines.join('\n'),
+        sessionA: digestA,
+        sessionB: digestB,
+        eventDiffSummary: formatEventCountDiff(digestA, digestB)
+    };
 }
 
 const EXIT_STRATEGY_SELECT_MAP = {
@@ -5230,6 +5583,13 @@ async function runCombinationOptimizationHeadless(combination, config, options =
     const baselineCacheSummary = summarizeDatasetRange(previousCachedStockData);
     const overrideCacheSummary = summarizeDatasetRange(preparedOptions.cachedDataOverride);
 
+    const localStorageRef = getWindowLocalStorage();
+    const sessionStorageRef = getWindowSessionStorage();
+    const previousLocalStorageSnapshot = captureWebStorageSnapshot(localStorageRef);
+    const previousSessionStorageSnapshot = captureWebStorageSnapshot(sessionStorageRef);
+    const previousLocalStorageSummary = summarizeStorageSnapshot(previousLocalStorageSnapshot);
+    const previousSessionStorageSummary = summarizeStorageSnapshot(previousSessionStorageSnapshot);
+
     const previousDebugSession = batchDebugSession;
     const previousProgress = { ...currentBatchProgress };
     const previousStopFlag = isBatchOptimizationStopped;
@@ -5269,7 +5629,11 @@ async function runCombinationOptimizationHeadless(combination, config, options =
             progress: clonePlainObject(previousProgress),
             cacheEntries: previousCacheEntryCount,
             cacheKeysPreview: previousCacheKeysPreview,
-            lastFetchSettingsPreserved: Boolean(previousLastFetchSettings)
+            lastFetchSettingsPreserved: Boolean(previousLastFetchSettings),
+            storage: {
+                local: previousLocalStorageSummary,
+                session: previousSessionStorageSummary
+            }
         }, { phase: 'external', console: false });
 
         recordBatchDebug('headless-cache-state', {
@@ -5324,6 +5688,12 @@ async function runCombinationOptimizationHeadless(combination, config, options =
 
         return cloneCombinationResult(result);
     } finally {
+        const currentLocalStorageSnapshot = captureWebStorageSnapshot(localStorageRef);
+        const currentSessionStorageSnapshot = captureWebStorageSnapshot(sessionStorageRef);
+
+        const localStorageDiff = diffStorageSnapshots(previousLocalStorageSnapshot, currentLocalStorageSnapshot);
+        const sessionStorageDiff = diffStorageSnapshots(previousSessionStorageSnapshot, currentSessionStorageSnapshot);
+
         restoreCacheStoreSnapshot(previousCacheStoreSnapshot, activeCacheStore);
         restoreLastFetchSettingsSnapshot(previousLastFetchSettings);
 
@@ -5362,16 +5732,46 @@ async function runCombinationOptimizationHeadless(combination, config, options =
         isBatchOptimizationStopped = previousStopFlag;
 
         if (headlessSession && batchDebugSession === headlessSession) {
+            restoreWebStorageSnapshot(localStorageRef, previousLocalStorageSnapshot);
+            restoreWebStorageSnapshot(sessionStorageRef, previousSessionStorageSnapshot);
+
+            const trimmedLocalDiff = localStorageDiff && !localStorageDiff.empty
+                ? {
+                    added: (localStorageDiff.added || []).slice(0, 5),
+                    removed: (localStorageDiff.removed || []).slice(0, 5),
+                    changed: (localStorageDiff.changed || []).slice(0, 5)
+                }
+                : { added: [], removed: [], changed: [] };
+            const trimmedSessionDiff = sessionStorageDiff && !sessionStorageDiff.empty
+                ? {
+                    added: (sessionStorageDiff.added || []).slice(0, 5),
+                    removed: (sessionStorageDiff.removed || []).slice(0, 5),
+                    changed: (sessionStorageDiff.changed || []).slice(0, 5)
+                }
+                : { added: [], removed: [], changed: [] };
+
             recordBatchDebug('headless-state-restore', {
                 resultsCount: Array.isArray(batchOptimizationResults) ? batchOptimizationResults.length : 0,
                 workerEntries: Array.isArray(batchWorkerStatus.entries) ? batchWorkerStatus.entries.length : 0,
                 runningFlag: window.batchOptimizationRunning,
                 stopFlag: isBatchOptimizationStopped,
-                progress: clonePlainObject(currentBatchProgress)
+                progress: clonePlainObject(currentBatchProgress),
+                storageRestored: {
+                    local: {
+                        summary: summarizeStorageSnapshot(previousLocalStorageSnapshot),
+                        diff: trimmedLocalDiff
+                    },
+                    session: {
+                        summary: summarizeStorageSnapshot(previousSessionStorageSnapshot),
+                        diff: trimmedSessionDiff
+                    }
+                }
             }, { phase: 'external', console: false });
             batchDebugSession = previousDebugSession || null;
         } else if (previousDebugSession) {
             batchDebugSession = previousDebugSession;
+            restoreWebStorageSnapshot(localStorageRef, previousLocalStorageSnapshot);
+            restoreWebStorageSnapshot(sessionStorageRef, previousSessionStorageSnapshot);
         }
 
         notifyBatchDebugListeners();
@@ -5390,7 +5790,10 @@ window.batchOptimization = {
     finalizeDebugSession: finalizeBatchDebugSession,
     startDebugSession: startBatchDebugSession,
     subscribeDebugLog: subscribeBatchDebugLog,
-    clearDebugLog: clearBatchDebugSession
+    clearDebugLog: clearBatchDebugSession,
+    summarizeDebugSnapshot: buildBatchDebugDigest,
+    diffDebugLogs: diffBatchDebugLogs,
+    formatDebugSnapshotLabel
 };
 
 // 測試風險管理優化功能

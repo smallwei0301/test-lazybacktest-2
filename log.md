@@ -1334,3 +1334,12 @@ NODE`
   - 建立 `lastHeadlessOptimizationSummary` 與 `recordHeadlessBatchComparison`，批量面板完成時即時計算與 headless 最佳解差距並輸出 `headless-compare` 除錯事件，若數值或參數不匹配會即時示警。
 - **Diagnostics**: 透過除錯 log 檢視快照還原與對拍輸出，確認在滾動測試 → 批量優化流程中 `runningFlag`、最佳組合與年化報酬差距均回到預期值，必要時可比對 `differences` 欄位快速找出缺失參數。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-20 — Patch LB-BATCH-OPT-20260718B
+- **Issue recap**: 滾動測試 headless 優化後即便重新整理仍可能讓批量優化找不到第一次的最佳解，研判 headless 過程修改了 localStorage/sessionStorage 等持久快取；此外缺乏能快速對比兩次批量除錯紀錄的工具，難以確認差異。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 會在執行前後快照 `localStorage`、`sessionStorage`，於還原時輸出 `storageRestored` 差異摘要並維持版本碼 `LB-BATCH-OPT-20260718B`，確保滾動測試不會留下殘存快取或設定污染。
+  - 新增 `buildBatchDebugDigest`、`diffBatchDebugLogs` 等工具函式與 `window.batchOptimization.diffDebugLogs` 對外介面，將最佳結果、Headless 對拍與事件統計整理成可複製的比較文本。
+  - `index.html` 與 `js/main.js` 在開發者卡片加入紀錄 A/B、產生比較與複製結果按鈕，輸出可直接貼回討論的除錯比較報告，協助定位滾動測試後與初次批量優化的差異。
+- **Diagnostics**: 本地流程依序執行滾動測試優化、重新整理、再跑批量面板並檢視除錯卡片，確認 `headless-state-restore` 顯示 storage 差異已歸零、比較工具列出指標與事件差異；實務上可將比較文本貼回支援管道協助分析。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

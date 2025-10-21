@@ -1624,6 +1624,56 @@ function initBatchDebugLogPanel() {
     const refreshBtn = document.getElementById('batchDebugRefreshBtn');
     const downloadBtn = document.getElementById('batchDebugDownloadBtn');
     const clearBtn = document.getElementById('batchDebugClearBtn');
+    const markFirstBtn = document.getElementById('batchDebugMarkFirstBtn');
+    const markSecondBtn = document.getElementById('batchDebugMarkSecondBtn');
+    const compareBtn = document.getElementById('batchDebugCompareBtn');
+    const copyBtn = document.getElementById('batchDebugCopyBtn');
+    const compareOutput = document.getElementById('batchDebugCompareOutput');
+    const compareStatus = document.getElementById('batchDebugCompareStatus');
+
+    let comparisonSnapshotA = null;
+    let comparisonSnapshotB = null;
+    let latestComparisonText = '';
+
+    const describeSnapshot = (snapshot) => {
+        if (!snapshot) return '尚未設定';
+        if (window.batchOptimization && typeof window.batchOptimization.formatDebugSnapshotLabel === 'function') {
+            try {
+                const label = window.batchOptimization.formatDebugSnapshotLabel(snapshot);
+                if (label) return label;
+            } catch (error) {
+                console.warn('[Batch Debug] Failed to format snapshot label:', error);
+            }
+        }
+        const eventCount = Array.isArray(snapshot.events) ? snapshot.events.length : 0;
+        const id = snapshot.sessionId ? `#${snapshot.sessionId}` : '紀錄';
+        return `${id}｜事件 ${eventCount}`;
+    };
+
+    const updateCompareStatus = (message = null) => {
+        if (!compareStatus) return;
+        if (message) {
+            compareStatus.textContent = message;
+            compareStatus.style.color = 'var(--foreground)';
+        } else {
+            const parts = [
+                `A：${describeSnapshot(comparisonSnapshotA)}`,
+                `B：${describeSnapshot(comparisonSnapshotB)}`
+            ];
+            compareStatus.textContent = parts.join(' ｜ ');
+            compareStatus.style.color = 'var(--muted-foreground)';
+        }
+
+        if (copyBtn) {
+            copyBtn.disabled = !latestComparisonText;
+            copyBtn.style.color = latestComparisonText ? 'var(--foreground)' : 'var(--muted-foreground)';
+        }
+    };
+
+    if (compareOutput) {
+        compareOutput.value = '';
+    }
+    updateCompareStatus();
 
     const applySnapshot = (snapshot) => {
         if (!metaEl || !listEl || !emptyEl) return;
@@ -1760,6 +1810,59 @@ function initBatchDebugLogPanel() {
     clearBtn?.addEventListener('click', () => {
         if (window.batchOptimization && typeof window.batchOptimization.clearDebugLog === 'function') {
             window.batchOptimization.clearDebugLog();
+        }
+    });
+
+    markFirstBtn?.addEventListener('click', () => {
+        comparisonSnapshotA = getSnapshot();
+        updateCompareStatus();
+    });
+
+    markSecondBtn?.addEventListener('click', () => {
+        comparisonSnapshotB = getSnapshot();
+        updateCompareStatus();
+    });
+
+    compareBtn?.addEventListener('click', () => {
+        if (!comparisonSnapshotA || !comparisonSnapshotB) {
+            latestComparisonText = '';
+            if (compareOutput) {
+                compareOutput.value = '請先設定紀錄A與紀錄B後再產生比較。';
+            }
+            updateCompareStatus('請先設定紀錄A與紀錄B。');
+            return;
+        }
+
+        if (window.batchOptimization && typeof window.batchOptimization.diffDebugLogs === 'function') {
+            try {
+                const diff = window.batchOptimization.diffDebugLogs(comparisonSnapshotA, comparisonSnapshotB) || {};
+                latestComparisonText = diff.text || '';
+            } catch (error) {
+                console.error('[Batch Debug] Failed to diff logs:', error);
+                latestComparisonText = '';
+            }
+        } else {
+            latestComparisonText = '';
+        }
+
+        if (compareOutput) {
+            compareOutput.value = latestComparisonText || '（比較結果為空）';
+        }
+        updateCompareStatus();
+    });
+
+    copyBtn?.addEventListener('click', async () => {
+        if (!latestComparisonText) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(latestComparisonText);
+            updateCompareStatus('已複製比較結果到剪貼簿。');
+            setTimeout(() => updateCompareStatus(), 2500);
+        } catch (error) {
+            console.error('[Batch Debug] Failed to copy diff:', error);
+            updateCompareStatus('複製失敗，請手動選取文字。');
+            setTimeout(() => updateCompareStatus(), 2500);
         }
     });
 

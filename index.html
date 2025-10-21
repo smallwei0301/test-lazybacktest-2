@@ -566,6 +566,50 @@
                                                     <div id="batchDebugEmptyHint" class="text-[11px]" style="color: var(--muted-foreground);">尚未建立批量優化除錯事件。</div>
                                                     <ul id="batchDebugEventList" class="space-y-2 hidden"></ul>
                                                 </div>
+                                                <div class="px-3 pb-3 space-y-2 border-t" style="border-color: var(--border);">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <button
+                                                            id="batchDebugMarkFirstBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            設為紀錄A
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugMarkSecondBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            設為紀錄B
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugCompareBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            產生比較
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugCopyBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                            disabled
+                                                        >
+                                                            複製比較
+                                                        </button>
+                                                    </div>
+                                                    <div id="batchDebugCompareStatus" class="text-[11px]" style="color: var(--muted-foreground);">尚未選擇比較紀錄。</div>
+                                                    <textarea
+                                                        id="batchDebugCompareOutput"
+                                                        class="w-full text-[11px] rounded-md border px-2 py-2 bg-white/60"
+                                                        style="border-color: var(--border); color: var(--foreground); min-height: 96px;"
+                                                        readonly
+                                                    ></textarea>
+                                                </div>
                                             </div>
                                         </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
