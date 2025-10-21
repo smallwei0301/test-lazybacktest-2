@@ -1244,8 +1244,11 @@
     function describePassRateStatus(aggregate) {
         const passRate = Number.isFinite(aggregate?.passRate) ? aggregate.passRate : null;
         if (passRate === null) return '尚未評分';
-        if (passRate >= 0.6) return '通過率 ≥60%，視窗穩定，可維持策略與門檻。';
-        if (passRate >= 0.4) return '通過率略低，建議調整策略組合或重新設定門檻。';
+
+        const percent = passRate <= 1 ? passRate * 100 : passRate;
+
+        if (percent >= 60) return '通過率 ≥60%，視窗穩定，可維持策略與門檻。';
+        if (percent >= 40) return '通過率略低，建議調整策略組合或重新設定門檻。';
         return '通過率偏低，請調整策略組合或放寬門檻條件。';
     }
 
