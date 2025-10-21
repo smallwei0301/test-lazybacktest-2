@@ -1368,3 +1368,11 @@ NODE`
   - `cached-data-evaluation` 除錯事件新增裁切摘要與移除統計，並在裁切發生時輸出 `cached-data-slice-applied`，方便在開發者卡片比對兩次批量優化實際使用的資料視窗。
 - **Diagnostics**: 依重現步驟（結束日 2024-02-19 → 2025-10-20 → 2025-02-19，再跑批量）驗證第二次批量除錯記錄中的 `sliceSummary.endDate` 為 2025-02-19，與需求範圍一致，且最佳參數回到首次結果。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-24 — Patch LB-BATCH-OPT-20260718F
+- **Issue recap**: 批量優化除錯卡片仍以英文為主並以基本列表呈現，除錯報告難以快速辨識層級與流程，也不利於直接貼上給團隊討論。
+- **Fix**:
+  - `js/main.js` 為除錯會話標題、狀態與時間資訊建立中文徽章，並以顏色區分資訊/警示/錯誤等層級，事件明細改為顯示中文敘述、流程標籤與帶底色的 JSON 摘要，整體版面更容易閱讀。
+  - `index.html` 微調除錯卡片的預設提示、內容間距與比較輸出欄位的 placeholder，保持中文用語並強調結果可直接複製貼上。
+- **Diagnostics**: 於瀏覽器啟動批量優化與滾動測試後檢視開發者卡片，確認事件列表出現彩色層級徽章、流程標籤與 JSON 摘要，且比較輸出區可直接複製中文化的報告。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

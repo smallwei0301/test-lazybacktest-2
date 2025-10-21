@@ -1614,6 +1614,119 @@ function formatBatchDebugTime(value) {
     }
 }
 
+function parseBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+    }
+    const date = new Date(typeof value === 'number' ? value : String(value));
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatBatchDebugDuration(startValue, endValue) {
+    const startDate = parseBatchDebugTime(startValue);
+    const endDate = parseBatchDebugTime(endValue);
+    if (!startDate || !endDate) {
+        return '';
+    }
+    const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+    if (!Number.isFinite(diffMs) || diffMs <= 0) {
+        return '';
+    }
+    const seconds = diffMs / 1000;
+    if (seconds < 1) {
+        return `${seconds.toFixed(2)} 秒`;
+    }
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)} 秒`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainSeconds = seconds % 60;
+    if (minutes < 60) {
+        return remainSeconds > 0
+            ? `${minutes} 分 ${remainSeconds.toFixed(1)} 秒`
+            : `${minutes} 分鐘`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainMinutes = minutes % 60;
+    return remainMinutes > 0
+        ? `${hours} 小時 ${remainMinutes} 分`
+        : `${hours} 小時`;
+}
+
+const BATCH_DEBUG_LEVEL_PRESETS = {
+    info: {
+        label: '資訊',
+        background: 'rgba(8, 145, 178, 0.12)',
+        border: 'rgba(8, 145, 178, 0.28)',
+        color: '#0f766e',
+    },
+    success: {
+        label: '完成',
+        background: 'rgba(16, 185, 129, 0.16)',
+        border: 'rgba(16, 185, 129, 0.28)',
+        color: '#047857',
+    },
+    warn: {
+        label: '警示',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    warning: {
+        label: '警示',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    error: {
+        label: '錯誤',
+        background: 'rgba(220, 38, 38, 0.14)',
+        border: 'rgba(220, 38, 38, 0.30)',
+        color: '#b91c1c',
+    },
+    debug: {
+        label: '偵錯',
+        background: 'rgba(107, 114, 128, 0.12)',
+        border: 'rgba(107, 114, 128, 0.28)',
+        color: '#374151',
+    },
+    trace: {
+        label: '追蹤',
+        background: 'rgba(59, 130, 246, 0.12)',
+        border: 'rgba(59, 130, 246, 0.30)',
+        color: '#1d4ed8',
+    },
+};
+
+function resolveBatchDebugLevelMeta(level) {
+    const key = typeof level === 'string' ? level.trim().toLowerCase() : '';
+    const preset = key && Object.prototype.hasOwnProperty.call(BATCH_DEBUG_LEVEL_PRESETS, key)
+        ? BATCH_DEBUG_LEVEL_PRESETS[key]
+        : null;
+    const fallbackLabel = typeof level === 'string' && level.trim()
+        ? level.trim().toUpperCase()
+        : '資訊';
+    return {
+        label: preset?.label || fallbackLabel,
+        background: preset?.background || 'rgba(148, 163, 184, 0.16)',
+        border: preset?.border || 'rgba(148, 163, 184, 0.26)',
+        color: preset?.color || '#334155',
+    };
+}
+
+function formatBatchDebugPhaseLabel(phase) {
+    if (!phase) {
+        return '';
+    }
+    if (typeof phase !== 'string') {
+        return String(phase);
+    }
+    return phase.trim();
+}
+
 function initBatchDebugLogPanel() {
     const container = document.getElementById('batchDebugLogContainer');
     if (!container) return;
@@ -1683,37 +1796,47 @@ function initBatchDebugLogPanel() {
             listEl.innerHTML = '';
             listEl.classList.add('hidden');
             emptyEl.classList.remove('hidden');
-            emptyEl.textContent = '尚未建立批量優化除錯事件。';
+            emptyEl.textContent = '暫無批量優化事件，請先啟動批量優化或滾動測試。';
             return;
         }
 
-        const headerLines = [];
-        const idLineParts = [];
-        if (snapshot.sessionId) idLineParts.push(`#${snapshot.sessionId}`);
-        if (snapshot.version) idLineParts.push(`版本 ${snapshot.version}`);
-        headerLines.push(idLineParts.join('｜') || '批量優化除錯會話');
+        const sessionTitleParts = [];
+        if (snapshot.sessionId) sessionTitleParts.push(`會話 #${snapshot.sessionId}`);
+        if (snapshot.version) sessionTitleParts.push(`版本 ${snapshot.version}`);
+        const sessionTitle = sessionTitleParts.join(' ｜ ') || '批量優化除錯會話';
 
-        const statusParts = [];
-        if (snapshot.outcome?.status) statusParts.push(snapshot.outcome.status);
-        if (Array.isArray(snapshot.events)) statusParts.push(`事件 ${snapshot.events.length} 筆`);
-        if (statusParts.length > 0) {
-            headerLines.push(statusParts.join(' ・ '));
-        }
+        const statusBadges = [];
+        if (snapshot.outcome?.status) statusBadges.push(`狀態：${snapshot.outcome.status}`);
+        if (Array.isArray(snapshot.events)) statusBadges.push(`事件：${snapshot.events.length} 筆`);
+        if (snapshot.outcome?.message) statusBadges.push(`說明：${snapshot.outcome.message}`);
 
-        const timeParts = [];
+        const timeBadges = [];
         if (snapshot.startedAtIso) {
-            timeParts.push(`開始 ${formatBatchDebugTime(snapshot.startedAtIso)}`);
+            timeBadges.push(`開始：${formatBatchDebugTime(snapshot.startedAtIso)}`);
         }
         if (snapshot.completedAtIso) {
-            timeParts.push(`結束 ${formatBatchDebugTime(snapshot.completedAtIso)}`);
+            timeBadges.push(`結束：${formatBatchDebugTime(snapshot.completedAtIso)}`);
         }
-        if (timeParts.length > 0) {
-            headerLines.push(timeParts.join(' ・ '));
+        const durationLabel = formatBatchDebugDuration(snapshot.startedAtIso, snapshot.completedAtIso);
+        if (durationLabel) {
+            timeBadges.push(`耗時：${durationLabel}`);
         }
 
-        metaEl.innerHTML = headerLines.map((line) => (
-            `<div class="text-[11px]" style="color: var(--foreground);">${testerEscapeHtml(line)}</div>`
-        )).join('');
+        const buildBadges = (items) => items.map((text) => (
+            `<span class="inline-flex items-center rounded-full border px-2 py-[2px] text-[10px]" style="border-color: var(--border); color: var(--foreground); background-color: rgba(255, 255, 255, 0.75);">${testerEscapeHtml(text)}</span>`
+        )).join('<span class="sr-only"> </span>');
+
+        const lines = [
+            `<div class="text-[11px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(sessionTitle)}</div>`,
+        ];
+        if (statusBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(statusBadges)}</div>`);
+        }
+        if (timeBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(timeBadges)}</div>`);
+        }
+
+        metaEl.innerHTML = lines.join('');
 
         const events = Array.isArray(snapshot.events)
             ? snapshot.events.slice(Math.max(snapshot.events.length - 50, 0))
@@ -1723,41 +1846,51 @@ function initBatchDebugLogPanel() {
         if (events.length === 0) {
             listEl.classList.add('hidden');
             emptyEl.classList.remove('hidden');
-            emptyEl.textContent = '尚未產生批量優化除錯事件。';
+            emptyEl.textContent = '暫無批量優化事件，請先執行批量優化或滾動測試。';
         } else {
             emptyEl.classList.add('hidden');
             listEl.classList.remove('hidden');
 
             events.forEach((event) => {
                 const li = document.createElement('li');
-                li.className = 'border rounded-md px-3 py-2 bg-white/70 shadow-sm';
+                li.className = 'border rounded-lg px-3 py-2 bg-white/80 shadow-sm space-y-1';
 
-                const timeLabel = testerEscapeHtml(formatBatchDebugTime(event.iso || event.ts));
-                const levelLabel = testerEscapeHtml((event.level || 'info').toUpperCase());
-                const phaseLabel = event.phase ? ` ・ ${testerEscapeHtml(event.phase)}` : '';
+                const timeValue = formatBatchDebugTime(event.iso || event.ts) || '—';
+                const levelMeta = resolveBatchDebugLevelMeta(event.level);
+                const phaseLabel = formatBatchDebugPhaseLabel(event.phase);
                 const eventLabel = testerEscapeHtml(event.label || '事件');
 
+                const levelBadge = `<span class="inline-flex items-center rounded-full border px-2 py-[1px] text-[10px]" style="background-color: ${levelMeta.background}; border-color: ${levelMeta.border}; color: ${levelMeta.color};">${testerEscapeHtml(levelMeta.label)}</span>`;
+                const phaseBadge = phaseLabel
+                    ? `<span class="text-[10px]" style="color: var(--muted-foreground);">流程：${testerEscapeHtml(phaseLabel)}</span>`
+                    : '';
+
                 let detailMarkup = '';
-                if (event.detail) {
+                if (event.detail !== undefined && event.detail !== null) {
                     try {
                         const detailString = JSON.stringify(event.detail, null, 2) || '';
-                        const truncated = detailString.length > 800
-                            ? `${detailString.slice(0, 800)}…`
+                        const truncated = detailString.length > 1200
+                            ? `${detailString.slice(0, 1200)}…`
                             : detailString;
                         if (truncated) {
-                            detailMarkup = `<pre class="mt-1 text-[10px] whitespace-pre-wrap break-all" style="color: var(--muted-foreground);">${testerEscapeHtml(truncated)}</pre>`;
+                            detailMarkup = `<pre class="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${testerEscapeHtml(truncated)}</pre>`;
                         }
                     } catch (error) {
-                        detailMarkup = `<pre class="mt-1 text-[10px] whitespace-pre-wrap break-all" style="color: var(--muted-foreground);">${testerEscapeHtml(String(event.detail))}</pre>`;
+                        detailMarkup = `<pre class="mt-2 text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${testerEscapeHtml(String(event.detail))}</pre>`;
                     }
                 }
 
+                const messageLine = event.message
+                    ? `<div class="text-[11px]" style="color: var(--foreground);">敘述：${testerEscapeHtml(event.message)}</div>`
+                    : '';
+
                 li.innerHTML = `
-                    <div class="flex items-center justify-between text-[11px]" style="color: var(--foreground);">
-                        <span>${timeLabel}</span>
-                        <span class="text-[10px]" style="color: var(--muted-foreground);">${levelLabel}${phaseLabel}</span>
+                    <div class="flex items-center justify-between gap-2 text-[11px]" style="color: var(--foreground);">
+                        <span class="font-mono tracking-tight">${testerEscapeHtml(timeValue)}</span>
+                        <span class="flex items-center gap-2">${levelBadge}${phaseBadge}</span>
                     </div>
-                    <div class="text-[11px] font-semibold mt-1" style="color: var(--foreground);">${eventLabel}</div>
+                    <div class="text-[12px] font-semibold" style="color: var(--foreground);">${eventLabel}</div>
+                    ${messageLine}
                     ${detailMarkup}
                 `;
 

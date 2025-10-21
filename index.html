@@ -560,10 +560,10 @@
                                             </div>
                                             <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
                                                 <div class="px-3 py-2 border-b" style="border-color: var(--border);">
-                                                    <div id="batchDebugSessionMeta" class="text-[11px]" style="color: var(--foreground);">尚未啟動批量優化除錯。</div>
+                                                    <div id="batchDebugSessionMeta" class="space-y-1 text-[11px]" style="color: var(--foreground);">尚未啟動批量優化除錯。</div>
                                                 </div>
                                                 <div class="px-3 py-3 space-y-2 max-h-64 overflow-y-auto text-[11px]" id="batchDebugLogScroll" style="color: var(--foreground);">
-                                                    <div id="batchDebugEmptyHint" class="text-[11px]" style="color: var(--muted-foreground);">尚未建立批量優化除錯事件。</div>
+                                                    <div id="batchDebugEmptyHint" class="text-[11px]" style="color: var(--muted-foreground);">暫無批量優化事件，請先啟動批量優化或滾動測試。</div>
                                                     <ul id="batchDebugEventList" class="space-y-2 hidden"></ul>
                                                 </div>
                                                 <div class="px-3 pb-3 space-y-2 border-t" style="border-color: var(--border);">
@@ -607,6 +607,7 @@
                                                         id="batchDebugCompareOutput"
                                                         class="w-full text-[11px] rounded-md border px-2 py-2 bg-white/60"
                                                         style="border-color: var(--border); color: var(--foreground); min-height: 96px;"
+                                                        placeholder="比較結果會顯示在此，可直接複製貼上。"
                                                         readonly
                                                     ></textarea>
                                                 </div>
