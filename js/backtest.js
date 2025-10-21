@@ -8834,7 +8834,7 @@ function setDefaultFees(stockNo) {
     }
 }
 
-const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710C';
+const STRATEGY_COMPARISON_VERSION = 'LB-STRATEGY-COMPARE-20260710D';
 const STRATEGY_COMPARISON_SELECTION_KEY = 'lazybacktest_strategy_compare_selection';
 const STRATEGY_COMPARISON_METRICS = [
     {
@@ -8920,6 +8920,11 @@ function collectStrategyMetricSnapshot() {
         ? window.rollingTest.state
         : null;
     const rollingAggregate = rollingState?.aggregate || null;
+    const rollingScorePoints = Number.isFinite(rollingAggregate?.scorePoints)
+        ? rollingAggregate.scorePoints
+        : Number.isFinite(rollingAggregate?.totalScore)
+            ? rollingAggregate.totalScore * 100
+            : null;
     const trendSummary = trendAnalysisState?.summary || null;
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
@@ -8945,7 +8950,7 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
+        rollingScore: normaliseMetricNumber(rollingScorePoints),
         rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'

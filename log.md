@@ -1394,3 +1394,11 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-07-27 — Patch LB-ROLLING-TEST-20251028B / LB-STRATEGY-COMPARE-20260710D
+- **Issue recap**: 使用者希望 OOS 品質指標達門檻即給滿分、年化報酬門檻改採買入持有基準，且在完成滾動測試後儲存策略時，策略比較表仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/rolling-test.js` 將各項 OOS 指標改為達門檻即 1 分、未達門檻線性遞減，年化報酬門檻改由測試期間的買入持有年化報酬率決定，並在卡片細節新增窗分數、品質分數與加權原值的中文說明。
+  - `js/rolling-test.js` 匯總結果增加動態門檻中位數與 0～100 分制輸出，供策略比較與 UI 說明使用。
+  - `js/backtest.js` 策略快照改存 `totalScore × 100` 的 Walk-Forward 分數，修正儲存後仍顯示 placeholder 的問題，並更新策略比較版本碼。
+  - `README.md` 更新 Walk-Forward 章節敘述，反映新的 OOS 品質評分方式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
