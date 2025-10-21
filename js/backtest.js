@@ -1945,6 +1945,13 @@ function formatPercentPlain(value, digits = 1) {
     return `${value.toFixed(digits)}%`;
 }
 
+function formatIsoDateLabel(iso) {
+    if (typeof iso !== 'string' || iso.trim() === '') return '';
+    const date = new Date(iso);
+    if (!Number.isFinite(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+}
+
 function formatPercentSigned(value, digits = 2) {
     if (!Number.isFinite(value)) return '—';
     const fixed = value.toFixed(digits);
@@ -8938,7 +8945,7 @@ function resolveTotalTradesMetric(performance) {
     return null;
 }
 
-function collectStrategyMetricSnapshot() {
+function collectStrategyMetricSnapshot(fallbackMetrics) {
     const performance = lastOverallResult || {};
     const sensitivitySummary = performance?.sensitivityAnalysis?.summary
         || performance?.parameterSensitivity?.summary
@@ -8949,6 +8956,7 @@ function collectStrategyMetricSnapshot() {
         : null;
     const rollingAggregate = rollingState?.aggregate || null;
     const trendSummary = trendAnalysisState?.summary || null;
+    const fallback = fallbackMetrics && typeof fallbackMetrics === 'object' ? fallbackMetrics : null;
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
     let latestCoverage = null;
@@ -8961,7 +8969,21 @@ function collectStrategyMetricSnapshot() {
         latestReturn = Number(trendSummary.latest.returnPct);
     }
 
-    return {
+    const rollingScore = normaliseMetricNumber(rollingAggregate?.score);
+    const rollingPassRate = normaliseMetricNumber(rollingAggregate?.passRate);
+    const fallbackRollingScore = fallback ? normaliseMetricNumber(fallback.rollingScore) : null;
+    const fallbackRollingPassRate = fallback ? normaliseMetricNumber(fallback.rollingPassRate) : null;
+    const summaryText = typeof rollingAggregate?.summaryText === 'string'
+        ? rollingAggregate.summaryText
+        : (typeof fallback?.rollingSummaryText === 'string' ? fallback.rollingSummaryText : null);
+    const generatedAt = typeof rollingState?.aggregateGeneratedAt === 'string'
+        ? rollingState.aggregateGeneratedAt
+        : (typeof fallback?.rollingGeneratedAt === 'string' ? fallback.rollingGeneratedAt : null);
+    const rollingVersion = typeof rollingState?.version === 'string'
+        ? rollingState.version
+        : (typeof fallback?.rollingVersion === 'string' ? fallback.rollingVersion : null);
+
+    const snapshot = {
         version: STRATEGY_COMPARISON_VERSION,
         capturedAt: new Date().toISOString(),
         annualizedReturn: normaliseMetricNumber(performance?.annualizedReturn),
@@ -8973,18 +8995,19 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
-        rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
-        rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
-        rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
-            ? rollingState.aggregateGeneratedAt
-            : null,
+        rollingScore: rollingScore !== null ? rollingScore : fallbackRollingScore,
+        rollingPassRate: rollingPassRate !== null ? rollingPassRate : fallbackRollingPassRate,
+        rollingSummaryText: summaryText,
+        rollingGeneratedAt: generatedAt,
+        rollingVersion,
         trendLatestLabel: latestLabelKey || null,
         trendLatestDate: typeof trendSummary?.latest?.date === 'string' ? trendSummary.latest.date : null,
         trendLatestReturnPct: normaliseMetricNumber(latestReturn),
         trendLatestCoveragePct: normaliseMetricNumber(latestCoverage),
         trendAverageConfidence: normaliseMetricNumber(trendSummary?.averageConfidence),
     };
+
+    return snapshot;
 }
 
 function loadStrategyComparisonPreferences() {
@@ -9255,10 +9278,10 @@ function formatStrategyComparisonValue(metricKey, metrics) {
         }
         case 'rollingScore': {
             const score = normaliseMetricNumber(metrics.rollingScore);
-            if (score === null) return placeholder;
-            const passRate = normaliseMetricNumber(metrics.rollingPassRate);
-            const passText = passRate === null ? '達標率 —' : `達標率 ${formatPercentPlain(passRate, 1)}`;
-            return `${Math.round(score)} 分｜${passText}`;
+            if (score === null) {
+                return placeholder;
+            }
+            return `${Math.round(score)} 分`;
         }
         case 'trendCurrent': {
             const label = resolveStrategyComparisonTrendLabel(metrics.trendLatestLabel);
@@ -9437,7 +9460,8 @@ function saveStrategy() {
         } 
     } 
     const currentSettings = getBacktestParams();
-    const currentMetrics = collectStrategyMetricSnapshot();
+    const existingMetrics = strategies[trimmedName]?.metrics || null;
+    const currentMetrics = collectStrategyMetricSnapshot(existingMetrics);
     
     if (saveStrategyToLocalStorage(trimmedName, currentSettings, currentMetrics)) { 
         populateSavedStrategiesDropdown(); 

@@ -15,6 +15,22 @@
   - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
 - **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
 
+## 2026-07-07 — Patch LB-ROLLING-TEST-20260707A
+- **Scope**: 滾動測試嚴格模式門檻換算、PSR/DSR 詳細資訊與策略比較顯示調整。
+- **Updates**:
+  - `js/rolling-test.js` 將嚴格模式 Sharpe 基準改為每日值 `1/√252`，統一以常數管理並更新卡片、摘要與說明文字（顯示日 Sharpe ≈ 0.063）。
+  - 擴充 PSR/DSR 詳細資訊，逐窗顯示 SR_hat(每期)、SR*、n_eff、γ3、γ4、MinTRL，移除 DSR 的 SR* 標示，PSR≥95% 視窗比為 0% 時提醒拉長區間。
+  - `js/backtest.js` 策略比較表僅保留滾動測試總分顯示，避免與報告細節重複。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機驗證嚴格模式下的 PSR/DSR 顯示與計算。
+
+## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
+- **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。
+- **Fix**:
+  - `index.html` 在「滾動測試次數」旁新增「改用手動視窗」切換鈕，手動模式可直接輸入訓練／測試／平移月數，並於進階設定說明新的切換流程，年化門檻輸入欄改為提示文字。
+  - `js/rolling-test.js` 更新評分流程：年化門檻改採各視窗買入持有年化，指標達標給 1 分、未達線性遞減至 0；逐窗分析會記錄門檻、品質原值、達標權重與統計權重，報表與卡片細節同步顯示並補上計算說明。新增手動視窗模式狀態管理、視窗計畫摘要提示，以及 `aggregate.score`（0～100 分）供策略比較使用。
+  - `README.md` 說明新版評分與手動視窗模式，更新補丁代碼。
+- **Testing**: 容器環境無法連線 Proxy，待實機驗證滾動測試與策略儲存流程。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:
@@ -1410,6 +1426,7 @@ NODE`
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
 ## 2026-07-27 — Patch LB-INDEX-UI-20250727B
 - **Issue recap**: 「立刻回測」按鈕觸發後仍停留在設定卡片，無法立即看到進度條，完成後右側報表也維持舊的捲動位置，使用者需手動滑動才能檢視最新摘要。
 - **Fix**:
@@ -1417,3 +1434,32 @@ NODE`
   - `js/backtest.js` 在回測結果回傳後重置右側內容區捲動位置，並在 `scrollIntoView` 失敗時使用新的平滑捲動輔助方法，避免不同瀏覽器下的焦點落差。
 - **Diagnostics**: 於桌機與手機尺寸測試快速回測，確認按下按鈕後畫面自動捲動到進度條，回測完成時右側「摘要」等分頁回到頂部並顯示最新結果。
 - **Testing**: （待在可連線 Yahoo Finance 的實際環境重新回測驗證畫面捲動與結果渲染）
+
+## 2026-07-27 — Patch LB-ROLLING-TEST-20251108A
+- **Issue recap**: Walk-Forward 報表缺乏品質中位與統計可信度的計算說明，逐窗資訊僅以文字列出不易對照；此外，保存策略後比較表仍顯示「請先測試後保存策略」，推估為滾動測試分數被覆寫為空值。
+- **Fix**:
+  - `js/rolling-test.js` 更新評分卡片文案，新增窗分數計算步驟列表、品質中位與加權原值的解釋，以及 PSR/DSR → 統計可信度的條列說明。逐窗得分改為表格呈現，清楚列出品質得分、加權原值、達標權重、統計權重、窗分數與年化門檻。
+  - `js/backtest.js` 的 `collectStrategyMetricSnapshot` 支援沿用既有滾動測試分數、達標率與摘要，並在比較表顯示版本代碼與更新日期，確保完成滾動測試後保存策略不再回到 placeholder 提示。
+  - `README.md` 同步文檔版本編號與新說明，`log.md` 記錄補丁背景與後續驗證需求。
+- **Testing**: 受限於容器無法連線 Proxy，未能實際跑滾動測試；請於具備資料來源的環境實測自動／手動視窗模式與策略保存流程，確認瀏覽器 console 無錯誤並完成比較表更新。
+
+## 2026-07-28 — Patch LB-ROLLING-TEST-20251109A
+- **Issue recap**: Walk-Forward 報表仍採算術平均結合 PSR/DSR，樣本不足時無法有效壓降統計權重，也缺少嚴格判定模式與有效樣本/嘗試資訊，導致可信度評估過於樂觀。
+- **Fix**:
+  - `index.html` 在滾動測試操作列加入「嚴格模式」開關並隨執行鎖定，更新文案提示啟用後的計分行為。
+  - `js/worker.js` 的 `computeReturnMomentSums` 追加 lag-1 自相關與樣本連續性檢查，供有效樣本數估算使用。
+  - `js/rolling-test.js` 更新為 `LB-ROLLING-TEST-20251109A`，導入 `state.strictMode`、以樣本 Sharpe 與有效樣本/嘗試數重算 PSR、DSR，可信度改為 `√(PSR × DSR)` 並套用 `0.2 + 0.8 × Credibility` 統計權重；樣本不足時壓至 0.3，嚴格模式會直接把該窗 PSR 歸零。報表補充 SR* 基準、DSR<50% 視窗比、有效樣本資訊與調整後的逐窗欄位。
+  - `README.md` 同步說明新版 Walk-Forward 評分邏輯與嚴格模式行為。
+- **Diagnostics**: 尚待具備 Proxy 的環境實測啟用/停用嚴格模式、檢視樣本極少與高相關參數組合案例，確認 PSR/DSR、統計權重與分數變化符合預期。
+- **Testing**: 未執行（容器無法連線 Proxy，需於實機環境執行滾動測試確認 console 無錯誤）。
+
+## 2026-07-29 — Patch LB-ROLLING-TEST-20260709A
+- **Issue recap**: 逐窗報表的參數/評語呈現仍為長句，難以快速定位重點；指標數字缺乏門檻色彩與明確建議，PSR/DSR 卡片也未依 γ₄、樣本量與通過率提供操作指引。
+- **Fix**:
+  - `js/rolling-test.js` 將參數摘要與視窗評語改為條列顯示，並依門檻對年化、Sharpe、Sortino、MaxDD、勝率、PSR/DSR、可信度套用紅綠色系；新增 `resolveMetricColor` 與 `formatBulletText` 以統一格式化。
+  - 更新 PSR/DSR、Sharpe、通過率等卡片描述邏輯，結合 γ₄、有效樣本、MinTRL 與通過率門檻，輸出操作建議；同時補齊整體分數、品質、WFE 的中文敘述。
+  - 聚合報表回傳整體樣本 Sharpe 與 γ₄ 指標，並以版本碼 `LB-ROLLING-TEST-20260709A` 標示。
+- **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+
