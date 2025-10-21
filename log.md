@@ -1343,3 +1343,12 @@ NODE`
   - `index.html` 與 `js/main.js` 在開發者卡片加入紀錄 A/B、產生比較與複製結果按鈕，輸出可直接貼回討論的除錯比較報告，協助定位滾動測試後與初次批量優化的差異。
 - **Diagnostics**: 本地流程依序執行滾動測試優化、重新整理、再跑批量面板並檢視除錯卡片，確認 `headless-state-restore` 顯示 storage 差異已歸零、比較工具列出指標與事件差異；實務上可將比較文本貼回支援管道協助分析。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-21 — Patch LB-BATCH-OPT-20260718C
+- **Issue recap**: 現有的除錯比較雖能列出最佳策略與事件統計，但無法看出兩次批量優化在基礎參數、排序配置與參數優化結果上的落差，導致仍難鎖定為何最佳解不同。
+- **Fix**:
+  - `js/batch-optimization.js` 擴充 `buildBatchDebugDigest`，新增初始設定、基礎參數、Top 3 結果與參數優化紀錄的快照；`summarizeResult` 與 `formatBestResultSummary` 亦加入買/賣出參數摘要，讓比較內容直接呈現具體數值差異。
+  - `diffBatchDebugLogs` 新增「初始設定」、「基礎參數對比」、「Top 3 結果」與「參數優化紀錄」區塊，並以易讀的 key-value 形式輸出，貼上後即可快速對照兩次批量優化的設定與選擇。
+  - 建立 `formatSimpleValue`、`formatParamOptimizationList` 等共用格式化函式，確保複雜物件（如策略清單、參數組合）也能輸出成精簡、適合貼上的文字，開發者模式的比較報告因此更完整。
+- **Diagnostics**: 於本地重現「先跑滾動測試再跑批量」情境，透過新比較文本即可看到停損/停利、排序鍵或參數優化值的差異，協助鎖定最佳解偏移的根本原因。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

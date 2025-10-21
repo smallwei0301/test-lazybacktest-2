@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.6 ---
-// Patch Tag: LB-BATCH-OPT-20260718B
+// --- 批量策略優化功能 - v1.2.7 ---
+// Patch Tag: LB-BATCH-OPT-20260718C
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718C';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -544,10 +544,10 @@ function summarizeCombination(combination) {
     };
 
     if (combination.buyParams) {
-        summary.buyParams = { ...combination.buyParams };
+        summary.buyParams = summarizeParams(combination.buyParams);
     }
     if (combination.sellParams) {
-        summary.sellParams = { ...combination.sellParams };
+        summary.sellParams = summarizeParams(combination.sellParams);
     }
     if (combination.riskManagement) {
         summary.riskManagement = { ...combination.riskManagement };
@@ -558,6 +558,43 @@ function summarizeCombination(combination) {
     }
 
     return summary;
+}
+
+function summarizeParams(params, limit = 8) {
+    if (!params || typeof params !== 'object') {
+        return null;
+    }
+
+    const entries = Object.entries(params)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                const formatted = Math.abs(value) >= 1000 || Math.abs(value) < 0.001
+                    ? value.toExponential(4)
+                    : Number(value.toFixed(4));
+                return [key, formatted];
+            }
+            if (typeof value === 'boolean') {
+                return [key, value];
+            }
+            if (typeof value === 'string') {
+                return [key, value];
+            }
+            if (value === null || value === undefined) {
+                return [key, null];
+            }
+            return [key, value];
+        });
+
+    if (entries.length === 0) {
+        return null;
+    }
+
+    const limited = entries.slice(0, Math.max(1, limit));
+    return limited.reduce((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+    }, {});
 }
 
 function summarizeResult(result) {
@@ -584,6 +621,18 @@ function summarizeResult(result) {
     }
     if (Array.isArray(result.optimizationTypes) && result.optimizationTypes.length > 0) {
         summary.optimizationTypes = [...result.optimizationTypes];
+    }
+    if (result.buyParams && typeof result.buyParams === 'object') {
+        const summarized = summarizeParams(result.buyParams);
+        if (summarized) {
+            summary.buyParams = summarized;
+        }
+    }
+    if (result.sellParams && typeof result.sellParams === 'object') {
+        const summarized = summarizeParams(result.sellParams);
+        if (summarized) {
+            summary.sellParams = summarized;
+        }
     }
     if (result.riskManagement) {
         summary.riskManagement = { ...result.riskManagement };
@@ -633,7 +682,14 @@ function buildBatchDebugDigest(snapshot) {
         summary: clonePlainObject(snapshot.summary || null),
         eventCount: Array.isArray(snapshot.events) ? snapshot.events.length : 0,
         eventCounts: {},
-        headlessCompare: null
+        headlessCompare: null,
+        initialConfig: null,
+        baseParams: null,
+        selectedStrategies: null,
+        sortKey: null,
+        sortDirection: null,
+        topResults: [],
+        paramOptimizations: []
     };
 
     if (Array.isArray(snapshot.events)) {
@@ -642,6 +698,33 @@ function buildBatchDebugDigest(snapshot) {
             digest.eventCounts[label] = (digest.eventCounts[label] || 0) + 1;
         });
         digest.headlessCompare = extractLastDebugEventByLabel(snapshot.events, 'headless-compare');
+
+        const batchStartEvent = extractLastDebugEventByLabel(snapshot.events, 'batch-start');
+        if (batchStartEvent?.detail) {
+            digest.initialConfig = clonePlainObject(batchStartEvent.detail.config || null);
+            digest.baseParams = clonePlainObject(batchStartEvent.detail.baseParams || null);
+            digest.selectedStrategies = clonePlainObject(batchStartEvent.detail.selectedStrategies || null);
+        }
+
+        const resultsSortedEvent = extractLastDebugEventByLabel(snapshot.events, 'results-sorted');
+        if (resultsSortedEvent?.detail) {
+            digest.sortKey = resultsSortedEvent.detail.sortKey || null;
+            digest.sortDirection = resultsSortedEvent.detail.sortDirection || null;
+            if (Array.isArray(resultsSortedEvent.detail.topResults)) {
+                digest.topResults = resultsSortedEvent.detail.topResults.map((item) => clonePlainObject(item));
+            }
+        }
+
+        digest.paramOptimizations = snapshot.events
+            .filter((entry) => entry.label === 'param-optimization-complete' && entry.detail)
+            .map((entry, index) => ({
+                index: index + 1,
+                strategyType: entry.detail.strategyType || null,
+                target: entry.detail.optimizeTarget || null,
+                selectedValue: entry.detail.selectedValue,
+                metric: entry.detail.metric,
+                targetMetric: entry.detail.targetMetric || null
+            }));
     }
 
     return digest;
@@ -655,6 +738,32 @@ function formatDebugMetric(value) {
         return value.toExponential(4);
     }
     return value.toFixed(4);
+}
+
+function formatParamSummary(params) {
+    if (!params || typeof params !== 'object') {
+        return null;
+    }
+
+    const entries = Object.entries(params).filter(([key]) => typeof key === 'string');
+    if (entries.length === 0) {
+        return null;
+    }
+
+    const parts = entries.map(([key, value]) => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return `${key}=${formatDebugMetric(value) ?? value.toFixed(4)}`;
+        }
+        if (typeof value === 'boolean') {
+            return `${key}=${value ? '是' : '否'}`;
+        }
+        if (value === null || value === undefined) {
+            return `${key}=—`;
+        }
+        return `${key}=${value}`;
+    });
+
+    return parts.join('、');
 }
 
 function formatBestResultSummary(bestResult) {
@@ -683,6 +792,19 @@ function formatBestResultSummary(bestResult) {
         }
         if (rmParts.length > 0) {
             parts.push(`風控：${rmParts.join('、')}`);
+        }
+    }
+
+    if (bestResult.buyParams && typeof bestResult.buyParams === 'object') {
+        const buySummary = formatParamSummary(bestResult.buyParams);
+        if (buySummary) {
+            parts.push(`買入參數：${buySummary}`);
+        }
+    }
+    if (bestResult.sellParams && typeof bestResult.sellParams === 'object') {
+        const sellSummary = formatParamSummary(bestResult.sellParams);
+        if (sellSummary) {
+            parts.push(`出場參數：${sellSummary}`);
         }
     }
 
@@ -754,6 +876,65 @@ function formatEventCountDiff(digestA, digestB) {
     return diffLines.join('\n');
 }
 
+function formatSimpleValue(value) {
+    if (value === null || value === undefined) {
+        return '（無）';
+    }
+    if (typeof value === 'number') {
+        const formatted = formatDebugMetric(value);
+        return formatted !== null ? formatted : value.toString();
+    }
+    if (typeof value === 'boolean') {
+        return value ? '是' : '否';
+    }
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            return '[]';
+        }
+        const preview = value.slice(0, 5).map((item) => formatSimpleValue(item));
+        return `[${preview.join(', ')}${value.length > 5 ? ', …' : ''}]`;
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value);
+        if (entries.length === 0) {
+            return '{}';
+        }
+        const formattedEntries = entries.slice(0, 6).map(([key, val]) => `${key}:${formatSimpleValue(val)}`);
+        return `{${formattedEntries.join(', ')}${entries.length > 6 ? ', …' : ''}}`;
+    }
+    return String(value);
+}
+
+function formatKeyValueComparison(label, valueA, valueB) {
+    return `- ${label}：A ${formatSimpleValue(valueA)}｜B ${formatSimpleValue(valueB)}`;
+}
+
+function formatTopResultsComparison(label, digest) {
+    if (!digest || !Array.isArray(digest.topResults) || digest.topResults.length === 0) {
+        return `${label}：無結果`;
+    }
+    const lines = digest.topResults.map((result, index) => {
+        const summary = formatBestResultSummary(result);
+        return `- #${index + 1} ${summary}`;
+    });
+    return `${label}：\n${lines.join('\n')}`;
+}
+
+function formatParamOptimizationList(label, list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return `${label}：無參數優化紀錄`;
+    }
+    const lines = list.map((item, index) => {
+        const targetLabel = item.target ? `${item.target}` : '未知參數';
+        const scopeLabel = item.strategyType ? `${item.strategyType}` : '未知範疇';
+        const valueLabel = formatSimpleValue(item.selectedValue);
+        const metricLabel = typeof item.metric === 'number' ? (formatDebugMetric(item.metric) || item.metric) : formatSimpleValue(item.metric);
+        const metricName = item.targetMetric || '目標指標';
+        return `- #${index + 1} ${scopeLabel}.${targetLabel}=${valueLabel}（${metricName}=${metricLabel}）`;
+    });
+    return `${label}：\n${lines.join('\n')}`;
+}
+
 function formatDebugSnapshotLabel(snapshot) {
     const digest = buildBatchDebugDigest(snapshot);
     if (!digest) {
@@ -813,6 +994,51 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
     lines.push('## Headless 對拍');
     lines.push(`A：${formatHeadlessCompareSummary(digestA?.headlessCompare)}`);
     lines.push(`B：${formatHeadlessCompareSummary(digestB?.headlessCompare)}`);
+
+    lines.push('');
+    lines.push('## 初始設定');
+    if (digestA?.initialConfig || digestB?.initialConfig) {
+        lines.push(formatKeyValueComparison('目標指標', digestA?.initialConfig?.targetMetric, digestB?.initialConfig?.targetMetric));
+        lines.push(formatKeyValueComparison('參數優化次數', digestA?.initialConfig?.parameterTrials, digestB?.initialConfig?.parameterTrials));
+        lines.push(formatKeyValueComparison('迭代上限', digestA?.initialConfig?.iterationLimit, digestB?.initialConfig?.iterationLimit));
+        lines.push(formatKeyValueComparison('併發數', digestA?.initialConfig?.concurrency, digestB?.initialConfig?.concurrency));
+        lines.push(formatKeyValueComparison('排序鍵', digestA?.sortKey || digestA?.initialConfig?.sortKey, digestB?.sortKey || digestB?.initialConfig?.sortKey));
+        lines.push(formatKeyValueComparison('排序方向', digestA?.sortDirection || digestA?.initialConfig?.sortDirection, digestB?.sortDirection || digestB?.initialConfig?.sortDirection));
+    } else {
+        lines.push('- 未記錄初始設定');
+    }
+
+    lines.push('');
+    lines.push('## 基礎參數對比');
+    if (digestA?.baseParams || digestB?.baseParams) {
+        const baseKeys = [
+            ['stockNo', '標的代碼'],
+            ['market', '市場'],
+            ['startDate', '起始日'],
+            ['endDate', '結束日'],
+            ['tradeTiming', '交易時點'],
+            ['initialCapital', '初始資金'],
+            ['positionSize', '單筆投入(%)'],
+            ['stopLoss', '停損'],
+            ['takeProfit', '停利']
+        ];
+        baseKeys.forEach(([key, label]) => {
+            lines.push(formatKeyValueComparison(label, digestA?.baseParams?.[key], digestB?.baseParams?.[key]));
+        });
+        lines.push(formatKeyValueComparison('多空策略', digestA?.selectedStrategies, digestB?.selectedStrategies));
+    } else {
+        lines.push('- 未記錄基礎參數');
+    }
+
+    lines.push('');
+    lines.push('## Top 3 結果');
+    lines.push(formatTopResultsComparison('A', digestA));
+    lines.push(formatTopResultsComparison('B', digestB));
+
+    lines.push('');
+    lines.push('## 參數優化紀錄');
+    lines.push(formatParamOptimizationList('A', digestA?.paramOptimizations));
+    lines.push(formatParamOptimizationList('B', digestB?.paramOptimizations));
 
     lines.push('');
     lines.push('## 事件次數差異');
