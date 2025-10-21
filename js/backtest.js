@@ -8945,7 +8945,12 @@ function collectStrategyMetricSnapshot() {
         sensitivityScenarioCount: Number.isFinite(sensitivitySummary?.scenarioCount)
             ? Number(sensitivitySummary.scenarioCount)
             : null,
-        rollingScore: normaliseMetricNumber(rollingAggregate?.score),
+        rollingScore: (() => {
+            const direct = normaliseMetricNumber(rollingAggregate?.score);
+            if (direct !== null) return direct;
+            const normalized = normaliseMetricNumber(rollingAggregate?.totalScore);
+            return normalized !== null ? normalized * 100 : null;
+        })(),
         rollingPassRate: normaliseMetricNumber(rollingAggregate?.passRate),
         rollingSummaryText: typeof rollingAggregate?.summaryText === 'string' ? rollingAggregate.summaryText : null,
         rollingGeneratedAt: typeof rollingState?.aggregateGeneratedAt === 'string'
