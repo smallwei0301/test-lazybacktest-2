@@ -1394,3 +1394,12 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-ROLLING-TEST-20251102A
+- **Issue recap**: OOS 品質指標一旦超過門檻仍會繼續加分、年化報酬沿用自訂門檻，且滾動測試儀表卡缺少計算說明，儲存含滾動測試的策略時比較表仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/rolling-test.js` 將 OOS 品質改為達標即滿分、未達門檻線性遞減，並以各視窗買入持有年化報酬作為年化門檻，同步回傳門檻中位數與詳細說明文字。
+  - `js/rolling-test.js` 擴充總分與品質卡片的細節描述，明確交代「窗分數中位」、「品質分數中位」與「加權原值」的計算方式，並輸出 0～100 的總分給外部模組使用。
+  - `js/backtest.js` 儲存策略時帶入最新滾動測試總分，避免比較面板仍顯示 placeholder。
+- **Diagnostics**: 以同一標的執行 Walk-Forward，確認品質卡片顯示門檻為買入持有年化中位數，詳情展開後可閱讀計算說明；儲存策略後於比較表可直接看到滾動評分。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
