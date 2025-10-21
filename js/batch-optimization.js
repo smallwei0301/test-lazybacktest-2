@@ -1,45 +1,117 @@
-// --- 批量策略優化功能 - v1.1 ---
-// Patch Tag: LB-BATCH-OPT-20250930A
+// --- 批量策略優化功能 - v1.2.8 ---
+// Patch Tag: LB-BATCH-OPT-20260718G
 
-// 策略名稱映射：批量優化名稱 -> Worker名稱
+const BATCH_STRATEGY_NAME_OVERRIDES = {
+    // 出場策略映射
+    'ma_cross_exit': 'ma_cross',
+    'ema_cross_exit': 'ema_cross',
+    'k_d_cross_exit': 'k_d_cross',
+    'macd_cross_exit': 'macd_cross',
+    'rsi_overbought_exit': 'rsi_overbought',
+    'williams_overbought_exit': 'williams_overbought',
+    'ma_below_exit': 'ma_below',
+    'rsi_reversal_exit': 'rsi_reversal',
+    'williams_reversal_exit': 'williams_reversal',
+
+    // 做空入場策略映射
+    'short_ma_cross': 'short_ma_cross',
+    'short_ema_cross': 'short_ema_cross',
+    'short_k_d_cross': 'short_k_d_cross',
+    'short_macd_cross': 'short_macd_cross',
+    'short_rsi_overbought': 'short_rsi_overbought',
+    'short_williams_overbought': 'short_williams_overbought',
+    'short_ma_below': 'short_ma_below',
+    'short_rsi_reversal': 'short_rsi_reversal',
+    'short_williams_reversal': 'short_williams_reversal',
+
+    // 回補策略映射
+    'cover_ma_cross': 'cover_ma_cross',
+    'cover_ema_cross': 'cover_ema_cross',
+    'cover_k_d_cross': 'cover_k_d_cross',
+    'cover_macd_cross': 'cover_macd_cross',
+    'cover_rsi_oversold': 'cover_rsi_oversold',
+    'cover_williams_oversold': 'cover_williams_oversold',
+    'cover_ma_above': 'cover_ma_above',
+    'cover_rsi_reversal': 'cover_rsi_reversal',
+    'cover_williams_reversal': 'cover_williams_reversal'
+};
+
+const BATCH_STRATEGY_NAME_MAP = (() => {
+    const map = new Map(Object.entries(BATCH_STRATEGY_NAME_OVERRIDES));
+    if (typeof strategyDescriptions === 'object' && strategyDescriptions) {
+        Object.keys(strategyDescriptions).forEach((key) => {
+            if (!map.has(key)) {
+                map.set(key, key);
+            }
+        });
+    }
+    return map;
+})();
+
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718H';
+
+let batchDebugSession = null;
+const batchDebugListeners = new Set();
+
+function hydrateStrategyNameMap() {
+    if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+        return;
+    }
+
+    Object.keys(strategyDescriptions).forEach((key) => {
+        if (!BATCH_STRATEGY_NAME_MAP.has(key)) {
+            BATCH_STRATEGY_NAME_MAP.set(key, key);
+        }
+    });
+}
+
 function getWorkerStrategyName(batchStrategyName) {
-    const strategyNameMap = {
-        // 出場策略映射
-        'ma_cross_exit': 'ma_cross',
-        'ema_cross_exit': 'ema_cross',
-        'k_d_cross_exit': 'k_d_cross',
-        'macd_cross_exit': 'macd_cross',
-        'rsi_overbought_exit': 'rsi_overbought',
-        'williams_overbought_exit': 'williams_overbought',
-        'ma_below_exit': 'ma_below',
-        'rsi_reversal_exit': 'rsi_reversal',
-        'williams_reversal_exit': 'williams_reversal',
-        
-        // 做空入場策略映射
-        'short_ma_cross': 'short_ma_cross',
-        'short_ema_cross': 'short_ema_cross',
-        'short_k_d_cross': 'short_k_d_cross',
-        'short_macd_cross': 'short_macd_cross',
-        'short_rsi_overbought': 'short_rsi_overbought',
-        'short_williams_overbought': 'short_williams_overbought',
-        'short_ma_below': 'short_ma_below',
-        'short_rsi_reversal': 'short_rsi_reversal',
-        'short_williams_reversal': 'short_williams_reversal',
-        
-        // 回補策略映射
-        'cover_ma_cross': 'cover_ma_cross',
-        'cover_ema_cross': 'cover_ema_cross',
-        'cover_k_d_cross': 'cover_k_d_cross',
-        'cover_macd_cross': 'cover_macd_cross',
-        'cover_rsi_oversold': 'cover_rsi_oversold',
-        'cover_williams_oversold': 'cover_williams_oversold',
-        'cover_ma_above': 'cover_ma_above',
-        'cover_rsi_reversal': 'cover_rsi_reversal',
-        'cover_williams_reversal': 'cover_williams_reversal'
-    };
-    
-    // 如果有映射則返回映射的名稱，否則返回原名稱
-    return strategyNameMap[batchStrategyName] || batchStrategyName;
+    if (batchStrategyName === 'none') {
+        return null;
+    }
+
+    if (!batchStrategyName) {
+        const message = '[Batch Optimization] Strategy name is required for worker mapping';
+        console.error(message);
+        if (batchDebugSession) {
+            recordBatchDebug('strategy-name-missing', { requested: batchStrategyName }, {
+                level: 'error',
+                consoleLevel: 'error'
+            });
+        }
+        if (typeof showError === 'function') {
+            showError('批量優化缺少策略名稱，無法建立回測請求。');
+        }
+        throw new Error(message);
+    }
+
+    if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
+        hydrateStrategyNameMap();
+    }
+
+    if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
+        const message = `[Batch Optimization] Missing worker strategy mapping for "${batchStrategyName}"`;
+        console.error(message);
+        if (batchDebugSession) {
+            recordBatchDebug('strategy-mapping-missing', { strategy: batchStrategyName }, {
+                level: 'error',
+                consoleLevel: 'error'
+            });
+        }
+        if (typeof showError === 'function') {
+            showError(`批量優化缺少「${batchStrategyName}」的策略映射，請補齊批量設定。`);
+        }
+        throw new Error(message);
+    }
+
+    return BATCH_STRATEGY_NAME_MAP.get(batchStrategyName);
+}
+
+function resolveWorkerStrategyName(strategyName) {
+    if (!strategyName) {
+        return null;
+    }
+    return getWorkerStrategyName(strategyName);
 }
 
 // 全局變量
@@ -48,6 +120,7 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let lastHeadlessOptimizationSummary = null;
 
 function clonePlainObject(value) {
     if (!value || typeof value !== 'object') return {};
@@ -64,6 +137,1310 @@ function clonePlainObject(value) {
         console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
         return { ...value };
     }
+}
+
+function cloneStructuredValue(value) {
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            console.warn('[Batch Optimization] structuredClone failed, falling back to JSON clone:', error);
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (error) {
+        console.warn('[Batch Optimization] JSON clone failed, returning shallow copy:', error);
+        if (Array.isArray(value)) {
+            return value.slice();
+        }
+        if (value && typeof value === 'object') {
+            return { ...value };
+        }
+        return value;
+    }
+}
+
+function getActiveCacheStore() {
+    if (typeof cachedDataStore !== 'undefined' && cachedDataStore instanceof Map) {
+        return cachedDataStore;
+    }
+    if (typeof window !== 'undefined' && window.cachedDataStore instanceof Map) {
+        return window.cachedDataStore;
+    }
+    return null;
+}
+
+function captureCacheStoreSnapshot(store = getActiveCacheStore()) {
+    if (!(store instanceof Map)) {
+        return null;
+    }
+    const snapshot = [];
+    store.forEach((value, key) => {
+        snapshot.push([key, cloneStructuredValue(value)]);
+    });
+    return snapshot;
+}
+
+function restoreCacheStoreSnapshot(snapshot, store = getActiveCacheStore()) {
+    if (!(store instanceof Map)) {
+        return;
+    }
+    store.clear();
+    if (!Array.isArray(snapshot)) {
+        return;
+    }
+    snapshot.forEach(([key, value]) => {
+        store.set(key, cloneStructuredValue(value));
+    });
+}
+
+function captureLastFetchSettingsSnapshot() {
+    if (typeof lastFetchSettings !== 'undefined') {
+        return clonePlainObject(lastFetchSettings);
+    }
+    if (typeof window !== 'undefined' && typeof window.lastFetchSettings !== 'undefined') {
+        return clonePlainObject(window.lastFetchSettings);
+    }
+    return undefined;
+}
+
+function restoreLastFetchSettingsSnapshot(snapshot) {
+    if (typeof lastFetchSettings !== 'undefined') {
+        lastFetchSettings = snapshot ? clonePlainObject(snapshot) : snapshot;
+        return;
+    }
+    if (typeof window !== 'undefined' && typeof window.lastFetchSettings !== 'undefined') {
+        window.lastFetchSettings = snapshot ? clonePlainObject(snapshot) : snapshot;
+    }
+}
+
+function extractRowDateValue(row) {
+    if (!row || typeof row !== 'object') return null;
+    return row.date || row.Date || row.tradeDate || row.trade_date || row.timestamp || row.time || row.t || null;
+}
+
+function summarizeDatasetRange(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return { length: 0, startDate: null, endDate: null };
+    }
+
+    const first = rows[0] || {};
+    const last = rows[rows.length - 1] || {};
+
+    return {
+        length: rows.length,
+        startDate: extractRowDateValue(first),
+        endDate: extractRowDateValue(last)
+    };
+}
+
+const DATASET_COVERAGE_TOLERANCE_MS = 48 * 60 * 60 * 1000; // 48 小時容忍，允許時區/假日差異
+
+function normaliseDateLikeToMs(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (value instanceof Date) {
+        const time = value.getTime();
+        return Number.isFinite(time) ? time : null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (value > 1e12) {
+            return value;
+        }
+        if (value > 1e10) {
+            return value * 1000;
+        }
+        const asInt = Math.trunc(value);
+        if (asInt >= 1e6) {
+            const str = String(asInt);
+            if (str.length === 8) {
+                const year = parseInt(str.slice(0, 4), 10);
+                const month = parseInt(str.slice(4, 6), 10) - 1;
+                const day = parseInt(str.slice(6, 8), 10);
+                const timestamp = Date.UTC(year, month, day);
+                return Number.isFinite(timestamp) ? timestamp : null;
+            }
+        }
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+        if (/^\d{8}$/.test(trimmed)) {
+            const year = parseInt(trimmed.slice(0, 4), 10);
+            const month = parseInt(trimmed.slice(4, 6), 10) - 1;
+            const day = parseInt(trimmed.slice(6, 8), 10);
+            const timestamp = Date.UTC(year, month, day);
+            return Number.isFinite(timestamp) ? timestamp : null;
+        }
+        const normalised = trimmed.replace(/\//g, '-');
+        const parsed = Date.parse(normalised);
+        if (!Number.isNaN(parsed)) {
+            return parsed;
+        }
+        const numeric = Number(normalised);
+        if (Number.isFinite(numeric)) {
+            return normaliseDateLikeToMs(numeric);
+        }
+    }
+
+    return null;
+}
+
+function sliceDatasetRowsByRange(rows, requiredRange) {
+    const tolerance = DATASET_COVERAGE_TOLERANCE_MS;
+    const startBound = normaliseDateLikeToMs(requiredRange?.dataStartDate
+        || requiredRange?.effectiveStartDate
+        || requiredRange?.startDate
+        || null);
+    const endBound = normaliseDateLikeToMs(requiredRange?.endDate || null);
+
+    const summaryBefore = summarizeDatasetRange(rows);
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return {
+            rows: [],
+            summaryBefore,
+            summaryAfter: { length: 0, startDate: null, endDate: null },
+            removedCount: 0,
+            removedBreakdown: { beforeStart: 0, afterEnd: 0, undetermined: 0 },
+            bounds: { startTs: startBound, endTs: endBound }
+        };
+    }
+
+    const filtered = [];
+    const removedBreakdown = { beforeStart: 0, afterEnd: 0, undetermined: 0 };
+
+    rows.forEach((row) => {
+        const rowDateValue = extractRowDateValue(row);
+        const rowTs = normaliseDateLikeToMs(rowDateValue);
+
+        if (rowTs === null) {
+            removedBreakdown.undetermined += 1;
+            filtered.push(row);
+            return;
+        }
+
+        if (startBound !== null && (rowTs + tolerance) < startBound) {
+            removedBreakdown.beforeStart += 1;
+            return;
+        }
+
+        if (endBound !== null && (rowTs - tolerance) > endBound) {
+            removedBreakdown.afterEnd += 1;
+            return;
+        }
+
+        filtered.push(row);
+    });
+
+    return {
+        rows: filtered,
+        summaryBefore,
+        summaryAfter: summarizeDatasetRange(filtered),
+        removedCount: rows.length - filtered.length,
+        removedBreakdown,
+        bounds: { startTs: startBound, endTs: endBound }
+    };
+}
+
+function buildCachedDatasetUsage(rows, requiredRange) {
+    const summary = summarizeDatasetRange(rows);
+    const hasDataset = Array.isArray(rows) && rows.length > 0;
+
+    let evaluation = {
+        coverageSatisfied: hasDataset,
+        reason: hasDataset ? 'ok' : 'dataset-empty',
+        datasetStartTs: normaliseDateLikeToMs(summary.startDate),
+        datasetEndTs: normaliseDateLikeToMs(summary.endDate),
+        requiredStartTs: normaliseDateLikeToMs(requiredRange?.dataStartDate
+            || requiredRange?.effectiveStartDate
+            || requiredRange?.startDate
+            || null),
+        requiredEndTs: normaliseDateLikeToMs(requiredRange?.endDate || null)
+    };
+
+    if (hasDataset) {
+        evaluation = evaluateDatasetCoverage(summary, requiredRange);
+    }
+
+    let sliceInfo = null;
+    let datasetForWorker = null;
+    let useCachedData = evaluation.coverageSatisfied && hasDataset;
+
+    if (useCachedData) {
+        sliceInfo = sliceDatasetRowsByRange(rows, requiredRange);
+        datasetForWorker = sliceInfo.rows;
+        if (!Array.isArray(datasetForWorker) || datasetForWorker.length === 0) {
+            useCachedData = false;
+        }
+    }
+
+    return {
+        summary,
+        evaluation,
+        sliceInfo,
+        datasetForWorker,
+        useCachedData
+    };
+}
+
+function buildBatchDatasetMeta(params = {}) {
+    const meta = {};
+
+    if (params.stockNo) {
+        meta.stockNo = params.stockNo;
+    }
+
+    const market = params.market || params.marketType;
+    if (market) {
+        meta.market = market;
+    }
+
+    if (params.priceMode) {
+        meta.priceMode = params.priceMode;
+    } else if (typeof params.adjustedPrice === 'boolean') {
+        meta.priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
+    }
+
+    if (params.tradeTiming) {
+        meta.tradeTiming = params.tradeTiming;
+    }
+
+    if (params.startDate) {
+        meta.requestStartDate = params.startDate;
+    }
+
+    if (params.endDate) {
+        meta.requestEndDate = params.endDate;
+    }
+
+    if (Number.isFinite(params.lookbackDays)) {
+        meta.lookbackDays = params.lookbackDays;
+    }
+
+    return meta;
+}
+
+function summarizeRequiredRangeFromParams(params = {}) {
+    const dataStartDate = params.dataStartDate || params.bufferedStartDate || null;
+    const effectiveStartDate = params.effectiveStartDate || params.startDate || null;
+    const startDate = params.startDate || null;
+    const endDate = params.endDate || null;
+
+    return {
+        lookbackDays: Number.isFinite(params.lookbackDays) ? params.lookbackDays : null,
+        dataStartDate,
+        effectiveStartDate,
+        startDate,
+        endDate
+    };
+}
+
+function evaluateDatasetCoverage(summary, requiredRange) {
+    const datasetStartTs = normaliseDateLikeToMs(summary?.startDate || null);
+    const datasetEndTs = normaliseDateLikeToMs(summary?.endDate || null);
+    const requiredStartTs = normaliseDateLikeToMs(requiredRange?.dataStartDate || requiredRange?.effectiveStartDate || requiredRange?.startDate || null);
+    const requiredEndTs = normaliseDateLikeToMs(requiredRange?.endDate || null);
+
+    let coverageSatisfied = true;
+    const reasons = [];
+
+    if (requiredStartTs !== null && datasetStartTs !== null && datasetStartTs - requiredStartTs > DATASET_COVERAGE_TOLERANCE_MS) {
+        coverageSatisfied = false;
+        reasons.push('dataset-start-after-required-start');
+    }
+
+    if (requiredEndTs !== null && datasetEndTs !== null && requiredEndTs - datasetEndTs > DATASET_COVERAGE_TOLERANCE_MS) {
+        coverageSatisfied = false;
+        reasons.push('dataset-end-before-required-end');
+    }
+
+    if (requiredEndTs !== null && datasetEndTs === null) {
+        coverageSatisfied = false;
+        reasons.push('dataset-end-missing');
+    }
+
+    if (requiredStartTs !== null && datasetStartTs === null) {
+        coverageSatisfied = false;
+        reasons.push('dataset-start-missing');
+    }
+
+    return {
+        coverageSatisfied,
+        reason: reasons.length > 0 ? reasons.join('|') : 'ok',
+        datasetStartTs,
+        datasetEndTs,
+        requiredStartTs,
+        requiredEndTs
+    };
+}
+
+function getWindowLocalStorage() {
+    try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+            return window.localStorage;
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Unable to access localStorage:', error);
+    }
+    return null;
+}
+
+function getWindowSessionStorage() {
+    try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+            return window.sessionStorage;
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Unable to access sessionStorage:', error);
+    }
+    return null;
+}
+
+function captureWebStorageSnapshot(storage) {
+    if (!storage || typeof storage.length !== 'number') {
+        return null;
+    }
+
+    const snapshot = {};
+    try {
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (typeof key === 'string') {
+                snapshot[key] = storage.getItem(key);
+            }
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to capture storage snapshot:', error);
+        return null;
+    }
+
+    return snapshot;
+}
+
+function summarizeStorageSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return { count: 0, keys: [] };
+    }
+
+    const keys = Object.keys(snapshot);
+    return {
+        count: keys.length,
+        keys: keys.slice(0, 5)
+    };
+}
+
+function diffStorageSnapshots(previousSnapshot, currentSnapshot) {
+    const diff = { added: [], removed: [], changed: [] };
+
+    if (!previousSnapshot && !currentSnapshot) {
+        return diff;
+    }
+
+    const prevKeys = new Set(Object.keys(previousSnapshot || {}));
+    const currKeys = new Set(Object.keys(currentSnapshot || {}));
+
+    currKeys.forEach((key) => {
+        if (!prevKeys.has(key)) {
+            diff.added.push(key);
+        } else if (previousSnapshot[key] !== currentSnapshot[key]) {
+            diff.changed.push(key);
+        }
+    });
+
+    prevKeys.forEach((key) => {
+        if (!currKeys.has(key)) {
+            diff.removed.push(key);
+        }
+    });
+
+    if (diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0) {
+        return { added: [], removed: [], changed: [], empty: true };
+    }
+
+    return diff;
+}
+
+function restoreWebStorageSnapshot(storage, snapshot) {
+    if (!storage || typeof storage.length !== 'number') {
+        return;
+    }
+
+    try {
+        const keys = [];
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (typeof key === 'string') {
+                keys.push(key);
+            }
+        }
+
+        keys.forEach((key) => {
+            if (!snapshot || !Object.prototype.hasOwnProperty.call(snapshot, key)) {
+                storage.removeItem(key);
+            }
+        });
+
+        if (snapshot && typeof snapshot === 'object') {
+            Object.keys(snapshot).forEach((key) => {
+                try {
+                    if (snapshot[key] === null || snapshot[key] === undefined) {
+                        storage.removeItem(key);
+                    } else {
+                        storage.setItem(key, snapshot[key]);
+                    }
+                } catch (error) {
+                    console.warn('[Batch Optimization] Failed to restore storage key:', key, error);
+                }
+            });
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to restore storage snapshot:', error);
+    }
+}
+
+function ensureBatchDebugSession(context = {}) {
+    if (!batchDebugSession) {
+        startBatchDebugSession(context);
+    }
+    return batchDebugSession;
+}
+
+function notifyBatchDebugListeners() {
+    if (batchDebugListeners.size === 0) {
+        return;
+    }
+    const snapshot = getBatchDebugSnapshot();
+    batchDebugListeners.forEach((listener) => {
+        try {
+            listener(snapshot);
+        } catch (error) {
+            console.error('[Batch Debug] Listener error:', error);
+        }
+    });
+}
+
+function subscribeBatchDebugLog(listener) {
+    if (typeof listener !== 'function') {
+        return () => {};
+    }
+    batchDebugListeners.add(listener);
+    try {
+        listener(getBatchDebugSnapshot());
+    } catch (error) {
+        console.error('[Batch Debug] Initial listener dispatch failed:', error);
+    }
+    return () => {
+        batchDebugListeners.delete(listener);
+    };
+}
+
+function startBatchDebugSession(context = {}) {
+    const timestamp = Date.now();
+    batchDebugSession = {
+        version: BATCH_DEBUG_VERSION_TAG,
+        sessionId: `BATCH-${timestamp}`,
+        startedAt: timestamp,
+        startedAtIso: new Date(timestamp).toISOString(),
+        context: clonePlainObject(context),
+        events: [],
+        summary: {}
+    };
+
+    const initEvent = {
+        ts: timestamp,
+        iso: batchDebugSession.startedAtIso,
+        label: 'session-start',
+        detail: clonePlainObject(context),
+        phase: context.phase || 'init',
+        level: 'info'
+    };
+    batchDebugSession.events.push(initEvent);
+
+    if (context.quiet !== true) {
+        console.log('[Batch Debug][session-start]', initEvent.detail);
+    }
+
+    notifyBatchDebugListeners();
+
+    return batchDebugSession;
+}
+
+function recordBatchDebug(event, detail = {}, options = {}) {
+    ensureBatchDebugSession(options.sessionContext || {});
+
+    if (!batchDebugSession) {
+        return null;
+    }
+
+    const timestamp = Date.now();
+    const entry = {
+        ts: timestamp,
+        iso: new Date(timestamp).toISOString(),
+        label: event,
+        detail: clonePlainObject(detail),
+        phase: options.phase || null,
+        level: options.level || 'info'
+    };
+
+    batchDebugSession.events.push(entry);
+    batchDebugSession.lastEventAt = timestamp;
+
+    if (options.updateSummary && typeof options.updateSummary === 'function') {
+        batchDebugSession.summary = batchDebugSession.summary || {};
+        options.updateSummary(batchDebugSession.summary, entry);
+    }
+
+    if (options.console !== false) {
+        const consoleLevel = options.consoleLevel
+            || (entry.level === 'error' ? 'error' : entry.level === 'warn' ? 'warn' : 'log');
+        const printer = console[consoleLevel] || console.log;
+        try {
+            printer.call(console, `[Batch Debug][${event}]`, detail);
+        } catch (error) {
+            console.log('[Batch Debug][fallback]', event, detail);
+        }
+    }
+
+    notifyBatchDebugListeners();
+
+    return entry;
+}
+
+function finalizeBatchDebugSession(outcome = {}) {
+    if (!batchDebugSession) {
+        return null;
+    }
+
+    if (batchDebugSession.completedAt) {
+        batchDebugSession.outcome = {
+            ...batchDebugSession.outcome,
+            ...clonePlainObject(outcome)
+        };
+        return batchDebugSession;
+    }
+
+    const timestamp = Date.now();
+    batchDebugSession.completedAt = timestamp;
+    batchDebugSession.completedAtIso = new Date(timestamp).toISOString();
+    batchDebugSession.outcome = clonePlainObject(outcome);
+
+    recordBatchDebug('session-complete', batchDebugSession.outcome, {
+        phase: 'complete',
+        consoleLevel: 'log'
+    });
+
+    notifyBatchDebugListeners();
+
+    return batchDebugSession;
+}
+
+function getBatchDebugSnapshot() {
+    if (!batchDebugSession) {
+        return null;
+    }
+    return clonePlainObject(batchDebugSession);
+}
+
+function downloadBatchDebugLog(filenamePrefix = 'batch-debug-log') {
+    if (!batchDebugSession) {
+        console.warn('[Batch Debug] No session available for export');
+        return;
+    }
+
+    try {
+        const snapshot = getBatchDebugSnapshot();
+        const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const filename = `${filenamePrefix}-${snapshot.sessionId || Date.now()}.json`;
+
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+
+        console.log('[Batch Debug] Exported log:', filename);
+    } catch (error) {
+        console.error('[Batch Debug] Failed to export log:', error);
+    }
+}
+
+function clearBatchDebugSession() {
+    batchDebugSession = null;
+    notifyBatchDebugListeners();
+}
+
+function summarizeCombination(combination) {
+    if (!combination || typeof combination !== 'object') {
+        return null;
+    }
+
+    const summary = {
+        buyStrategy: combination.buyStrategy || null,
+        sellStrategy: combination.sellStrategy || null
+    };
+
+    if (combination.buyParams) {
+        summary.buyParams = summarizeParams(combination.buyParams);
+    }
+    if (combination.sellParams) {
+        summary.sellParams = summarizeParams(combination.sellParams);
+    }
+    if (combination.riskManagement) {
+        summary.riskManagement = { ...combination.riskManagement };
+    }
+    if (combination.__finalMetric !== undefined) {
+        summary.metric = combination.__finalMetric;
+        summary.metricLabel = combination.__metricLabel || null;
+    }
+
+    return summary;
+}
+
+function summarizeParams(params, limit = 8) {
+    if (!params || typeof params !== 'object') {
+        return null;
+    }
+
+    const entries = Object.entries(params)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                const formatted = Math.abs(value) >= 1000 || Math.abs(value) < 0.001
+                    ? value.toExponential(4)
+                    : Number(value.toFixed(4));
+                return [key, formatted];
+            }
+            if (typeof value === 'boolean') {
+                return [key, value];
+            }
+            if (typeof value === 'string') {
+                return [key, value];
+            }
+            if (value === null || value === undefined) {
+                return [key, null];
+            }
+            return [key, value];
+        });
+
+    if (entries.length === 0) {
+        return null;
+    }
+
+    const limited = entries.slice(0, Math.max(1, limit));
+    return limited.reduce((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+    }, {});
+}
+
+function summarizeResult(result) {
+    if (!result || typeof result !== 'object') {
+        return null;
+    }
+
+    const summary = {
+        buyStrategy: result.buyStrategy ?? result.entryStrategy ?? null,
+        sellStrategy: result.sellStrategy ?? result.exitStrategy ?? null,
+        annualizedReturn: typeof result.annualizedReturn === 'number' ? result.annualizedReturn : null,
+        sharpeRatio: typeof result.sharpeRatio === 'number' ? result.sharpeRatio : null,
+        maxDrawdown: typeof result.maxDrawdown === 'number' ? result.maxDrawdown : null,
+        totalReturn: typeof result.totalReturn === 'number' ? result.totalReturn : null
+    };
+
+    if (result.tradeCount !== undefined) {
+        summary.tradeCount = result.tradeCount;
+    } else if (result.totalTrades !== undefined) {
+        summary.tradeCount = result.totalTrades;
+    }
+    if (result.optimizationType) {
+        summary.optimizationType = result.optimizationType;
+    }
+    if (Array.isArray(result.optimizationTypes) && result.optimizationTypes.length > 0) {
+        summary.optimizationTypes = [...result.optimizationTypes];
+    }
+    if (result.buyParams && typeof result.buyParams === 'object') {
+        const summarized = summarizeParams(result.buyParams);
+        if (summarized) {
+            summary.buyParams = summarized;
+        }
+    }
+    if (result.sellParams && typeof result.sellParams === 'object') {
+        const summarized = summarizeParams(result.sellParams);
+        if (summarized) {
+            summary.sellParams = summarized;
+        }
+    }
+    if (result.riskManagement) {
+        summary.riskManagement = { ...result.riskManagement };
+    }
+    if (result.usedStopLoss !== undefined) {
+        summary.usedStopLoss = result.usedStopLoss;
+    }
+    if (result.usedTakeProfit !== undefined) {
+        summary.usedTakeProfit = result.usedTakeProfit;
+    }
+    if (result.__finalMetric !== undefined) {
+        summary.metric = result.__finalMetric;
+        summary.metricLabel = result.__metricLabel || null;
+    }
+
+    return summary;
+}
+
+function extractLastDebugEventByLabel(events, label) {
+    if (!Array.isArray(events)) {
+        return null;
+    }
+
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+        const entry = events[i];
+        if ((entry.label || entry.event) === label) {
+            return clonePlainObject(entry);
+        }
+    }
+
+    return null;
+}
+
+function buildBatchDebugDigest(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    const digest = {
+        sessionId: snapshot.sessionId || null,
+        version: snapshot.version || BATCH_DEBUG_VERSION_TAG,
+        startedAt: snapshot.startedAtIso || null,
+        completedAt: snapshot.completedAtIso || null,
+        status: snapshot.outcome?.status || null,
+        outcome: clonePlainObject(snapshot.outcome || {}),
+        bestResult: clonePlainObject(snapshot.outcome?.bestResult || null),
+        summary: clonePlainObject(snapshot.summary || null),
+        eventCount: Array.isArray(snapshot.events) ? snapshot.events.length : 0,
+        eventCounts: {},
+        headlessCompare: null,
+        initialConfig: null,
+        baseParams: null,
+        selectedStrategies: null,
+        sortKey: null,
+        sortDirection: null,
+        topResults: [],
+        paramOptimizations: [],
+        datasetCoverage: null,
+        datasetCoverageWarnings: []
+    };
+
+    if (Array.isArray(snapshot.events)) {
+        snapshot.events.forEach((entry) => {
+            const label = entry.label || entry.event || 'unknown';
+            digest.eventCounts[label] = (digest.eventCounts[label] || 0) + 1;
+        });
+        digest.headlessCompare = extractLastDebugEventByLabel(snapshot.events, 'headless-compare');
+
+        const batchStartEvent = extractLastDebugEventByLabel(snapshot.events, 'batch-start');
+        if (batchStartEvent?.detail) {
+            digest.initialConfig = clonePlainObject(batchStartEvent.detail.config || null);
+            digest.baseParams = clonePlainObject(batchStartEvent.detail.baseParams || null);
+            digest.selectedStrategies = clonePlainObject(batchStartEvent.detail.selectedStrategies || null);
+        }
+
+        const coverageEvents = snapshot.events
+            .filter((entry) => entry.label === 'cached-data-evaluation' && entry.detail)
+            .map((entry) => clonePlainObject(entry.detail));
+        if (coverageEvents.length > 0) {
+            digest.datasetCoverage = coverageEvents[coverageEvents.length - 1];
+        }
+
+        digest.datasetCoverageWarnings = snapshot.events
+            .filter((entry) => entry.label === 'cached-data-coverage-mismatch' && entry.detail)
+            .map((entry) => clonePlainObject(entry.detail));
+
+        const resultsSortedEvent = extractLastDebugEventByLabel(snapshot.events, 'results-sorted');
+        if (resultsSortedEvent?.detail) {
+            digest.sortKey = resultsSortedEvent.detail.sortKey || null;
+            digest.sortDirection = resultsSortedEvent.detail.sortDirection || null;
+            if (Array.isArray(resultsSortedEvent.detail.topResults)) {
+                digest.topResults = resultsSortedEvent.detail.topResults.map((item) => clonePlainObject(item));
+            }
+        }
+
+        digest.paramOptimizations = snapshot.events
+            .filter((entry) => entry.label === 'param-optimization-complete' && entry.detail)
+            .map((entry, index) => ({
+                index: index + 1,
+                strategyType: entry.detail.strategyType || null,
+                target: entry.detail.optimizeTarget || null,
+                selectedValue: entry.detail.selectedValue,
+                metric: entry.detail.metric,
+                targetMetric: entry.detail.targetMetric || null
+            }));
+    }
+
+    return digest;
+}
+
+function formatDebugMetric(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    if (Math.abs(value) >= 1000 || Math.abs(value) < 0.01) {
+        return value.toExponential(4);
+    }
+    return value.toFixed(4);
+}
+
+function formatParamSummary(params) {
+    if (!params || typeof params !== 'object') {
+        return null;
+    }
+
+    const entries = Object.entries(params).filter(([key]) => typeof key === 'string');
+    if (entries.length === 0) {
+        return null;
+    }
+
+    const parts = entries.map(([key, value]) => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return `${key}=${formatDebugMetric(value) ?? value.toFixed(4)}`;
+        }
+        if (typeof value === 'boolean') {
+            return `${key}=${value ? '是' : '否'}`;
+        }
+        if (value === null || value === undefined) {
+            return `${key}=—`;
+        }
+        return `${key}=${value}`;
+    });
+
+    return parts.join('、');
+}
+
+function formatBestResultSummary(bestResult) {
+    if (!bestResult || typeof bestResult !== 'object') {
+        return '（無最佳結果紀錄）';
+    }
+
+    const parts = [];
+    const strategyLabel = `${bestResult.buyStrategy || '無'} ➜ ${bestResult.sellStrategy || '無'}`;
+    parts.push(`策略：${strategyLabel}`);
+
+    if (typeof bestResult.metric === 'number' && Number.isFinite(bestResult.metric)) {
+        const metricLabel = bestResult.metricLabel || '目標指標';
+        parts.push(`${metricLabel}=${formatDebugMetric(bestResult.metric)}`);
+    } else if (typeof bestResult.annualizedReturn === 'number') {
+        parts.push(`年化報酬=${formatDebugMetric(bestResult.annualizedReturn)}`);
+    }
+
+    if (bestResult.riskManagement && typeof bestResult.riskManagement === 'object') {
+        const rmParts = [];
+        if (Number.isFinite(bestResult.riskManagement.stopLoss)) {
+            rmParts.push(`停損=${bestResult.riskManagement.stopLoss}`);
+        }
+        if (Number.isFinite(bestResult.riskManagement.takeProfit)) {
+            rmParts.push(`停利=${bestResult.riskManagement.takeProfit}`);
+        }
+        if (rmParts.length > 0) {
+            parts.push(`風控：${rmParts.join('、')}`);
+        }
+    }
+
+    if (bestResult.buyParams && typeof bestResult.buyParams === 'object') {
+        const buySummary = formatParamSummary(bestResult.buyParams);
+        if (buySummary) {
+            parts.push(`買入參數：${buySummary}`);
+        }
+    }
+    if (bestResult.sellParams && typeof bestResult.sellParams === 'object') {
+        const sellSummary = formatParamSummary(bestResult.sellParams);
+        if (sellSummary) {
+            parts.push(`出場參數：${sellSummary}`);
+        }
+    }
+
+    return parts.join('｜');
+}
+
+function formatHeadlessCompareSummary(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return '（尚未進行 Headless 對拍）';
+    }
+
+    const detail = entry.detail || {};
+    const parts = [];
+    if (typeof detail.metricDelta === 'number' && Number.isFinite(detail.metricDelta)) {
+        parts.push(`Δ=${formatDebugMetric(detail.metricDelta)}`);
+    }
+    if (detail.metricLabel) {
+        parts.push(`指標=${detail.metricLabel}`);
+    }
+    if (detail.headlessMetric !== undefined) {
+        parts.push(`Headless=${formatDebugMetric(detail.headlessMetric)}`);
+    }
+    if (detail.batchMetric !== undefined) {
+        parts.push(`Batch=${formatDebugMetric(detail.batchMetric)}`);
+    }
+    if (detail.differences) {
+        const diffKeys = Object.keys(detail.differences);
+        if (diffKeys.length > 0) {
+            parts.push(`差異欄位=${diffKeys.join(',')}`);
+        }
+    }
+    if (parts.length === 0) {
+        parts.push('（無差異）');
+    }
+    return parts.join('｜');
+}
+
+function formatEventCountsForComparison(eventCounts, label) {
+    const entries = Object.entries(eventCounts || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+    if (entries.length === 0) {
+        return `${label}：無事件紀錄`;
+    }
+    return [`${label}（前 8 筆）：`]
+        .concat(entries.map(([event, count]) => `- ${event} × ${count}`))
+        .join('\n');
+}
+
+function formatEventCountDiff(digestA, digestB) {
+    const diffLines = [];
+    const keys = new Set([
+        ...Object.keys(digestA?.eventCounts || {}),
+        ...Object.keys(digestB?.eventCounts || {})
+    ]);
+
+    keys.forEach((key) => {
+        const countA = digestA?.eventCounts?.[key] || 0;
+        const countB = digestB?.eventCounts?.[key] || 0;
+        if (countA !== countB) {
+            diffLines.push(`- ${key}：A=${countA}｜B=${countB}`);
+        }
+    });
+
+    if (diffLines.length === 0) {
+        return '兩次事件次數相同。';
+    }
+
+    return diffLines.join('\n');
+}
+
+function formatSimpleValue(value) {
+    if (value === null || value === undefined) {
+        return '（無）';
+    }
+    if (typeof value === 'number') {
+        const formatted = formatDebugMetric(value);
+        return formatted !== null ? formatted : value.toString();
+    }
+    if (typeof value === 'boolean') {
+        return value ? '是' : '否';
+    }
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            return '[]';
+        }
+        const preview = value.slice(0, 5).map((item) => formatSimpleValue(item));
+        return `[${preview.join(', ')}${value.length > 5 ? ', …' : ''}]`;
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value);
+        if (entries.length === 0) {
+            return '{}';
+        }
+        const formattedEntries = entries.slice(0, 6).map(([key, val]) => `${key}:${formatSimpleValue(val)}`);
+        return `{${formattedEntries.join(', ')}${entries.length > 6 ? ', …' : ''}}`;
+    }
+    return String(value);
+}
+
+function formatKeyValueComparison(label, valueA, valueB) {
+    return `- ${label}：A ${formatSimpleValue(valueA)}｜B ${formatSimpleValue(valueB)}`;
+}
+
+function formatTopResultsComparison(label, digest) {
+    if (!digest || !Array.isArray(digest.topResults) || digest.topResults.length === 0) {
+        return `${label}：無結果`;
+    }
+    const lines = digest.topResults.map((result, index) => {
+        const summary = formatBestResultSummary(result);
+        return `- #${index + 1} ${summary}`;
+    });
+    return `${label}：\n${lines.join('\n')}`;
+}
+
+function formatParamOptimizationList(label, list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return `${label}：無參數優化紀錄`;
+    }
+    const lines = list.map((item, index) => {
+        const targetLabel = item.target ? `${item.target}` : '未知參數';
+        const scopeLabel = item.strategyType ? `${item.strategyType}` : '未知範疇';
+        const valueLabel = formatSimpleValue(item.selectedValue);
+        const metricLabel = typeof item.metric === 'number' ? (formatDebugMetric(item.metric) || item.metric) : formatSimpleValue(item.metric);
+        const metricName = item.targetMetric || '目標指標';
+        return `- #${index + 1} ${scopeLabel}.${targetLabel}=${valueLabel}（${metricName}=${metricLabel}）`;
+    });
+    return `${label}：\n${lines.join('\n')}`;
+}
+
+function formatCoverageDate(value) {
+    const timestamp = normaliseDateLikeToMs(value);
+    if (timestamp !== null) {
+        try {
+            return new Date(timestamp).toISOString().slice(0, 10);
+        } catch (error) {
+            return String(value);
+        }
+    }
+    if (value === null || value === undefined) {
+        return '無';
+    }
+    return String(value);
+}
+
+function formatDatasetCoverageSummary(label, digest) {
+    if (!digest || !digest.datasetCoverage) {
+        return `${label}：未記錄資料覆蓋檢查`;
+    }
+
+    const detail = digest.datasetCoverage;
+    const summary = detail.summary || {};
+    const required = detail.requiredRange || {};
+    const coverage = detail.coverage || {};
+
+    const datasetLength = typeof detail.datasetLength === 'number'
+        ? detail.datasetLength
+        : (typeof summary.length === 'number' ? summary.length : null);
+    const datasetRange = `${formatCoverageDate(summary.startDate)}～${formatCoverageDate(summary.endDate)}`;
+    const requiredStart = required.dataStartDate || required.effectiveStartDate || required.startDate;
+    const requiredRange = `${formatCoverageDate(requiredStart)}～${formatCoverageDate(required.endDate)}`;
+    const status = coverage.coverageSatisfied ? '符合' : `不符（${coverage.reason || '未知原因'}）`;
+
+    return `${label}：來源=${detail.source || '未知'}｜筆數=${formatSimpleValue(datasetLength)}｜資料範圍=${datasetRange}｜需求範圍=${requiredRange}｜檢查=${status}`;
+}
+
+function formatDatasetCoverageWarnings(label, warnings) {
+    if (!Array.isArray(warnings) || warnings.length === 0) {
+        return `${label}：無覆蓋異常`; 
+    }
+
+    const lines = warnings.slice(0, 3).map((item, index) => {
+        const summary = item.summary || {};
+        const required = item.requiredRange || {};
+        const coverage = item.coverage || {};
+        const requiredStart = required.dataStartDate || required.effectiveStartDate || required.startDate;
+        return `- #${index + 1} 來源=${item.source || '未知'}｜資料=${formatCoverageDate(summary.startDate)}～${formatCoverageDate(summary.endDate)}｜需求=${formatCoverageDate(requiredStart)}～${formatCoverageDate(required.endDate)}｜原因=${coverage.reason || item.reason || '未知'}`;
+    });
+
+    const suffix = warnings.length > 3 ? `\n（共 ${warnings.length} 筆，僅列前 3 筆）` : '';
+    return `${label}：\n${lines.join('\n')}${suffix}`;
+}
+
+function formatDebugSnapshotLabel(snapshot) {
+    const digest = buildBatchDebugDigest(snapshot);
+    if (!digest) {
+        return '尚未設定';
+    }
+
+    const parts = [];
+    if (digest.sessionId) {
+        parts.push(`#${digest.sessionId}`);
+    }
+    if (digest.status) {
+        parts.push(digest.status);
+    }
+    if (digest.completedAt) {
+        try {
+            parts.push(new Date(digest.completedAt).toLocaleString('zh-TW', { hour12: false }));
+        } catch (error) {
+            parts.push(digest.completedAt);
+        }
+    } else if (digest.startedAt) {
+        try {
+            parts.push(new Date(digest.startedAt).toLocaleString('zh-TW', { hour12: false }));
+        } catch (error) {
+            parts.push(digest.startedAt);
+        }
+    }
+    return parts.join('｜') || '批量優化紀錄';
+}
+
+function diffBatchDebugLogs(snapshotA, snapshotB) {
+    const digestA = buildBatchDebugDigest(snapshotA);
+    const digestB = buildBatchDebugDigest(snapshotB);
+
+    const lines = [];
+    lines.push('# 批量優化除錯比較');
+    lines.push(`版本：A ${digestA?.version || '未知'}｜B ${digestB?.version || '未知'}`);
+    lines.push(`狀態：A ${digestA?.status || '未完成'}｜B ${digestB?.status || '未完成'}`);
+    lines.push(`事件總數：A ${digestA?.eventCount ?? 0}｜B ${digestB?.eventCount ?? 0}`);
+
+    const startedA = digestA?.startedAt || null;
+    const startedB = digestB?.startedAt || null;
+    if (startedA || startedB) {
+        lines.push(`開始時間：A ${startedA || '未知'}｜B ${startedB || '未知'}`);
+    }
+    const completedA = digestA?.completedAt || null;
+    const completedB = digestB?.completedAt || null;
+    if (completedA || completedB) {
+        lines.push(`結束時間：A ${completedA || '未結束'}｜B ${completedB || '未結束'}`);
+    }
+
+    lines.push('');
+    lines.push('## 最佳結果');
+    lines.push(`A：${formatBestResultSummary(digestA?.bestResult)}`);
+    lines.push(`B：${formatBestResultSummary(digestB?.bestResult)}`);
+
+    lines.push('');
+    lines.push('## Headless 對拍');
+    lines.push(`A：${formatHeadlessCompareSummary(digestA?.headlessCompare)}`);
+    lines.push(`B：${formatHeadlessCompareSummary(digestB?.headlessCompare)}`);
+
+    lines.push('');
+    lines.push('## 初始設定');
+    if (digestA?.initialConfig || digestB?.initialConfig) {
+        lines.push(formatKeyValueComparison('目標指標', digestA?.initialConfig?.targetMetric, digestB?.initialConfig?.targetMetric));
+        lines.push(formatKeyValueComparison('參數優化次數', digestA?.initialConfig?.parameterTrials, digestB?.initialConfig?.parameterTrials));
+        lines.push(formatKeyValueComparison('迭代上限', digestA?.initialConfig?.iterationLimit, digestB?.initialConfig?.iterationLimit));
+        lines.push(formatKeyValueComparison('併發數', digestA?.initialConfig?.concurrency, digestB?.initialConfig?.concurrency));
+        lines.push(formatKeyValueComparison('排序鍵', digestA?.sortKey || digestA?.initialConfig?.sortKey, digestB?.sortKey || digestB?.initialConfig?.sortKey));
+        lines.push(formatKeyValueComparison('排序方向', digestA?.sortDirection || digestA?.initialConfig?.sortDirection, digestB?.sortDirection || digestB?.initialConfig?.sortDirection));
+    } else {
+        lines.push('- 未記錄初始設定');
+    }
+
+    lines.push('');
+    lines.push('## 基礎參數對比');
+    if (digestA?.baseParams || digestB?.baseParams) {
+        const baseKeys = [
+            ['stockNo', '標的代碼'],
+            ['market', '市場'],
+            ['startDate', '起始日'],
+            ['endDate', '結束日'],
+            ['tradeTiming', '交易時點'],
+            ['initialCapital', '初始資金'],
+            ['positionSize', '單筆投入(%)'],
+            ['stopLoss', '停損'],
+            ['takeProfit', '停利']
+        ];
+        baseKeys.forEach(([key, label]) => {
+            lines.push(formatKeyValueComparison(label, digestA?.baseParams?.[key], digestB?.baseParams?.[key]));
+        });
+        lines.push(formatKeyValueComparison('多空策略', digestA?.selectedStrategies, digestB?.selectedStrategies));
+    } else {
+        lines.push('- 未記錄基礎參數');
+    }
+
+    lines.push('');
+    lines.push('## 資料覆蓋檢查');
+    lines.push(formatDatasetCoverageSummary('A', digestA));
+    lines.push(formatDatasetCoverageSummary('B', digestB));
+
+    lines.push('');
+    lines.push('## 資料覆蓋異常');
+    lines.push(formatDatasetCoverageWarnings('A', digestA?.datasetCoverageWarnings));
+    lines.push(formatDatasetCoverageWarnings('B', digestB?.datasetCoverageWarnings));
+
+    lines.push('');
+    lines.push('## Top 3 結果');
+    lines.push(formatTopResultsComparison('A', digestA));
+    lines.push(formatTopResultsComparison('B', digestB));
+
+    lines.push('');
+    lines.push('## 參數優化紀錄');
+    lines.push(formatParamOptimizationList('A', digestA?.paramOptimizations));
+    lines.push(formatParamOptimizationList('B', digestB?.paramOptimizations));
+
+    lines.push('');
+    lines.push('## 事件次數差異');
+    lines.push(formatEventCountDiff(digestA, digestB));
+
+    lines.push('');
+    lines.push('## 事件統計');
+    lines.push(formatEventCountsForComparison(digestA?.eventCounts, 'A'));
+    lines.push(formatEventCountsForComparison(digestB?.eventCounts, 'B'));
+
+    return {
+        text: lines.join('\n'),
+        sessionA: digestA,
+        sessionB: digestB,
+        eventDiffSummary: formatEventCountDiff(digestA, digestB)
+    };
+}
+
+const EXIT_STRATEGY_SELECT_MAP = {
+    'ma_cross': 'ma_cross',
+    'ma_cross_exit': 'ma_cross',
+    'ma_below': 'ma_below',
+    'ma_below_exit': 'ma_below',
+    'rsi_overbought': 'rsi_overbought',
+    'rsi_overbought_exit': 'rsi_overbought',
+    'macd_cross': 'macd_cross',
+    'macd_cross_exit': 'macd_cross',
+    'bollinger_reversal': 'bollinger_reversal',
+    'k_d_cross': 'k_d_cross',
+    'k_d_cross_exit': 'k_d_cross',
+    'volume_spike': 'volume_spike',
+    'price_breakdown': 'price_breakdown',
+    'williams_overbought': 'williams_overbought',
+    'williams_overbought_exit': 'williams_overbought',
+    'turtle_stop_loss': 'turtle_stop_loss',
+    'trailing_stop': 'trailing_stop',
+    'fixed_stop_loss': 'fixed_stop_loss'
+};
+
+const BATCH_PARAM_SUFFIX_OVERRIDES = {
+    'k_d_cross': { thresholdX: 'KdThresholdX' },
+    'k_d_cross_exit': { thresholdY: 'KdThresholdY' },
+    'short_k_d_cross': { thresholdY: 'ShortKdThresholdY' },
+    'cover_k_d_cross': { thresholdX: 'CoverKdThresholdX' },
+    'short_macd_cross': { signalPeriod: 'ShortSignalPeriod' },
+    'cover_macd_cross': { signalPeriod: 'CoverSignalPeriod' },
+    'turtle_stop_loss': { stopLossPeriod: 'StopLossPeriod' },
+    'short_turtle_stop_loss': { stopLossPeriod: 'ShortStopLossPeriod' },
+    'cover_turtle_breakout': { breakoutPeriod: 'CoverBreakoutPeriod' },
+    'cover_trailing_stop': { percentage: 'CoverTrailingStopPercentage' }
+};
+
+const BATCH_PARAM_FIELD_CACHE = new Map();
+
+function capitalizeParamKey(key) {
+    if (!key) return '';
+    return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function resolveParamFieldMap(strategyKey) {
+    if (!strategyKey) return null;
+    if (BATCH_PARAM_FIELD_CACHE.has(strategyKey)) {
+        return BATCH_PARAM_FIELD_CACHE.get(strategyKey);
+    }
+
+    const config = typeof strategyDescriptions === 'object' ? strategyDescriptions?.[strategyKey] : null;
+    const overrides = BATCH_PARAM_SUFFIX_OVERRIDES[strategyKey] || {};
+    const mapping = {};
+
+    if (config?.defaultParams && typeof config.defaultParams === 'object') {
+        Object.keys(config.defaultParams).forEach((paramKey) => {
+            const suffix = overrides[paramKey] || capitalizeParamKey(paramKey);
+            mapping[paramKey] = suffix;
+        });
+    }
+
+    BATCH_PARAM_FIELD_CACHE.set(strategyKey, mapping);
+    return mapping;
 }
 
 function prepareBaseParamsForOptimization(source) {
@@ -193,7 +1570,9 @@ function initBatchOptimization() {
             console.error('[Batch Optimization] strategyDescriptions not found');
             return;
         }
-        
+
+        hydrateStrategyNameMap();
+
         // 生成策略選項
         generateStrategyOptions();
         
@@ -418,17 +1797,49 @@ function startBatchOptimization() {
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+
+        batchOptimizationConfig = {
+            ...batchOptimizationConfig,
+            ...config
+        };
+
+        const selectedStrategies = {
+            buy: getSelectedStrategies('batch-buy-strategies'),
+            sell: getSelectedStrategies('batch-sell-strategies')
+        };
+
+        const baseParamsSnapshot = typeof getBacktestParams === 'function'
+            ? clonePlainObject(getBacktestParams())
+            : {};
+
+        startBatchDebugSession({
+            phase: 'init',
+            configSnapshot: clonePlainObject(config),
+            selectedStrategies,
+            baseParams: baseParamsSnapshot,
+            cachedDataLength: Array.isArray(cachedStockData) ? cachedStockData.length : 0
+        });
+
+        recordBatchDebug('batch-start', {
+            config: clonePlainObject(config),
+            selectedStrategies,
+            baseParams: baseParamsSnapshot
+        }, { phase: 'init', consoleLevel: 'log' });
+
         // 重置結果
         batchOptimizationResults = [];
-    // 初始化 worker 狀態面板
-    resetBatchWorkerStatus();
-    const panel = document.getElementById('batch-worker-status-panel');
-    if (panel) panel.classList.remove('hidden');
-        
+        recordBatchDebug('results-reset', {}, { phase: 'init', console: false });
+
+        // 初始化 worker 狀態面板
+        resetBatchWorkerStatus();
+        const panel = document.getElementById('batch-worker-status-panel');
+        if (panel) {
+            panel.classList.remove('hidden');
+        }
+
         // 顯示進度
         showBatchProgress();
-        
+
         // 執行批量優化
         executeBatchOptimization(config);
     } catch (error) {
@@ -760,53 +2171,89 @@ function updateBatchProgress(currentCombination = null) {
 // 執行批量優化
 async function executeBatchOptimization(config) {
     console.log('[Batch Optimization] executeBatchOptimization called with config:', config);
-    
+
+    recordBatchDebug('execute-start', {
+        config: clonePlainObject(config),
+        cachedDataLength: Array.isArray(cachedStockData) ? cachedStockData.length : 0
+    }, { phase: 'execute', console: false });
+
     try {
         // 步驟1：取得策略列表
         let buyStrategies = getSelectedStrategies('batch-buy-strategies');
         let sellStrategies = getSelectedStrategies('batch-sell-strategies');
-        
+
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
-        
+
+        recordBatchDebug('strategies-resolved', {
+            buyStrategies: [...buyStrategies],
+            sellStrategies: [...sellStrategies]
+        }, { phase: 'prepare', consoleLevel: 'log' });
+
         updateBatchProgress(5, '準備策略參數優化...');
-        
+
         // 步驟2：先生成所有選中的策略組合，然後逐個對每個組合依序優化參數
         console.log('[Batch Optimization] Generating strategy combinations...');
         const rawCombinations = generateStrategyCombinations(buyStrategies, sellStrategies);
         const totalRaw = rawCombinations.length;
         console.log(`[Batch Optimization] Generated ${totalRaw} raw strategy combinations`);
 
+        recordBatchDebug('combinations-generated', {
+            count: totalRaw,
+            sample: rawCombinations.slice(0, Math.min(5, totalRaw)).map(summarizeCombination)
+        }, { phase: 'prepare', console: false });
+
         updateBatchProgress(30, '對每個組合進行參數優化...');
 
         // 步驟3：針對每個組合進行並行的 per-combination 優化
         const optimizedCombinations = await optimizeCombinations(rawCombinations, config);
+
+        recordBatchDebug('combinations-optimized', {
+            count: optimizedCombinations.length,
+            sample: optimizedCombinations.slice(0, Math.min(5, optimizedCombinations.length)).map(summarizeCombination)
+        }, { phase: 'optimize', consoleLevel: 'log' });
 
         const totalCombinations = Math.min(optimizedCombinations.length, config.maxCombinations);
         console.log(`[Batch Optimization] Completed per-combination parameter optimization for ${optimizedCombinations.length} combinations`);
 
         // 限制組合數量
         const limitedCombinations = optimizedCombinations.slice(0, config.maxCombinations);
-        
+
+        recordBatchDebug('combinations-limited', {
+            limit: config.maxCombinations,
+            finalCount: limitedCombinations.length
+        }, { phase: 'optimize', console: false });
+
         // 重置進度狀態，接著分批處理
         currentBatchProgress = {
             current: 0,
             total: limitedCombinations.length
         };
-        
+
         updateBatchProgress(35, `開始處理 ${limitedCombinations.length} 個優化組合...`);
-        
+
         // 分批處理
         const batches = [];
         for (let i = 0; i < limitedCombinations.length; i += config.batchSize) {
             batches.push(limitedCombinations.slice(i, i + config.batchSize));
         }
-        
+
         console.log(`[Batch Optimization] Processing in ${batches.length} batches`);
-        
+
+        recordBatchDebug('batch-processing-start', {
+            batchCount: batches.length,
+            batchSize: config.batchSize,
+            totalCombinations: limitedCombinations.length
+        }, { phase: 'collect', consoleLevel: 'log' });
+
         // 開始處理每一批
         processBatch(batches, 0, config);
     } catch (error) {
         console.error('[Batch Optimization] Error in executeBatchOptimization:', error);
+        recordBatchDebug('execute-error', {
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        }, { phase: 'execute', level: 'error', consoleLevel: 'error' });
+        finalizeBatchDebugSession({ status: 'failed', stage: 'executeBatchOptimization', error: error?.message || String(error) });
         showError('批量優化執行失敗：' + error.message);
         hideBatchProgress();
         restoreBatchOptimizationUI();
@@ -861,11 +2308,17 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
         riskManagement: combination.riskManagement
     };
 
+    recordBatchDebug('combo-iteration-start', {
+        combination: summarizeCombination(currentCombo),
+        maxIterations,
+        enabledScopes: options?.enabledScopes || null
+    }, { phase: 'optimize', console: false });
+
     try {
         console.log(`[Batch Optimization] Initial combination:`, {
             buyStrategy: currentCombo.buyStrategy,
             buyParams: currentCombo.buyParams,
-            sellStrategy: currentCombo.sellStrategy, 
+            sellStrategy: currentCombo.sellStrategy,
             sellParams: currentCombo.sellParams,
             riskManagement: currentCombo.riskManagement
         });
@@ -874,7 +2327,12 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
         // 這模擬了用戶手動操作的完整過程
         for (let iter = 0; iter < maxIterations; iter++) {
             console.log(`[Batch Optimization] === Iteration ${iter + 1}/${maxIterations} ===`);
-            
+
+            recordBatchDebug('combo-iteration-cycle', {
+                iteration: iter + 1,
+                combination: summarizeCombination(currentCombo)
+            }, { phase: 'optimize', console: false });
+
             // 記錄本輪迭代前的參數
             const prevBuyParams = JSON.parse(JSON.stringify(currentCombo.buyParams || {}));
             const prevSellParams = JSON.parse(JSON.stringify(currentCombo.sellParams || {}));
@@ -954,10 +2412,27 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
         currentCombo.__finalMetric = Number.isFinite(finalMetric) ? finalMetric : null;
         currentCombo.__metricLabel = config.targetMetric;
 
+        if (!finalResult) {
+            recordBatchDebug('combo-iteration-missing-result', {
+                combination: summarizeCombination(currentCombo)
+            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        recordBatchDebug('combo-iteration-final', {
+            combination: summarizeCombination(currentCombo),
+            finalMetric: currentCombo.__finalMetric,
+            metricLabel: currentCombo.__metricLabel
+        }, { phase: 'optimize', console: false });
+
         return currentCombo;
 
     } catch (error) {
         console.error(`[Batch Optimization] Error in iterative optimization for ${combination.buyStrategy} + ${combination.sellStrategy}:`, error);
+        recordBatchDebug('combo-iteration-error', {
+            combination: summarizeCombination(combination),
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
         // 返回原始組合作為備用
         return combination;
     }
@@ -1017,20 +2492,32 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
 
             // 設定當前策略的參數
             if (strategyType === 'entry') {
-                baseParams.entryStrategy = getWorkerStrategyName(strategy);
+                const workerEntryStrategy = resolveWorkerStrategyName(strategy);
+                if (workerEntryStrategy) {
+                    baseParams.entryStrategy = workerEntryStrategy;
+                }
                 baseParams.entryParams = { ...currentParams };
                 // 包含完整的出場參數
                 if (baseCombo && baseCombo.sellParams) {
                     baseParams.exitParams = { ...baseCombo.sellParams };
-                    baseParams.exitStrategy = getWorkerStrategyName(baseCombo.sellStrategy);
+                    const workerExitStrategy = resolveWorkerStrategyName(baseCombo.sellStrategy);
+                    if (workerExitStrategy) {
+                        baseParams.exitStrategy = workerExitStrategy;
+                    }
                 }
             } else {
-                baseParams.exitStrategy = getWorkerStrategyName(strategy);
+                const workerExitStrategy = resolveWorkerStrategyName(strategy);
+                if (workerExitStrategy) {
+                    baseParams.exitStrategy = workerExitStrategy;
+                }
                 baseParams.exitParams = { ...currentParams };
-                // 包含完整的進場參數  
+                // 包含完整的進場參數
                 if (baseCombo && baseCombo.buyParams) {
                     baseParams.entryParams = { ...baseCombo.buyParams };
-                    baseParams.entryStrategy = getWorkerStrategyName(baseCombo.buyStrategy);
+                    const workerEntryStrategy = resolveWorkerStrategyName(baseCombo.buyStrategy);
+                    if (workerEntryStrategy) {
+                        baseParams.entryStrategy = workerEntryStrategy;
+                    }
                 }
             }
             
@@ -1083,6 +2570,13 @@ async function optimizeCombinations(combinations, config) {
     const maxConcurrency = config.optimizeConcurrency || navigator.hardwareConcurrency || 4;
     console.log(`[Batch Optimization] Running per-combination optimization with concurrency = ${maxConcurrency}`);
 
+    recordBatchDebug('combo-optimize-start', {
+        total: combinations.length,
+        concurrency: maxConcurrency,
+        iterationLimit: config.iterationLimit,
+        parameterTrials: config.parameterTrials
+    }, { phase: 'optimize', console: false });
+
     // 初始化狀態面板
     batchWorkerStatus.concurrencyLimit = maxConcurrency;
     batchWorkerStatus.inFlightCount = 0;
@@ -1105,6 +2599,12 @@ async function optimizeCombinations(combinations, config) {
                 const i = index++;
                 const combo = combinations[i];
 
+                recordBatchDebug('combo-optimize-launch', {
+                    index: i + 1,
+                    total: combinations.length,
+                    combination: summarizeCombination(combo)
+                }, { phase: 'optimize', console: false });
+
                 const p = optimizeCombinationIterative(combo, config)
                     .then(res => {
                         optimized[i] = res;
@@ -1119,6 +2619,13 @@ async function optimizeCombinations(combinations, config) {
                         // 更新進度（以整體百分比顯示）
                         const completedCount = optimized.filter(Boolean).length;
                         updateBatchProgress(30 + (completedCount / combinations.length) * 30, `優化組合 ${completedCount}/${combinations.length}`);
+
+                        recordBatchDebug('combo-optimize-complete', {
+                            index: i + 1,
+                            combination: summarizeCombination(res),
+                            metric: res ? res.__finalMetric : null,
+                            metricLabel: res ? res.__metricLabel : null
+                        }, { phase: 'optimize', console: false });
                     })
                     .catch(err => {
                         console.error('[Batch Optimization] Error optimizing combination:', err);
@@ -1130,6 +2637,13 @@ async function optimizeCombinations(combinations, config) {
                             entry.endTime = Date.now();
                             entry.error = (err && err.message) ? err.message : String(err);
                         }
+
+                        recordBatchDebug('combo-optimize-error', {
+                            index: i + 1,
+                            combination: summarizeCombination(combo),
+                            message: err?.message || String(err),
+                            stack: err?.stack || null
+                        }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
                     })
                     .finally(() => {
                         inFlight.delete(p);
@@ -1142,6 +2656,10 @@ async function optimizeCombinations(combinations, config) {
                         } else if (inFlight.size === 0) {
                             // 全部完成
                             renderBatchWorkerStatus();
+                            recordBatchDebug('combo-optimize-finish', {
+                                total: combinations.length,
+                                completed: optimized.filter(Boolean).length
+                            }, { phase: 'optimize', console: false });
                             resolve(optimized.filter(Boolean));
                         }
                     });
@@ -1179,30 +2697,154 @@ function getDefaultStrategyParams(strategy) {
 }
 
 // 分批處理
+function computeCombinationDifferences(headlessSummary, batchSummary) {
+    if (!headlessSummary || !batchSummary) {
+        return { missing: true };
+    }
+
+    const differences = {};
+    if ((headlessSummary.buyStrategy || null) !== (batchSummary.buyStrategy || null)
+        || (headlessSummary.sellStrategy || null) !== (batchSummary.sellStrategy || null)) {
+        differences.strategy = {
+            headlessBuy: headlessSummary.buyStrategy || null,
+            batchBuy: batchSummary.buyStrategy || null,
+            headlessSell: headlessSummary.sellStrategy || null,
+            batchSell: batchSummary.sellStrategy || null
+        };
+    }
+
+    const scopes = ['buyParams', 'sellParams', 'riskManagement'];
+    scopes.forEach((scope) => {
+        const headlessParams = headlessSummary[scope] || {};
+        const batchParams = batchSummary[scope] || {};
+        const keys = new Set([...Object.keys(headlessParams), ...Object.keys(batchParams)]);
+        const mismatches = [];
+
+        keys.forEach((key) => {
+            const headlessValue = headlessParams[key];
+            const batchValue = batchParams[key];
+            if (JSON.stringify(headlessValue) !== JSON.stringify(batchValue)) {
+                mismatches.push({ key, headless: headlessValue, batch: batchValue });
+            }
+        });
+
+        if (mismatches.length > 0) {
+            differences[scope] = mismatches;
+        }
+    });
+
+    return Object.keys(differences).length > 0 ? differences : null;
+}
+
+function recordHeadlessBatchComparison(bestResult) {
+    try {
+        if (!lastHeadlessOptimizationSummary) {
+            recordBatchDebug('headless-compare-skip', {
+                reason: 'no-headless-summary',
+                batchBest: bestResult ? summarizeCombination(bestResult) : null
+            }, { phase: 'collect', console: false });
+            return;
+        }
+
+        const summary = lastHeadlessOptimizationSummary;
+        const metricLabel = summary.metricLabel || batchOptimizationConfig.targetMetric || 'annualizedReturn';
+        const headlessMetric = Number.isFinite(summary.metric) ? summary.metric : null;
+        const batchMetricValue = bestResult ? getMetricFromResult(bestResult, metricLabel) : NaN;
+        const batchMetric = Number.isFinite(batchMetricValue) ? batchMetricValue : null;
+        const metricDelta = headlessMetric !== null && batchMetric !== null ? batchMetric - headlessMetric : null;
+        const matched = metricDelta !== null ? Math.abs(metricDelta) <= 1e-6 : false;
+
+        const headlessCombination = summary.combination || null;
+        const batchCombination = bestResult ? summarizeCombination(bestResult) : null;
+        const differences = computeCombinationDifferences(headlessCombination, batchCombination);
+
+        recordBatchDebug('headless-compare', {
+            matched,
+            metricLabel,
+            headlessMetric,
+            batchMetric,
+            metricDelta,
+            headlessCombination,
+            batchCombination,
+            differences,
+            headlessTimestamp: summary.timestamp,
+            headlessSource: summary.source || 'external-headless'
+        }, {
+            phase: 'collect',
+            console: matched ? false : 'warn',
+            consoleLevel: matched ? 'log' : 'warn',
+            level: matched ? 'info' : 'warn'
+        });
+
+        if (!matched) {
+            console.warn('[Batch Optimization] Headless optimization and batch panel best metrics differ:', {
+                metricLabel,
+                headlessMetric,
+                batchMetric,
+                metricDelta,
+                headlessCombination,
+                batchCombination,
+                differences
+            });
+        }
+
+        summary.lastComparedAt = Date.now();
+        summary.lastComparisonMatched = matched;
+        summary.lastComparisonDelta = metricDelta;
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to compare headless and batch results:', error);
+        recordBatchDebug('headless-compare-error', {
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        }, { phase: 'collect', level: 'error', consoleLevel: 'error' });
+    }
+}
+
 function processBatch(batches, batchIndex, config) {
     // 檢查是否被停止
     if (isBatchOptimizationStopped) {
         console.log('[Batch Optimization] Process stopped by user');
+        recordBatchDebug('batch-stopped', { batchIndex }, { phase: 'collect', level: 'warn', consoleLevel: 'warn' });
         return;
     }
-    
+
     if (batchIndex >= batches.length) {
         // 所有批次處理完成
         updateBatchProgress(100, '批量優化完成');
-        
+
         // 顯示結果並恢復 UI
         showBatchResults();
         restoreBatchOptimizationUI();
+        const bestResult = batchOptimizationResults && batchOptimizationResults.length > 0
+            ? summarizeResult(batchOptimizationResults[0])
+            : null;
+        if (batchOptimizationResults && batchOptimizationResults.length > 0) {
+            recordHeadlessBatchComparison(batchOptimizationResults[0]);
+        } else {
+            recordHeadlessBatchComparison(null);
+        }
+        finalizeBatchDebugSession({
+            status: 'completed',
+            processedBatches: batches.length,
+            resultCount: batchOptimizationResults.length,
+            bestResult
+        });
         return;
     }
-    
+
     const currentBatch = batches[batchIndex];
     console.log(`[Batch Optimization] Processing batch ${batchIndex + 1}/${batches.length} with ${currentBatch.length} combinations`);
-    
+
+    recordBatchDebug('batch-processing', {
+        batchIndex: batchIndex + 1,
+        totalBatches: batches.length,
+        batchSize: currentBatch.length
+    }, { phase: 'collect', console: false });
+
     // 計算進度百分比
     const progressPercentage = 35 + ((batchIndex / batches.length) * 65);
     updateBatchProgress(progressPercentage, `處理批次 ${batchIndex + 1}/${batches.length}...`);
-    
+
     // 處理當前批次
     processStrategyCombinations(currentBatch, config).then(() => {
         // 檢查是否被停止
@@ -1210,13 +2852,19 @@ function processBatch(batches, batchIndex, config) {
             console.log('[Batch Optimization] Process stopped by user');
             return;
         }
-        
+
         // 處理下一批次
         setTimeout(() => {
             processBatch(batches, batchIndex + 1, config);
         }, 100); // 小延遲避免阻塞UI
     }).catch(error => {
         console.error('[Batch Optimization] Error processing batch:', error);
+        recordBatchDebug('batch-error', {
+            batchIndex: batchIndex + 1,
+            message: error?.message || String(error),
+            stack: error?.stack || null
+        }, { phase: 'collect', level: 'error', consoleLevel: 'error' });
+        finalizeBatchDebugSession({ status: 'failed', stage: 'processBatch', error: error?.message || String(error) });
         restoreBatchOptimizationUI();
     });
 }
@@ -1231,9 +2879,9 @@ async function processStrategyCombinations(combinations, config) {
             console.log('[Batch Optimization] Process stopped by user during combination processing');
             break;
         }
-        
+
         const combination = combinations[i];
-        
+
         // 更新進度顯示，包含當前組合資訊
         const combinationInfo = {
             buyStrategy: combination.buyStrategy,
@@ -1241,7 +2889,13 @@ async function processStrategyCombinations(combinations, config) {
             current: currentBatchProgress.current + 1,
             total: currentBatchProgress.total
         };
-        
+
+        recordBatchDebug('combination-start', {
+            index: i + 1,
+            total: combinations.length,
+            combination: summarizeCombination(combination)
+        }, { phase: 'backtest', console: false });
+
         try {
             // 執行回測
             const result = await executeBacktestForCombination(combination);
@@ -1267,31 +2921,61 @@ async function processStrategyCombinations(combinations, config) {
                 delete combinedResult.exitStrategy;
                 delete combinedResult.entryParams;
                 delete combinedResult.exitParams;
-                
+
                 console.log(`[Batch Debug] Strategy preserved: ${combination.buyStrategy} -> ${combination.sellStrategy}`);
                 console.log(`[Batch Debug] Final result sellStrategy:`, combinedResult.sellStrategy);
                 results.push(combinedResult);
+
+                recordBatchDebug('combination-complete', {
+                    index: i + 1,
+                    combination: summarizeCombination(combination),
+                    result: summarizeResult(combinedResult)
+                }, { phase: 'backtest', console: false });
+            } else {
+                recordBatchDebug('combination-no-result', {
+                    index: i + 1,
+                    combination: summarizeCombination(combination)
+                }, { phase: 'backtest', level: 'warn', consoleLevel: 'warn' });
             }
         } catch (error) {
             console.error(`[Batch Optimization] Error processing combination:`, error);
+            recordBatchDebug('combination-error', {
+                index: i + 1,
+                combination: summarizeCombination(combination),
+                message: error?.message || String(error),
+                stack: error?.stack || null
+            }, { phase: 'backtest', level: 'error', consoleLevel: 'error' });
         }
-        
+
         // 更新進度
         currentBatchProgress.current++;
         if (currentBatchProgress.current % 10 === 0) { // 每10個更新一次進度
             updateBatchProgress(combinationInfo);
         }
     }
-    
+
     // 將結果添加到全局結果中
     batchOptimizationResults.push(...results);
-    
+
+    if (results.length === 0) {
+        recordBatchDebug('combination-batch-empty', {
+            processed: combinations.length
+        }, { phase: 'backtest', level: 'warn', consoleLevel: 'warn' });
+    } else {
+        recordBatchDebug('batch-results-appended', {
+            appended: results.length,
+            total: batchOptimizationResults.length,
+            sample: results.slice(0, Math.min(5, results.length)).map(summarizeResult)
+        }, { phase: 'backtest', console: false });
+    }
+
     console.log(`[Batch Optimization] Processed ${combinations.length} combinations, total results: ${batchOptimizationResults.length}`);
 }
 
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
+        let datasetMeta = {};
         try {
             // 使用現有的回測邏輯
             const baseParamsOverride = options?.baseParamsOverride;
@@ -1310,8 +2994,16 @@ async function executeBacktestForCombination(combination, options = {}) {
             }
 
             // 更新策略設定（使用 worker 能理解的策略名稱）
-            params.entryStrategy = getWorkerStrategyName(combination.buyStrategy);
-            params.exitStrategy = getWorkerStrategyName(combination.sellStrategy);
+            const workerEntryStrategy = resolveWorkerStrategyName(combination.buyStrategy);
+            if (workerEntryStrategy) {
+                params.entryStrategy = workerEntryStrategy;
+            }
+            const workerExitStrategy = resolveWorkerStrategyName(combination.sellStrategy);
+            if (workerExitStrategy) {
+                params.exitStrategy = workerExitStrategy;
+            } else if (!combination.sellStrategy) {
+                delete params.exitStrategy;
+            }
             params.entryParams = combination.buyParams ? { ...combination.buyParams } : {};
             params.exitParams = combination.sellParams ? { ...combination.sellParams } : {};
 
@@ -1325,33 +3017,115 @@ async function executeBacktestForCombination(combination, options = {}) {
                 }
                 console.log(`[Batch Optimization] Applied risk management:`, combination.riskManagement);
             }
-            
+
+            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+                ? options.cachedDataOverride
+                : null;
+            const cachedPayload = overrideData
+                || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
+            const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
+
+            const preparedParams = enrichParamsWithLookback(params);
+            datasetMeta = buildBatchDatasetMeta(preparedParams);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+            const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+            if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+                recordBatchDebug('cached-data-slice-applied', {
+                    context: 'executeBacktestForCombination',
+                    combination: summarizeCombination(combination),
+                    source: cachedSource,
+                    requiredRange,
+                    summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                    summaryAfter: sliceSummary,
+                    removedCount: cachedUsage.sliceInfo.removedCount,
+                    removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                    bounds: cachedUsage.sliceInfo.bounds,
+                    ...datasetMeta
+                }, { phase: 'worker', console: false });
+            }
+
+            recordBatchDebug('cached-data-evaluation', {
+                context: 'executeBacktestForCombination',
+                combination: summarizeCombination(combination),
+                source: cachedSource,
+                summary: cachedUsage.summary,
+                requiredRange,
+                coverage: coverageEvaluation,
+                datasetLength: cachedUsage.summary.length,
+                sliceSummary,
+                sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+                sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+                useCachedData,
+                overrideProvided: Boolean(overrideData),
+                ...datasetMeta
+            }, { phase: 'worker', console: false });
+
+            if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+                recordBatchDebug('cached-data-coverage-mismatch', {
+                    context: 'executeBacktestForCombination',
+                    combination: summarizeCombination(combination),
+                    source: cachedSource,
+                    summary: cachedUsage.summary,
+                    requiredRange,
+                    coverage: coverageEvaluation,
+                    ...datasetMeta
+                }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+            }
+
+            const cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
+
+            recordBatchDebug('worker-run-start', {
+                context: 'executeBacktestForCombination',
+                combination: summarizeCombination(combination),
+                useOverride: Boolean(baseParamsOverride),
+                useCachedData,
+                cachedSource,
+                datasetLength: cachedUsage.summary.length,
+                sliceLength: sliceSummary ? sliceSummary.length : null,
+                ...datasetMeta
+            }, { phase: 'worker', console: false });
+
             // 創建臨時worker執行回測
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
 
-                const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
-                    ? options.cachedDataOverride
-                    : null;
-                const cachedPayload = overrideData
-                    || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-                const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
-
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
                         const result = e.data.data;
-                        
+
                         // 確保結果包含實際使用的停損停利參數
                         if (result) {
                             result.usedStopLoss = params.stopLoss;
                             result.usedTakeProfit = params.takeProfit;
                             console.log(`[Batch Optimization] Backtest completed with stopLoss: ${params.stopLoss}, takeProfit: ${params.takeProfit}`);
                         }
-                        
+
+                        recordBatchDebug('worker-run-result', {
+                            context: 'executeBacktestForCombination',
+                            combination: summarizeCombination(combination),
+                            result: summarizeResult(result),
+                            usedCachedData: useCachedData,
+                            ...datasetMeta
+                        }, { phase: 'worker', console: false });
+
                         tempWorker.terminate();
                         resolve(result);
                     } else if (e.data.type === 'error') {
                         console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
+                        recordBatchDebug('worker-run-error', {
+                            context: 'executeBacktestForCombination',
+                            combination: summarizeCombination(combination),
+                            message: e.data.data?.message || e.data.error,
+                            ...datasetMeta
+                        }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                         tempWorker.terminate();
                         resolve(null);
                     }
@@ -1359,29 +3133,54 @@ async function executeBacktestForCombination(combination, options = {}) {
 
                 tempWorker.onerror = function(error) {
                     console.error('[Batch Optimization] Worker error:', error);
+                    recordBatchDebug('worker-run-error', {
+                        context: 'executeBacktestForCombination',
+                        combination: summarizeCombination(combination),
+                        message: error?.message || String(error),
+                        stack: error?.stack || null,
+                        ...datasetMeta
+                    }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                     tempWorker.terminate();
                     resolve(null);
                 };
 
-                const preparedParams = enrichParamsWithLookback(params);
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedPayload
+                    cachedData: cachedDataForWorker
                 });
 
                 // 設定超時
                 setTimeout(() => {
                     tempWorker.terminate();
+                    recordBatchDebug('worker-run-timeout', {
+                        context: 'executeBacktestForCombination',
+                        combination: summarizeCombination(combination),
+                        message: 'Worker execution timed out after 30 seconds.',
+                        ...datasetMeta
+                    }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
                     resolve(null);
                 }, 30000); // 30秒超時
             } else {
                 console.warn('[Batch Optimization] Worker URL not available');
+                recordBatchDebug('worker-missing-url', {
+                    context: 'executeBacktestForCombination',
+                    combination: summarizeCombination(combination),
+                    message: 'Worker URL is not available.',
+                    ...datasetMeta
+                }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                 resolve(null);
             }
         } catch (error) {
             console.error('[Batch Optimization] Error in executeBacktestForCombination:', error);
+            recordBatchDebug('worker-run-exception', {
+                context: 'executeBacktestForCombination',
+                combination: summarizeCombination(combination),
+                message: error?.message || String(error),
+                stack: error?.stack || null,
+                ...datasetMeta
+            }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
             resolve(null);
         }
     });
@@ -1478,7 +3277,10 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
         
         // 修復：設定策略參數時，使用組合中的實際參數而非預設參數
         if (strategyType === 'entry') {
-            baseParams.entryStrategy = getWorkerStrategyName(strategy);
+            const workerEntryStrategy = resolveWorkerStrategyName(strategy);
+            if (workerEntryStrategy) {
+                baseParams.entryStrategy = workerEntryStrategy;
+            }
             // 使用組合中的進場參數作為起始點（如果有的話）
             if (baseCombo && baseCombo.buyParams) {
                 baseParams.entryParams = { ...baseCombo.buyParams };
@@ -1488,10 +3290,16 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             // 確保包含當前組合的出場參數
             if (baseCombo && baseCombo.sellParams) {
                 baseParams.exitParams = { ...baseCombo.sellParams };
-                baseParams.exitStrategy = getWorkerStrategyName(baseCombo.sellStrategy);
+                const workerExitStrategy = resolveWorkerStrategyName(baseCombo.sellStrategy);
+                if (workerExitStrategy) {
+                    baseParams.exitStrategy = workerExitStrategy;
+                }
             }
         } else {
-            baseParams.exitStrategy = getWorkerStrategyName(strategy);
+            const workerExitStrategy = resolveWorkerStrategyName(strategy);
+            if (workerExitStrategy) {
+                baseParams.exitStrategy = workerExitStrategy;
+            }
             // 使用組合中的出場參數作為起始點（如果有的話）
             if (baseCombo && baseCombo.sellParams) {
                 baseParams.exitParams = { ...baseCombo.sellParams };
@@ -1501,7 +3309,10 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             // 確保包含當前組合的進場參數
             if (baseCombo && baseCombo.buyParams) {
                 baseParams.entryParams = { ...baseCombo.buyParams };
-                baseParams.entryStrategy = getWorkerStrategyName(baseCombo.buyStrategy);
+                const workerEntryStrategy = resolveWorkerStrategyName(baseCombo.buyStrategy);
+                if (workerEntryStrategy) {
+                    baseParams.entryStrategy = workerEntryStrategy;
+                }
             }
         }
         
@@ -1587,7 +3398,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             : null;
         const cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1599,6 +3410,12 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
 
                 if (!data || !Array.isArray(data.results) || data.results.length === 0) {
                     console.warn(`[Batch Optimization] No optimization results for ${optimizeTarget.name}`);
+                    recordBatchDebug('param-optimization-empty', {
+                        strategyType,
+                        optimizeTarget: optimizeTarget.name,
+                        trials,
+                        paramsPreview: params ? { entryStrategy: params.entryStrategy, exitStrategy: params.exitStrategy } : null
+                    }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
                     resolve({ value: undefined, metric: -Infinity });
                     return;
                 }
@@ -1634,16 +3451,34 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
 
                 const best = validResults[0];
                 console.debug('[Batch Optimization] Selected best optimization result:', best);
+                recordBatchDebug('param-optimization-complete', {
+                    strategyType,
+                    optimizeTarget: optimizeTarget.name,
+                    selectedValue: best.paramValue,
+                    metric: best.metricVal,
+                    targetMetric
+                }, { phase: 'optimize', console: false });
                 resolve({ value: best.paramValue, metric: best.metricVal });
             } else if (type === 'error') {
                 console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
+                recordBatchDebug('param-optimization-error', {
+                    strategyType,
+                    optimizeTarget: optimizeTarget.name,
+                    message: e.data.data?.message
+                }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
                 optimizeWorker.terminate();
                 resolve({ value: undefined, metric: -Infinity });
             }
         };
-        
+
         optimizeWorker.onerror = function(error) {
             console.error(`[Batch Optimization] ${optimizeTarget.name} optimization worker error:`, error);
+            recordBatchDebug('param-optimization-error', {
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                message: error?.message || String(error),
+                stack: error?.stack || null
+            }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
             optimizeWorker.terminate();
             resolve({ value: undefined, metric: -Infinity });
         };
@@ -1661,6 +3496,63 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        const datasetMeta = buildBatchDatasetMeta(preparedParams);
+        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+            recordBatchDebug('cached-data-slice-applied', {
+                context: 'optimize-single-param',
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                requiredRange,
+                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                summaryAfter: sliceSummary,
+                removedCount: cachedUsage.sliceInfo.removedCount,
+                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                bounds: cachedUsage.sliceInfo.bounds,
+                ...datasetMeta
+            }, { phase: 'optimize', console: false });
+        }
+
+        recordBatchDebug('cached-data-evaluation', {
+            context: 'optimize-single-param',
+            strategyType,
+            optimizeTarget: optimizeTarget.name,
+            source: cachedSource,
+            summary: cachedUsage.summary,
+            requiredRange,
+            coverage: coverageEvaluation,
+            datasetLength: cachedUsage.summary.length,
+            sliceSummary,
+            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+            useCachedData,
+            overrideProvided: Boolean(overrideData),
+            ...datasetMeta
+        }, { phase: 'optimize', console: false });
+
+        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+            recordBatchDebug('cached-data-coverage-mismatch', {
+                context: 'optimize-single-param',
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                summary: cachedUsage.summary,
+                requiredRange,
+                coverage: coverageEvaluation,
+                ...datasetMeta
+            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+            useCachedData = false;
+            cachedDataForWorker = null;
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -1670,7 +3562,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedDataForWorker
         });
         
         // 設定超時
@@ -1750,7 +3642,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             : null;
         const cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
-        const useCachedData = Array.isArray(cachedPayload) && cachedPayload.length > 0;
+        const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
         
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
@@ -1798,6 +3690,60 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
+        const datasetMeta = buildBatchDatasetMeta(preparedParams);
+        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+            recordBatchDebug('cached-data-slice-applied', {
+                context: 'optimize-risk-param',
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                requiredRange,
+                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                summaryAfter: sliceSummary,
+                removedCount: cachedUsage.sliceInfo.removedCount,
+                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                bounds: cachedUsage.sliceInfo.bounds,
+                ...datasetMeta
+            }, { phase: 'optimize', console: false });
+        }
+
+        recordBatchDebug('cached-data-evaluation', {
+            context: 'optimize-risk-param',
+            optimizeTarget: optimizeTarget.name,
+            source: cachedSource,
+            summary: cachedUsage.summary,
+            requiredRange,
+            coverage: coverageEvaluation,
+            datasetLength: cachedUsage.summary.length,
+            sliceSummary,
+            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+            useCachedData,
+            overrideProvided: Boolean(overrideData),
+            ...datasetMeta
+        }, { phase: 'optimize', console: false });
+
+        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+            recordBatchDebug('cached-data-coverage-mismatch', {
+                context: 'optimize-risk-param',
+                optimizeTarget: optimizeTarget.name,
+                source: cachedSource,
+                summary: cachedUsage.summary,
+                requiredRange,
+                coverage: coverageEvaluation,
+                ...datasetMeta
+            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+            useCachedData = false;
+            cachedDataForWorker = null;
+        }
 
         // 發送優化任務
         optimizeWorker.postMessage({
@@ -1807,7 +3753,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizeTarget.range,
             useCachedData,
-            cachedData: cachedPayload
+            cachedData: cachedDataForWorker
         });
     });
 }
@@ -1816,7 +3762,11 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
 function showBatchResults() {
     try {
         console.log(`[Batch Optimization] Showing ${batchOptimizationResults.length} results`);
-        
+
+        recordBatchDebug('show-results', {
+            total: batchOptimizationResults.length
+        }, { phase: 'render', consoleLevel: 'log' });
+
         // 隱藏進度區域
         const progressElement = document.getElementById('batch-optimization-progress');
         if (progressElement) {
@@ -1848,7 +3798,7 @@ function sortBatchResults() {
     const config = batchOptimizationConfig;
     const sortKey = config.sortKey || config.targetMetric || 'annualizedReturn';
     const sortDirection = config.sortDirection || 'desc';
-    
+
     batchOptimizationResults.sort((a, b) => {
         let aValue = a[sortKey] || 0;
         let bValue = b[sortKey] || 0;
@@ -1877,9 +3827,15 @@ function sortBatchResults() {
             return bValue - aValue;
         }
     });
-    
+
     // 重新渲染表格
     renderBatchResultsTable();
+
+    recordBatchDebug('results-sorted', {
+        sortKey,
+        sortDirection,
+        topResults: batchOptimizationResults.slice(0, Math.min(3, batchOptimizationResults.length)).map(summarizeResult)
+    }, { phase: 'render', console: false });
 }
 
 // 更新排序方向按鈕
@@ -2923,8 +4879,14 @@ async function runCEMRefinement(task) {
 
 function buildRefinementBaseTemplate(candidate) {
     const baseParams = getBacktestParams();
-    baseParams.entryStrategy = getWorkerStrategyName(candidate.buyStrategy);
-    baseParams.exitStrategy = getWorkerStrategyName(candidate.sellStrategy);
+    const workerEntryStrategy = resolveWorkerStrategyName(candidate.buyStrategy);
+    if (workerEntryStrategy) {
+        baseParams.entryStrategy = workerEntryStrategy;
+    }
+    const workerExitStrategy = resolveWorkerStrategyName(candidate.sellStrategy);
+    if (workerExitStrategy) {
+        baseParams.exitStrategy = workerExitStrategy;
+    }
     return baseParams;
 }
 
@@ -3243,6 +5205,13 @@ function findBestEntryStrategy() {
     
     if (!batchOptimizationResults || batchOptimizationResults.length === 0) {
         console.warn('[Cross Optimization] No batch optimization results available');
+        if (batchDebugSession) {
+            recordBatchDebug('best-result-missing', {
+                strategy,
+                strategyType,
+                reason: 'no-results'
+            }, { phase: 'cross', level: 'warn', consoleLevel: 'warn' });
+        }
         return null;
     }
     
@@ -3291,17 +5260,31 @@ function findBestResultForStrategy(strategy, strategyType) {
     
     if (filteredResults.length === 0) {
         console.warn(`[Cross Optimization] No results found for ${strategyType} strategy: ${strategy}`);
+        if (batchDebugSession) {
+            recordBatchDebug('best-result-missing', {
+                strategy,
+                strategyType,
+                reason: 'no-filter-match'
+            }, { phase: 'cross', level: 'warn', consoleLevel: 'warn' });
+        }
         return null;
     }
-    
+
     // 按年化報酬率排序，找到最佳結果
     const sorted = filteredResults.sort((a, b) => {
         const aReturn = a.annualizedReturn || -Infinity;
         const bReturn = b.annualizedReturn || -Infinity;
         return bReturn - aReturn;
     });
-    
+
     console.log(`[Cross Optimization] Best result for ${strategy}:`, sorted[0]);
+    if (batchDebugSession) {
+        recordBatchDebug('best-result-found', {
+            strategy,
+            strategyType,
+            result: summarizeResult(sorted[0])
+        }, { phase: 'cross', console: false });
+    }
     return sorted[0];
 }
 
@@ -3335,9 +5318,20 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
         // 設定基礎參數
         const baseParams = getBacktestParams();
         console.log('[Cross Optimization] Base params obtained:', baseParams);
-        
-        baseParams.entryStrategy = getWorkerStrategyName(entryStrategy);
-        baseParams.exitStrategy = getWorkerStrategyName(exitStrategy);
+
+        const workerEntryStrategy = resolveWorkerStrategyName(entryStrategy);
+        const workerExitStrategy = resolveWorkerStrategyName(exitStrategy);
+        if (!workerEntryStrategy || !workerExitStrategy) {
+            const message = '[Cross Optimization] 無法解析進出場策略映射，已停止交叉優化';
+            console.error(message, { entryStrategy, exitStrategy });
+            if (typeof showError === 'function') {
+                showError('交叉優化無法解析進出場策略映射，請確認批量設定。');
+            }
+            return;
+        }
+
+        baseParams.entryStrategy = workerEntryStrategy;
+        baseParams.exitStrategy = workerExitStrategy;
         
         console.log('[Cross Optimization] Strategy names converted:', {
             entryStrategy: baseParams.entryStrategy,
@@ -3568,199 +5562,262 @@ function formatNumber(value) {
     return value.toFixed(2);
 }
 
+function ensureStrategyOption(selectElement, value, scopeLabel) {
+    if (!selectElement) return;
+    const hasOption = Array.from(selectElement.options).some((option) => option.value === value);
+    if (!hasOption) {
+        const message = `[Batch Optimization] Missing ${scopeLabel} option "${value}" in select element`;
+        console.error(message);
+        if (typeof showError === 'function') {
+            const label = scopeLabel === 'entry' ? '進場' : '出場';
+            showError(`批量優化載入失敗：找不到${label}策略選項「${value}」，請更新映射設定。`);
+        }
+        throw new Error(message);
+    }
+}
+
+function resolveExitStrategySelectValue(strategyKey, exitStrategyElement) {
+    if (!strategyKey) {
+        const message = '[Batch Optimization] Result missing exit strategy field';
+        console.error(message);
+        if (typeof showError === 'function') {
+            showError('批量優化結果缺少出場策略，請重新產出結果。');
+        }
+        throw new Error(message);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(EXIT_STRATEGY_SELECT_MAP, strategyKey)) {
+        const message = `[Batch Optimization] Missing select mapping for exit strategy "${strategyKey}"`;
+        console.error(message);
+        if (typeof showError === 'function') {
+            showError(`批量優化尚未定義「${strategyKey}」的欄位映射，請補齊對照表後再重試。`);
+        }
+        throw new Error(message);
+    }
+
+    const selectValue = EXIT_STRATEGY_SELECT_MAP[strategyKey];
+    ensureStrategyOption(exitStrategyElement, selectValue, 'exit');
+    return selectValue;
+}
+
+function applyRiskManagementSettings(result) {
+    const stopLossInput = document.getElementById('stopLoss');
+    const takeProfitInput = document.getElementById('takeProfit');
+    const expectedStopLoss = result?.riskManagement?.stopLoss ?? result?.usedStopLoss;
+    const expectedTakeProfit = result?.riskManagement?.takeProfit ?? result?.usedTakeProfit;
+
+    if (stopLossInput && expectedStopLoss !== undefined && expectedStopLoss !== null) {
+        stopLossInput.value = expectedStopLoss;
+    }
+    if (takeProfitInput && expectedTakeProfit !== undefined && expectedTakeProfit !== null) {
+        takeProfitInput.value = expectedTakeProfit;
+    }
+}
+
+function normalizeParamValue(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric)) {
+        return Number(numeric.toFixed(6));
+    }
+    return String(value);
+}
+
+function valuesAreEqual(expected, actual) {
+    if (expected === actual) return true;
+    if (typeof expected === 'number' && typeof actual === 'number') {
+        return Math.abs(expected - actual) <= 1e-4;
+    }
+    return false;
+}
+
+function compareParamObjects(label, expectedParams = {}, actualParams = {}, mismatches = []) {
+    const keys = new Set([...Object.keys(expectedParams || {}), ...Object.keys(actualParams || {})]);
+    keys.forEach((key) => {
+        const expected = normalizeParamValue(expectedParams?.[key]);
+        const actual = normalizeParamValue(actualParams?.[key]);
+        if (!valuesAreEqual(expected, actual)) {
+            mismatches.push(`${label}「${key}」應為 ${expected ?? '無'}, 目前為 ${actual ?? '無'}`);
+        }
+    });
+    return mismatches;
+}
+
+function assertBatchStrategySync(result) {
+    if (typeof getBacktestParams !== 'function') {
+        return true;
+    }
+
+    try {
+        const currentParams = getBacktestParams();
+        const mismatches = [];
+
+        const expectedEntry = getWorkerStrategyName(result.buyStrategy);
+        let currentEntryLabel = currentParams.entryStrategy;
+        try {
+            currentEntryLabel = getWorkerStrategyName(currentParams.entryStrategy);
+        } catch (error) {
+            mismatches.push('目前設定無法解析進場策略映射');
+        }
+        if (expectedEntry !== currentEntryLabel) {
+            mismatches.push(`進場策略應為 ${expectedEntry}，目前為 ${currentEntryLabel ?? '無'}`);
+        }
+
+        const exitStrategyKey = result.sellStrategy || result.exitStrategy;
+        if (exitStrategyKey) {
+            const expectedExit = getWorkerStrategyName(exitStrategyKey);
+            let currentExitLabel = currentParams.exitStrategy;
+            try {
+                currentExitLabel = getWorkerStrategyName(currentParams.exitStrategy);
+            } catch (error) {
+                mismatches.push('目前設定無法解析出場策略映射');
+            }
+            if (expectedExit !== currentExitLabel) {
+                mismatches.push(`出場策略應為 ${expectedExit}，目前為 ${currentExitLabel ?? '無'}`);
+            }
+        }
+
+        compareParamObjects('進場參數', result.buyParams, currentParams.entryParams, mismatches);
+
+        const expectedExitParams = result.sellParams || result.exitParams;
+        if (expectedExitParams && Object.keys(expectedExitParams).length > 0) {
+            compareParamObjects('出場參數', expectedExitParams, currentParams.exitParams, mismatches);
+        }
+
+        const expectedStopLoss = normalizeParamValue(result?.riskManagement?.stopLoss ?? result?.usedStopLoss);
+        const expectedTakeProfit = normalizeParamValue(result?.riskManagement?.takeProfit ?? result?.usedTakeProfit);
+        const actualStopLoss = normalizeParamValue(currentParams?.stopLoss);
+        const actualTakeProfit = normalizeParamValue(currentParams?.takeProfit);
+
+        if (expectedStopLoss !== null && !valuesAreEqual(expectedStopLoss, actualStopLoss)) {
+            mismatches.push(`停損應為 ${expectedStopLoss}%，目前為 ${actualStopLoss ?? '無'}`);
+        }
+        if (expectedTakeProfit !== null && !valuesAreEqual(expectedTakeProfit, actualTakeProfit)) {
+            mismatches.push(`停利應為 ${expectedTakeProfit}%，目前為 ${actualTakeProfit ?? '無'}`);
+        }
+
+        if (mismatches.length > 0) {
+            const detail = mismatches.join('；');
+            const message = `[批量優化] 載入參數與結果不一致：${detail}`;
+            console.error('[Batch Optimization] ' + message, { expected: result, current: currentParams });
+            if (typeof showError === 'function') {
+                showError(message);
+            }
+            if (batchDebugSession) {
+                recordBatchDebug('dom-sync-mismatch', {
+                    detail: mismatches,
+                    result: summarizeResult(result)
+                }, { phase: 'render', level: 'error', consoleLevel: 'error' });
+            }
+            return false;
+        }
+
+        console.log('[Batch Optimization] Loaded strategy matches current DOM parameters');
+        if (batchDebugSession) {
+            recordBatchDebug('dom-sync-pass', {
+                result: summarizeResult(result)
+            }, { phase: 'render', console: false });
+        }
+        return true;
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to verify loaded batch strategy:', error);
+        if (batchDebugSession) {
+            recordBatchDebug('dom-sync-error', {
+                message: error?.message || String(error),
+                stack: error?.stack || null
+            }, { phase: 'render', level: 'error', consoleLevel: 'error' });
+        }
+        return false;
+    }
+}
+
 // 載入批量優化策略
 function loadBatchStrategy(index) {
     const result = batchOptimizationResults[index];
     if (!result) {
         console.error('[Batch Optimization] No result found at index:', index);
+        if (typeof showError === 'function') {
+            showError('批量優化結果不存在，請重新選擇。');
+        }
+        if (batchDebugSession) {
+            recordBatchDebug('load-strategy-missing', { index }, { phase: 'render', level: 'error', consoleLevel: 'error' });
+        }
         return;
     }
-    
-    console.log('[Batch Optimization] Loading strategy at index:', index);
-    console.log('[Batch Optimization] Full result object:', result);
-    console.log('[Batch Optimization] buyStrategy:', result.buyStrategy);
-    console.log('[Batch Optimization] sellStrategy:', result.sellStrategy);
-    console.log('[Batch Optimization] sellStrategy type:', typeof result.sellStrategy);
-    console.log('[Batch Optimization] Has sellStrategy property:', 'sellStrategy' in result);
-    console.log('[Batch Optimization] Object keys:', Object.keys(result));
-    
-    // 檢查是否有 exitStrategy 字段（這可能是問題所在）
-    if ('exitStrategy' in result) {
-        console.warn('[Batch Optimization] Found exitStrategy field:', result.exitStrategy);
-        console.warn('[Batch Optimization] This might be overriding sellStrategy');
-    }
-    
-    // 更新策略選擇
-    const entryStrategyElement = document.getElementById('entryStrategy');
-    const exitStrategyElement = document.getElementById('exitStrategy');
-    
-    if (entryStrategyElement) {
-        entryStrategyElement.value = result.buyStrategy;
-        // 觸發策略變更事件
+
+    recordBatchDebug('load-strategy', {
+        index,
+        result: summarizeResult(result)
+    }, { phase: 'render', consoleLevel: 'log' });
+
+    try {
+        const entryStrategyElement = document.getElementById('entryStrategy');
+        const exitStrategyElement = document.getElementById('exitStrategy');
+
+        if (!entryStrategyElement || !exitStrategyElement) {
+            const message = '[Batch Optimization] Strategy select elements are missing';
+            console.error(message);
+            if (typeof showError === 'function') {
+                showError('找不到進出場策略選單，請重新整理頁面後重試。');
+            }
+            if (batchDebugSession) {
+                recordBatchDebug('load-strategy-error', {
+                    message: 'select-missing',
+                    result: summarizeResult(result)
+                }, { phase: 'render', level: 'error', consoleLevel: 'error' });
+            }
+            return;
+        }
+
+        const entryStrategyKey = result.buyStrategy;
+        ensureStrategyOption(entryStrategyElement, entryStrategyKey, 'entry');
+
+        const exitStrategyKey = result.sellStrategy || result.exitStrategy;
+        const exitSelectValue = resolveExitStrategySelectValue(exitStrategyKey, exitStrategyElement);
+
+        entryStrategyElement.value = entryStrategyKey;
+        exitStrategyElement.value = exitSelectValue;
+
+        applyRiskManagementSettings(result);
+
         entryStrategyElement.dispatchEvent(new Event('change'));
-    }
-    
-    if (exitStrategyElement) {
-        // 優先使用 sellStrategy，如果不存在則檢查 exitStrategy，最後使用預設策略
-        let exitStrategy = result.sellStrategy;
-        if (!exitStrategy && result.exitStrategy) {
-            console.warn('[Batch Optimization] Using exitStrategy as fallback:', result.exitStrategy);
-            exitStrategy = result.exitStrategy;
-        }
-        if (!exitStrategy) {
-            console.warn('[Batch Optimization] No exit strategy found, using default');
-            exitStrategy = 'stop_loss_take_profit';
-        }
-        
-        // 關鍵修復：將批量優化的完整策略ID轉換為HTML select期待的簡化版本
-        let selectValue = exitStrategy;
-        if (exitStrategy.endsWith('_exit')) {
-            // 移除 '_exit' 後綴，因為HTML select中可能只存儲基礎名稱
-            const baseStrategy = exitStrategy.replace('_exit', '');
-            console.log(`[Batch Optimization] Converting strategy from '${exitStrategy}' to '${baseStrategy}'`);
-            selectValue = baseStrategy;
-        }
-        
-        console.log('[Batch Optimization] Setting exit strategy to:', selectValue);
-        console.log('[Batch Optimization] Available options in select:', Array.from(exitStrategyElement.options).map(o => o.value));
-        
-        // 檢查選項是否存在
-        const optionExists = Array.from(exitStrategyElement.options).some(option => option.value === selectValue);
-        if (!optionExists) {
-            console.warn(`[Batch Optimization] Option '${selectValue}' not found in select, trying original value '${exitStrategy}'`);
-            selectValue = exitStrategy; // 回退到原始值
-            
-            // 如果還是不存在，使用預設策略
-            const fallbackExists = Array.from(exitStrategyElement.options).some(option => option.value === selectValue);
-            if (!fallbackExists) {
-                console.warn(`[Batch Optimization] Neither '${selectValue}' nor original value found, using stop_loss_take_profit`);
-                selectValue = 'stop_loss_take_profit';
-            }
-        }
-        
-        exitStrategyElement.value = selectValue;
-        
-        // 如果出場策略為 null 或使用預設策略，顯示訊息給用戶
-        if (!result.sellStrategy) {
-            console.log('[Batch Optimization] 出場策略未觸發，使用策略:', selectValue);
-            if (selectValue === 'stop_loss_take_profit') {
-                showInfo('此優化結果的出場策略未觸發，已載入預設的停損停利策略。您可以根據需要調整出場策略。');
-            } else {
-                const strategyName = strategyDescriptions[result.sellStrategy]?.name || strategyDescriptions[selectValue]?.name || selectValue;
-                showInfo(`已載入出場策略：${strategyName}`);
-            }
-        }
-        
-        // 觸發策略變更事件
         exitStrategyElement.dispatchEvent(new Event('change'));
-    }
-    
-    // 更新策略參數
-    updateBatchStrategyParams('entry', result.buyParams, result.buyStrategy);
-    // 更新出場策略參數，優先使用 sellParams，然後嘗試 exitParams
-    const exitParams = result.sellParams || result.exitParams;
-    const exitStrategyName = result.sellStrategy || result.exitStrategy;
-    if (exitParams && Object.keys(exitParams).length > 0) {
-        updateBatchStrategyParams('exit', exitParams, exitStrategyName);
-        console.log('[Batch Optimization] 已更新出場策略參數:', exitParams, '策略:', exitStrategyName);
-    } else {
-        console.log('[Batch Optimization] 出場策略參數為空，跳過參數更新');
-    }
-    
-    // 檢查並應用風險管理參數
-    console.log('[Batch Optimization] Checking for risk management parameters...');
-    console.log('[Batch Optimization] Result has riskManagement:', 'riskManagement' in result);
-    console.log('[Batch Optimization] riskManagement value:', result.riskManagement);
-    
-    if (result.riskManagement) {
-        console.log('[Batch Optimization] 應用風險管理參數:', result.riskManagement);
-        
-        // 設定停損
-        if (result.riskManagement.stopLoss !== undefined) {
-            const stopLossInput = document.getElementById('stopLoss');
-            if (stopLossInput) {
-                console.log('[Batch Optimization] 設定停損前的值:', stopLossInput.value);
-                stopLossInput.value = result.riskManagement.stopLoss;
-                console.log('[Batch Optimization] 設定停損後的值:', stopLossInput.value);
-                console.log('[Batch Optimization] 設定停損:', result.riskManagement.stopLoss);
-            } else {
-                console.error('[Batch Optimization] 找不到停損輸入框 (stopLoss)');
-            }
+
+        updateBatchStrategyParams('entry', result.buyParams, entryStrategyKey);
+
+        const exitParams = result.sellParams || result.exitParams;
+        if (exitParams && Object.keys(exitParams).length > 0) {
+            updateBatchStrategyParams('exit', exitParams, exitStrategyKey);
+        } else {
+            console.log('[Batch Optimization] 出場策略參數為空，跳過參數更新');
         }
-        
-        // 設定停利
-        if (result.riskManagement.takeProfit !== undefined) {
-            const takeProfitInput = document.getElementById('takeProfit');
-            if (takeProfitInput) {
-                console.log('[Batch Optimization] 設定停利前的值:', takeProfitInput.value);
-                takeProfitInput.value = result.riskManagement.takeProfit;
-                console.log('[Batch Optimization] 設定停利後的值:', takeProfitInput.value);
-                console.log('[Batch Optimization] 設定停利:', result.riskManagement.takeProfit);
-            } else {
-                console.error('[Batch Optimization] 找不到停利輸入框 (takeProfit)');
-            }
+
+        const isConsistent = assertBatchStrategySync(result);
+
+        const entryStrategyName = strategyDescriptions[entryStrategyKey]?.name || entryStrategyKey;
+        if (typeof showSuccess === 'function') {
+            showSuccess(`進場策略已載入：${entryStrategyName}`);
         }
-        
-        showInfo(`已載入優化的風險管理參數：停損 ${result.riskManagement.stopLoss || 0}%，停利 ${result.riskManagement.takeProfit || 0}%`);
-    } else {
-        console.log('[Batch Optimization] 沒有風險管理參數需要載入');
-        
-        // 檢查是否為風險管理策略但沒有參數
-        if (result.sellStrategy === 'fixed_stop_loss' || result.sellStrategy === 'cover_fixed_stop_loss') {
-            console.warn('[Batch Optimization] 這是風險管理策略但沒有找到 riskManagement 參數');
-            console.warn('[Batch Optimization] 完整結果物件:', result);
-        }
-        
-        // 對於非風險管理策略，載入該組合實際使用的停損停利參數
-        console.log('[Batch Optimization] Checking for used risk management parameters...');
-        console.log('[Batch Optimization] usedStopLoss:', result.usedStopLoss);
-        console.log('[Batch Optimization] usedTakeProfit:', result.usedTakeProfit);
-        
-        if (result.usedStopLoss !== undefined || result.usedTakeProfit !== undefined) {
-            console.log('[Batch Optimization] 載入該組合實際使用的風險管理參數');
-            
-            // 設定停損
-            if (result.usedStopLoss !== undefined) {
-                const stopLossInput = document.getElementById('stopLoss');
-                if (stopLossInput) {
-                    console.log('[Batch Optimization] 設定實際使用的停損前的值:', stopLossInput.value);
-                    stopLossInput.value = result.usedStopLoss;
-                    console.log('[Batch Optimization] 設定實際使用的停損後的值:', stopLossInput.value);
-                } else {
-                    console.error('[Batch Optimization] 找不到停損輸入框 (stopLoss)');
+
+        if (isConsistent && typeof confirm === 'function' && confirm(`批量優化策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
+            setTimeout(() => {
+                if (typeof runBacktestInternal === 'function') {
+                    runBacktestInternal();
                 }
-            }
-            
-            // 設定停利
-            if (result.usedTakeProfit !== undefined) {
-                const takeProfitInput = document.getElementById('takeProfit');
-                if (takeProfitInput) {
-                    console.log('[Batch Optimization] 設定實際使用的停利前的值:', takeProfitInput.value);
-                    takeProfitInput.value = result.usedTakeProfit;
-                    console.log('[Batch Optimization] 設定實際使用的停利後的值:', takeProfitInput.value);
-                } else {
-                    console.error('[Batch Optimization] 找不到停利輸入框 (takeProfit)');
-                }
-            }
-            
-            showInfo(`已載入該組合使用的風險管理參數：停損 ${result.usedStopLoss || 0}%，停利 ${result.usedTakeProfit || 0}%`);
+            }, 100);
+        }
+
+        switchTab('optimization');
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to load batch strategy:', error);
+        if (batchDebugSession) {
+            recordBatchDebug('load-strategy-error', {
+                message: error?.message || String(error),
+                stack: error?.stack || null,
+                result: summarizeResult(result)
+            }, { phase: 'render', level: 'error', consoleLevel: 'error' });
         }
     }
-    
-    // 顯示進場策略載入成功的通知
-    const entryStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-    showSuccess(`進場策略已載入：${entryStrategyName}`);
-    
-    // 顯示確認對話框並自動執行回測
-    if (confirm(`批量優化策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
-        // 自動執行回測
-        setTimeout(() => {
-            runBacktestInternal();
-        }, 100);
-    }
-    
-    // 切換到優化頁籤
-    switchTab('optimization');
 }
 
 // 添加測試按鈕（開發用）
@@ -3844,41 +5901,51 @@ function updateBatchStrategyParams(type, params, strategyName = null) {
         console.warn(`[Batch Optimization] Invalid params for ${type}:`, params);
         return;
     }
-    
+
     try {
-        // 獲取當前選擇的策略，用於特殊參數名稱映射
-        // 優先使用傳入的策略名稱，否則從DOM獲取
         let currentStrategy = strategyName;
         if (!currentStrategy) {
             const strategySelect = document.getElementById(`${type}Strategy`);
             currentStrategy = strategySelect ? strategySelect.value : '';
         }
-        
+
+        if (!currentStrategy) {
+            console.warn(`[Batch Optimization] Cannot determine strategy for ${type} params update`, params);
+            return;
+        }
+
+        const fieldMap = resolveParamFieldMap(currentStrategy);
+        if (!fieldMap) {
+            console.warn(`[Batch Optimization] No param mapping found for strategy ${currentStrategy}`);
+            return;
+        }
+
         console.log(`[Batch Optimization] Updating ${type} params for strategy: ${currentStrategy}`, params);
-        
+
         for (const [key, value] of Object.entries(params)) {
             if (key && value !== undefined && value !== null) {
-                // 基礎ID生成
-                let inputId = `${type}${key.charAt(0).toUpperCase() + key.slice(1)}`;
-                
-                // KD策略的特殊參數名稱映射（與 loadStrategy 函數保持一致）
-                if ((currentStrategy === 'k_d_cross' || currentStrategy === 'k_d_cross_exit') && key === 'thresholdX') {
-                    inputId = `${type}KdThresholdX`;
-                } else if ((currentStrategy === 'k_d_cross_exit' || currentStrategy.includes('k_d_cross')) && key === 'thresholdY') {
-                    inputId = `${type}KdThresholdY`;
-                } else if ((currentStrategy === 'macd_cross' || currentStrategy === 'macd_cross_exit') && key === 'signalPeriod') {
-                    inputId = `${type}SignalPeriod`;
-                } else if (currentStrategy === 'turtle_stop_loss' && key === 'stopLossPeriod') {
-                    inputId = `${type}StopLossPeriod`;
+                const suffix = fieldMap[key];
+                if (!suffix) {
+                    const message = `[Batch Optimization] Missing field mapping for ${currentStrategy}.${key}`;
+                    console.error(message);
+                    if (typeof showError === 'function') {
+                        showError(`批量優化缺少「${currentStrategy}.${key}」的欄位映射，請更新批量設定。`);
+                    }
+                    continue;
                 }
-                
+
+                const inputId = `${type}${suffix}`;
                 const input = document.getElementById(inputId);
-                if (input) {
-                    input.value = value;
-                    console.log(`[Batch Optimization] Set ${inputId} = ${value} (strategy: ${currentStrategy})`);
-                } else {
-                    console.warn(`[Batch Optimization] Input element not found: ${inputId} for strategy ${currentStrategy}, key: ${key}`);
+                if (!input) {
+                    const message = `[Batch Optimization] Input element not found for ${inputId} (${currentStrategy}.${key})`;
+                    console.error(message);
+                    if (typeof showError === 'function') {
+                        showError(`批量優化無法找到欄位 ${inputId}，請確認表單欄位是否存在。`);
+                    }
+                    continue;
                 }
+
+                input.value = value;
             }
         }
     } catch (error) {
@@ -4070,11 +6137,382 @@ function hideBatchProgress() {
     }
 }
 
-// 隱藏批量進度
-function hideBatchProgress() {
-    const progressElement = document.getElementById('batch-optimization-progress');
-    if (progressElement) {
-        progressElement.classList.add('hidden');
+function cloneCombinationInput(combination) {
+    if (!combination || typeof combination !== 'object') {
+        return null;
+    }
+
+    const clone = {
+        buyStrategy: combination.buyStrategy || null,
+        sellStrategy: combination.sellStrategy || null,
+        buyParams: clonePlainObject(combination.buyParams || {}),
+        sellParams: clonePlainObject(combination.sellParams || {}),
+    };
+
+    if (combination.riskManagement) {
+        clone.riskManagement = clonePlainObject(combination.riskManagement);
+    }
+    if (combination.shortEntryStrategy) {
+        clone.shortEntryStrategy = combination.shortEntryStrategy;
+    }
+    if (combination.shortExitStrategy) {
+        clone.shortExitStrategy = combination.shortExitStrategy;
+    }
+    if (combination.shortEntryParams) {
+        clone.shortEntryParams = clonePlainObject(combination.shortEntryParams);
+    }
+    if (combination.shortExitParams) {
+        clone.shortExitParams = clonePlainObject(combination.shortExitParams);
+    }
+
+    return clone;
+}
+
+function cloneCombinationResult(result) {
+    if (!result || typeof result !== 'object') {
+        return null;
+    }
+
+    const clone = cloneCombinationInput(result) || {};
+
+    if (result.optimizationType) {
+        clone.optimizationType = result.optimizationType;
+    }
+    if (Array.isArray(result.optimizationTypes)) {
+        clone.optimizationTypes = [...result.optimizationTypes];
+    }
+    if (result.__finalResult) {
+        clone.__finalResult = clonePlainObject(result.__finalResult);
+    }
+    if (result.__finalMetric !== undefined) {
+        clone.__finalMetric = result.__finalMetric;
+    }
+    if (result.__metricLabel !== undefined) {
+        clone.__metricLabel = result.__metricLabel;
+    }
+
+    return clone;
+}
+
+function captureBatchResultsSnapshot() {
+    if (!Array.isArray(batchOptimizationResults)) {
+        return [];
+    }
+
+    try {
+        return JSON.parse(JSON.stringify(batchOptimizationResults));
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to deep clone batch results snapshot via JSON:', error);
+        return batchOptimizationResults.map(result => clonePlainObject(result));
+    }
+}
+
+function restoreBatchResultsSnapshot(snapshot) {
+    if (!Array.isArray(snapshot)) {
+        batchOptimizationResults = [];
+        return;
+    }
+
+    try {
+        batchOptimizationResults = JSON.parse(JSON.stringify(snapshot));
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to restore batch results snapshot via JSON:', error);
+        batchOptimizationResults = snapshot.map(result => clonePlainObject(result));
+    }
+}
+
+function captureBatchWorkerStatusSnapshot(status) {
+    if (!status || typeof status !== 'object') {
+        return { concurrencyLimit: 0, inFlightCount: 0, entries: [] };
+    }
+
+    const snapshot = {
+        concurrencyLimit: status.concurrencyLimit ?? 0,
+        inFlightCount: status.inFlightCount ?? 0,
+        entries: Array.isArray(status.entries)
+            ? status.entries.map(entry => clonePlainObject(entry))
+            : []
+    };
+
+    return snapshot;
+}
+
+function restoreBatchWorkerStatusSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        batchWorkerStatus = { concurrencyLimit: 0, inFlightCount: 0, entries: [] };
+        return;
+    }
+
+    batchWorkerStatus = {
+        concurrencyLimit: snapshot.concurrencyLimit ?? 0,
+        inFlightCount: snapshot.inFlightCount ?? 0,
+        entries: Array.isArray(snapshot.entries)
+            ? snapshot.entries.map(entry => clonePlainObject(entry))
+            : []
+    };
+}
+
+function sanitizeOptimizationConfig(config = {}) {
+    const sanitized = clonePlainObject(config) || {};
+
+    if (!sanitized.targetMetric) {
+        sanitized.targetMetric = 'annualizedReturn';
+    }
+
+    const parsedTrials = parseInt(sanitized.parameterTrials, 10);
+    sanitized.parameterTrials = Number.isFinite(parsedTrials) && parsedTrials > 0
+        ? parsedTrials
+        : 100;
+
+    const parsedIterations = parseInt(sanitized.iterationLimit, 10);
+    sanitized.iterationLimit = Number.isFinite(parsedIterations) && parsedIterations > 0
+        ? parsedIterations
+        : 6;
+
+    if (sanitized.optimizeTargets && !Array.isArray(sanitized.optimizeTargets)) {
+        sanitized.optimizeTargets = [sanitized.optimizeTargets];
+    }
+
+    return sanitized;
+}
+
+function sanitizeOptimizationOptions(options = {}) {
+    if (!options || typeof options !== 'object') {
+        return {};
+    }
+
+    const sanitized = {};
+
+    if (Array.isArray(options.enabledScopes)) {
+        sanitized.enabledScopes = [...options.enabledScopes];
+    }
+
+    if (options.baseParamsOverride && typeof options.baseParamsOverride === 'object') {
+        sanitized.baseParamsOverride = prepareBaseParamsForOptimization(options.baseParamsOverride);
+    }
+
+    if (Array.isArray(options.cachedDataOverride)) {
+        sanitized.cachedDataOverride = options.cachedDataOverride.slice();
+    }
+
+    if (options.sessionContext && typeof options.sessionContext === 'object') {
+        sanitized.sessionContext = clonePlainObject(options.sessionContext);
+    }
+
+    return sanitized;
+}
+
+async function runCombinationOptimizationHeadless(combination, config, options = {}) {
+    const preparedCombination = cloneCombinationInput(combination);
+    if (!preparedCombination) {
+        throw new Error('[Batch Optimization] Invalid combination payload for optimization');
+    }
+
+    const preparedConfig = sanitizeOptimizationConfig(config);
+    const preparedOptions = sanitizeOptimizationOptions(options);
+
+    if (!preparedOptions.sessionContext) {
+        preparedOptions.sessionContext = { source: 'external-headless' };
+    }
+
+    const previousCachedStockData = typeof cachedStockData !== 'undefined' ? cachedStockData : undefined;
+    const previousDiagnostics = typeof lastDatasetDiagnostics !== 'undefined' ? lastDatasetDiagnostics : undefined;
+    const previousOverallResult = typeof lastOverallResult !== 'undefined' ? lastOverallResult : undefined;
+    const baselineCacheSummary = summarizeDatasetRange(previousCachedStockData);
+    const overrideCacheSummary = summarizeDatasetRange(preparedOptions.cachedDataOverride);
+
+    const localStorageRef = getWindowLocalStorage();
+    const sessionStorageRef = getWindowSessionStorage();
+    const previousLocalStorageSnapshot = captureWebStorageSnapshot(localStorageRef);
+    const previousSessionStorageSnapshot = captureWebStorageSnapshot(sessionStorageRef);
+    const previousLocalStorageSummary = summarizeStorageSnapshot(previousLocalStorageSnapshot);
+    const previousSessionStorageSummary = summarizeStorageSnapshot(previousSessionStorageSnapshot);
+
+    const previousDebugSession = batchDebugSession;
+    const previousProgress = { ...currentBatchProgress };
+    const previousStopFlag = isBatchOptimizationStopped;
+    const previousResultsSnapshot = captureBatchResultsSnapshot();
+    const previousWorkerStatusSnapshot = captureBatchWorkerStatusSnapshot(batchWorkerStatus);
+    const previousConfigSnapshot = clonePlainObject(batchOptimizationConfig);
+    const previousRunningFlag = Boolean(window.batchOptimizationRunning);
+    const previousWorkerInstance = batchOptimizationWorker;
+    const activeCacheStore = getActiveCacheStore();
+    const previousCacheStoreSnapshot = captureCacheStoreSnapshot(activeCacheStore);
+    const previousCacheEntryCount = Array.isArray(previousCacheStoreSnapshot) ? previousCacheStoreSnapshot.length : 0;
+    const previousCacheKeysPreview = Array.isArray(previousCacheStoreSnapshot)
+        ? previousCacheStoreSnapshot.slice(0, 5).map(([key]) => key)
+        : [];
+    const previousLastFetchSettings = captureLastFetchSettingsSnapshot();
+
+    let headlessSession = null;
+
+    lastHeadlessOptimizationSummary = null;
+
+    try {
+        isBatchOptimizationStopped = false;
+        headlessSession = startBatchDebugSession({
+            phase: 'external',
+            source: preparedOptions.sessionContext.source,
+            quiet: true,
+            mode: 'headless'
+        });
+
+        recordBatchDebug('headless-state-snapshot', {
+            resultsCount: previousResultsSnapshot.length,
+            workerEntries: Array.isArray(previousWorkerStatusSnapshot.entries)
+                ? previousWorkerStatusSnapshot.entries.length
+                : 0,
+            runningFlag: previousRunningFlag,
+            stopFlag: previousStopFlag,
+            progress: clonePlainObject(previousProgress),
+            cacheEntries: previousCacheEntryCount,
+            cacheKeysPreview: previousCacheKeysPreview,
+            lastFetchSettingsPreserved: Boolean(previousLastFetchSettings),
+            storage: {
+                local: previousLocalStorageSummary,
+                session: previousSessionStorageSummary
+            }
+        }, { phase: 'external', console: false });
+
+        recordBatchDebug('headless-cache-state', {
+            baselineCache: baselineCacheSummary,
+            overrideCache: overrideCacheSummary,
+            diagnosticsPreserved: Boolean(previousDiagnostics),
+            overallResultPreserved: Boolean(previousOverallResult),
+            cacheEntries: previousCacheEntryCount
+        }, { phase: 'external', console: false });
+
+        const result = await optimizeCombinationIterative(preparedCombination, preparedConfig, preparedOptions);
+
+        if (result) {
+            const metricLabel = result.__metricLabel || preparedConfig.targetMetric || 'annualizedReturn';
+            let metricValue = Number.isFinite(result.__finalMetric) ? result.__finalMetric : null;
+            if (metricValue === null) {
+                const fallbackMetric = getMetricFromResult(result, metricLabel);
+                metricValue = Number.isFinite(fallbackMetric) ? fallbackMetric : null;
+            }
+
+            lastHeadlessOptimizationSummary = {
+                combination: summarizeCombination(result),
+                metric: metricValue,
+                metricLabel,
+                timestamp: Date.now(),
+                source: preparedOptions.sessionContext.source || 'external-headless',
+                baselineCache: baselineCacheSummary,
+                overrideCache: overrideCacheSummary
+            };
+
+            recordBatchDebug('headless-result', {
+                combination: lastHeadlessOptimizationSummary.combination,
+                metric: lastHeadlessOptimizationSummary.metric,
+                metricLabel,
+                baselineCache: baselineCacheSummary,
+                overrideCache: overrideCacheSummary
+            }, { phase: 'external', console: false });
+        } else {
+            lastHeadlessOptimizationSummary = null;
+            recordBatchDebug('headless-result-missing', {
+                combination: summarizeCombination(preparedCombination)
+            }, { phase: 'external', level: 'warn', consoleLevel: 'warn' });
+        }
+
+        if (headlessSession && batchDebugSession === headlessSession) {
+            finalizeBatchDebugSession({
+                status: 'completed',
+                mode: 'headless',
+                combination: summarizeCombination(result)
+            });
+        }
+
+        return cloneCombinationResult(result);
+    } finally {
+        const currentLocalStorageSnapshot = captureWebStorageSnapshot(localStorageRef);
+        const currentSessionStorageSnapshot = captureWebStorageSnapshot(sessionStorageRef);
+
+        const localStorageDiff = diffStorageSnapshots(previousLocalStorageSnapshot, currentLocalStorageSnapshot);
+        const sessionStorageDiff = diffStorageSnapshots(previousSessionStorageSnapshot, currentSessionStorageSnapshot);
+
+        restoreCacheStoreSnapshot(previousCacheStoreSnapshot, activeCacheStore);
+        restoreLastFetchSettingsSnapshot(previousLastFetchSettings);
+
+        const restoredCacheEntryCount = activeCacheStore instanceof Map ? activeCacheStore.size : previousCacheEntryCount;
+        const restoredCacheKeysPreview = activeCacheStore instanceof Map
+            ? Array.from(activeCacheStore.keys()).slice(0, 5)
+            : previousCacheKeysPreview;
+
+        if (headlessSession && batchDebugSession === headlessSession) {
+            recordBatchDebug('headless-cache-restore', {
+                restoredBaseline: baselineCacheSummary,
+                restoredDiagnostics: Boolean(previousDiagnostics),
+                restoredOverallResult: Boolean(previousOverallResult),
+                cacheEntriesRestored: restoredCacheEntryCount,
+                cacheKeysPreview: restoredCacheKeysPreview,
+                lastFetchSettingsRestored: Boolean(previousLastFetchSettings)
+            }, { phase: 'external', console: false });
+        }
+
+        if (typeof cachedStockData !== 'undefined') {
+            cachedStockData = previousCachedStockData;
+        }
+        if (typeof lastDatasetDiagnostics !== 'undefined') {
+            lastDatasetDiagnostics = previousDiagnostics;
+        }
+        if (typeof lastOverallResult !== 'undefined') {
+            lastOverallResult = previousOverallResult;
+        }
+
+        restoreBatchResultsSnapshot(previousResultsSnapshot);
+        restoreBatchWorkerStatusSnapshot(previousWorkerStatusSnapshot);
+        batchOptimizationConfig = clonePlainObject(previousConfigSnapshot) || {};
+        window.batchOptimizationRunning = previousRunningFlag;
+        batchOptimizationWorker = previousWorkerInstance;
+        currentBatchProgress = { ...previousProgress };
+        isBatchOptimizationStopped = previousStopFlag;
+
+        if (headlessSession && batchDebugSession === headlessSession) {
+            restoreWebStorageSnapshot(localStorageRef, previousLocalStorageSnapshot);
+            restoreWebStorageSnapshot(sessionStorageRef, previousSessionStorageSnapshot);
+
+            const trimmedLocalDiff = localStorageDiff && !localStorageDiff.empty
+                ? {
+                    added: (localStorageDiff.added || []).slice(0, 5),
+                    removed: (localStorageDiff.removed || []).slice(0, 5),
+                    changed: (localStorageDiff.changed || []).slice(0, 5)
+                }
+                : { added: [], removed: [], changed: [] };
+            const trimmedSessionDiff = sessionStorageDiff && !sessionStorageDiff.empty
+                ? {
+                    added: (sessionStorageDiff.added || []).slice(0, 5),
+                    removed: (sessionStorageDiff.removed || []).slice(0, 5),
+                    changed: (sessionStorageDiff.changed || []).slice(0, 5)
+                }
+                : { added: [], removed: [], changed: [] };
+
+            recordBatchDebug('headless-state-restore', {
+                resultsCount: Array.isArray(batchOptimizationResults) ? batchOptimizationResults.length : 0,
+                workerEntries: Array.isArray(batchWorkerStatus.entries) ? batchWorkerStatus.entries.length : 0,
+                runningFlag: window.batchOptimizationRunning,
+                stopFlag: isBatchOptimizationStopped,
+                progress: clonePlainObject(currentBatchProgress),
+                storageRestored: {
+                    local: {
+                        summary: summarizeStorageSnapshot(previousLocalStorageSnapshot),
+                        diff: trimmedLocalDiff
+                    },
+                    session: {
+                        summary: summarizeStorageSnapshot(previousSessionStorageSnapshot),
+                        diff: trimmedSessionDiff
+                    }
+                }
+            }, { phase: 'external', console: false });
+            batchDebugSession = previousDebugSession || null;
+        } else if (previousDebugSession) {
+            batchDebugSession = previousDebugSession;
+            restoreWebStorageSnapshot(localStorageRef, previousLocalStorageSnapshot);
+            restoreWebStorageSnapshot(sessionStorageRef, previousSessionStorageSnapshot);
+        }
+
+        notifyBatchDebugListeners();
     }
 }
 
@@ -4084,7 +6522,16 @@ window.batchOptimization = {
     loadStrategy: loadBatchStrategy,
     stop: stopBatchOptimization,
     getWorkerStrategyName: getWorkerStrategyName,
-    runCombinationOptimization: (combination, config, options = {}) => optimizeCombinationIterative(combination, config, options)
+    runCombinationOptimization: (combination, config, options = {}) => runCombinationOptimizationHeadless(combination, config, options),
+    getDebugLog: getBatchDebugSnapshot,
+    downloadDebugLog: () => downloadBatchDebugLog('batch-optimization'),
+    finalizeDebugSession: finalizeBatchDebugSession,
+    startDebugSession: startBatchDebugSession,
+    subscribeDebugLog: subscribeBatchDebugLog,
+    clearDebugLog: clearBatchDebugSession,
+    summarizeDebugSnapshot: buildBatchDebugDigest,
+    diffDebugLogs: diffBatchDebugLogs,
+    formatDebugSnapshotLabel
 };
 
 // 測試風險管理優化功能
@@ -4366,10 +6813,16 @@ function restoreBatchOptimizationUI() {
 // 停止批量優化
 function stopBatchOptimization() {
     console.log('[Batch Optimization] Stopping batch optimization...');
-    
+
+    if (batchDebugSession) {
+        recordBatchDebug('stop-requested', {
+            resultCount: batchOptimizationResults.length
+        }, { phase: 'finalize', level: 'warn', consoleLevel: 'warn' });
+    }
+
     // 設置停止標誌
     isBatchOptimizationStopped = true;
-    
+
     // 終止 worker
     if (batchOptimizationWorker) {
         batchOptimizationWorker.terminate();
@@ -4394,8 +6847,13 @@ function stopBatchOptimization() {
             statusDiv.className = 'text-sm text-red-600 font-medium';
         }
     }
-    
+
     console.log('[Batch Optimization] Stopped successfully');
+
+    finalizeBatchDebugSession({
+        status: 'stopped',
+        resultCount: batchOptimizationResults.length
+    });
 }
 
 // 將測試函數添加到導出對象
@@ -4654,11 +7112,24 @@ function performSingleBacktestFast(params) {
             
             // 發送回測請求 - 使用緩存數據提高速度
             const preparedParams = enrichParamsWithLookback(params);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedUsage = buildCachedDatasetUsage(
+                Array.isArray(cachedStockData) ? cachedStockData : null,
+                requiredRange
+            );
+            let { useCachedData } = cachedUsage;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
+
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: true,
-                cachedData: cachedStockData
+                useCachedData,
+                cachedData: cachedDataForWorker
             });
             
         } catch (error) {

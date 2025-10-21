@@ -1,5 +1,55 @@
 
 
+## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
+- **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
+- **Updates**:
+  - `js/batch-optimization.js` 擴充 headless 執行的快取快照機制，新增資料集 Map 與 `lastFetchSettings` 複本，結束後完整還原，並在除錯 log 記錄快取筆數、鍵值摘要與復原狀態，避免 Walk-Forward 影響批量優化最佳解。
+  - 建立除錯訂閱通知，`window.batchOptimization.subscribeDebugLog/clearDebugLog` 對外提供即時監看與清除功能，所有事件、結案與清除行為皆會同步更新監聽端。
+  - `index.html` × `js/main.js` 於開發者模式卡片新增「批量優化除錯」卡，提供刷新、下載、清除按鈕與最多 50 筆事件的滾動列表，協助直接在前台檢視排查時間線。
+- **Testing**: `node - <<'NODE' const fs = require('fs'); const vm = require('vm'); ['js/batch-optimization.js'].forEach((file) => { const code = fs.readFileSync(file, 'utf8'); new vm.Script(code, { filename: file }); }); console.log('scripts compile'); NODE`
+
+## 2026-07-15 — Patch LB-BATCH-OPT-20260715B
+- **Scope**: 批量優化策略映射 hydration 修正。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `hydrateStrategyNameMap`，在 `strategyDescriptions` 完整載入後補齊所有策略映射，避免批量優化提前報缺、導致無法回傳最佳參數。
+  - `getWorkerStrategyName` 改於查詢前觸發 hydration，並允許 `none` 類型策略返回 `null`，確保缺席的進/出場或風控欄位不會阻斷流程。
+  - `initBatchOptimization` 初始化階段即進行映射同步，確保 UI 載入與優化流程使用相同的策略對照表。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-16 — Patch LB-BATCH-OPT-20260716C
+- **Scope**: 批量優化／滾動測試同步的全程 debug log 與結果追蹤。
+- **Updates**:
+  - `js/batch-optimization.js` 新增 `startBatchDebugSession`、`recordBatchDebug`、`downloadBatchDebugLog` 等工具，於批量優化啟動時建立版本化除錯紀錄，並可從瀏覽器匯出 JSON 供交叉分析。
+  - 在組合優化、worker 執行、參數搜尋、結果排序與 DOM 載入等節點加入紀錄，遇到缺結果、超時、映射遺失或載入不一致時即時寫入警示；成功流程則保留最佳指標與參數快照，協助比對批量與滾動測試最佳解。
+  - `window.batchOptimization` 新增 `getDebugLog`、`downloadDebugLog` 等介面，並於停止／錯誤時統一輸出結案資訊，確保每次執行都有完整的時間線與摘要。
+- **Diagnostics**: 本地模擬缺映射、worker 超時與 DOM 對拍錯誤情境，確認 log 會依序記錄 `strategy-mapping-missing`、`worker-run-timeout`、`dom-sync-mismatch` 等事件並可成功下載檔案比對。
+- **Testing**: `node - <<'NODE'
+const fs = require('fs');
+const vm = require('vm');
+['js/batch-optimization.js'].forEach((file) => {
+  const code = fs.readFileSync(file, 'utf8');
+  new vm.Script(code, { filename: file });
+});
+console.log('scripts compile');
+NODE`
+
+## 2026-07-15 — Patch LB-BATCH-OPT-20260715A
+- **Scope**: 批量優化策略映射與 Walk-Forward 同步
+- **Updates**:
+  - 新增 `resolveWorkerStrategyName` 並在批量/滾動優化流程僅針對實際存在的策略鍵進行映射，避免缺少出場策略時誤觸強制錯誤。
+  - `optimizeStrategyWithInternalConvergence`、`optimizeMultipleStrategyParameters` 與交叉優化僅在策略存在時覆寫 worker 名稱，確保滾動測試與批量面板共用相同參數來源。
+  - `executeBacktestForCombination` 遇到未設定的出場策略時不再強制套用映射或殘留舊鍵，防止 Walk-Forward 迭代回退為預設策略導致最佳參數走位。
+- **Testing**: 容器無法啟動瀏覽器與 Proxy，待於實機執行批量優化 + 滾動測試流程確認最佳參數重新對齊。
+
+## 2026-07-11 — Patch LB-BATCH-OPT-20260711A
+- **Scope**: 批量優化載入流程、映射與驗證強化。
+- **Updates**:
+  - 將 Worker 策略名稱改為查表模式，缺少映射時立即透過錯誤訊息阻擋，避免回退到預設策略掩蓋問題。
+  - 將 `updateBatchStrategyParams` 改寫為表驅動欄位對照，欄位不存在即記錄錯誤且不寫入，確保參數欄位完整維護。
+  - 載入批量結果時同步設定進出場與風險管理欄位，再觸發一次變更事件並進行 DOM 取值比對，第一時間揭露映射遺失或策略走位。
+  - 刪除重複的 `hideBatchProgress` 定義並新增欄位與策略映射一致性的防護流程。
+- **Testing**: 需於瀏覽器啟動回測功能確認載入策略後無 console error，並驗證對拍警示。（容器環境無法啟動瀏覽器）
+
 ## 2026-07-10 — Patch LB-STRATEGY-COMPARE-20260710C
 - **Scope**: 策略比較分頁圖示位置調整與趨勢信心格式修正。
 - **Updates**:
@@ -1260,3 +1310,87 @@
 - **Diagnostics**: 於本地多次切換顯示/隱藏並驗證畫布空間即時收合、重新開啟後恢復原始尺寸且輪播可重新排程。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-17 — Patch LB-BATCH-OPT-20260717A
+- **Issue recap**: Walk-Forward 訓練期透過 `window.batchOptimization.runCombinationOptimization` 呼叫批量引擎時會沿用主面板的除錯工作階段與停用旗標，導致後續在 UI 啟動批量優化時沿用滾動測試的暫存進度與資料覆寫，進而出現「批量優化找不到最佳解」的狀態污染。
+- **Fix**:
+  - `js/batch-optimization.js` 導入 `runCombinationOptimizationHeadless`，在外部呼叫時複製組合與訓練設定、獨立建立 headless 除錯工作階段並於完成後恢復 `batchDebugSession`、`currentBatchProgress` 與停止旗標，確保滾動測試不會修改批量優化 UI 的狀態。
+  - 同步提供 `cloneCombinationResult`、`sanitizeOptimizationConfig` 等工具，避免 headless 期間直接操作原始參考，並更新批量優化模組版號至 `LB-BATCH-OPT-20260717A`。
+- **Diagnostics**: 於瀏覽器先執行滾動測試訓練期優化，再切換至批量優化面板確認 `window.batchOptimizationRunning`、進度條與最佳結果均重置且與單獨執行批量優化時一致，無需重新整理即可取得最佳參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-18 — Patch LB-BATCH-OPT-20260717B
+- **Issue recap**: Walk-Forward 優化完成後再次開啟批量優化仍可能讀到訓練窗裁切後的快取資料或診斷快照，造成最佳解偏離面板預期。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 會在 headless 呼叫前完整快照 `cachedStockData`、資料診斷與總結結果，於優化完成後強制回復，同時輸出 `headless-cache-state/headless-cache-restore` 除錯事件以追蹤資料範圍。
+  - 新增 `summarizeDatasetRange` 將快取筆數與起訖日期標準化，供除錯事件與後續追蹤使用；模組版本碼同步更新為 `LB-BATCH-OPT-20260717B`。
+- **Diagnostics**: 實機流程中先執行滾動測試訓練期優化再切回批量面板，透過除錯 log 比對 headless cache 範圍恢復情形並確認面板重跑後的最佳解與獨立批量優化一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+
+## 2026-07-19 — Patch LB-BATCH-OPT-20260717C
+- **Issue recap**: 仍有用戶回報滾動測試完成後切換回批量優化，最佳參數與訓練窗內 headless 結果不一致，推測尚有全域狀態污染或缺乏對拍紀錄。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 進一步快照 `batchOptimizationResults`、`batchWorkerStatus`、`batchOptimizationConfig`、`window.batchOptimizationRunning` 與進度資訊，結束後完整復原並以 `headless-state-snapshot/headless-state-restore` 記錄狀態，模組版號更新為 `LB-BATCH-OPT-20260717C`。
+  - 建立 `lastHeadlessOptimizationSummary` 與 `recordHeadlessBatchComparison`，批量面板完成時即時計算與 headless 最佳解差距並輸出 `headless-compare` 除錯事件，若數值或參數不匹配會即時示警。
+- **Diagnostics**: 透過除錯 log 檢視快照還原與對拍輸出，確認在滾動測試 → 批量優化流程中 `runningFlag`、最佳組合與年化報酬差距均回到預期值，必要時可比對 `differences` 欄位快速找出缺失參數。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-20 — Patch LB-BATCH-OPT-20260718B
+- **Issue recap**: 滾動測試 headless 優化後即便重新整理仍可能讓批量優化找不到第一次的最佳解，研判 headless 過程修改了 localStorage/sessionStorage 等持久快取；此外缺乏能快速對比兩次批量除錯紀錄的工具，難以確認差異。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `runCombinationOptimizationHeadless` 會在執行前後快照 `localStorage`、`sessionStorage`，於還原時輸出 `storageRestored` 差異摘要並維持版本碼 `LB-BATCH-OPT-20260718B`，確保滾動測試不會留下殘存快取或設定污染。
+  - 新增 `buildBatchDebugDigest`、`diffBatchDebugLogs` 等工具函式與 `window.batchOptimization.diffDebugLogs` 對外介面，將最佳結果、Headless 對拍與事件統計整理成可複製的比較文本。
+  - `index.html` 與 `js/main.js` 在開發者卡片加入紀錄 A/B、產生比較與複製結果按鈕，輸出可直接貼回討論的除錯比較報告，協助定位滾動測試後與初次批量優化的差異。
+- **Diagnostics**: 本地流程依序執行滾動測試優化、重新整理、再跑批量面板並檢視除錯卡片，確認 `headless-state-restore` 顯示 storage 差異已歸零、比較工具列出指標與事件差異；實務上可將比較文本貼回支援管道協助分析。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-21 — Patch LB-BATCH-OPT-20260718C
+- **Issue recap**: 現有的除錯比較雖能列出最佳策略與事件統計，但無法看出兩次批量優化在基礎參數、排序配置與參數優化結果上的落差，導致仍難鎖定為何最佳解不同。
+- **Fix**:
+  - `js/batch-optimization.js` 擴充 `buildBatchDebugDigest`，新增初始設定、基礎參數、Top 3 結果與參數優化紀錄的快照；`summarizeResult` 與 `formatBestResultSummary` 亦加入買/賣出參數摘要，讓比較內容直接呈現具體數值差異。
+  - `diffBatchDebugLogs` 新增「初始設定」、「基礎參數對比」、「Top 3 結果」與「參數優化紀錄」區塊，並以易讀的 key-value 形式輸出，貼上後即可快速對照兩次批量優化的設定與選擇。
+  - 建立 `formatSimpleValue`、`formatParamOptimizationList` 等共用格式化函式，確保複雜物件（如策略清單、參數組合）也能輸出成精簡、適合貼上的文字，開發者模式的比較報告因此更完整。
+- **Diagnostics**: 於本地重現「先跑滾動測試再跑批量」情境，透過新比較文本即可看到停損/停利、排序鍵或參數優化值的差異，協助鎖定最佳解偏移的根本原因。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-22 — Patch LB-BATCH-OPT-20260718D
+- **Issue recap**: 改變結束日期後即使復原成原本設定再次執行批量優化，最佳參數仍與第一次不同，排查發現舊的股價快取沒有覆蓋最新需求區間，導致後續組合沿用截短資料。
+- **Fix**:
+  - `js/batch-optimization.js` 在執行 `executeBacktestForCombination` 前先比對 `cachedStockData` 的起訖與需求範圍，若不足則記錄 `cached-data-coverage-mismatch` 並停用快取改以最新資料回測，確保批量優化與滾動測試共用時不會殘留過期資料。
+  - 同步擴充除錯摘要與比較輸出，新增資料覆蓋檢查與異常清單，讓開發者模式卡片能直接顯示各次批量優化使用的資料範圍與不足原因，便於後續追蹤。
+- **Diagnostics**: 先以新結束日期執行一般回測，再切回原始日期進行兩次批量優化；確認除錯卡片顯示第一次沿用快取、第二次出現覆蓋警示並改為重抓資料，兩次比較文本的「資料覆蓋檢查」區塊應相符且最佳解一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-23 — Patch LB-BATCH-OPT-20260718E
+- **Issue recap**: 切換結束日期後再回到原設定，批量優化仍可能沿用含未來日期的快取，導致比較紀錄顯示需求範圍止於 2024-02-19 卻實際載入到 2025-10-20，最終最佳參數與初次結果不一致。
+- **Fix**:
+  - `js/batch-optimization.js` 導入 `sliceDatasetRowsByRange` 與 `buildCachedDatasetUsage`，在批量回測、單參數優化、風險優化與交叉回測等流程皆以需求範圍裁切快取資料，必要時回退至重新抓取，並記錄裁切前後筆數與日期。
+  - `cached-data-evaluation` 除錯事件新增裁切摘要與移除統計，並在裁切發生時輸出 `cached-data-slice-applied`，方便在開發者卡片比對兩次批量優化實際使用的資料視窗。
+- **Diagnostics**: 依重現步驟（結束日 2024-02-19 → 2025-10-20 → 2025-02-19，再跑批量）驗證第二次批量除錯記錄中的 `sliceSummary.endDate` 為 2025-02-19，與需求範圍一致，且最佳參數回到首次結果。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-24 — Patch LB-BATCH-OPT-20260718F
+- **Issue recap**: 批量優化除錯卡片仍以英文為主並以基本列表呈現，除錯報告難以快速辨識層級與流程，也不利於直接貼上給團隊討論。
+- **Fix**:
+  - `js/main.js` 為除錯會話標題、狀態與時間資訊建立中文徽章，並以顏色區分資訊/警示/錯誤等層級，事件明細改為顯示中文敘述、流程標籤與帶底色的 JSON 摘要，整體版面更容易閱讀。
+  - `index.html` 微調除錯卡片的預設提示、內容間距與比較輸出欄位的 placeholder，保持中文用語並強調結果可直接複製貼上。
+- **Diagnostics**: 於瀏覽器啟動批量優化與滾動測試後檢視開發者卡片，確認事件列表出現彩色層級徽章、流程標籤與 JSON 摘要，且比較輸出區可直接複製中文化的報告。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-25 — Patch LB-BATCH-OPT-20260718G
+- **Issue recap**: 雖已改成中文介面，但事件列表仍是單純 JSON 區塊，無法直接閱讀快取來源、裁切摘要或決策；同時缺乏市場、價格模式等元資訊，導致比較兩次批量優化時仍需手動查詢背景設定。
+- **Fix**:
+  - `js/batch-optimization.js` 在快取評估、裁切與 worker 事件寫入時補充 `context`、`market`、`priceMode`、`tradeTiming` 等欄位，並同步標準化快取裁切訊息，統一輸出 `executeBacktestForCombination`、單參數與風控優化的資料摘要。
+  - `js/main.js` 新增批量除錯事件的中文呈現模板，整合場景、決策、覆蓋檢查與裁切筆數等資訊，並自動附上策略參數、風控與資料來源欄位，改以卡片格式呈現，同時提供 fallback，避免渲染失敗時缺乏資訊。
+  - 新增日期、數字與來源對應的格式化工具，保留組合摘要與資料筆數，確保貼上除錯日誌即可看出資料範圍與快取決策。
+- **Diagnostics**: 依「結束日 2024-02-19 → 2025-10-20 → 2025-02-19」重現流程後檢視開發者模式卡片，確認事件顯示「沿用快取／重新抓取」等中文敘述、裁切筆數與市場/價格模式資訊皆齊全，並與除錯比較報告交叉比對資料範圍。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-26 — Patch LB-BATCH-OPT-20260718H
+- **Issue recap**: 開發者模式卡片雖已換上中文模板，但快取診斷仍以英文欄位與一般列表呈現，無法一眼看出「沿用快取」決策、裁切後日期及筆數等關鍵資訊，貼給團隊時也缺乏條列式摘要。
+- **Fix**:
+  - `js/main.js` 將 `cached-data-evaluation` 模板改為逐行中文敘述，新增決策代碼、狀態欄位與裁切前後範圍，並把裁切筆數與細項改寫成可讀性更好的附註區塊。
+  - `renderBatchDebugEvent` 調整為類卡片排版，顯示中文徽章、時間與逐行欄位，並在需要時以色塊呈現裁切附註，貼上聊天室即可清楚閱讀。
+  - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
+- **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`

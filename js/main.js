@@ -43,6 +43,7 @@ let sortState = { key: 'annualizedReturn', direction: 'desc' };
 let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
+let batchDebugLogUnsubscribe = null;
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
@@ -1591,6 +1592,1220 @@ function initDataSourceTester() {
     window.applyMarketPreset = applyMarketPreset;
 }
 
+function formatBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    let date;
+    if (value instanceof Date) {
+        date = value;
+    } else if (typeof value === 'number') {
+        date = new Date(value);
+    } else {
+        date = new Date(String(value));
+    }
+    if (!Number.isFinite(date.getTime())) {
+        return typeof value === 'string' ? value : String(value);
+    }
+    try {
+        return date.toLocaleString('zh-TW', { hour12: false });
+    } catch (error) {
+        return date.toISOString().replace('T', ' ').replace('Z', 'Z');
+    }
+}
+
+function parseBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+    }
+    const date = new Date(typeof value === 'number' ? value : String(value));
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatBatchDebugDuration(startValue, endValue) {
+    const startDate = parseBatchDebugTime(startValue);
+    const endDate = parseBatchDebugTime(endValue);
+    if (!startDate || !endDate) {
+        return '';
+    }
+    const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+    if (!Number.isFinite(diffMs) || diffMs <= 0) {
+        return '';
+    }
+    const seconds = diffMs / 1000;
+    if (seconds < 1) {
+        return `${seconds.toFixed(2)} 秒`;
+    }
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)} 秒`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainSeconds = seconds % 60;
+    if (minutes < 60) {
+        return remainSeconds > 0
+            ? `${minutes} 分 ${remainSeconds.toFixed(1)} 秒`
+            : `${minutes} 分鐘`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainMinutes = minutes % 60;
+    return remainMinutes > 0
+        ? `${hours} 小時 ${remainMinutes} 分`
+        : `${hours} 小時`;
+}
+
+const BATCH_DEBUG_LEVEL_PRESETS = {
+    info: {
+        label: '資訊',
+        english: 'INFO',
+        background: 'rgba(8, 145, 178, 0.12)',
+        border: 'rgba(8, 145, 178, 0.28)',
+        color: '#0f766e',
+    },
+    success: {
+        label: '完成',
+        english: 'SUCCESS',
+        background: 'rgba(16, 185, 129, 0.16)',
+        border: 'rgba(16, 185, 129, 0.28)',
+        color: '#047857',
+    },
+    warn: {
+        label: '警示',
+        english: 'WARN',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    warning: {
+        label: '警示',
+        english: 'WARN',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    error: {
+        label: '錯誤',
+        english: 'ERROR',
+        background: 'rgba(220, 38, 38, 0.14)',
+        border: 'rgba(220, 38, 38, 0.30)',
+        color: '#b91c1c',
+    },
+    debug: {
+        label: '偵錯',
+        english: 'DEBUG',
+        background: 'rgba(107, 114, 128, 0.12)',
+        border: 'rgba(107, 114, 128, 0.28)',
+        color: '#374151',
+    },
+    trace: {
+        label: '追蹤',
+        english: 'TRACE',
+        background: 'rgba(59, 130, 246, 0.12)',
+        border: 'rgba(59, 130, 246, 0.30)',
+        color: '#1d4ed8',
+    },
+};
+
+function resolveBatchDebugLevelMeta(level) {
+    const key = typeof level === 'string' ? level.trim().toLowerCase() : '';
+    const preset = key && Object.prototype.hasOwnProperty.call(BATCH_DEBUG_LEVEL_PRESETS, key)
+        ? BATCH_DEBUG_LEVEL_PRESETS[key]
+        : null;
+    const fallbackLabel = typeof level === 'string' && level.trim()
+        ? level.trim().toUpperCase()
+        : '資訊';
+    const englishLabel = preset?.english || fallbackLabel;
+    return {
+        label: preset?.label || fallbackLabel,
+        english: englishLabel,
+        background: preset?.background || 'rgba(148, 163, 184, 0.16)',
+        border: preset?.border || 'rgba(148, 163, 184, 0.26)',
+        color: preset?.color || '#334155',
+    };
+}
+
+const BATCH_DEBUG_PHASE_LABELS = {
+    init: '初始化流程',
+    worker: '回測執行',
+    backtest: '回測流程',
+    optimize: '參數優化',
+    collect: '結果彙整',
+    render: '畫面更新',
+    compare: '結果對拍',
+    headless: '背景作業',
+    summary: '結果摘要',
+    storage: '快取快照'
+};
+
+const BATCH_DEBUG_EVENT_NAME_MAP = {
+    'session-start': '除錯會話啟動',
+    'session-complete': '除錯會話結束',
+    'batch-start': '批量優化啟動',
+    'results-reset': '重設結果列表',
+    'execute-start': '開始執行批量回測',
+    'batch-processing-start': '併發優化啟動',
+    'combo-iteration-start': '組合迭代啟動',
+    'combo-iteration-cycle': '組合迭代進行',
+    'combo-iteration-final': '組合迭代完成',
+    'combo-iteration-error': '組合迭代錯誤',
+    'combination-start': '回測組合啟動',
+    'combination-complete': '回測組合完成',
+    'combination-error': '回測組合錯誤',
+    'combination-no-result': '回測組合無結果',
+    'combination-batch-empty': '本輪無任何回測結果',
+    'batch-results-appended': '寫入批量結果',
+    'cached-data-evaluation': '批量快取診斷',
+    'cached-data-slice-applied': '快取資料裁切',
+    'cached-data-coverage-mismatch': '快取覆蓋異常',
+    'worker-run-start': '啟動回測工作',
+    'worker-run-result': '回測結果返回',
+    'worker-run-error': '回測工作錯誤',
+    'worker-run-timeout': '回測工作逾時',
+    'worker-run-exception': '回測工作異常',
+    'worker-missing-url': '回測 Worker 缺少來源',
+    'param-optimization-complete': '參數優化完成',
+    'param-optimization-error': '參數優化錯誤',
+    'combo-optimize-complete': '組合優化完成',
+    'combo-optimize-error': '組合優化錯誤',
+    'headless-cache-state': '背景快取狀態',
+    'headless-cache-restore': '背景快取還原',
+    'headless-state-snapshot': '背景狀態快照',
+    'headless-state-restore': '背景狀態還原',
+    'headless-compare': '背景結果對拍',
+    'headless-compare-error': '背景對拍錯誤',
+    'headless-result': '背景最佳結果',
+    'dom-sync-pass': '畫面同步通過',
+    'dom-sync-mismatch': '畫面同步差異',
+    'dom-sync-error': '畫面同步錯誤',
+    'best-result-found': '找到最佳結果',
+    'best-result-missing': '最佳結果缺失',
+    'storageRestored': '快取儲存還原',
+    'storagerestored': '快取儲存還原'
+};
+
+const BATCH_DEBUG_SOURCE_LABELS = {
+    'global-cache': '全域快取',
+    override: '覆寫資料',
+    none: '無快取',
+    worker: '即時抓取'
+};
+
+const BATCH_DEBUG_MARKET_LABELS = {
+    TWSE: '台股上市（TWSE）',
+    TPEX: '台股上櫃（TPEX）',
+    OTC: '台股上櫃（OTC）',
+    TPEx: '台股上櫃（TPEX）',
+    US: '美股（US）',
+    HK: '港股（HK）'
+};
+
+const BATCH_DEBUG_PRICE_MODE_LABELS = {
+    adjusted: '還原價',
+    raw: '原始價'
+};
+
+const BATCH_DEBUG_TRADE_TIMING_LABELS = {
+    close: '當日收盤',
+    open: '當日開盤',
+    next_open: '次日開盤',
+    next_close: '次日收盤'
+};
+
+const BATCH_DEBUG_COVERAGE_REASON_LABELS = {
+    ok: '覆蓋符合需求',
+    'dataset-empty': '快取資料為空',
+    'dataset-start-after-required-start': '快取起點晚於需求起點',
+    'dataset-end-before-required-end': '快取終點早於需求終點',
+    'dataset-end-missing': '快取缺少終點資訊',
+    'dataset-start-missing': '快取缺少起點資訊'
+};
+
+const batchDebugEventTimeFormatter = (() => {
+    try {
+        return new Intl.DateTimeFormat('zh-TW', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (error) {
+        console.warn('[Batch Debug] Intl DateTimeFormat unavailable:', error);
+        return null;
+    }
+})();
+
+const batchDebugNumberFormatter = new Intl.NumberFormat('zh-TW', {
+    maximumFractionDigits: 4
+});
+
+function formatBatchDebugPhaseLabel(phase) {
+    if (!phase) {
+        return '';
+    }
+    if (typeof phase !== 'string') {
+        return String(phase);
+    }
+    const trimmed = phase.trim();
+    if (!trimmed) {
+        return '';
+    }
+    const key = trimmed.toLowerCase();
+    const localized = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PHASE_LABELS, key)
+        ? BATCH_DEBUG_PHASE_LABELS[key]
+        : null;
+    if (!localized) {
+        return trimmed;
+    }
+    return localized.includes(trimmed) ? localized : `${localized}（${trimmed}）`;
+}
+
+function formatBatchDebugEventName(label) {
+    if (label === null || label === undefined) {
+        return '批量優化事件';
+    }
+    const raw = typeof label === 'string' ? label.trim() : String(label);
+    if (!raw) {
+        return '批量優化事件';
+    }
+    const lower = raw.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_NAME_MAP, raw)) {
+        return BATCH_DEBUG_EVENT_NAME_MAP[raw];
+    }
+    if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_NAME_MAP, lower)) {
+        return BATCH_DEBUG_EVENT_NAME_MAP[lower];
+    }
+    return raw;
+}
+
+function formatBatchDebugEventTimeLabel(value) {
+    const date = parseBatchDebugTime(value);
+    if (!date) {
+        return value ? String(value) : '';
+    }
+    if (batchDebugEventTimeFormatter) {
+        try {
+            return batchDebugEventTimeFormatter.format(date);
+        } catch (error) {
+            // ignore and fall back to manual formatting
+        }
+    }
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${m}/${d} ${hh}:${mm}:${ss}`;
+}
+
+function formatBatchDebugDateValue(value) {
+    if (value === null || value === undefined) {
+        return '—';
+    }
+    if (value instanceof Date) {
+        if (!Number.isFinite(value.getTime())) {
+            return '—';
+        }
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (value > 1e12) {
+            const date = new Date(value);
+            return formatBatchDebugDateValue(date);
+        }
+        if (value > 1e5) {
+            const text = String(Math.trunc(value));
+            if (text.length === 8) {
+                return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+            }
+        }
+        const date = new Date(value * 1000);
+        if (Number.isFinite(date.getTime())) {
+            return formatBatchDebugDateValue(date);
+        }
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return '—';
+        }
+        if (/^\d{8}$/.test(trimmed)) {
+            return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
+        }
+        const parsed = parseBatchDebugTime(trimmed);
+        if (parsed) {
+            return formatBatchDebugDateValue(parsed);
+        }
+        return trimmed;
+    }
+    return String(value);
+}
+
+function formatBatchDebugRangeText(range) {
+    if (!range || typeof range !== 'object') {
+        return '—';
+    }
+    const start = range.startDate || range.dataStartDate || range.effectiveStartDate || range.from || null;
+    const end = range.endDate || range.to || null;
+    const startText = formatBatchDebugDateValue(start);
+    const endText = formatBatchDebugDateValue(end);
+    if ((!startText || startText === '—') && (!endText || endText === '—')) {
+        return '—';
+    }
+    if (!start || startText === '—') {
+        return endText;
+    }
+    if (!end || endText === '—') {
+        return startText;
+    }
+    return `${startText} → ${endText}`;
+}
+
+function formatBatchDebugSummaryText(summary) {
+    if (!summary || typeof summary !== 'object') {
+        return '—';
+    }
+    const range = formatBatchDebugRangeText(summary);
+    const lengthLabel = Number.isFinite(summary.length)
+        ? `${formatBatchDebugNumber(summary.length)} 筆`
+        : null;
+    if (lengthLabel && range && range !== '—') {
+        return `${range}｜${lengthLabel}`;
+    }
+    if (range && range !== '—') {
+        return range;
+    }
+    if (lengthLabel) {
+        return lengthLabel;
+    }
+    return '—';
+}
+
+function formatBatchDebugNumber(value, options = {}) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (options.percentage) {
+            const decimals = Number.isFinite(options.decimals) ? options.decimals : 2;
+            return `${(value * 100).toFixed(decimals)}%`;
+        }
+        if (Number.isFinite(options.decimals)) {
+            return value.toFixed(options.decimals);
+        }
+        return batchDebugNumberFormatter.format(value);
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    return String(value);
+}
+
+function formatBatchDebugCoverageText(coverage) {
+    if (!coverage || typeof coverage !== 'object') {
+        return '—';
+    }
+    if (coverage.coverageSatisfied) {
+        return '覆蓋符合需求';
+    }
+    const reasonText = typeof coverage.reason === 'string' ? coverage.reason : '';
+    const reasons = reasonText ? reasonText.split('|') : [];
+    if (reasons.length === 0) {
+        return '覆蓋不足';
+    }
+    const mapped = reasons.map((code) => {
+        const key = code.trim();
+        if (!key) return null;
+        if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_COVERAGE_REASON_LABELS, key)) {
+            return BATCH_DEBUG_COVERAGE_REASON_LABELS[key];
+        }
+        return key;
+    }).filter(Boolean);
+    const text = mapped.length > 0 ? mapped.join('、') : reasons.join('、');
+    return `覆蓋不足：${text}`;
+}
+
+function formatBatchDebugSourceLabel(source) {
+    if (source === null || source === undefined) {
+        return '—';
+    }
+    const raw = String(source).trim();
+    if (!raw) {
+        return '—';
+    }
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_SOURCE_LABELS, lower)
+        ? BATCH_DEBUG_SOURCE_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_SOURCE_LABELS, raw)
+            ? BATCH_DEBUG_SOURCE_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugPriceModeLabel(mode) {
+    if (!mode) {
+        return '—';
+    }
+    const raw = String(mode).trim();
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PRICE_MODE_LABELS, lower)
+        ? BATCH_DEBUG_PRICE_MODE_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PRICE_MODE_LABELS, raw)
+            ? BATCH_DEBUG_PRICE_MODE_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugMarketLabel(market) {
+    if (!market) {
+        return '—';
+    }
+    const raw = String(market).trim();
+    const upper = raw.toUpperCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_MARKET_LABELS, upper)
+        ? BATCH_DEBUG_MARKET_LABELS[upper]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_MARKET_LABELS, raw)
+            ? BATCH_DEBUG_MARKET_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${upper}）`;
+}
+
+function formatBatchDebugTradeTimingLabel(value) {
+    if (!value) {
+        return '—';
+    }
+    const raw = String(value).trim();
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_TRADE_TIMING_LABELS, lower)
+        ? BATCH_DEBUG_TRADE_TIMING_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_TRADE_TIMING_LABELS, raw)
+            ? BATCH_DEBUG_TRADE_TIMING_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugScene(detail, event) {
+    if (detail && typeof detail === 'object') {
+        if (detail.scene) return String(detail.scene);
+        if (detail.context) return String(detail.context);
+    }
+    if (event && event.phase) {
+        return formatBatchDebugPhaseLabel(event.phase) || String(event.phase);
+    }
+    return '批量流程';
+}
+
+function extractCombinationDetail(detail) {
+    if (!detail || typeof detail !== 'object') {
+        return null;
+    }
+    if (detail.combination && typeof detail.combination === 'object') {
+        return detail.combination;
+    }
+    if (detail.result && typeof detail.result === 'object') {
+        return detail.result;
+    }
+    return null;
+}
+
+function formatBatchDebugCombinationHeadline(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination) {
+        return '';
+    }
+    const buy = combination.buyStrategy || combination.entryStrategy || '—';
+    const sell = combination.sellStrategy || combination.exitStrategy || '';
+    let base = sell ? `${buy} → ${sell}` : buy;
+    if (combination.metricLabel && typeof combination.metric === 'number') {
+        base = `${base}｜${combination.metricLabel}=${formatBatchDebugNumber(combination.metric)}`;
+    } else if (typeof combination.metric === 'number') {
+        base = `${base}｜指標=${formatBatchDebugNumber(combination.metric)}`;
+    }
+    return base;
+}
+
+function formatBatchDebugParamPairs(params) {
+    if (!params || typeof params !== 'object') {
+        return '';
+    }
+    const entries = Object.entries(params)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => {
+            if (value === null || value === undefined) {
+                return `${key}=—`;
+            }
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return `${key}=${formatBatchDebugNumber(value)}`;
+            }
+            if (typeof value === 'boolean') {
+                return `${key}=${value ? '是' : '否'}`;
+            }
+            return `${key}=${value}`;
+        });
+    return entries.join('、');
+}
+
+function formatBatchDebugCombinationParams(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination) {
+        return '';
+    }
+    const parts = [];
+    if (combination.buyParams) {
+        const text = formatBatchDebugParamPairs(combination.buyParams);
+        if (text) parts.push(`買入：${text}`);
+    }
+    if (combination.sellParams) {
+        const text = formatBatchDebugParamPairs(combination.sellParams);
+        if (text) parts.push(`出場：${text}`);
+    }
+    return parts.join('｜');
+}
+
+function formatBatchDebugRiskSummary(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination || !combination.riskManagement) {
+        return '';
+    }
+    const parts = Object.entries(combination.riskManagement)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => `${key}=${formatBatchDebugNumber(value)}`);
+    return parts.length > 0 ? parts.join('、') : '';
+}
+
+function formatBatchDebugSliceBreakdown(breakdown) {
+    if (!breakdown || typeof breakdown !== 'object') {
+        return '';
+    }
+    const parts = [];
+    if (Number.isFinite(breakdown.beforeStart) && breakdown.beforeStart > 0) {
+        parts.push(`起點之前 ${formatBatchDebugNumber(breakdown.beforeStart)} 筆`);
+    }
+    if (Number.isFinite(breakdown.afterEnd) && breakdown.afterEnd > 0) {
+        parts.push(`終點之後 ${formatBatchDebugNumber(breakdown.afterEnd)} 筆`);
+    }
+    if (Number.isFinite(breakdown.undetermined) && breakdown.undetermined > 0) {
+        parts.push(`未判定 ${formatBatchDebugNumber(breakdown.undetermined)} 筆`);
+    }
+    return parts.join('、');
+}
+
+function buildBatchDebugRow(label, value, options = {}) {
+    if (!label) {
+        return null;
+    }
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    return {
+        key: options.key || label,
+        label,
+        value,
+        allowHtml: Boolean(options.allowHtml)
+    };
+}
+
+function normalizeBatchDebugRow(row) {
+    if (!row || typeof row !== 'object') {
+        return null;
+    }
+    const label = row.label ? String(row.label) : '';
+    if (!label) {
+        return null;
+    }
+    const rawValue = row.value;
+    if (rawValue === null || rawValue === undefined || rawValue === '') {
+        return null;
+    }
+    const value = row.allowHtml ? String(rawValue) : String(rawValue);
+    if (!value) {
+        return null;
+    }
+    return {
+        key: row.key || label,
+        label,
+        value,
+        allowHtml: Boolean(row.allowHtml)
+    };
+}
+
+function buildDefaultBatchDebugPresentation(event) {
+    const detail = event?.detail && typeof event.detail === 'object' ? event.detail : null;
+    const rows = [];
+    if (detail) {
+        Object.entries(detail).forEach(([key, value]) => {
+            if (value === null || value === undefined) {
+                return;
+            }
+            if (typeof value === 'object') {
+                return;
+            }
+            rows.push(buildBatchDebugRow(key, value, { key }));
+        });
+    }
+    return {
+        category: formatBatchDebugEventName(event?.label),
+        highlight: '',
+        rows,
+        showDetailJson: true
+    };
+}
+
+const BATCH_DEBUG_EVENT_TEMPLATES = {
+    'cached-data-evaluation': (event, detail) => {
+        const highlight = detail.useCachedData ? '沿用快取' : '重新抓取資料';
+        const decisionCode = detail.decision
+            || (detail.useCachedData ? 'globalCacheReusable' : 'fetchFreshData');
+        const sliceSummary = detail.sliceSummary || null;
+        const summaryRangeText = formatBatchDebugRangeText(sliceSummary || detail.summary);
+        const datasetLength = Number.isFinite(sliceSummary?.length)
+            ? sliceSummary.length
+            : detail.datasetLength;
+        const rows = [
+            buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+            buildBatchDebugRow('決策', decisionCode, { key: 'decision' }),
+            buildBatchDebugRow('狀態', highlight, { key: 'status' }),
+            buildBatchDebugRow('覆蓋檢查', formatBatchDebugCoverageText(detail.coverage), { key: 'coverage' }),
+            buildBatchDebugRow('來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+            buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' }),
+            buildBatchDebugRow('資料筆數', formatBatchDebugNumber(datasetLength), { key: 'datasetLength' }),
+            buildBatchDebugRow('資料範圍', summaryRangeText, { key: 'summaryRange' })
+        ];
+        if (detail.summary && sliceSummary) {
+            rows.push(buildBatchDebugRow('原範圍', formatBatchDebugRangeText(detail.summary), { key: 'summary' }));
+            rows.push(buildBatchDebugRow('裁切後', formatBatchDebugRangeText(sliceSummary), { key: 'sliceSummary' }));
+        }
+        const extraMessages = [];
+        if (detail.sliceRemovedCount > 0) {
+            extraMessages.push(`快取資料已依需求區間裁切（移除 ${formatBatchDebugNumber(detail.sliceRemovedCount)} 筆）`);
+        }
+        if (detail.sliceRemovedBreakdown) {
+            const breakdown = formatBatchDebugSliceBreakdown(detail.sliceRemovedBreakdown);
+            if (breakdown) {
+                extraMessages.push(`裁切明細：${breakdown}`);
+            }
+        }
+        if (detail.overrideProvided) {
+            rows.push(buildBatchDebugRow('覆寫資料', detail.overrideProvided ? '已提供' : '未提供', { key: 'overrideProvided' }));
+        }
+        const extra = extraMessages.length > 0 ? extraMessages.join('\n') : '';
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight,
+            rows,
+            extra,
+            showDetailJson: false
+        };
+    },
+    'cached-data-slice-applied': (event, detail) => {
+        const removed = Number.isFinite(detail.removedCount) ? detail.removedCount : 0;
+        const highlight = removed > 0
+            ? `裁切 ${formatBatchDebugNumber(removed)} 筆`
+            : '無需裁切資料';
+        const rows = [
+            buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+            buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+            buildBatchDebugRow('裁切前', formatBatchDebugSummaryText(detail.summaryBefore), { key: 'summaryBefore' }),
+            buildBatchDebugRow('裁切後', formatBatchDebugSummaryText(detail.summaryAfter), { key: 'summaryAfter' }),
+            buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' })
+        ];
+        const breakdown = formatBatchDebugSliceBreakdown(detail.removedBreakdown);
+        if (breakdown) {
+            rows.push(buildBatchDebugRow('移除統計', breakdown, { key: 'sliceBreakdown' }));
+        }
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight,
+            rows,
+            showDetailJson: false
+        };
+    },
+    'cached-data-coverage-mismatch': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '覆蓋不足，改以重新抓取資料',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+                buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' }),
+                buildBatchDebugRow('現有範圍', formatBatchDebugSummaryText(detail.summary), { key: 'summary' }),
+                buildBatchDebugRow('覆蓋檢查', formatBatchDebugCoverageText(detail.coverage), { key: 'coverage' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-start': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.useCachedData ? '使用快取執行回測' : '重新載入資料執行回測',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.cachedSource || detail.source), { key: 'source' }),
+                buildBatchDebugRow('沿用快取', detail.useCachedData ? '是' : '否', { key: 'useCachedData' }),
+                buildBatchDebugRow('快取筆數', formatBatchDebugNumber(detail.datasetLength), { key: 'datasetLength' }),
+                buildBatchDebugRow('裁切後筆數', formatBatchDebugNumber(detail.sliceLength), { key: 'sliceLength' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-result': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '回測工作完成',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('沿用快取', detail.usedCachedData ? '是' : '否', { key: 'usedCachedData' }),
+                buildBatchDebugRow('年化報酬', detail.result?.annualizedReturn !== undefined ? formatBatchDebugNumber(detail.result.annualizedReturn) : '', { key: 'annualizedReturn' }),
+                buildBatchDebugRow('最大回撤', detail.result?.maxDrawdown !== undefined ? formatBatchDebugNumber(detail.result.maxDrawdown) : '', { key: 'maxDrawdown' }),
+                buildBatchDebugRow('交易次數', detail.result?.tradeCount !== undefined ? formatBatchDebugNumber(detail.result.tradeCount) : '', { key: 'tradeCount' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-error': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.message ? `錯誤：${detail.message}` : '回測工作發生錯誤',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.cachedSource || detail.source), { key: 'source' })
+            ],
+            showDetailJson: true
+        };
+    },
+    'worker-run-timeout': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.message || '回測工作逾時',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' })
+            ],
+            showDetailJson: true
+        };
+    },
+    'param-optimization-complete': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '參數優化完成',
+            rows: [
+                buildBatchDebugRow('策略類型', detail.strategyType, { key: 'strategyType' }),
+                buildBatchDebugRow('優化目標', detail.optimizeTarget, { key: 'optimizeTarget' }),
+                buildBatchDebugRow('指標', detail.targetMetric, { key: 'targetMetric' }),
+                buildBatchDebugRow('選定數值', formatBatchDebugNumber(detail.selectedValue), { key: 'selectedValue' }),
+                buildBatchDebugRow('指標數值', formatBatchDebugNumber(detail.metric), { key: 'metric' })
+            ],
+            showDetailJson: false
+        };
+    }
+};
+
+function normalizeBatchDebugPresentation(presentation, event, detail) {
+    const normalized = {
+        category: presentation.category || formatBatchDebugEventName(event?.label),
+        highlight: presentation.highlight ? String(presentation.highlight) : '',
+        rows: Array.isArray(presentation.rows) ? presentation.rows.map(normalizeBatchDebugRow).filter(Boolean) : [],
+        showDetailJson: presentation.showDetailJson === true,
+        extra: presentation.extra ? String(presentation.extra) : ''
+    };
+
+    const usedKeys = new Set(normalized.rows.map((row) => row.key));
+
+    const combinationHeadline = formatBatchDebugCombinationHeadline(detail);
+    if (combinationHeadline && !usedKeys.has('combination')) {
+        const row = normalizeBatchDebugRow({ key: 'combination', label: '策略', value: combinationHeadline });
+        if (row) {
+            normalized.rows.unshift(row);
+            usedKeys.add(row.key);
+        }
+        const paramsText = formatBatchDebugCombinationParams(detail);
+        if (paramsText && !usedKeys.has('combinationParams')) {
+            const paramRow = normalizeBatchDebugRow({ key: 'combinationParams', label: '參數', value: paramsText });
+            if (paramRow) {
+                normalized.rows.splice(1, 0, paramRow);
+                usedKeys.add(paramRow.key);
+            }
+        }
+        const riskText = formatBatchDebugRiskSummary(detail);
+        if (riskText && !usedKeys.has('riskManagement')) {
+            const riskRow = normalizeBatchDebugRow({ key: 'riskManagement', label: '風險管理', value: riskText });
+            if (riskRow) {
+                normalized.rows.push(riskRow);
+                usedKeys.add(riskRow.key);
+            }
+        }
+    }
+
+    const includeRequestRange = !usedKeys.has('requiredRange');
+    const datasetRows = [
+        buildBatchDebugRow('標的代碼', detail?.stockNo, { key: 'stockNo' }),
+        buildBatchDebugRow('市場', formatBatchDebugMarketLabel(detail?.market), { key: 'market' }),
+        buildBatchDebugRow('價格模式', formatBatchDebugPriceModeLabel(detail?.priceMode), { key: 'priceMode' }),
+        buildBatchDebugRow('交易時點', formatBatchDebugTradeTimingLabel(detail?.tradeTiming), { key: 'tradeTiming' }),
+        includeRequestRange
+            ? buildBatchDebugRow('請求區間', formatBatchDebugRangeText({ startDate: detail?.requestStartDate, endDate: detail?.requestEndDate }), { key: 'requestRange' })
+            : null
+    ].filter(Boolean);
+
+    datasetRows.forEach((row) => {
+        const normalizedRow = normalizeBatchDebugRow(row);
+        if (normalizedRow && normalizedRow.value !== '—' && !usedKeys.has(normalizedRow.key)) {
+            normalized.rows.push(normalizedRow);
+            usedKeys.add(normalizedRow.key);
+        }
+    });
+
+    return normalized;
+}
+
+function buildBatchDebugEventPresentation(event) {
+    if (!event || typeof event !== 'object') {
+        return buildDefaultBatchDebugPresentation(event);
+    }
+    const detail = event.detail && typeof event.detail === 'object' ? event.detail : {};
+    const label = typeof event.label === 'string' ? event.label : '';
+    const builder = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_TEMPLATES, label)
+        ? BATCH_DEBUG_EVENT_TEMPLATES[label]
+        : (label && Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_TEMPLATES, label.toLowerCase())
+            ? BATCH_DEBUG_EVENT_TEMPLATES[label.toLowerCase()]
+            : null);
+
+    let presentation = null;
+    if (typeof builder === 'function') {
+        try {
+            presentation = builder(event, detail);
+        } catch (error) {
+            console.error('[Batch Debug] Failed to build presentation:', label, error);
+        }
+    }
+    if (!presentation) {
+        presentation = buildDefaultBatchDebugPresentation(event);
+    }
+    const normalized = normalizeBatchDebugPresentation(presentation, event, detail);
+    normalized.detail = detail;
+    return normalized;
+}
+
+function renderBatchDebugEvent(event) {
+    const presentation = buildBatchDebugEventPresentation(event);
+    const levelMeta = resolveBatchDebugLevelMeta(event?.level);
+    const timeLabel = formatBatchDebugEventTimeLabel(event?.iso || event?.ts || Date.now());
+    const phaseLabel = formatBatchDebugPhaseLabel(event?.phase);
+    const badges = [];
+    if (levelMeta.english) {
+        badges.push(`<span class="inline-flex items-center rounded-full border px-2 py-[2px] text-[10px] font-semibold tracking-wide uppercase" style="color: ${levelMeta.color}; border-color: ${levelMeta.color};">${testerEscapeHtml(levelMeta.english)}</span>`);
+    }
+    if (levelMeta.label && levelMeta.label !== levelMeta.english) {
+        badges.push(`<span class="text-[10px] font-medium" style="color: ${levelMeta.color};">${testerEscapeHtml(levelMeta.label)}</span>`);
+    }
+    if (phaseLabel) {
+        badges.push(`<span class="inline-flex items-center rounded-full border border-dashed px-2 py-[1px] text-[10px]" style="color: var(--muted-foreground); border-color: rgba(148, 163, 184, 0.45); background-color: rgba(148, 163, 184, 0.12);">${testerEscapeHtml(phaseLabel)}</span>`);
+    }
+
+    const rowsHtml = presentation.rows.map((row) => {
+        const valueHtml = row.allowHtml ? row.value : testerEscapeHtml(String(row.value));
+        return `<div class="text-[12px] leading-[20px]"><span class="text-[12px]" style="color: var(--muted-foreground);">${testerEscapeHtml(row.label)}：</span><span class="font-medium" style="color: var(--foreground);">${valueHtml}</span></div>`;
+    }).join('');
+
+    const highlightHtml = presentation.highlight
+        ? `<div class="text-[12px] font-semibold" style="color: ${levelMeta.color};">${testerEscapeHtml(presentation.highlight)}</div>`
+        : '';
+
+    const extraHtml = presentation.extra
+        ? `<div class="rounded-md border px-3 py-2 text-[11px] leading-[18px]" style="border-color: ${levelMeta.border}; color: ${levelMeta.color}; background-color: ${levelMeta.background};">${testerEscapeHtml(presentation.extra).replace(/\n/g, '<br />')}</div>`
+        : '';
+
+    let detailJsonHtml = '';
+    if (presentation.showDetailJson && presentation.detail && Object.keys(presentation.detail).length > 0) {
+        detailJsonHtml = `<pre class="text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${testerEscapeHtml(JSON.stringify(presentation.detail, null, 2))}</pre>`;
+    }
+
+    return `
+        <div class="space-y-2 rounded-lg border px-4 py-3" style="background-color: rgba(248, 250, 252, 0.88); border-color: ${levelMeta.border};">
+            <div class="text-[13px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(presentation.category)}</div>
+            ${badges.length > 0 ? `<div class="flex flex-wrap items-center gap-2">${badges.join('')}</div>` : ''}
+            ${highlightHtml}
+            <div class="text-[11px]" style="color: var(--muted-foreground);">${testerEscapeHtml(timeLabel)}</div>
+            ${rowsHtml ? `<div class="space-y-1">${rowsHtml}</div>` : ''}
+            ${extraHtml}
+            ${detailJsonHtml}
+        </div>
+    `;
+}
+
+function initBatchDebugLogPanel() {
+    const container = document.getElementById('batchDebugLogContainer');
+    if (!container) return;
+
+    const metaEl = document.getElementById('batchDebugSessionMeta');
+    const listEl = document.getElementById('batchDebugEventList');
+    const emptyEl = document.getElementById('batchDebugEmptyHint');
+    const refreshBtn = document.getElementById('batchDebugRefreshBtn');
+    const downloadBtn = document.getElementById('batchDebugDownloadBtn');
+    const clearBtn = document.getElementById('batchDebugClearBtn');
+    const markFirstBtn = document.getElementById('batchDebugMarkFirstBtn');
+    const markSecondBtn = document.getElementById('batchDebugMarkSecondBtn');
+    const compareBtn = document.getElementById('batchDebugCompareBtn');
+    const copyBtn = document.getElementById('batchDebugCopyBtn');
+    const compareOutput = document.getElementById('batchDebugCompareOutput');
+    const compareStatus = document.getElementById('batchDebugCompareStatus');
+
+    let comparisonSnapshotA = null;
+    let comparisonSnapshotB = null;
+    let latestComparisonText = '';
+
+    const describeSnapshot = (snapshot) => {
+        if (!snapshot) return '尚未設定';
+        if (window.batchOptimization && typeof window.batchOptimization.formatDebugSnapshotLabel === 'function') {
+            try {
+                const label = window.batchOptimization.formatDebugSnapshotLabel(snapshot);
+                if (label) return label;
+            } catch (error) {
+                console.warn('[Batch Debug] Failed to format snapshot label:', error);
+            }
+        }
+        const eventCount = Array.isArray(snapshot.events) ? snapshot.events.length : 0;
+        const id = snapshot.sessionId ? `#${snapshot.sessionId}` : '紀錄';
+        return `${id}｜事件 ${eventCount}`;
+    };
+
+    const updateCompareStatus = (message = null) => {
+        if (!compareStatus) return;
+        if (message) {
+            compareStatus.textContent = message;
+            compareStatus.style.color = 'var(--foreground)';
+        } else {
+            const parts = [
+                `A：${describeSnapshot(comparisonSnapshotA)}`,
+                `B：${describeSnapshot(comparisonSnapshotB)}`
+            ];
+            compareStatus.textContent = parts.join(' ｜ ');
+            compareStatus.style.color = 'var(--muted-foreground)';
+        }
+
+        if (copyBtn) {
+            copyBtn.disabled = !latestComparisonText;
+            copyBtn.style.color = latestComparisonText ? 'var(--foreground)' : 'var(--muted-foreground)';
+        }
+    };
+
+    if (compareOutput) {
+        compareOutput.value = '';
+    }
+    updateCompareStatus();
+
+    const applySnapshot = (snapshot) => {
+        if (!metaEl || !listEl || !emptyEl) return;
+
+        if (!snapshot) {
+            metaEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">尚未啟動批量優化除錯。</div>';
+            listEl.innerHTML = '';
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '暫無批量優化事件，請先啟動批量優化或滾動測試。';
+            return;
+        }
+
+        const sessionTitleParts = [];
+        if (snapshot.sessionId) sessionTitleParts.push(`會話 #${snapshot.sessionId}`);
+        if (snapshot.version) sessionTitleParts.push(`版本 ${snapshot.version}`);
+        const sessionTitle = sessionTitleParts.join(' ｜ ') || '批量優化除錯會話';
+
+        const statusBadges = [];
+        if (snapshot.outcome?.status) statusBadges.push(`狀態：${snapshot.outcome.status}`);
+        if (Array.isArray(snapshot.events)) statusBadges.push(`事件：${snapshot.events.length} 筆`);
+        if (snapshot.outcome?.message) statusBadges.push(`說明：${snapshot.outcome.message}`);
+
+        const timeBadges = [];
+        if (snapshot.startedAtIso) {
+            timeBadges.push(`開始：${formatBatchDebugTime(snapshot.startedAtIso)}`);
+        }
+        if (snapshot.completedAtIso) {
+            timeBadges.push(`結束：${formatBatchDebugTime(snapshot.completedAtIso)}`);
+        }
+        const durationLabel = formatBatchDebugDuration(snapshot.startedAtIso, snapshot.completedAtIso);
+        if (durationLabel) {
+            timeBadges.push(`耗時：${durationLabel}`);
+        }
+
+        const buildBadges = (items) => items.map((text) => (
+            `<span class="inline-flex items-center rounded-full border px-2 py-[2px] text-[10px]" style="border-color: var(--border); color: var(--foreground); background-color: rgba(255, 255, 255, 0.75);">${testerEscapeHtml(text)}</span>`
+        )).join('<span class="sr-only"> </span>');
+
+        const lines = [
+            `<div class="text-[11px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(sessionTitle)}</div>`,
+        ];
+        if (statusBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(statusBadges)}</div>`);
+        }
+        if (timeBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(timeBadges)}</div>`);
+        }
+
+        metaEl.innerHTML = lines.join('');
+
+        const events = Array.isArray(snapshot.events)
+            ? snapshot.events.slice(Math.max(snapshot.events.length - 50, 0))
+            : [];
+
+        listEl.innerHTML = '';
+        if (events.length === 0) {
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '暫無批量優化事件，請先執行批量優化或滾動測試。';
+        } else {
+            emptyEl.classList.add('hidden');
+            listEl.classList.remove('hidden');
+
+            events.forEach((event) => {
+                const li = document.createElement('li');
+                li.className = 'border rounded-lg px-3 py-3 bg-white/80 shadow-sm';
+                li.style.borderColor = 'var(--border)';
+
+                let content = '';
+                try {
+                    content = renderBatchDebugEvent(event);
+                } catch (error) {
+                    console.error('[Batch Debug] Failed to render event:', event?.label, error);
+                    const fallbackDetail = event && event.detail ? testerEscapeHtml(JSON.stringify(event.detail, null, 2)) : '—';
+                    content = `
+                        <div class="space-y-2">
+                            <div class="text-[12px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(event?.label || '事件')}</div>
+                            <div class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(formatBatchDebugTime(event?.iso || event?.ts) || '—')}</div>
+                            <div class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(event?.message || '渲染失敗')}</div>
+                            <pre class="text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${fallbackDetail}</pre>
+                        </div>
+                    `;
+                }
+
+                li.innerHTML = content;
+                listEl.appendChild(li);
+            });
+        }
+    };
+
+    const getSnapshot = () => {
+        if (window.batchOptimization && typeof window.batchOptimization.getDebugLog === 'function') {
+            return window.batchOptimization.getDebugLog();
+        }
+        return null;
+    };
+
+    const ensureSubscription = () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.subscribeDebugLog !== 'function') {
+            return false;
+        }
+        if (typeof batchDebugLogUnsubscribe === 'function') {
+            batchDebugLogUnsubscribe();
+            batchDebugLogUnsubscribe = null;
+        }
+        batchDebugLogUnsubscribe = window.batchOptimization.subscribeDebugLog((snapshot) => {
+            applySnapshot(snapshot);
+        });
+        applySnapshot(getSnapshot());
+        return true;
+    };
+
+    const attemptSubscription = (retry = 0) => {
+        if (ensureSubscription()) {
+            return;
+        }
+        if (retry < 5) {
+            setTimeout(() => attemptSubscription(retry + 1), 300 * (retry + 1));
+        }
+    };
+
+    refreshBtn?.addEventListener('click', () => {
+        applySnapshot(getSnapshot());
+    });
+
+    downloadBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.downloadDebugLog === 'function') {
+            window.batchOptimization.downloadDebugLog('batch-optimization-debug');
+        }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.clearDebugLog === 'function') {
+            window.batchOptimization.clearDebugLog();
+        }
+    });
+
+    markFirstBtn?.addEventListener('click', () => {
+        comparisonSnapshotA = getSnapshot();
+        updateCompareStatus();
+    });
+
+    markSecondBtn?.addEventListener('click', () => {
+        comparisonSnapshotB = getSnapshot();
+        updateCompareStatus();
+    });
+
+    compareBtn?.addEventListener('click', () => {
+        if (!comparisonSnapshotA || !comparisonSnapshotB) {
+            latestComparisonText = '';
+            if (compareOutput) {
+                compareOutput.value = '請先設定紀錄A與紀錄B後再產生比較。';
+            }
+            updateCompareStatus('請先設定紀錄A與紀錄B。');
+            return;
+        }
+
+        if (window.batchOptimization && typeof window.batchOptimization.diffDebugLogs === 'function') {
+            try {
+                const diff = window.batchOptimization.diffDebugLogs(comparisonSnapshotA, comparisonSnapshotB) || {};
+                latestComparisonText = diff.text || '';
+            } catch (error) {
+                console.error('[Batch Debug] Failed to diff logs:', error);
+                latestComparisonText = '';
+            }
+        } else {
+            latestComparisonText = '';
+        }
+
+        if (compareOutput) {
+            compareOutput.value = latestComparisonText || '（比較結果為空）';
+        }
+        updateCompareStatus();
+    });
+
+    copyBtn?.addEventListener('click', async () => {
+        if (!latestComparisonText) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(latestComparisonText);
+            updateCompareStatus('已複製比較結果到剪貼簿。');
+            setTimeout(() => updateCompareStatus(), 2500);
+        } catch (error) {
+            console.error('[Batch Debug] Failed to copy diff:', error);
+            updateCompareStatus('複製失敗，請手動選取文字。');
+            setTimeout(() => updateCompareStatus(), 2500);
+        }
+    });
+
+    applySnapshot(getSnapshot());
+    attemptSubscription();
+}
+
 function initDeveloperAreaToggle() {
     const toggleBtn = document.getElementById('developerAreaToggle');
     const wrapper = document.getElementById('developerAreaWrapper');
@@ -2825,6 +4040,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initBatchDebugLogPanel();
 
         // 初始化頁籤功能
         initTabs();
