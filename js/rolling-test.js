@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.5 ---
+// Patch Tag: LB-ROLLING-TRUST-20251109A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,10 +18,12 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TRUST-20251109A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
+        manualDurationMode: false,
+        strictMode: false,
     };
 
     let planRefreshTimer = null;
@@ -42,21 +44,6 @@
         winRate: 0.10,
     };
 
-    const QUALITY_TARGETS = {
-        annualizedReturn: 15,
-        sharpeRatio: 1.2,
-        sortinoRatio: 1.5,
-        maxDrawdownSpan: 15,
-        maxDrawdownFloor: 5,
-        winRateBonus: 10,
-    };
-
-    const QUALITY_OFFSETS = {
-        annualizedReturn: Math.max(QUALITY_TARGETS.annualizedReturn - DEFAULT_THRESHOLDS.annualizedReturn, 0.01),
-        sharpeRatio: Math.max(QUALITY_TARGETS.sharpeRatio - DEFAULT_THRESHOLDS.sharpeRatio, 0.01),
-        sortinoRatio: Math.max(QUALITY_TARGETS.sortinoRatio - DEFAULT_THRESHOLDS.sortinoRatio, 0.01),
-    };
-
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
     const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
     const DEFAULT_WINDOW_RATIO = { training: 36, testing: 12, step: 6 };
@@ -64,6 +51,7 @@
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
     const DAYS_PER_YEAR = 252;
     const RISK_FREE_RATE = 0.01;
+    const DAILY_RISK_FREE_RATE = Math.pow(1 + RISK_FREE_RATE, 1 / DAYS_PER_YEAR) - 1;
     const MIN_TRACK_RECORD_CONFIDENCE = 0.95;
     const WFE_ADJUST_MIN = 0.8;
     const WFE_ADJUST_MAX = 1.2;
@@ -114,6 +102,49 @@
         return !container.classList.contains('hidden');
     }
 
+    function setManualDurationMode(enabled, options = {}) {
+        const manualEnabled = Boolean(enabled);
+        state.manualDurationMode = manualEnabled;
+
+        const manualContainer = document.getElementById('rolling-manual-durations');
+        if (manualContainer) {
+            manualContainer.classList.toggle('hidden', !manualEnabled);
+        }
+
+        const windowCountInput = document.getElementById('rolling-window-count');
+        if (windowCountInput) {
+            windowCountInput.disabled = manualEnabled;
+            windowCountInput.classList.toggle('opacity-60', manualEnabled);
+            windowCountInput.setAttribute('aria-disabled', manualEnabled ? 'true' : 'false');
+        }
+
+        const toggleButton = document.getElementById('rolling-window-mode-toggle');
+        if (toggleButton) {
+            toggleButton.textContent = manualEnabled ? '改用視窗次數' : '改用手動視窗';
+        }
+
+        if (manualEnabled && options.prefill) {
+            prefillManualDurationsFromAuto();
+        }
+    }
+
+    function prefillManualDurationsFromAuto() {
+        const cachedRows = ensureRollingCacheHydrated();
+        const availability = getCachedAvailability(cachedRows);
+        const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
+        const baseStart = params?.startDate || availability?.start || lastFetchSettings?.startDate || null;
+        const baseEnd = params?.endDate || availability?.end || lastFetchSettings?.endDate || null;
+        const windowCountRaw = clampNumber(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT), 1, 24);
+        const windowCount = Math.max(1, Math.round(windowCountRaw));
+        const durations = deriveAutoWindowDurations({
+            baseStart,
+            baseEnd,
+            availability,
+            windowCount,
+        });
+        syncAutoDurationInputs(durations);
+    }
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -134,6 +165,18 @@
         if (startBtn) startBtn.addEventListener('click', startRollingTest);
         if (stopBtn) stopBtn.addEventListener('click', stopRollingTest);
 
+        const strictToggle = document.getElementById('rolling-strict-mode');
+        if (strictToggle) {
+            state.strictMode = Boolean(strictToggle.checked);
+            strictToggle.addEventListener('change', () => {
+                state.strictMode = Boolean(strictToggle.checked);
+                if (state.config) {
+                    state.config.strictMode = state.strictMode;
+                }
+                updateRollingPlanPreview();
+            });
+        }
+
         const shortToggle = document.getElementById('enableShortSelling');
         if (shortToggle) {
             shortToggle.addEventListener('change', () => {
@@ -149,6 +192,22 @@
                 setAdvancedToggleState(expanded);
                 updateRollingPlanPreview();
             });
+        }
+
+        const windowModeToggle = document.getElementById('rolling-window-mode-toggle');
+        if (windowModeToggle) {
+            setManualDurationMode(false);
+            windowModeToggle.addEventListener('click', () => {
+                const enableManual = !state.manualDurationMode;
+                if (enableManual) {
+                    prefillManualDurationsFromAuto();
+                }
+                setManualDurationMode(enableManual);
+                updateRollingPlanPreview();
+                syncRollingOptimizeUI();
+            });
+        } else {
+            setManualDurationMode(state.manualDurationMode);
         }
 
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -212,6 +271,7 @@
         state.running = true;
         state.cancelled = false;
         state.config = config;
+        state.strictMode = Boolean(config?.strictMode);
         state.windows = windows;
         state.results = [];
         state.startTime = Date.now();
@@ -487,14 +547,25 @@
             };
         });
 
-        const aggregate = computeAggregateReport(analysisEntries, state.config?.thresholds || DEFAULT_THRESHOLDS, state.config?.minTrades || 0);
+        const aggregate = computeAggregateReport(
+            analysisEntries,
+            state.config?.thresholds || DEFAULT_THRESHOLDS,
+            {
+                srBenchmarks: { base: 0, strict: 1 },
+                strictMode: state.strictMode,
+                optimizationEnabled: Boolean(state.config?.optimization?.enabled),
+                optimizationTrials: state.config?.optimization?.trials,
+                minTrades: state.config?.minTrades,
+            },
+        );
         state.aggregate = aggregate;
         state.aggregateGeneratedAt = new Date().toISOString();
 
         const report = document.getElementById('rolling-test-report');
         const intro = document.getElementById('rolling-report-intro');
         if (intro) {
-            intro.textContent = `共完成 ${aggregate.totalWindows} 個 Walk-Forward 視窗（訓練 ${state.config.trainingMonths} 個月 / 測試 ${state.config.testingMonths} 個月 / 平移 ${state.config.stepMonths} 個月）`;
+            const strictSuffix = state.strictMode ? '（已啟用嚴格模式）' : '';
+            intro.textContent = `共完成 ${aggregate.totalWindows} 個 Walk-Forward 視窗（訓練 ${state.config.trainingMonths} 個月 / 測試 ${state.config.testingMonths} 個月 / 平移 ${state.config.stepMonths} 個月）${strictSuffix}`;
         }
         if (report) report.classList.remove('hidden');
 
@@ -576,7 +647,7 @@
                 detailBuilder: () => buildWfeDetail(aggregate),
             },
             {
-                title: 'PSR / DSR',
+                title: 'PSR / DSR（SR*=0）',
                 value: `${formatProbability(aggregate.medianPsr)} / ${formatProbability(aggregate.medianDsr)}`,
                 description: describeCredibilityStatus(aggregate),
                 detailBuilder: () => buildCredibilityDetail(aggregate),
@@ -642,13 +713,34 @@
         const container = document.createElement('div');
         container.className = 'mt-1';
 
-        const list = document.createElement('ul');
-        list.className = 'list-disc pl-4 space-y-1';
+        const intro = document.createElement('p');
+        intro.textContent = 'Walk-Forward 總分使用中位數壓低極端視窗的影響，完整流程如下：';
+        container.appendChild(intro);
+
+        const steps = document.createElement('ol');
+        steps.className = 'list-decimal pl-4 space-y-1 text-[11px]';
+        steps.style.color = 'var(--muted-foreground)';
+
+        const stepItems = [
+            '每個視窗先計算 OOS 品質得分：指標達門檻得 1 分，未達門檻依落差線性遞減至 0，並依權重平均。',
+            '計算統計可信度 Credibility = √(PSR × DSR)，統計權重 = 0.2 + 0.8 × Credibility（n_eff < MinTRL 時上限 0.3，嚴格模式則歸零）。',
+            '窗分數 = 品質得分 × 統計權重；將所有窗分數排序後取中位數（偶數視窗取中間兩個的平均）。',
+            'Walk-Forward 總分 = 窗分數中位 × WFE 調整係數（介於 0.8～1.2），最後換算為 0～100 分。',
+        ];
+        stepItems.forEach((text) => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            steps.appendChild(item);
+        });
+        container.appendChild(steps);
+
+        const statsList = document.createElement('ul');
+        statsList.className = 'list-disc pl-4 space-y-1';
 
         const addItem = (label, value) => {
             const li = document.createElement('li');
             li.textContent = `${label}：${value}`;
-            list.appendChild(li);
+            statsList.appendChild(li);
         };
 
         addItem('窗分數中位', formatScore(aggregate.medianWindowScore));
@@ -656,7 +748,7 @@
         addItem('總分（0-100）', formatScorePoints(aggregate.totalScore));
         addItem('通過視窗', `${aggregate.passCount}/${aggregate.totalWindows}`);
 
-        container.appendChild(list);
+        container.appendChild(statsList);
         return container;
     }
 
@@ -665,11 +757,19 @@
         container.className = 'mt-1 space-y-2';
 
         const summary = document.createElement('p');
-        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（加權原值 ${formatScore(aggregate.medianOosQualityRaw)}），達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
+        summary.textContent = `品質分數中位 ${formatScore(aggregate.medianOosQuality)}（將每個視窗的品質得分排序後取中位），加權原值 ${formatScore(aggregate.medianOosQualityRaw)}，達標權重比 ${formatProbability(aggregate.medianOosPassRatio)}。`;
         container.appendChild(summary);
 
+        const explain = document.createElement('p');
+        explain.textContent = '每個指標達門檻即得滿分 1，未達門檻依差距線性遞減至 0；「加權原值」為指標分數乘權重的平均值，也是最終的品質得分；「達標權重」用來輔助判斷哪些指標拖累品質。';
+        container.appendChild(explain);
+
+        const medianExplain = document.createElement('p');
+        medianExplain.textContent = '品質分數中位會將所有視窗的品質得分排序後取中間值，若視窗數為偶數則取中間兩個的平均，用來避免單一視窗過度拉高或拉低整體判斷。';
+        container.appendChild(medianExplain);
+
         const credibilityLine = document.createElement('p');
-        credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}、統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
+        credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}（統計權重 = 0.5 + 0.5 × 可信度），統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
         container.appendChild(credibilityLine);
 
         const gridWrapper = document.createElement('div');
@@ -682,12 +782,15 @@
 
         const thresholds = aggregate.thresholds || DEFAULT_THRESHOLDS;
         const componentScores = aggregate.qualityComponentMedians || {};
+        const annualizedThresholdDisplay = Number.isFinite(aggregate.medianBaselineAnnualizedReturn)
+            ? aggregate.medianBaselineAnnualizedReturn
+            : thresholds.annualizedReturn;
         const componentConfig = [
             {
                 key: 'annualizedReturn',
                 label: '年化報酬',
                 median: aggregate.medianAnnualizedReturn,
-                threshold: thresholds.annualizedReturn,
+                threshold: annualizedThresholdDisplay,
                 comparator: '≥',
                 formatter: formatPercent,
             },
@@ -756,6 +859,70 @@
         });
 
         container.appendChild(gridWrapper);
+
+        if (Array.isArray(aggregate.perWindowSummaries) && aggregate.perWindowSummaries.length > 0) {
+            const listTitle = document.createElement('p');
+            listTitle.className = 'font-medium';
+            listTitle.textContent = '逐窗得分（品質得分 × 統計權重 = 窗分數）：';
+            container.appendChild(listTitle);
+
+            const tableWrapper = document.createElement('div');
+            tableWrapper.className = 'overflow-x-auto rounded border';
+            tableWrapper.style.borderColor = 'var(--border)';
+
+            const table = document.createElement('table');
+            table.className = 'min-w-full text-[11px]';
+            table.style.borderCollapse = 'collapse';
+
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            const headers = ['視窗', '品質', '加權原值', '達標權重', '統計權重', '窗分數', '年化門檻'];
+            headers.forEach((label, idx) => {
+                const th = document.createElement('th');
+                th.textContent = label;
+                th.className = 'px-2 py-1 font-medium';
+                th.style.borderBottom = `1px solid var(--border)`;
+                th.style.textAlign = idx === 0 ? 'left' : 'right';
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            aggregate.perWindowSummaries.forEach((summary, index) => {
+                const row = document.createElement('tr');
+                const cells = [
+                    { text: `視窗 ${index + 1}`, align: 'left' },
+                    { text: formatScore(summary.oosQuality), align: 'right' },
+                    { text: formatScore(summary.oosQualityRaw), align: 'right' },
+                    { text: formatProbability(summary.oosPassRatio), align: 'right' },
+                    { text: formatScore(summary.statWeight), align: 'right' },
+                    { text: formatScorePoints(summary.windowScore), align: 'right' },
+                    { text: Number.isFinite(summary.baselineAnnualizedReturn)
+                        ? formatPercent(summary.baselineAnnualizedReturn)
+                        : '—', align: 'right' },
+                ];
+                cells.forEach((cell) => {
+                    const td = document.createElement('td');
+                    td.textContent = cell.text;
+                    td.className = 'px-2 py-1';
+                    td.style.textAlign = cell.align;
+                    td.style.borderBottom = `1px solid var(--border)`;
+                    row.appendChild(td);
+                });
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            tableWrapper.appendChild(table);
+            container.appendChild(tableWrapper);
+
+            const note = document.createElement('p');
+            note.className = 'text-[11px]';
+            note.style.color = 'var(--muted-foreground)';
+            note.textContent = '註：品質原值 = 指標分數 × 權重的平均；品質得分 = 加權原值；達標權重為達標指標權重占比（用來檢視哪些指標拉低分數）。';
+            container.appendChild(note);
+        }
+
         return container;
     }
 
@@ -789,34 +956,72 @@
         const container = document.createElement('div');
         container.className = 'mt-1 space-y-2';
 
-        const sampleText = Number.isFinite(aggregate.medianSampleCount)
-            ? `${Math.round(aggregate.medianSampleCount)} 筆`
-            : '—';
+        const sampleText = Number.isFinite(aggregate.medianEffectiveSampleCount)
+            ? `${trimNumber(aggregate.medianEffectiveSampleCount)} 筆（有效樣本）`
+            : (Number.isFinite(aggregate.medianSampleCount)
+                ? `${Math.round(aggregate.medianSampleCount)} 筆`
+                : '—');
         const minTrlText = Number.isFinite(aggregate.medianMinTrackRecordLength)
             ? `／需求 ≥ ${Math.ceil(aggregate.medianMinTrackRecordLength)} 日`
             : '';
         const summary = document.createElement('p');
-        summary.textContent = `PSR≥95% 視窗比 ${formatProbability(aggregate.psrAbove95Ratio)}，DSR 中位 ${formatProbability(aggregate.medianDsr)}，樣本中位 ${sampleText}${minTrlText}。`;
+        const psrStrictText = Number.isFinite(aggregate.psrStrictAbove95Ratio)
+            ? `，PSR@SR*=1≥95% 視窗比 ${formatProbability(aggregate.psrStrictAbove95Ratio)}`
+            : '';
+        const dsrBelowText = Number.isFinite(aggregate.dsrBelow50Ratio)
+            ? `，DSR<50% 視窗比 ${formatProbability(aggregate.dsrBelow50Ratio)}`
+            : '';
+        summary.textContent = `PSR@SR*=0≥95% 視窗比 ${formatProbability(aggregate.psrAbove95Ratio)}${psrStrictText}，DSR 中位 ${formatProbability(aggregate.medianDsr)}${dsrBelowText}，樣本中位 ${sampleText}${minTrlText}。`;
         container.appendChild(summary);
+
+        const explainIntro = document.createElement('p');
+        explainIntro.textContent = '統計可信度整合 PSR 與 DSR，並依有效樣本（n_eff）與 MinTRL 調整統計權重，流程如下：';
+        container.appendChild(explainIntro);
+
+        const explainList = document.createElement('ol');
+        explainList.className = 'list-decimal pl-4 space-y-1 text-[11px]';
+        explainList.style.color = 'var(--muted-foreground)';
+        [
+            'PSR（Probabilistic Sharpe）使用每日樣本 Sharpe、n_eff、偏度與峰度估計超越基準 Sharpe 的機率。',
+            '嚴格模式同時計算 PSR@SR*=1，未達 MinTRL 的視窗直接視為不可信。',
+            'DSR（Deflated Sharpe）以有效嘗試數 M_eff 校正多次參數搜尋的樂觀偏誤。',
+            '可信度 = √(PSR × DSR)，統計權重 = 0.2 + 0.8 × 可信度；n_eff < MinTRL 時權重上限 0.3（嚴格模式直接歸零）。',
+        ].forEach((text) => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            explainList.appendChild(item);
+        });
+        container.appendChild(explainList);
 
         const list = document.createElement('ul');
         list.className = 'list-disc pl-4 space-y-1';
         const psrValues = Array.isArray(aggregate.psrValues) ? aggregate.psrValues : [];
+        const psrStrictValues = Array.isArray(aggregate.psrStrictValues) ? aggregate.psrStrictValues : [];
         const dsrValues = Array.isArray(aggregate.dsrValues) ? aggregate.dsrValues : [];
+        const dsrStrictValues = Array.isArray(aggregate.dsrStrictValues) ? aggregate.dsrStrictValues : [];
         const sampleCounts = Array.isArray(aggregate.sampleCounts) ? aggregate.sampleCounts : [];
+        const effectiveSampleCounts = Array.isArray(aggregate.effectiveSampleCounts) ? aggregate.effectiveSampleCounts : [];
         const minTrlValues = Array.isArray(aggregate.minTrackRecordValues) ? aggregate.minTrackRecordValues : [];
 
         aggregate.evaluations.forEach((evaluation, index) => {
             const psrText = Number.isFinite(psrValues[index]) ? formatProbability(psrValues[index]) : '—';
+            const psrStrictVal = Number.isFinite(psrStrictValues[index]) ? formatProbability(psrStrictValues[index]) : '—';
             const dsrText = Number.isFinite(dsrValues[index]) ? formatProbability(dsrValues[index]) : '—';
+            const dsrStrictVal = Number.isFinite(dsrStrictValues[index]) ? formatProbability(dsrStrictValues[index]) : '—';
             const sampleValue = Number.isFinite(sampleCounts[index]) ? Math.round(sampleCounts[index]) : null;
+            const effectiveSampleValue = Number.isFinite(effectiveSampleCounts[index]) ? trimNumber(effectiveSampleCounts[index]) : null;
             const minTrlValue = Number.isFinite(minTrlValues[index]) ? Math.ceil(minTrlValues[index]) : null;
             const details = [];
-            details.push(`PSR ${psrText}`);
-            details.push(`DSR ${dsrText}`);
+            details.push(`PSR@0 ${psrText}`);
+            details.push(`PSR@1 ${psrStrictVal}`);
+            details.push(`DSR@0 ${dsrText}`);
+            details.push(`DSR@1 ${dsrStrictVal}`);
             if (sampleValue !== null) details.push(`樣本 ${sampleValue}`);
+            if (effectiveSampleValue !== null) details.push(`n_eff ${effectiveSampleValue}`);
             if (minTrlValue !== null) details.push(`需求 ≥ ${minTrlValue}`);
-            if (details.length === 0) return;
+            const statWeightValue = Number.isFinite(evaluation?.analysis?.statWeight) ? evaluation.analysis.statWeight : null;
+            if (Number.isFinite(statWeightValue)) details.push(`統計權重 ${formatScore(statWeightValue)}`);
+            if (evaluation?.analysis?.statWeightLimited) details.push('權重受 MinTRL 限制');
             const li = document.createElement('li');
             li.textContent = `視窗 ${index + 1}：${details.join('、')}`;
             list.appendChild(li);
@@ -925,14 +1130,22 @@
     function describeCredibilityStatus(aggregate) {
         const psrRatio = Number.isFinite(aggregate?.psrAbove95Ratio) ? aggregate.psrAbove95Ratio : null;
         const medianDsr = Number.isFinite(aggregate?.medianDsr) ? aggregate.medianDsr : null;
+        const dsrBelow = Number.isFinite(aggregate?.dsrBelow50Ratio) ? aggregate.dsrBelow50Ratio : null;
+        const psrStrictRatio = Number.isFinite(aggregate?.psrStrictAbove95Ratio) ? aggregate.psrStrictAbove95Ratio : null;
         if (psrRatio === null || medianDsr === null) {
             return '樣本不足';
         }
         const psrPass = psrRatio >= 0.5;
         const dsrPass = medianDsr >= 0.7;
-        if (psrPass && dsrPass) return '合格';
+        const dsrStable = dsrBelow === null || dsrBelow <= 0.3;
+        if (psrPass && dsrPass && dsrStable) {
+            if (aggregate?.strictMode && Number.isFinite(psrStrictRatio) && psrStrictRatio < 0.3) {
+                return '嚴格檢定不足';
+            }
+            return '合格';
+        }
         if (!psrPass && dsrPass) return 'PSR 偏低';
-        if (psrPass && !dsrPass) return 'DSR 偏低';
+        if (!dsrPass || !dsrStable) return 'DSR 偏低';
         return '需補樣本';
     }
 
@@ -1009,6 +1222,18 @@
                 getValue: (entry) => formatPercent(entry.metrics.annualizedReturn),
             },
             {
+                label: '年化門檻%',
+                className: 'text-right',
+                getValue: (entry) => {
+                    const threshold = Number.isFinite(entry.thresholds?.annualizedReturn)
+                        ? entry.thresholds.annualizedReturn
+                        : Number.isFinite(entry.metrics.baselineAnnualizedReturn)
+                            ? entry.metrics.baselineAnnualizedReturn
+                            : null;
+                    return Number.isFinite(threshold) ? formatPercent(threshold) : '—';
+                },
+            },
+            {
                 label: 'Sharpe',
                 className: 'text-right',
                 getValue: (entry) => formatNumber(entry.metrics.sharpeRatio),
@@ -1034,14 +1259,24 @@
                 getValue: (entry) => (Number.isFinite(entry.metrics.tradesCount) ? entry.metrics.tradesCount : '—'),
             },
             {
-                label: 'PSR95',
+                label: 'PSR@0',
                 className: 'text-right',
                 getValue: (entry) => formatProbability(entry.analysis?.psrProbability),
             },
             {
-                label: 'DSR',
+                label: 'PSR@1',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.psrStrictProbability),
+            },
+            {
+                label: 'DSR@0',
                 className: 'text-right',
                 getValue: (entry) => formatProbability(entry.analysis?.dsrProbability),
+            },
+            {
+                label: 'DSR@1',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.dsrStrictProbability),
             },
             {
                 label: '可信度',
@@ -1054,9 +1289,36 @@
                 getValue: (entry) => (Number.isFinite(entry.analysis?.wfe) ? formatPercent(entry.analysis.wfe) : '—'),
             },
             {
+                label: '品質原值',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.oosQuality?.rawValue),
+            },
+            {
+                label: '品質得分',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.oosQuality?.value),
+            },
+            {
+                label: '達標權重',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.oosQuality?.passRatio),
+            },
+            {
+                label: '統計權重',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.statWeight),
+            },
+            {
                 label: '窗分數',
                 className: 'text-right',
                 getValue: (entry) => formatScorePoints(entry.analysis?.windowScore),
+            },
+            {
+                label: '有效樣本',
+                className: 'text-right',
+                getValue: (entry) => (Number.isFinite(entry.analysis?.effectiveSampleCount)
+                    ? trimNumber(entry.analysis.effectiveSampleCount)
+                    : '—'),
             },
             {
                 label: '樣本',
@@ -1249,21 +1511,33 @@
     }
 
     function computeAggregateReport(entries, thresholds, options = {}) {
-        const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : thresholds.sharpeRatio;
+        const srBenchmarks = {
+            base: Number.isFinite(options?.srBenchmarks?.base) ? options.srBenchmarks.base : 0,
+            strict: Number.isFinite(options?.srBenchmarks?.strict) ? options.srBenchmarks.strict : 1,
+        };
+        const strictMode = Boolean(options?.strictMode);
         const optimizationTrials = options?.optimizationEnabled
             ? Math.max(1, Number(options?.optimizationTrials) || 60)
             : 1;
 
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds);
+            const windowThresholds = resolveWindowThresholds(entry.testing, thresholds);
+            const evaluation = evaluateWindow(entry.testing, windowThresholds);
             const commentParts = [];
-            const analysis = computeWindowAnalysis(entry.testing, thresholds, {
-                srBenchmark,
-                trialCount: optimizationTrials,
+            const trialInfo = resolveOptimizationTrialInfo(entry.optimization, {
+                fallbackTrials: optimizationTrials,
+            });
+            const analysis = computeWindowAnalysis(entry.testing, windowThresholds, {
+                srBenchmarks,
+                trialCount: trialInfo.rawTrials,
+                effectiveTrialCount: trialInfo.effectiveTrials,
+                strictMode,
+                correlationEstimate: trialInfo.correlationEstimate,
             });
             if (entry.testing) {
                 entry.testing.analysis = analysis;
             }
+            evaluation.thresholds = windowThresholds;
 
             if (entry.testing?.error) {
                 commentParts.push(entry.testing.error);
@@ -1276,8 +1550,14 @@
                 if (Number.isFinite(entry.training?.annualizedReturn) && Number.isFinite(entry.testing?.annualizedReturn)) {
                     commentParts.push(`訓練 ${formatPercent(entry.training.annualizedReturn)} → 測試 ${formatPercent(entry.testing.annualizedReturn)}`);
                 }
-                if (Number.isFinite(analysis?.minTrackRecordLength) && Number.isFinite(analysis?.sampleCount)
-                    && analysis.sampleCount > 0 && analysis.minTrackRecordLength > analysis.sampleCount) {
+                if (Number.isFinite(entry.testing?.baselineAnnualizedReturn)) {
+                    commentParts.push(`年化門檻採買入持有 ${formatPercent(entry.testing.baselineAnnualizedReturn)}`);
+                }
+                const effectiveSamples = Number.isFinite(analysis?.effectiveSampleCount)
+                    ? analysis.effectiveSampleCount
+                    : analysis?.sampleCount;
+                if (Number.isFinite(analysis?.minTrackRecordLength) && Number.isFinite(effectiveSamples)
+                    && effectiveSamples > 0 && analysis.minTrackRecordLength > effectiveSamples) {
                     commentParts.push(`樣本不足：需 ≥ ${Math.ceil(analysis.minTrackRecordLength)} 日`);
                 }
                 if (entry.optimization) {
@@ -1297,6 +1577,7 @@
                 paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
                 analysis,
+                thresholds: windowThresholds,
             };
         });
 
@@ -1313,6 +1594,8 @@
         const averageSortino = average(validMetrics.map((m) => m.sortinoRatio));
         const averageMaxDrawdown = average(validMetrics.map((m) => m.maxDrawdown));
         const medianAnnualizedReturn = median(validMetrics.map((m) => m.annualizedReturn));
+        const baselineAnnualizedValues = validMetrics.map((m) => m.baselineAnnualizedReturn);
+        const medianBaselineAnnualizedReturn = median(baselineAnnualizedValues);
         const medianSharpe = median(validMetrics.map((m) => m.sharpeRatio));
         const medianSortino = median(validMetrics.map((m) => m.sortinoRatio));
         const medianMaxDrawdown = median(validMetrics.map((m) => m.maxDrawdown));
@@ -1342,6 +1625,7 @@
         const qualityComponentsList = analyses.map((analysis) => (analysis?.oosQuality?.components && typeof analysis.oosQuality.components === 'object'
             ? analysis.oosQuality.components
             : null));
+        const thresholdsPerWindow = evaluations.map((ev) => ev.thresholds || ev.analysis?.thresholds || null);
         const qualityComponentMedians = computeMedianComponents(qualityComponentsList);
         const credibilityValues = analyses.map((analysis) => (Number.isFinite(analysis?.credibility) ? analysis.credibility : null));
         const medianCredibility = median(credibilityValues);
@@ -1349,33 +1633,62 @@
         const medianStatWeight = median(statWeightValues);
 
         const psrValues = analyses.map((analysis) => (Number.isFinite(analysis?.psrProbability) ? analysis.psrProbability : null));
+        const psrStrictValues = analyses.map((analysis) => (Number.isFinite(analysis?.psrStrictProbability) ? analysis.psrStrictProbability : null));
         const dsrValues = analyses.map((analysis) => (Number.isFinite(analysis?.dsrProbability) ? analysis.dsrProbability : null));
+        const dsrStrictValues = analyses.map((analysis) => (Number.isFinite(analysis?.dsrStrictProbability) ? analysis.dsrStrictProbability : null));
         const medianPsr = median(psrValues);
+        const medianPsrStrict = median(psrStrictValues);
         const medianDsr = median(dsrValues);
+        const medianDsrStrict = median(dsrStrictValues);
         const psrAbove95Count = analyses.filter((analysis) => Number.isFinite(analysis?.psrProbability) && analysis.psrProbability >= 0.95).length;
         const psrAbove95Ratio = analyses.length > 0 ? psrAbove95Count / analyses.length : 0;
+        const psrStrictAbove95Count = analyses.filter((analysis) => Number.isFinite(analysis?.psrStrictProbability) && analysis.psrStrictProbability >= 0.95).length;
+        const psrStrictAbove95Ratio = analyses.length > 0 ? psrStrictAbove95Count / analyses.length : 0;
+        const dsrBelow50Count = analyses.filter((analysis) => Number.isFinite(analysis?.dsrProbability) && analysis.dsrProbability < 0.5).length;
+        const dsrBelow50Ratio = analyses.length > 0 ? dsrBelow50Count / analyses.length : 0;
 
         const sampleCounts = analyses.map((analysis) => (Number.isFinite(analysis?.sampleCount) ? analysis.sampleCount : null));
         const medianSampleCount = median(sampleCounts);
+        const effectiveSampleCounts = analyses.map((analysis) => (Number.isFinite(analysis?.effectiveSampleCount) ? analysis.effectiveSampleCount : null));
+        const medianEffectiveSampleCount = median(effectiveSampleCounts);
         const minTrackRecordValues = analyses.map((analysis) => (Number.isFinite(analysis?.minTrackRecordLength) ? analysis.minTrackRecordLength : null));
         const medianMinTrackRecordLength = median(minTrackRecordValues);
 
         const overallMoments = combineReturnMoments(analyses.map((analysis) => analysis?.stats));
         const overallSharpe = computeAnnualizedSharpeFromMoments(overallMoments);
+        const overallSampleSharpe = computeSampleSharpeFromMoments(overallMoments);
+        const aggregatedEffectiveSamples = Number.isFinite(medianEffectiveSampleCount)
+            ? medianEffectiveSampleCount
+            : overallMoments?.sampleCount;
         const overallPsr = computeProbabilisticSharpeProbability({
-            sharpe: overallSharpe,
-            benchmark: srBenchmark,
-            sampleCount: overallMoments?.sampleCount,
+            sharpe: overallSampleSharpe,
+            benchmark: srBenchmarks.base,
+            sampleCount: aggregatedEffectiveSamples,
+            skewness: overallMoments?.skewness,
+            kurtosis: overallMoments?.kurtosis,
+        });
+        const overallPsrStrict = computeProbabilisticSharpeProbability({
+            sharpe: overallSampleSharpe,
+            benchmark: srBenchmarks.strict,
+            sampleCount: aggregatedEffectiveSamples,
             skewness: overallMoments?.skewness,
             kurtosis: overallMoments?.kurtosis,
         });
         const overallDsr = computeDeflatedSharpeProbability({
-            sharpe: overallSharpe,
-            benchmark: srBenchmark,
-            sampleCount: overallMoments?.sampleCount,
+            sharpe: overallSampleSharpe,
+            benchmark: srBenchmarks.base,
+            sampleCount: aggregatedEffectiveSamples,
             skewness: overallMoments?.skewness,
             kurtosis: overallMoments?.kurtosis,
-            trials: optimizationTrials,
+            trials: options?.optimizationEnabled ? optimizationTrials : 1,
+        });
+        const overallDsrStrict = computeDeflatedSharpeProbability({
+            sharpe: overallSampleSharpe,
+            benchmark: srBenchmarks.strict,
+            sampleCount: aggregatedEffectiveSamples,
+            skewness: overallMoments?.skewness,
+            kurtosis: overallMoments?.kurtosis,
+            trials: options?.optimizationEnabled ? optimizationTrials : 1,
         });
 
         let grade = resolveGrade({
@@ -1404,13 +1717,48 @@
             medianCredibility,
             medianWfePercent,
             psrAbove95Ratio,
+            psrStrictAbove95Ratio,
             medianDsr,
+            medianDsrStrict,
             overallSharpe,
             overallPsr,
+            overallPsrStrict,
             overallDsr,
+            overallDsrStrict,
             passRate,
             thresholds,
             gradeDowngraded,
+            medianBaselineAnnualizedReturn,
+            dsrBelow50Ratio,
+            strictMode,
+        });
+
+        const perWindowSummaries = evaluations.map((ev, index) => {
+            const analysis = ev.analysis || {};
+            const quality = analysis.oosQuality || {};
+            return {
+                index,
+                windowScore: Number.isFinite(analysis.windowScore) ? analysis.windowScore : null,
+                statWeight: Number.isFinite(analysis.statWeight) ? analysis.statWeight : null,
+                credibility: Number.isFinite(analysis.credibility) ? analysis.credibility : null,
+                credibilityStrict: Number.isFinite(analysis.credibilityStrict) ? analysis.credibilityStrict : null,
+                psr: Number.isFinite(analysis.psrProbability) ? analysis.psrProbability : null,
+                psrStrict: Number.isFinite(analysis.psrStrictProbability) ? analysis.psrStrictProbability : null,
+                dsr: Number.isFinite(analysis.dsrProbability) ? analysis.dsrProbability : null,
+                dsrStrict: Number.isFinite(analysis.dsrStrictProbability) ? analysis.dsrStrictProbability : null,
+                oosQuality: Number.isFinite(quality.value) ? quality.value : null,
+                oosQualityRaw: Number.isFinite(quality.rawValue) ? quality.rawValue : null,
+                oosPassRatio: Number.isFinite(quality.passRatio) ? quality.passRatio : null,
+                thresholds: thresholdsPerWindow[index] || null,
+                baselineAnnualizedReturn: Number.isFinite(ev.metrics?.baselineAnnualizedReturn)
+                    ? ev.metrics.baselineAnnualizedReturn
+                    : null,
+                sampleCount: Number.isFinite(analysis.sampleCount) ? analysis.sampleCount : null,
+                effectiveSampleCount: Number.isFinite(analysis.effectiveSampleCount) ? analysis.effectiveSampleCount : null,
+                statWeightLimited: Boolean(analysis.statWeightLimited),
+                effectiveTrialCount: Number.isFinite(analysis.effectiveTrialCount) ? analysis.effectiveTrialCount : null,
+                trialCount: Number.isFinite(analysis.trialCount) ? analysis.trialCount : null,
+            };
         });
 
         return {
@@ -1433,6 +1781,7 @@
             averageSortino,
             averageMaxDrawdown,
             medianAnnualizedReturn,
+            medianBaselineAnnualizedReturn,
             medianSharpe,
             medianSortino,
             medianMaxDrawdown,
@@ -1443,27 +1792,42 @@
             medianCredibility,
             medianStatWeight,
             medianPsr,
+            medianPsrStrict,
             medianDsr,
+            medianDsrStrict,
             psrAbove95Ratio,
+            psrStrictAbove95Ratio,
+            dsrBelow50Ratio,
             medianSampleCount,
+            medianEffectiveSampleCount,
             medianMinTrackRecordLength,
             overallSharpe,
             overallPsr,
+            overallPsrStrict,
             overallDsr,
+            overallDsrStrict,
             thresholds,
             medianOosQualityRaw,
             qualityComponentMedians,
             qualityComponents: qualityComponentsList,
+            thresholdsPerWindow,
             oosQualityValues,
             oosPassRatios,
             windowScores,
             wfeValuesPercent,
             credibilityValues,
             psrValues,
+            psrStrictValues,
             dsrValues,
+            dsrStrictValues,
             sampleCounts,
+            effectiveSampleCounts,
             minTrackRecordValues,
             oosQualityRawValues,
+            baselineAnnualizedValues,
+            perWindowSummaries,
+            score: Number.isFinite(totalScore) ? totalScore * 100 : null,
+            strictMode,
         };
     }
 
@@ -1475,18 +1839,37 @@
             parts.push(`指標達標權重比 ${formatProbability(context.medianOosPassRatio)}`);
         }
         if (Number.isFinite(context.medianWfePercent)) {
-            parts.push(`WFE 中位 ${formatPercent(context.medianWfePercent)}，PSR≥95% 視窗比 ${formatProbability(context.psrAbove95Ratio)}`);
+            let credibilityLine = `WFE 中位 ${formatPercent(context.medianWfePercent)}，PSR@SR*=0≥95% 視窗比 ${formatProbability(context.psrAbove95Ratio)}`;
+            if (Number.isFinite(context.psrStrictAbove95Ratio)) {
+                credibilityLine += `，PSR@SR*=1≥95% 視窗比 ${formatProbability(context.psrStrictAbove95Ratio)}`;
+            }
+            if (Number.isFinite(context.dsrBelow50Ratio)) {
+                credibilityLine += `，DSR<50% 視窗比 ${formatProbability(context.dsrBelow50Ratio)}`;
+            }
+            parts.push(credibilityLine);
         }
-        if (Number.isFinite(context.overallSharpe) || Number.isFinite(context.overallPsr) || Number.isFinite(context.overallDsr)) {
+        if (Number.isFinite(context.overallSharpe) || Number.isFinite(context.overallPsr)
+            || Number.isFinite(context.overallPsrStrict) || Number.isFinite(context.overallDsr) || Number.isFinite(context.overallDsrStrict)) {
             const sharpeText = Number.isFinite(context.overallSharpe) ? `Sharpe ${formatNumber(context.overallSharpe)}` : null;
-            const psrText = Number.isFinite(context.overallPsr) ? `PSR ${formatProbability(context.overallPsr)}` : null;
-            const dsrText = Number.isFinite(context.overallDsr) ? `DSR ${formatProbability(context.overallDsr)}` : null;
-            const combined = [sharpeText, psrText, dsrText].filter(Boolean).join('，');
+            const psrText = Number.isFinite(context.overallPsr) ? `PSR@SR*=0 ${formatProbability(context.overallPsr)}` : null;
+            const psrStrictText = Number.isFinite(context.overallPsrStrict) ? `PSR@SR*=1 ${formatProbability(context.overallPsrStrict)}` : null;
+            const dsrText = Number.isFinite(context.overallDsr) ? `DSR@SR*=0 ${formatProbability(context.overallDsr)}` : null;
+            const dsrStrictText = Number.isFinite(context.overallDsrStrict) ? `DSR@SR*=1 ${formatProbability(context.overallDsrStrict)}` : null;
+            const combined = [sharpeText, psrText, psrStrictText, dsrText, dsrStrictText].filter(Boolean).join('，');
             if (combined) parts.push(`整體 ${combined}`);
         }
-        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
+        if (Number.isFinite(context.medianBaselineAnnualizedReturn)) {
+            parts.push(`買入持有年化中位 ${formatPercent(context.medianBaselineAnnualizedReturn)}，每個視窗的年化門檻均採用對應的買入持有年化`);
+        }
+        const baselineClause = Number.isFinite(context.medianBaselineAnnualizedReturn)
+            ? `年化 ≥ 視窗買入持有（中位 ${formatPercent(context.medianBaselineAnnualizedReturn)}）`
+            : '年化 ≥ 視窗買入持有';
+        parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（${baselineClause}、Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
         if (context.gradeDowngraded) {
             parts.push('整體 DSR 未達 0，已將等級下修一級');
+        }
+        if (context.strictMode) {
+            parts.push('已啟用嚴格模式：PSR/DSR 以 SR*=1 檢驗且低於 MinTRL 的視窗一律視為不可信');
         }
         return parts.join('；');
     }
@@ -1522,7 +1905,7 @@
         const checks = [];
         if (Number.isFinite(metrics.annualizedReturn)) {
             const pass = metrics.annualizedReturn >= thresholds.annualizedReturn;
-            if (!pass) reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
+            if (!pass) reasons.push(`年化報酬低於 ${formatPercent(thresholds.annualizedReturn)}`);
             checks.push(pass);
         }
         if (Number.isFinite(metrics.sharpeRatio)) {
@@ -1542,7 +1925,7 @@
         }
         if (Number.isFinite(metrics.winRate)) {
             const pass = metrics.winRate >= thresholds.winRate;
-            if (!pass) reasons.push(`勝率低於 ${thresholds.winRate}%`);
+            if (!pass) reasons.push(`勝率低於 ${formatPercent(thresholds.winRate)}`);
             checks.push(pass);
         }
 
@@ -1571,6 +1954,7 @@
             maxDrawdown: toFiniteNumber(result.maxDrawdown),
             winRate: toFiniteNumber(winRate),
             tradesCount: Number.isFinite(tradesCount) ? tradesCount : null,
+            baselineAnnualizedReturn: toFiniteNumber(result.buyHoldAnnualizedReturn),
             oosStats: sanitizeOosStats(result.oosDailyStats),
         };
     }
@@ -1587,6 +1971,15 @@
         const sampleCount = Number.isFinite(stats.sampleCount) && stats.sampleCount > 0
             ? Math.round(stats.sampleCount)
             : 0;
+        const autocorrelations = Array.isArray(stats.autocorrelations)
+            ? stats.autocorrelations.map((rho) => (Number.isFinite(rho) ? Number(rho) : null))
+            : [];
+        const effectiveSampleCount = Number.isFinite(stats.effectiveSampleCount) && stats.effectiveSampleCount > 0
+            ? Number(stats.effectiveSampleCount)
+            : null;
+        const excessKurtosis = Number.isFinite(stats.excessKurtosis)
+            ? Number(stats.excessKurtosis)
+            : (Number.isFinite(stats.kurtosis) ? Number(stats.kurtosis) - 3 : null);
         return {
             sampleCount,
             sum1: normalize(stats.sum1) ?? 0,
@@ -1598,6 +1991,12 @@
             stdDev: normalize(stats.stdDev),
             skewness: normalize(stats.skewness),
             kurtosis: normalize(stats.kurtosis),
+            autocorrelations,
+            effectiveSampleCount,
+            excessKurtosis,
+            averageAutocorrelation: Number.isFinite(stats.averageAutocorrelation)
+                ? Number(stats.averageAutocorrelation)
+                : null,
         };
     }
 
@@ -1638,6 +2037,23 @@
         if (!Number.isFinite(best) || !Number.isFinite(worst)) return null;
         if (worst <= best) return value <= best ? 1 : 0;
         const ratio = (worst - value) / (worst - best);
+        return clamp01(ratio);
+    }
+
+    function scoreAgainstThreshold(value, threshold) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        if (Math.abs(threshold) < 1e-6) {
+            return value >= threshold ? 1 : 0;
+        }
+        const ratio = 1 + (value - threshold) / Math.abs(threshold);
+        return clamp01(ratio);
+    }
+
+    function scoreAgainstUpperBound(value, threshold) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+        if (value <= threshold) return 1;
+        const scale = Math.max(Math.abs(threshold), 1);
+        const ratio = 1 - (value - threshold) / scale;
         return clamp01(ratio);
     }
 
@@ -1727,6 +2143,14 @@
         return fallback;
     }
 
+    function resolveWindowThresholds(metrics, thresholds) {
+        const resolved = { ...thresholds };
+        if (metrics && Number.isFinite(metrics.baselineAnnualizedReturn)) {
+            resolved.annualizedReturn = Number(metrics.baselineAnnualizedReturn);
+        }
+        return resolved;
+    }
+
     function computeOosQualityScore(metrics, thresholds) {
         if (!metrics || metrics.error) {
             return { value: null, components: {}, passRatio: 0, rawValue: null };
@@ -1747,45 +2171,88 @@
         };
 
         const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
         const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
-        const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
+        const annScore = scoreAgainstThreshold(annValue, annThreshold);
+        const annPass = Number.isFinite(annValue) && Number.isFinite(annThreshold) && annValue >= annThreshold;
         accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
         const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
-        const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
+        const sharpeScore = scoreAgainstThreshold(sharpeValue, sharpeThreshold);
+        const sharpePass = Number.isFinite(sharpeValue) && Number.isFinite(sharpeThreshold) && sharpeValue >= sharpeThreshold;
         accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
         const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
-        const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
+        const sortinoScore = scoreAgainstThreshold(sortinoValue, sortinoThreshold);
+        const sortinoPass = Number.isFinite(sortinoValue) && Number.isFinite(sortinoThreshold) && sortinoValue >= sortinoThreshold;
         accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
         const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
-        const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
+        const drawdownScore = scoreAgainstUpperBound(drawdownValue, drawdownThreshold);
+        const drawdownPass = Number.isFinite(drawdownValue) && Number.isFinite(drawdownThreshold) && drawdownValue <= drawdownThreshold;
         accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
         const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
-        const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
+        const winRateScore = scoreAgainstThreshold(winRateValue, winRateThreshold);
+        const winRatePass = Number.isFinite(winRateValue) && Number.isFinite(winRateThreshold) && winRateValue >= winRateThreshold;
         accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;
-        const value = Number.isFinite(rawValue) ? Math.min(rawValue, passRatio) : null;
+        const value = Number.isFinite(rawValue) ? rawValue : null;
         return { value, components, passRatio, rawValue };
+    }
+
+    function resolveOptimizationTrialInfo(summary, options = {}) {
+        const fallbackTrials = Math.max(1, Number(options?.fallbackTrials) || 1);
+        if (!summary || typeof summary !== 'object') {
+            return { rawTrials: fallbackTrials, effectiveTrials: fallbackTrials, correlationEstimate: null };
+        }
+        const rawTrials = Math.max(1, Number(summary.rawTrials ?? summary.trials ?? fallbackTrials) || fallbackTrials);
+        const correlationEstimate = Number.isFinite(summary.correlationEstimate)
+            ? clamp01(Math.abs(summary.correlationEstimate))
+            : null;
+        const effectiveTrials = Math.max(1, Number(summary.effectiveTrials)
+            || computeEffectiveTrialCount(rawTrials, correlationEstimate));
+        return { rawTrials, effectiveTrials, correlationEstimate };
+    }
+
+    function estimateOptimizationCorrelation(scopeResults) {
+        if (!Array.isArray(scopeResults) || scopeResults.length === 0) return null;
+        const correlations = [];
+        scopeResults.forEach((result) => {
+            const history = Array.isArray(result?.metricHistory) ? result.metricHistory.filter((val) => Number.isFinite(val)) : [];
+            if (history.length < 2) return;
+            const mean = history.reduce((acc, val) => acc + val, 0) / history.length;
+            let numerator = 0;
+            let denomA = 0;
+            let denomB = 0;
+            for (let i = 1; i < history.length; i += 1) {
+                const prev = history[i - 1] - mean;
+                const curr = history[i] - mean;
+                numerator += prev * curr;
+                denomA += prev * prev;
+                denomB += curr * curr;
+            }
+            const denominator = Math.sqrt(denomA * denomB);
+            if (denominator > 0) {
+                correlations.push(numerator / denominator);
+            }
+        });
+        if (correlations.length === 0) return null;
+        const avg = correlations.reduce((acc, val) => acc + val, 0) / correlations.length;
+        return clamp01(Math.abs(avg));
+    }
+
+    function computeEffectiveTrialCount(rawTrials, correlationEstimate) {
+        const trials = Math.max(1, Number(rawTrials) || 1);
+        if (!Number.isFinite(correlationEstimate)) return trials;
+        const rho = clamp01(correlationEstimate);
+        const effective = 1 + (trials - 1) * (1 - rho);
+        return Math.max(1, effective);
     }
 
     function computeMedianComponents(componentList) {
@@ -1806,61 +2273,159 @@
         return result;
     }
 
+    function computeSampleSharpeFromStats(stats) {
+        if (!stats || typeof stats !== 'object') return null;
+        const mean = Number.isFinite(stats.mean) ? stats.mean : null;
+        const stdDev = Number.isFinite(stats.stdDev) ? stats.stdDev : null;
+        if (!Number.isFinite(mean) || !Number.isFinite(stdDev) || stdDev <= 0) return null;
+        return (mean - DAILY_RISK_FREE_RATE) / stdDev;
+    }
+
+    function computeSampleSharpeFromMoments(moment) {
+        if (!moment || typeof moment !== 'object') return null;
+        const mean = Number.isFinite(moment.mean) ? moment.mean : (Number.isFinite(moment.sum1) && Number.isFinite(moment.sampleCount) && moment.sampleCount > 0
+            ? moment.sum1 / moment.sampleCount
+            : null);
+        const stdDev = Number.isFinite(moment.stdDev) ? moment.stdDev : null;
+        if (!Number.isFinite(mean) || !Number.isFinite(stdDev) || stdDev <= 0) return null;
+        return (mean - DAILY_RISK_FREE_RATE) / stdDev;
+    }
+
+    function resolveEffectiveSampleCount(stats) {
+        if (!stats || typeof stats !== 'object') return 0;
+        if (Number.isFinite(stats.effectiveSampleCount) && stats.effectiveSampleCount > 0) {
+            return stats.effectiveSampleCount;
+        }
+        const sampleCount = Number.isFinite(stats.sampleCount) && stats.sampleCount > 0 ? stats.sampleCount : 0;
+        if (sampleCount <= 0) return 0;
+        const autocorrelations = Array.isArray(stats.autocorrelations) ? stats.autocorrelations : [];
+        let positiveAutoSum = 0;
+        autocorrelations.forEach((rho) => {
+            if (Number.isFinite(rho) && rho > 0) {
+                positiveAutoSum += rho;
+            }
+        });
+        const autoPenalty = 1 + 2 * positiveAutoSum;
+        const excessKurtosis = Number.isFinite(stats.excessKurtosis)
+            ? stats.excessKurtosis
+            : (Number.isFinite(stats.kurtosis) ? stats.kurtosis - 3 : 0);
+        const tailPenalty = 1 + Math.max(0, excessKurtosis) / 2;
+        const adjusted = sampleCount / Math.max(1, autoPenalty * tailPenalty);
+        return Math.max(1, Math.min(sampleCount, adjusted));
+    }
+
     function computeWindowAnalysis(metrics, thresholds, options) {
-        const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : thresholds.sharpeRatio;
+        const resolvedThresholds = resolveWindowThresholds(metrics, thresholds);
+        const srBenchmarks = {
+            base: Number.isFinite(options?.srBenchmarks?.base) ? options.srBenchmarks.base : 0,
+            strict: Number.isFinite(options?.srBenchmarks?.strict) ? options.srBenchmarks.strict : 1,
+        };
         const trialCount = Math.max(1, Number(options?.trialCount) || 1);
+        const effectiveTrialCount = Math.max(1, Number(options?.effectiveTrialCount) || trialCount);
+        const strictMode = Boolean(options?.strictMode);
         const wfe = Number.isFinite(metrics?.walkForwardEfficiency) ? metrics.walkForwardEfficiency : null;
         const stats = metrics?.oosStats && typeof metrics.oosStats === 'object' ? metrics.oosStats : null;
-        const sampleCount = Number.isFinite(stats?.sampleCount) && stats.sampleCount > 0 ? stats.sampleCount : 0;
+        const rawSampleCount = Number.isFinite(stats?.sampleCount) && stats.sampleCount > 0 ? stats.sampleCount : 0;
+        const effectiveSampleCount = resolveEffectiveSampleCount(stats);
 
-        const quality = computeOosQualityScore(metrics, thresholds);
-        const sharpe = toFiniteNumber(metrics?.sharpeRatio);
+        const quality = computeOosQualityScore(metrics, resolvedThresholds);
+        const sampleSharpe = computeSampleSharpeFromStats(stats);
         const skewness = Number.isFinite(stats?.skewness) ? stats.skewness : null;
         const kurtosis = Number.isFinite(stats?.kurtosis) ? stats.kurtosis : null;
-
-        const psr = computeProbabilisticSharpeProbability({
-            sharpe,
-            benchmark: srBenchmark,
-            sampleCount,
+        const psrBase = computeProbabilisticSharpeProbability({
+            sharpe: sampleSharpe,
+            benchmark: srBenchmarks.base,
+            sampleCount: effectiveSampleCount,
             skewness,
             kurtosis,
         });
 
-        const dsr = computeDeflatedSharpeProbability({
-            sharpe,
-            benchmark: srBenchmark,
-            sampleCount,
+        const psrStrict = computeProbabilisticSharpeProbability({
+            sharpe: sampleSharpe,
+            benchmark: srBenchmarks.strict,
+            sampleCount: effectiveSampleCount,
             skewness,
             kurtosis,
-            trials: trialCount,
         });
 
-        const psrContribution = Number.isFinite(psr) ? psr : 0;
-        const dsrContribution = Number.isFinite(dsr) ? dsr : 0;
-        const credibility = clamp01((psrContribution + dsrContribution) / 2);
-        const statWeight = 0.5 + 0.5 * credibility;
-        const windowScore = (Number.isFinite(quality.value) ? quality.value : 0) * statWeight;
+        const dsrBase = computeDeflatedSharpeProbability({
+            sharpe: sampleSharpe,
+            benchmark: srBenchmarks.base,
+            sampleCount: effectiveSampleCount,
+            skewness,
+            kurtosis,
+            trials: effectiveTrialCount,
+        });
 
+        const dsrStrict = computeDeflatedSharpeProbability({
+            sharpe: sampleSharpe,
+            benchmark: srBenchmarks.strict,
+            sampleCount: effectiveSampleCount,
+            skewness,
+            kurtosis,
+            trials: effectiveTrialCount,
+        });
+
+        let psrForDisplay = Number.isFinite(psrBase) ? clamp01(psrBase) : null;
+        let psrStrictForDisplay = Number.isFinite(psrStrict) ? clamp01(psrStrict) : null;
+        const dsrDisplay = Number.isFinite(dsrBase) ? clamp01(dsrBase) : null;
+        const dsrStrictDisplay = Number.isFinite(dsrStrict) ? clamp01(dsrStrict) : null;
+
+        const credibilityBase = (Number.isFinite(psrForDisplay) && Number.isFinite(dsrDisplay))
+            ? clamp01(Math.sqrt(psrForDisplay * dsrDisplay))
+            : 0;
+        let credibilityStrict = (Number.isFinite(psrStrictForDisplay) && Number.isFinite(dsrStrictDisplay))
+            ? clamp01(Math.sqrt(psrStrictForDisplay * dsrStrictDisplay))
+            : 0;
+
+        let credibility = credibilityBase;
+        let statWeight = 0.2 + 0.8 * credibility;
         const minTrackRecordLength = computeMinTrackRecordLength({
-            sharpe,
-            benchmark: srBenchmark,
-            sampleCount,
+            sharpe: sampleSharpe,
+            benchmark: srBenchmarks.base,
+            sampleCount: effectiveSampleCount,
             skewness,
             kurtosis,
             confidence: MIN_TRACK_RECORD_CONFIDENCE,
         });
 
+        let statWeightLimited = false;
+        if (Number.isFinite(minTrackRecordLength) && Number.isFinite(effectiveSampleCount)
+            && effectiveSampleCount > 0 && minTrackRecordLength > effectiveSampleCount) {
+            if (strictMode) {
+                psrForDisplay = 0;
+                psrStrictForDisplay = 0;
+                credibility = 0;
+                credibilityStrict = 0;
+                statWeight = 0.2;
+                statWeightLimited = true;
+            } else {
+                statWeight = Math.min(statWeight, 0.3);
+                statWeightLimited = true;
+            }
+        }
+
+        const windowScore = (Number.isFinite(quality.value) ? quality.value : 0) * statWeight;
+
         return {
             oosQuality: quality,
-            psrProbability: Number.isFinite(psr) ? clamp01(psr) : null,
-            dsrProbability: Number.isFinite(dsr) ? clamp01(dsr) : null,
+            psrProbability: psrForDisplay,
+            psrStrictProbability: psrStrictForDisplay,
+            dsrProbability: dsrDisplay,
+            dsrStrictProbability: dsrStrictDisplay,
             credibility,
+            credibilityStrict,
             statWeight,
+            statWeightLimited,
             windowScore,
             minTrackRecordLength: Number.isFinite(minTrackRecordLength) ? minTrackRecordLength : null,
-            sampleCount,
+            sampleCount: rawSampleCount,
+            effectiveSampleCount,
+            effectiveTrialCount,
+            trialCount,
             stats,
             wfe,
+            thresholds: resolvedThresholds,
         };
     }
 
@@ -2266,6 +2831,7 @@
         };
         const params = typeof getBacktestParams === 'function' ? getBacktestParams() : null;
         const optimization = getRollingOptimizationConfig();
+        const strictMode = Boolean(document.getElementById('rolling-strict-mode')?.checked);
         const baseStart = params?.startDate || availability?.start || lastFetchSettings?.startDate || null;
         const baseEnd = params?.endDate || availability?.end || lastFetchSettings?.endDate || null;
 
@@ -2273,7 +2839,7 @@
         let testingMonths;
         let stepMonths;
 
-        if (isAdvancedSettingsActive()) {
+        if (state.manualDurationMode) {
             trainingMonths = clampNumber(readInputValue('rolling-training-months', DEFAULT_WINDOW_RATIO.training), 6, 180);
             testingMonths = clampNumber(readInputValue('rolling-testing-months', DEFAULT_WINDOW_RATIO.testing), 3, 72);
             stepMonths = clampNumber(readInputValue('rolling-step-months', DEFAULT_WINDOW_RATIO.step), 1, 36);
@@ -2298,7 +2864,10 @@
             baseStart,
             baseEnd,
             optimization,
-            windowCount,
+            windowCount: state.manualDurationMode ? null : windowCount,
+            requestedWindowCount: windowCount,
+            manualDurationMode: state.manualDurationMode,
+            strictMode,
         };
     }
 
@@ -2664,6 +3233,11 @@
             if (message) summary.messages.push(message);
         });
 
+        const correlationEstimate = estimateOptimizationCorrelation(summary.scopeResults);
+        summary.correlationEstimate = correlationEstimate;
+        summary.rawTrials = plan.config.trials;
+        summary.effectiveTrials = computeEffectiveTrialCount(plan.config.trials, correlationEstimate);
+
         if (summary.messages.length > 0) {
             summary.messages.unshift(`優化目標：${metricLabel}`);
         } else if (!summary.error) {
@@ -3011,6 +3585,7 @@
                 changedKeys,
                 metricValue,
                 metricLabel: resolveMetricLabel(targetMetric),
+                metricHistory: history.slice(),
             });
         });
         return results;
@@ -3177,7 +3752,9 @@
         }
 
         const summaryParts = [];
-        if (Number.isFinite(config.windowCount)) {
+        if (state.manualDurationMode) {
+            summaryParts.push('手動視窗');
+        } else if (Number.isFinite(config.windowCount)) {
             summaryParts.push(`目標 ${config.windowCount} 次`);
         }
         summaryParts.push(`訓練 ${config.trainingMonths} 個月`);
@@ -3187,7 +3764,7 @@
             summaryEl.textContent = `共 ${windows.length} 個視窗（${summaryParts.join(' / ')}）`;
         }
 
-        if (Number.isFinite(config.windowCount) && windows.length < config.windowCount) {
+        if (!state.manualDurationMode && Number.isFinite(config.windowCount) && windows.length < config.windowCount) {
             setPlanWarning(`可用資料僅能建立 ${windows.length} 個視窗，建議延長回測期間。`);
         } else {
             setPlanWarning('');

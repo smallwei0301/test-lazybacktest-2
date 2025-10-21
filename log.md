@@ -1,5 +1,13 @@
 
 
+## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
+- **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。
+- **Fix**:
+  - `index.html` 在「滾動測試次數」旁新增「改用手動視窗」切換鈕，手動模式可直接輸入訓練／測試／平移月數，並於進階設定說明新的切換流程，年化門檻輸入欄改為提示文字。
+  - `js/rolling-test.js` 更新評分流程：年化門檻改採各視窗買入持有年化，指標達標給 1 分、未達線性遞減至 0；逐窗分析會記錄門檻、品質原值、達標權重與統計權重，報表與卡片細節同步顯示並補上計算說明。新增手動視窗模式狀態管理、視窗計畫摘要提示，以及 `aggregate.score`（0～100 分）供策略比較使用。
+  - `README.md` 說明新版評分與手動視窗模式，更新補丁代碼。
+- **Testing**: 容器環境無法連線 Proxy，待實機驗證滾動測試與策略儲存流程。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:
@@ -1394,3 +1402,19 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-ROLLING-TEST-20251108A
+- **Issue recap**: Walk-Forward 報表缺乏品質中位與統計可信度的計算說明，逐窗資訊僅以文字列出不易對照；此外，保存策略後比較表仍顯示「請先測試後保存策略」，推估為滾動測試分數被覆寫為空值。
+- **Fix**:
+  - `js/rolling-test.js` 更新評分卡片文案，新增窗分數計算步驟列表、品質中位與加權原值的解釋，以及 PSR/DSR → 統計可信度的條列說明。逐窗得分改為表格呈現，清楚列出品質得分、加權原值、達標權重、統計權重、窗分數與年化門檻。
+  - `js/backtest.js` 的 `collectStrategyMetricSnapshot` 支援沿用既有滾動測試分數、達標率與摘要，並在比較表顯示版本代碼與更新日期，確保完成滾動測試後保存策略不再回到 placeholder 提示。
+  - `README.md` 同步文檔版本編號與新說明，`log.md` 記錄補丁背景與後續驗證需求。
+- **Testing**: 受限於容器無法連線 Proxy，未能實際跑滾動測試；請於具備資料來源的環境實測自動／手動視窗模式與策略保存流程，確認瀏覽器 console 無錯誤並完成比較表更新。
+
+## 2026-07-28 — Patch LB-ROLLING-TRUST-20251109A
+- **Issue recap**: PSR/DSR 仍以年化 Sharpe 與總樣本數估計，未考慮自相關造成的樣本膨脹，也缺乏對參數嘗試相似度的折減。品質得分則同時受限於達標權重，嚴格模式需求亦無法切換。
+- **Fix**:
+  - `js/rolling-test.js` 導入每日樣本 Sharpe、有效樣本數 n_eff 與有效嘗試數 M_eff，重新計算 PSR@SR*=0/1 與 DSR，統計權重改為 `0.2 + 0.8 × √(PSR × DSR)`，並在 n_eff 低於 MinTRL 時限制或歸零（嚴格模式）。
+  - 逐窗表格新增 PSR/DSR 雙門檻、n_eff、MinTRL 與統計權重受限提示；總結文字與卡片說明同步更新，支援嚴格模式核取方塊並顯示 PSR@SR*=1 的達標比例。
+  - `js/worker.js` 回傳 OOS 報酬矩的同時計算自相關係數、有效樣本數與超額峰度，`sanitizeOosStats()` 保留欄位供前端估算；README、log.md 換版為 `LB-ROLLING-TRUST-20251109A` 並補充新流程。
+- **Testing**: 受限於容器無法連線 Proxy，未能跑實際滾動測試；請於具備資料來源的環境驗證一般模式與嚴格模式的 PSR/DSR 顯示、MinTRL 限制，以及逐窗表格與比較報告是否同步更新。
