@@ -566,6 +566,47 @@
                                                 ></div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="batchOptimizationLogContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="line-chart" class="lucide w-4 h-4"></i>
+                                                    批量優化除錯紀錄
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="batchOptimizationLogToggle"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors flex items-center gap-1"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        aria-expanded="false"
+                                                        aria-controls="batchOptimizationLogPanel"
+                                                    >
+                                                        <span class="toggle-indicator">＋</span>
+                                                        <span class="toggle-label">展開</span>
+                                                    </button>
+                                                    <button
+                                                        id="batchOptimizationLogClear"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        清除紀錄
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div
+                                                id="batchOptimizationLogPanel"
+                                                class="rounded-md border bg-white/70 shadow-sm hidden"
+                                                style="border-color: var(--border);"
+                                                aria-hidden="true"
+                                            >
+                                                <div
+                                                    id="batch-optimization-log-body"
+                                                    class="px-3 py-3 space-y-3 text-[11px]"
+                                                    style="color: var(--foreground);"
+                                                ></div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
