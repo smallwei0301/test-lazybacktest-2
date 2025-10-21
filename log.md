@@ -1293,3 +1293,11 @@
 - **Diagnostics**: 滾動測試訓練窗與批量面板交替執行，確認覆用視窗快取時 `cachedDataOverride` 與全域快取皆通過範圍檢查，並於控制台觀察覆寫被拒後改為重新抓取的資訊訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-11 — Patch LB-BATCH-CACHE-20251027A
+- **Issue recap**: 滾動測試後立即執行批量優化時，部分流程仍沿用訓練視窗殘留的快取資料，且缺乏可複製的批量比較紀錄，導致最佳參數與首次批量結果不一致。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `ensureBatchCachePrimed` 預檢流程，先檢查資料範圍是否足夠，必要時自動呼叫主執行緒回測補齊快取並記錄 preflight 決策。
+  - 建立批量優化跑次歷史與比較摘要，於開發者模式卡片輸出可複製的兩輪差異（目標指標、資料區間、最佳策略與指標值），協助比對滾動測試後與原始批量結果。
+- **Diagnostics**: 依「滾動優化 → 批量優化 → 調整日期 → 再跑批量」流程，確認預檢會觸發主回測補快取且開發者日誌記錄兩輪結果與差異摘要，可貼上複製比對。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+

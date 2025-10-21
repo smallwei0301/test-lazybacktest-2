@@ -4,6 +4,7 @@
 // Patch Tag: LB-BATCH-CACHE-20251020A
 // Patch Tag: LB-BATCH-CACHE-20251022A
 // Patch Tag: LB-BATCH-CACHE-20251024A
+// Patch Tag: LB-BATCH-CACHE-20251027A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -52,6 +53,8 @@ let batchOptimizationResults = [];
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
+let lastBatchPreflightDecision = null;
+const batchOptimizationRunHistory = [];
 
 const CACHE_DATE_TOLERANCE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -62,6 +65,27 @@ function formatDebugDate(ts) {
         return iso.slice(0, 10);
     } catch (error) {
         return null;
+    }
+}
+
+function formatDebugTimestamp(ms) {
+    if (!Number.isFinite(ms)) return '';
+    try {
+        const date = new Date(ms);
+        if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+            return new Intl.DateTimeFormat('zh-TW', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false,
+            }).format(date);
+        }
+        return date.toISOString().replace('T', ' ').replace('Z', '');
+    } catch (error) {
+        return '';
     }
 }
 
@@ -563,6 +587,11 @@ function recordBatchDeveloperLog(kind, details = {}) {
                 : String(details.priceMode);
             developerNotes.push(`價格模式：${modeText}`);
         }
+        if (Array.isArray(details.notes)) {
+            details.notes.forEach((note) => {
+                if (note) developerNotes.push(note);
+            });
+        }
 
         const meta = {
             datasetRange,
@@ -570,6 +599,9 @@ function recordBatchDeveloperLog(kind, details = {}) {
             priceMode: details.priceMode || null,
             dataSource: details.source || null,
         };
+        if (details.copyText) {
+            meta.copyText = details.copyText;
+        }
 
         log.record(severity, {
             label: '批量快取診斷',
@@ -672,6 +704,132 @@ function applyBatchWorkerResultToCache(preparedParams, workerResult, cachePayloa
         priceMode: settings.priceMode,
         market: settings.market,
     });
+}
+
+function shouldPrimeCacheForReason(reason) {
+    if (!reason) return false;
+    const retryReasons = new Set([
+        'noGlobalCache',
+        'globalDatasetInsufficient',
+        'rangeNotCovered',
+        'cacheEntryMissing',
+        'missingCoverage',
+        'coverageInsufficient',
+        'stockMismatch',
+        'marketMismatch',
+        'modeMismatch',
+        'splitMismatch',
+    ]);
+    return retryReasons.has(reason);
+}
+
+function waitForDatasetCoverage(requiredStart, requiredEnd, timeoutMs = 20000, pollMs = 300) {
+    return new Promise((resolve, reject) => {
+        const startTime = Date.now();
+        const deadline = startTime + timeoutMs;
+
+        function check() {
+            if (Array.isArray(cachedStockData) && cachedStockData.length > 0) {
+                const fallbackStart = requiredStart || lastFetchSettings?.dataStartDate || lastFetchSettings?.startDate || null;
+                const fallbackEnd = requiredEnd || lastFetchSettings?.endDate || null;
+                if (!fallbackStart && !fallbackEnd) {
+                    resolve(true);
+                    return;
+                }
+                if (datasetCoversRange(cachedStockData, fallbackStart, fallbackEnd)) {
+                    resolve(true);
+                    return;
+                }
+            }
+
+            if (Date.now() >= deadline) {
+                reject(new Error('timeout'));
+                return;
+            }
+
+            setTimeout(check, pollMs);
+        }
+
+        check();
+    });
+}
+
+async function ensureBatchCachePrimed(params) {
+    const state = { timestamp: Date.now(), initial: null, refreshed: null };
+    if (!params || typeof params !== 'object') return state;
+
+    const initialPayload = resolveWorkerCachePayload(params, {});
+    state.initial = initialPayload;
+    logBatchCacheDecision('preflight-initial', params, initialPayload);
+
+    if (initialPayload.useCachedData || !shouldPrimeCacheForReason(initialPayload.reason)) {
+        if (!initialPayload.useCachedData && initialPayload.reason) {
+            recordBatchDeveloperLog('warning', {
+                status: '快取需重建',
+                context: 'batch-preflight',
+                reason: initialPayload.reason,
+                required: initialPayload.required || null,
+                summary: initialPayload.datasetSummary || null,
+            });
+        }
+        return state;
+    }
+
+    recordBatchDeveloperLog('warning', {
+        status: '啟動主回測以刷新快取',
+        context: 'batch-preflight',
+        reason: initialPayload.reason,
+        required: initialPayload.required || null,
+        summary: initialPayload.datasetSummary || null,
+    });
+
+    if (typeof runBacktestInternal !== 'function') {
+        recordBatchDeveloperLog('error', {
+            status: '主回測函式不存在',
+            context: 'batch-preflight',
+            reason: initialPayload.reason,
+            required: initialPayload.required || null,
+            notes: ['無法自動補齊快取：缺少 runBacktestInternal'],
+        });
+        return state;
+    }
+
+    try {
+        runBacktestInternal();
+    } catch (error) {
+        recordBatchDeveloperLog('error', {
+            status: '啟動主回測失敗',
+            context: 'batch-preflight',
+            reason: initialPayload.reason,
+            required: initialPayload.required || null,
+            notes: [error?.message ? `錯誤：${error.message}` : '發生未知錯誤'],
+        });
+        return state;
+    }
+
+    try {
+        await waitForDatasetCoverage(initialPayload.required?.start || null, initialPayload.required?.end || null);
+        const refreshedPayload = resolveWorkerCachePayload(params, {});
+        state.refreshed = refreshedPayload;
+        logBatchCacheDecision('preflight-refreshed', params, refreshedPayload);
+        recordBatchDeveloperLog(refreshedPayload.useCachedData ? 'success' : 'warning', {
+            status: refreshedPayload.useCachedData ? '快取已刷新' : '仍需重新抓取',
+            context: 'batch-preflight',
+            reason: refreshedPayload.reason || initialPayload.reason,
+            required: refreshedPayload.required || initialPayload.required || null,
+            summary: refreshedPayload.datasetSummary || initialPayload.datasetSummary || null,
+        });
+    } catch (error) {
+        recordBatchDeveloperLog('error', {
+            status: '等待快取逾時',
+            context: 'batch-preflight',
+            reason: initialPayload.reason,
+            required: initialPayload.required || null,
+            notes: [error?.message ? `錯誤：${error.message}` : '等待快取資料逾時'],
+        });
+    }
+
+    return state;
 }
 
 function resetBatchWorkerStatus() {
@@ -902,9 +1060,9 @@ function bindBatchOptimizationEvents() {
 }
 
 // 開始批量優化
-function startBatchOptimization() {
+async function startBatchOptimization() {
     console.log('[Batch Optimization] Starting batch optimization...');
-    
+
     // 防止重複執行
     if (window.batchOptimizationRunning) {
         console.log('[Batch Optimization] Already running, skipping...');
@@ -937,34 +1095,55 @@ function startBatchOptimization() {
     if (stopBtn) {
         stopBtn.classList.remove('hidden');
     }
-    
+
     // 驗證進出場條件不可為 null
     if (!validateBatchStrategies()) {
         restoreBatchOptimizationUI();
         return;
     }
-    
-    // 檢查是否有足夠的股票數據
-    if (!cachedStockData || cachedStockData.length < 20) {
+
+    showBatchProgress();
+    updateBatchProgress(2, '檢查資料快取...');
+
+    let preparedBaseParams = null;
+    try {
+        const baseSnapshot = prepareBaseParamsForOptimization(getBacktestParams());
+        preparedBaseParams = enrichParamsWithLookback(baseSnapshot);
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to prepare base params for preflight:', error);
+    }
+
+    try {
+        lastBatchPreflightDecision = await ensureBatchCachePrimed(preparedBaseParams || {});
+    } catch (error) {
+        console.warn('[Batch Optimization] Cache preflight error:', error);
+        lastBatchPreflightDecision = lastBatchPreflightDecision || { timestamp: Date.now(), initial: null, refreshed: null };
+    }
+
+    if (!Array.isArray(cachedStockData) || cachedStockData.length < 20) {
         showError('請先執行回測以建立快取股票數據，然後再進行批量優化');
+        recordBatchDeveloperLog('error', {
+            status: '快取不足',
+            context: 'batch-preflight',
+            reason: 'noGlobalCache',
+            notes: ['自動快取補齊失敗，請先手動執行一次回測'],
+        });
         restoreBatchOptimizationUI();
         return;
     }
-    
+
     try {
         // 獲取批量優化設定
         const config = getBatchOptimizationConfig();
-        
+        batchOptimizationConfig = { ...config };
+
         // 重置結果
         batchOptimizationResults = [];
     // 初始化 worker 狀態面板
     resetBatchWorkerStatus();
     const panel = document.getElementById('batch-worker-status-panel');
     if (panel) panel.classList.remove('hidden');
-        
-        // 顯示進度
-        showBatchProgress();
-        
+
         // 執行批量優化
         executeBatchOptimization(config);
     } catch (error) {
@@ -2387,7 +2566,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
 function showBatchResults() {
     try {
         console.log(`[Batch Optimization] Showing ${batchOptimizationResults.length} results`);
-        
+
         // 隱藏進度區域
         const progressElement = document.getElementById('batch-optimization-progress');
         if (progressElement) {
@@ -2402,16 +2581,157 @@ function showBatchResults() {
         
         // 排序結果
         sortBatchResults();
-        
+
         // 渲染結果表格
         renderBatchResultsTable();
-        
+
+        recordBatchRunSummary();
+
         // 重置運行狀態
         restoreBatchOptimizationUI();
     } catch (error) {
         console.error('[Batch Optimization] Error showing results:', error);
         restoreBatchOptimizationUI();
     }
+}
+
+function recordBatchRunSummary() {
+    const totalResults = Array.isArray(batchOptimizationResults) ? batchOptimizationResults.length : 0;
+    const datasetSummary = summariseDatasetRangeForDebug(cachedStockData);
+    const metricKey = batchOptimizationConfig.sortKey || batchOptimizationConfig.targetMetric || 'annualizedReturn';
+    const bestResult = totalResults > 0 ? batchOptimizationResults[0] : null;
+    const bestMetricValueRaw = bestResult && Number.isFinite(bestResult[metricKey]) ? bestResult[metricKey] : null;
+    const summary = {
+        id: Date.now(),
+        timestamp: Date.now(),
+        totalResults,
+        datasetSummary,
+        best: bestResult
+            ? {
+                buyStrategy: bestResult.buyStrategy,
+                sellStrategy: bestResult.sellStrategy,
+                metricKey,
+                metricValue: bestMetricValueRaw,
+                annualizedReturn: Number.isFinite(bestResult.annualizedReturn) ? bestResult.annualizedReturn : null,
+                sharpeRatio: Number.isFinite(bestResult.sharpeRatio) ? bestResult.sharpeRatio : null,
+                maxDrawdown: Number.isFinite(bestResult.maxDrawdown) ? bestResult.maxDrawdown : null,
+                totalReturn: Number.isFinite(bestResult.totalReturn) ? bestResult.totalReturn : null,
+            }
+            : null,
+        config: {
+            targetMetric: batchOptimizationConfig.targetMetric || 'annualizedReturn',
+            iterationLimit: batchOptimizationConfig.iterationLimit || null,
+            parameterTrials: batchOptimizationConfig.parameterTrials || null,
+            concurrency: batchOptimizationConfig.concurrency || null,
+        },
+        preflight: lastBatchPreflightDecision
+            ? {
+                initialReason: lastBatchPreflightDecision.initial?.reason || null,
+                refreshedReason: lastBatchPreflightDecision.refreshed?.reason || null,
+                timestamp: lastBatchPreflightDecision.timestamp || null,
+            }
+            : null,
+    };
+
+    batchOptimizationRunHistory.unshift(summary);
+    if (batchOptimizationRunHistory.length > 5) {
+        batchOptimizationRunHistory.length = 5;
+    }
+
+    const notes = [];
+    if (summary.best) {
+        notes.push(`最佳策略：${summary.best.buyStrategy} / ${summary.best.sellStrategy}`);
+        if (Number.isFinite(summary.best.metricValue)) {
+            notes.push(`最佳 ${summary.best.metricKey}：${summary.best.metricValue.toFixed(4)}`);
+        }
+        if (Number.isFinite(summary.best.totalReturn)) {
+            notes.push(`總報酬：${(summary.best.totalReturn * 100).toFixed(2)}%`);
+        }
+    } else {
+        notes.push('本輪未產生有效結果');
+    }
+    if (summary.datasetSummary?.hasData) {
+        notes.push(`資料範圍：${summary.datasetSummary.start || '未知'} → ${summary.datasetSummary.end || '未知'}（${summary.datasetSummary.valid || summary.datasetSummary.length || 0} 筆）`);
+    }
+    if (summary.preflight?.initialReason && summary.preflight.initialReason !== 'globalCacheReusable') {
+        notes.push(`啟動前快取：${summary.preflight.initialReason}`);
+    }
+    if (summary.preflight?.refreshedReason && summary.preflight.refreshedReason !== summary.preflight.initialReason) {
+        notes.push(`重檢快取：${summary.preflight.refreshedReason}`);
+    }
+
+    recordBatchDeveloperLog('info', {
+        status: '批量優化完成',
+        context: 'batch-run',
+        reason: summary.preflight?.refreshedReason || summary.preflight?.initialReason || 'completed',
+        summary: summary.datasetSummary,
+        notes,
+        priceMode: lastFetchSettings?.priceMode || null,
+        market: lastFetchSettings?.market || lastFetchSettings?.marketType || null,
+    });
+
+    if (batchOptimizationRunHistory.length >= 2) {
+        const comparison = buildBatchRunComparison(batchOptimizationRunHistory[0], batchOptimizationRunHistory[1]);
+        recordBatchDeveloperLog('info', {
+            status: '批量優化比較',
+            context: 'batch-run-compare',
+            reason: 'comparison',
+            notes: comparison.notes,
+            copyText: comparison.copyText,
+        });
+    }
+}
+
+function buildBatchRunComparison(current, previous) {
+    const notes = [];
+    const lines = [];
+    const currentTime = formatDebugTimestamp(current?.timestamp);
+    const previousTime = formatDebugTimestamp(previous?.timestamp);
+    const currentLabel = currentTime || '未知時間';
+    const previousLabel = previousTime || '未知時間';
+    lines.push(`批量優化比較：${previousLabel} → ${currentLabel}`);
+    notes.push(`比較：${previousLabel} → ${currentLabel}`);
+
+    const prevMetric = previous?.config?.targetMetric || '未設定';
+    const currMetric = current?.config?.targetMetric || '未設定';
+    lines.push(`目標指標：${prevMetric} → ${currMetric}`);
+    notes.push(`目標指標：${prevMetric} → ${currMetric}`);
+
+    const prevBestLabel = previous?.best ? `${previous.best.buyStrategy} / ${previous.best.sellStrategy}` : '無';
+    const currBestLabel = current?.best ? `${current.best.buyStrategy} / ${current.best.sellStrategy}` : '無';
+    lines.push(`最佳策略：${prevBestLabel} → ${currBestLabel}`);
+    notes.push(`最佳策略：${prevBestLabel} → ${currBestLabel}`);
+
+    const metricKey = current?.best?.metricKey || previous?.best?.metricKey || 'annualizedReturn';
+    const prevMetricValue = Number.isFinite(previous?.best?.metricValue)
+        ? previous.best.metricValue.toFixed(4)
+        : '—';
+    const currMetricValue = Number.isFinite(current?.best?.metricValue)
+        ? current.best.metricValue.toFixed(4)
+        : '—';
+    lines.push(`最佳 ${metricKey}：${prevMetricValue} → ${currMetricValue}`);
+    notes.push(`最佳 ${metricKey}：${prevMetricValue} → ${currMetricValue}`);
+
+    if (current?.datasetSummary?.hasData || previous?.datasetSummary?.hasData) {
+        const prevRange = previous?.datasetSummary?.hasData
+            ? `${previous.datasetSummary.start || '未知'} → ${previous.datasetSummary.end || '未知'}`
+            : '無資料';
+        const currRange = current?.datasetSummary?.hasData
+            ? `${current.datasetSummary.start || '未知'} → ${current.datasetSummary.end || '未知'}`
+            : '無資料';
+        lines.push(`資料範圍：${prevRange} → ${currRange}`);
+        notes.push(`資料範圍：${prevRange} → ${currRange}`);
+    }
+
+    lines.push(`結果筆數：${previous?.totalResults ?? 0} → ${current?.totalResults ?? 0}`);
+    notes.push(`結果筆數：${previous?.totalResults ?? 0} → ${current?.totalResults ?? 0}`);
+
+    const prevReason = previous?.preflight?.refreshedReason || previous?.preflight?.initialReason || '—';
+    const currReason = current?.preflight?.refreshedReason || current?.preflight?.initialReason || '—';
+    lines.push(`快取狀態：${prevReason} → ${currReason}`);
+    notes.push(`快取狀態：${prevReason} → ${currReason}`);
+
+    return { notes, copyText: lines.join('\n') };
 }
 
 // 排序結果
