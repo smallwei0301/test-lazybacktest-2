@@ -12,6 +12,8 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260310A
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
+// Patch Tag: LB-YAHOO-INDEX-20260719A
+// Patch Tag: LB-YAHOO-INDEX-20260727A
 
 // 全局變量
 let stockChart = null;
@@ -782,6 +784,12 @@ function getStockNoValue() {
     return (input?.value || '').trim().toUpperCase();
 }
 
+function isYahooIndexSymbol(stockNo) {
+    const value = (stockNo || '').trim().toUpperCase();
+    if (!value.startsWith('^')) return false;
+    return YAHOO_INDEX_PATTERN.test(value);
+}
+
 function normalizeMarketValue(value) {
     const normalized = (value || 'TWSE').toUpperCase();
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
@@ -790,7 +798,12 @@ function normalizeMarketValue(value) {
 
 function getCurrentMarketFromUI() {
     const selectEl = document.getElementById('marketSelect');
-    return normalizeMarketValue(selectEl?.value || 'TWSE');
+    const selectedMarket = normalizeMarketValue(selectEl?.value || 'TWSE');
+    const stockValue = getStockNoValue();
+    if (stockValue.startsWith('^')) {
+        return 'US';
+    }
+    return selectedMarket;
 }
 
 function getMarketLabel(market) {
@@ -872,7 +885,12 @@ function getDateRangeFromUI() {
     return { start, end };
 }
 
-function getTesterSourceConfigs(market, adjusted, splitEnabled) {
+function getTesterSourceConfigs(market, adjusted, splitEnabled, options = {}) {
+    if (options.isIndex) {
+        return [
+            { id: 'yahoo', label: 'Yahoo 指數', description: 'Yahoo Finance 指數日線資料' },
+        ];
+    }
     if (adjusted) {
         const netlifyDescription = splitEnabled
             ? 'TWSE/FinMind 原始 + FinMind 配息 + 股票拆分'
@@ -976,6 +994,7 @@ function setTesterButtonsDisabled(disabled) {
 async function runDataSourceTester(sourceId, sourceLabel) {
     if (dataSourceTesterState.busy) return;
     const stockNo = getStockNoValue();
+    const isIndexSymbol = isYahooIndexSymbol(stockNo);
     const { start, end } = getDateRangeFromUI();
     if (!stockNo || !start || !end) {
         showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
@@ -986,6 +1005,10 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     const splitEnabled = isSplitAdjustmentEnabled();
     let requestUrl = '';
     let parseMode = 'proxy';
+    if (isIndexSymbol && adjusted) {
+        showTesterResult('error', '指數僅支援 Yahoo Finance 原始日線資料，請改用原始股價模式。');
+        return;
+    }
     if (adjusted) {
         if (sourceId === 'netlifyAdjusted') {
             const params = new URLSearchParams({
@@ -1014,13 +1037,15 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     } else {
         let endpoint = '/api/twse/';
         if (market === 'TPEX') endpoint = '/api/tpex/';
-        else if (market === 'US') endpoint = '/api/us/';
+        else if (market === 'US' || isIndexSymbol) endpoint = '/api/us/';
         const params = new URLSearchParams({
             stockNo,
             start,
             end,
         });
-        if (sourceId) params.set('forceSource', sourceId);
+        if (isIndexSymbol) {
+            params.set('forceSource', 'yahoo');
+        } else if (sourceId) params.set('forceSource', sourceId);
         requestUrl = `${endpoint}?${params.toString()}`;
     }
 
@@ -1484,20 +1509,24 @@ function refreshDataSourceTester() {
     const splitEnabled = isSplitAdjustmentEnabled();
     const { start, end } = getDateRangeFromUI();
     const stockNo = getStockNoValue();
-    const sources = getTesterSourceConfigs(market, adjusted, splitEnabled);
+    const isIndex = isYahooIndexSymbol(stockNo);
+    const sources = getTesterSourceConfigs(market, adjusted, splitEnabled, { isIndex });
     const missingInputs = !stockNo || !start || !end;
+    const displayMarket = isIndex ? 'US' : market;
     const modeText = adjusted
         ? splitEnabled
             ? '還原股價（含拆分）'
             : '還原股價'
         : '原始股價';
-    modeEl.textContent = `${getMarketLabel(market)} ・ ${modeText}`;
+    modeEl.textContent = `${getMarketLabel(displayMarket)} ・ ${modeText}`;
     renderDataSourceTesterButtons(sources, missingInputs || dataSourceTesterState.busy);
     const messageLines = [];
     let messageColor = 'var(--muted-foreground)';
     if (missingInputs) {
         messageLines.push('請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。');
         clearTesterResult();
+    } else if (isIndex) {
+        messageLines.push('指數以 Yahoo Finance 為主要來源，FinMind 目前不提供指數日線資料。');
     } else if (adjusted) {
         messageLines.push(
             splitEnabled
@@ -1512,7 +1541,7 @@ function refreshDataSourceTester() {
         messageLines.push('TWSE 為主來源，FinMind 為備援來源。建議主備來源都測試一次。');
     }
 
-    if (!missingInputs && (market === 'TWSE' || market === 'TPEX')) {
+    if (!missingInputs && (displayMarket === 'TWSE' || displayMarket === 'TPEX')) {
         const directoryMeta = typeof window.getTaiwanDirectoryMeta === 'function' ? window.getTaiwanDirectoryMeta() : null;
         if (directoryMeta?.version) {
             const sourceLabel = directoryMeta.source || '台股官方清單';
@@ -3512,6 +3541,7 @@ function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; c
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
+    const isIndexSymbol = isYahooIndexSymbol(stockNo);
     const startDate = document.getElementById('startDate')?.value;
     const endDate = document.getElementById('endDate')?.value;
     const initialCapital = parseFloat(document.getElementById('initialCapital')?.value) || 100000;
@@ -3535,7 +3565,8 @@ function getBacktestParams() {
     const stopLoss = parseFloat(document.getElementById('stopLoss')?.value) || 0;
     const takeProfit = parseFloat(document.getElementById('takeProfit')?.value) || 0;
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
-    const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
+    const adjustedChecked = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
+    const adjustedPrice = isIndexSymbol ? false : adjustedChecked;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitStrategy = document.getElementById('exitStrategy')?.value;
@@ -3558,7 +3589,8 @@ function getBacktestParams() {
     const sellFee = parseFloat(document.getElementById('sellFee')?.value) || 0;
     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital';
     const marketSelect = document.getElementById('marketSelect');
-    const market = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const selectedMarket = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const market = isIndexSymbol ? 'US' : selectedMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
 
     return {
@@ -3589,17 +3621,21 @@ function getBacktestParams() {
         sellFee,
         positionBasis,
         market,
-        marketType: currentMarket,
+        marketType: isIndexSymbol ? 'US' : currentMarket,
         entryStages,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
 const US_STOCK_PATTERN = /^[A-Z0-9]{1,6}(?:[.-][A-Z0-9]{1,4})?$/;
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9._-]{0,14}$/;
 
 function validateStockNoByMarket(stockNo, market) {
     if (!stockNo) {
         showError('請輸入有效代碼');
         return false;
+    }
+    if (isYahooIndexSymbol(stockNo)) {
+        return true;
     }
     const normalizedMarket = normalizeMarketValue(market || currentMarket || 'TWSE');
     if (normalizedMarket === 'US') {

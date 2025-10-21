@@ -2794,6 +2794,9 @@
                     if (/^\d{4}[A-Z]$/.test(upper)) {
                         return { code: upper, market: null };
                     }
+                    if (/^\^[A-Z0-9][A-Z0-9._-]{0,14}$/.test(upper)) {
+                        return { code: upper, market: 'US' };
+                    }
                     if (/^[A-Z]{1,6}(?:\.[A-Z]{1,3}|-[A-Z]{1,2})?$/.test(upper)) {
                         return { code: upper, market: 'US' };
                     }

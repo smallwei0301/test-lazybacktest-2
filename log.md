@@ -1,5 +1,22 @@
 
 
+## 2026-07-27 — Patch LB-YAHOO-INDEX-20260727A
+- **Scope**: caret (`^`) 指數代碼輸入流程提前切換至 Yahoo Index 管線。
+- **Updates**:
+  - `js/main.js` 的市場偵測若遇到 `^` 開頭代碼即回傳美股市場，資料來源測試與預設費率一開始就走指數邏輯，避免還原價選項殘留。
+  - `js/backtest.js` 的名稱查詢順序在 `^` 代碼時直接鎖定美股來源，確保不會嘗試 TWSE/TPEX 目錄並加速自動切換流程。
+- **Testing**: `node - <<'NODE' const fs = require('fs'); const vm = require('vm'); ['js/main.js','js/backtest.js'].forEach((file) => { const code = fs.readFileSync(file, 'utf8'); new vm.Script(code, { filename: file }); }); console.log('core scripts compile'); NODE`
+
+## 2026-07-19 — Patch LB-YAHOO-INDEX-20260719A
+- **Scope**: 指數代碼（Yahoo Finance）輸入、抓取與名稱解析全流程支援。
+- **Updates**:
+  - `js/main.js` 新增 `isYahooIndexSymbol` 偵測，指數代碼自動切換至美股市場、停用還原價選項，資料來源測試改為強制 Yahoo 指數通道並調整提示訊息。
+  - `js/backtest.js` 將指數視為 US/Index 交易，套用 0 交易成本並重用 Yahoo 名稱快取，確保一鍵回測與市場建議一致。
+  - `js/worker.js` 於資料抓取層辨識指數，改用 `/api/us/` 並強制 `forceSource=yahoo`，避免進入 FinMind 流程且同步記錄診斷旗標。
+  - `netlify/functions/us-proxy.js` 指數直接走 Yahoo Chart/Quote API，跳過 FinMind，並回傳 Yahoo 長名稱與交易所資訊供快取使用。
+  - `index.html` 快速回測關鍵字解析新增 `^` 指數格式，即時鎖定 Yahoo Index 管線。
+- **Testing**: 容器環境僅完成靜態腳本語法檢查（`node - <<'NODE' ... new vm.Script(...)` 驗證 main/backtest/worker 腳本），Netlify Function 需於部署環境再確認 ES Module 匯入與實際抓取流程，待實機回測驗證 console 無錯誤。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:

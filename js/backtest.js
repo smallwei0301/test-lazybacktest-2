@@ -13,6 +13,8 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-YAHOO-INDEX-20260719A
+// Patch Tag: LB-YAHOO-INDEX-20260727A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -8803,12 +8805,13 @@ function setDefaultFees(stockNo) {
     const stockCode = typeof stockNo === 'string' ? stockNo.trim().toUpperCase() : '';
     const isETF = stockCode.startsWith('00');
     const isTAIEX = stockCode === 'TAIEX';
+    const isIndexSymbol = isYahooIndexSymbol(stockCode);
     const isUSMarket = currentMarket === 'US';
 
-    if (isUSMarket) {
+    if (isUSMarket || isIndexSymbol) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
-        console.log(`[Fees] US market defaults applied for ${stockCode || '(未輸入)'}`);
+        console.log(`[Fees] US/Index defaults applied for ${stockCode || '(未輸入)'}`);
         return;
     }
 
@@ -9470,6 +9473,7 @@ const TAIWAN_DIRECTORY_CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 台股官方清單
 const TAIWAN_DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
 const MIN_STOCK_LOOKUP_LENGTH = 4;
 const STOCK_NAME_DEBOUNCE_MS = 800;
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9._-]{0,14}$/;
 const persistentTaiwanNameCache = loadPersistentTaiwanNameCache();
 const persistentUSNameCache = loadPersistentUSNameCache();
 const taiwanDirectoryState = {
@@ -9729,6 +9733,12 @@ function createStockNameCacheKey(market, stockCode) {
     const normalizedCode = (stockCode || '').trim().toUpperCase();
     if (!normalizedMarket || !normalizedCode) return null;
     return `${normalizedMarket}|${normalizedCode}`;
+}
+
+function isYahooIndexSymbol(symbol) {
+    const value = (symbol || '').trim().toUpperCase();
+    if (!value.startsWith('^')) return false;
+    return YAHOO_INDEX_PATTERN.test(value);
 }
 
 function getLeadingDigitCount(symbol) {
@@ -10100,6 +10110,9 @@ function getMarketDisplayName(market) {
 
 function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const normalizedCode = (stockCode || '').trim().toUpperCase();
+    if (normalizedCode.startsWith('^')) {
+        return ['US'];
+    }
     const hasAlpha = /[A-Z]/.test(normalizedCode);
     const isNumeric = /^\d+$/.test(normalizedCode);
     const leadingDigits = getLeadingDigitCount(normalizedCode);
