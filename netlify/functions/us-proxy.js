@@ -2,6 +2,7 @@
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-US-NAMEFIX-20250614A
+// Patch Tag: LB-YAHOO-INDEX-20260719A
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
@@ -12,6 +13,8 @@ const FINMIND_LEVEL_PATTERN = /your level is register/i;
 const FINMIND_SOURCE_LABEL = 'FinMind (US)';
 const YAHOO_SOURCE_LABEL = 'Yahoo Finance (US)';
 const YAHOO_ENDPOINT = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const YAHOO_QUOTE_ENDPOINT = 'https://query1.finance.yahoo.com/v7/finance/quote';
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9._-]{0,14}$/;
 
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
 const inMemoryInfoCache = new Map(); // Map<stockNo, { timestamp, data }>
@@ -55,6 +58,12 @@ function normaliseFinMindErrorMessage(message) {
 
 function normalizeStockNo(value) {
     return (value || '').trim().toUpperCase();
+}
+
+function isYahooIndexSymbol(value) {
+    const normalized = normalizeStockNo(value);
+    if (!normalized.startsWith('^')) return false;
+    return YAHOO_INDEX_PATTERN.test(normalized);
 }
 
 function normalizeUsComparisonKey(value) {
@@ -117,6 +126,33 @@ function normalizeYahooNumber(value) {
     if (value === null || value === undefined) return null;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
+}
+
+async function fetchYahooQuoteMeta(stockNo) {
+    const url = new URL(YAHOO_QUOTE_ENDPOINT);
+    url.searchParams.set('symbols', stockNo);
+    const response = await fetch(url.toString(), {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (LazyBacktest)'
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Yahoo Quote HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const quote = payload?.quoteResponse?.result;
+    if (!Array.isArray(quote) || quote.length === 0) return null;
+    const record = quote[0];
+    if (!record) return null;
+    const longName = typeof record.longName === 'string' ? record.longName.trim() : '';
+    const shortName = typeof record.shortName === 'string' ? record.shortName.trim() : '';
+    return {
+        longName: longName || shortName || stockNo,
+        shortName: shortName || null,
+        symbol: normalizeStockNo(record.symbol || stockNo),
+        exchange: record.fullExchangeName || record.exchange || null,
+        currency: record.currency || null,
+    };
 }
 
 function resolveDateRange(startParam, endParam, monthParam) {
@@ -320,6 +356,37 @@ async function fetchUSStockInfo(stockNo) {
         return cacheHit;
     }
 
+    const indexMode = isYahooIndexSymbol(normalized);
+    if (indexMode) {
+        try {
+            const yahooMeta = await fetchYahooQuoteMeta(normalized);
+            const payload = {
+                stockNo: normalized,
+                stockName: yahooMeta?.longName || normalized,
+                symbol: yahooMeta?.symbol || normalized,
+                marketCategory: yahooMeta?.exchange || 'Index',
+                securityType: 'Index',
+                matchStrategy: null,
+                resolvedSymbol: yahooMeta?.symbol || normalized,
+                source: 'Yahoo Finance (Index)',
+                currency: yahooMeta?.currency || null,
+            };
+            await writeInfoCache(store, normalized, payload);
+            return payload;
+        } catch (error) {
+            console.warn('[US Proxy v1.2] 無法從 Yahoo 取得指數資訊:', error);
+            const payload = {
+                stockNo: normalized,
+                stockName: normalized,
+                symbol: normalized,
+                securityType: 'Index',
+                source: 'Yahoo Finance (Index)',
+            };
+            await writeInfoCache(store, normalized, payload);
+            return payload;
+        }
+    }
+
     try {
         let data = await fetchFinMindData('USStockInfo', {
             data_id: normalized,
@@ -334,15 +401,24 @@ async function fetchUSStockInfo(stockNo) {
             }
         }
         const metadata = extractUSStockMetadata(data, normalized) || null;
+        let yahooMeta = null;
+        if (!metadata || !metadata.stockName) {
+            try {
+                yahooMeta = await fetchYahooQuoteMeta(normalized);
+            } catch (quoteError) {
+                console.warn('[US Proxy v1.2] Yahoo Quote 查詢股票資訊失敗:', quoteError);
+            }
+        }
         const payload = {
             stockNo: normalized,
-            stockName: metadata?.stockName || normalized,
-            symbol: metadata?.symbol || normalized,
-            marketCategory: metadata?.marketCategory || null,
+            stockName: metadata?.stockName || yahooMeta?.longName || normalized,
+            symbol: metadata?.symbol || yahooMeta?.symbol || normalized,
+            marketCategory: metadata?.marketCategory || yahooMeta?.exchange || null,
             securityType: metadata?.securityType || null,
             matchStrategy: metadata?.matchStrategy || null,
-            resolvedSymbol: metadata?.resolvedSymbol || null,
-            source: metadata?.source || FINMIND_SOURCE_LABEL,
+            resolvedSymbol: metadata?.resolvedSymbol || yahooMeta?.symbol || null,
+            source: metadata?.source || (yahooMeta ? 'Yahoo Finance (US)' : FINMIND_SOURCE_LABEL),
+            currency: yahooMeta?.currency || null,
         };
         await writeInfoCache(store, normalized, payload);
         return payload;
@@ -443,8 +519,15 @@ async function fetchUSPriceRange(stockNo, startISO, endISO, options = {}) {
     }
 
     const forceSource = (options.forceSource || '').toLowerCase();
-    const allowFinMind = forceSource !== 'yahoo';
+    const indexMode = isYahooIndexSymbol(normalized);
+    if (indexMode && forceSource === 'finmind') {
+        throw new Error('指數僅支援 Yahoo Finance 資料來源');
+    }
+    const allowFinMind = !indexMode && forceSource !== 'yahoo';
     const allowYahoo = forceSource !== 'finmind';
+    if (indexMode && !allowYahoo) {
+        throw new Error('指數僅支援 Yahoo Finance 資料來源');
+    }
 
     let finmindRows = null;
     let finmindError = null;

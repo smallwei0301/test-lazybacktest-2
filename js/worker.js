@@ -12,6 +12,7 @@
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
+// Patch Tag: LB-YAHOO-INDEX-20260719A
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 importScripts('shared-lookback.js');
 importScripts('config.js');
@@ -35,6 +36,14 @@ const CLASSIFICATION_MODES = {
   BINARY: 'binary',
   MULTICLASS: 'multiclass',
 };
+
+const YAHOO_INDEX_PATTERN = /^\^[A-Z0-9][A-Z0-9._-]{0,14}$/;
+
+function isYahooIndexSymbol(symbol) {
+  const value = (symbol || '').toString().trim().toUpperCase();
+  if (!value.startsWith('^')) return false;
+  return YAHOO_INDEX_PATTERN.test(value);
+}
 
 const ANN_FEATURE_NAMES = [
   'SMA30',
@@ -4316,6 +4325,7 @@ async function fetchCurrentMonthGapPatch({
 
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  else if (marketKey === "US") proxyPath = "/api/us/";
   const isTpex = marketKey === "TPEX";
   const aggregatedRows = [];
   const aggregatedSources = new Set();
@@ -4336,9 +4346,10 @@ async function fetchCurrentMonthGapPatch({
       end: monthEndISO,
     });
 
-    const candidateSources = [null];
-    if (primaryForceSource) candidateSources.push(primaryForceSource);
+    const candidateSources = indexMode ? ["yahoo"] : [null];
+    if (!indexMode && primaryForceSource) candidateSources.push(primaryForceSource);
     if (
+      !indexMode &&
       fallbackForceSource &&
       fallbackForceSource !== primaryForceSource
     ) {
@@ -4902,10 +4913,14 @@ async function fetchStockData(
       "fetchStockData 缺少 marketType 參數! 無法判斷上市或上櫃。",
     );
   }
+  const normalizedStockNo = (stockNo || '').toString().trim().toUpperCase();
+  const indexMode = isYahooIndexSymbol(normalizedStockNo);
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
-  const adjusted = Boolean(options.adjusted || options.adjustedPrice);
-  const split = Boolean(options.splitAdjustment);
+  const requestedAdjusted = Boolean(options.adjusted || options.adjustedPrice);
+  const adjusted = indexMode ? false : requestedAdjusted;
+  const requestedSplit = Boolean(options.splitAdjustment);
+  const split = indexMode ? false : requestedSplit;
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -4919,9 +4934,16 @@ async function fetchStockData(
   if (startDateObj > endDateObj) {
     throw new Error("開始日期需早於結束日期");
   }
-  const marketKey = getMarketKey(marketType);
-  const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
-  const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
+  let marketKey = getMarketKey(marketType);
+  if (indexMode) {
+    marketKey = "US";
+  }
+  let primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
+  let fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
+  if (indexMode) {
+    primaryForceSource = "yahoo";
+    fallbackForceSource = null;
+  }
   const cacheKey = buildCacheKey(
     stockNo,
     startDate,
@@ -4943,6 +4965,7 @@ async function fetchStockData(
     dataStartDate: startDate,
     months: [],
     usedCache: Boolean(cachedEntry),
+    indexMode,
   };
   if (cachedEntry) {
     const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
@@ -5398,8 +5421,8 @@ async function fetchStockData(
           const rangeKey = `${missingRange.start}-${missingRange.end}`;
           const shouldForceRange =
             forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
-          const candidateSources = [];
-          if (shouldForceRange) {
+          const candidateSources = indexMode ? ["yahoo"] : [];
+          if (!indexMode && shouldForceRange) {
             if (primaryForceSource) candidateSources.push(primaryForceSource);
             if (
               fallbackForceSource &&
@@ -5408,7 +5431,9 @@ async function fetchStockData(
               candidateSources.push(fallbackForceSource);
             }
           }
-          candidateSources.push(null);
+          if (!indexMode) {
+            candidateSources.push(null);
+          }
 
           let payload = null;
           let lastError = null;
