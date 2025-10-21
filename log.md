@@ -1394,3 +1394,12 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-YAHOO-INDEX-20260715A
+- **Issue recap**: 使用者輸入以「^」開頭的 Yahoo 指數代碼時仍套用台股/美股股票格式驗證與資料來源，導致無法通過格式檢查，資料測試卡也會呼叫 TWSE/FinMind 來源而失敗，實際回測流程更會沿用台股暖身與快取規則，無法抓取指數行情。
+- **Fix**:
+  - `js/main.js` 新增 Yahoo 指數辨識，調整市場推論、資料來源測試與參數蒐集流程，強制使用 Yahoo Finance 原始行情並禁止還原價模式。
+  - `js/backtest.js` 將指數視為專屬類型，更新手續費、名稱查詢與市場紀錄，確保回測使用 US 通道並呈現「Yahoo 指數」提示。
+  - `js/worker.js` 在背景抓取流程套用指數模式，直接走 `/api/us/` Yahoo 路徑並跳過 FinMind/TWSE 快取，補強診斷資訊的 `symbolType` 標記。
+- **Diagnostics**: 以 `^GSPC`、`^TWII` 測試資料來源按鈕與回測，確認測試卡僅顯示 Yahoo 指數來源、主流程抓取成功且不再呼叫 TWSE/FinMind。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js','js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
