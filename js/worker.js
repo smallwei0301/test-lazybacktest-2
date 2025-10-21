@@ -6224,7 +6224,7 @@ function computeReturnMomentSums(returns) {
     };
   }
 
-  let sampleCount = 0;
+  const validReturns = [];
   let sum1 = 0;
   let sum2 = 0;
   let sum3 = 0;
@@ -6233,13 +6233,15 @@ function computeReturnMomentSums(returns) {
   for (let i = 0; i < returns.length; i += 1) {
     const value = returns[i];
     if (!Number.isFinite(value)) continue;
-    sampleCount += 1;
+    validReturns.push(value);
     sum1 += value;
     const squared = value * value;
     sum2 += squared;
     sum3 += squared * value;
     sum4 += squared * squared;
   }
+
+  const sampleCount = validReturns.length;
 
   if (sampleCount === 0) {
     return {
@@ -6261,9 +6263,8 @@ function computeReturnMomentSums(returns) {
   let diff3Sum = 0;
   let diff4Sum = 0;
 
-  for (let i = 0; i < returns.length; i += 1) {
-    const value = returns[i];
-    if (!Number.isFinite(value)) continue;
+  for (let i = 0; i < validReturns.length; i += 1) {
+    const value = validReturns[i];
     const diff = value - mean;
     const diff2 = diff * diff;
     diff2Sum += diff2;
@@ -6293,6 +6294,37 @@ function computeReturnMomentSums(returns) {
     kurtosis = excess !== null ? excess + 3 : null;
   }
 
+  const maxLag = Math.min(10, sampleCount - 1);
+  const autocorrelations = [];
+  if (maxLag > 0 && variance > 0) {
+    for (let lag = 1; lag <= maxLag; lag += 1) {
+      let covariance = 0;
+      for (let i = lag; i < sampleCount; i += 1) {
+        covariance += (validReturns[i] - mean) * (validReturns[i - lag] - mean);
+      }
+      const denom = sampleCount - lag;
+      const rho = denom > 0 ? covariance / denom / variance : 0;
+      autocorrelations.push(Number.isFinite(rho) ? rho : 0);
+    }
+  }
+
+  const positiveAutoSum = autocorrelations.reduce((acc, rho) => {
+    if (Number.isFinite(rho) && rho > 0) {
+      return acc + rho;
+    }
+    return acc;
+  }, 0);
+
+  const excessKurtosis = Number.isFinite(kurtosis) ? kurtosis - 3 : null;
+  const tailPenalty = 1 + (Number.isFinite(excessKurtosis) && excessKurtosis > 0 ? excessKurtosis / 2 : 0);
+  const autoPenalty = 1 + 2 * positiveAutoSum;
+  const effectiveSampleCount = sampleCount > 0
+    ? Math.max(1, Math.min(sampleCount, sampleCount / Math.max(1, autoPenalty * tailPenalty)))
+    : 0;
+  const averageAutocorrelation = autocorrelations.length > 0
+    ? autocorrelations.reduce((acc, rho) => acc + rho, 0) / autocorrelations.length
+    : null;
+
   return {
     sampleCount,
     sum1,
@@ -6304,6 +6336,10 @@ function computeReturnMomentSums(returns) {
     stdDev,
     skewness,
     kurtosis,
+    autocorrelations,
+    effectiveSampleCount,
+    excessKurtosis,
+    averageAutocorrelation,
   };
 }
 

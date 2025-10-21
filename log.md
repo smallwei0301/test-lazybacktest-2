@@ -1410,3 +1410,11 @@ NODE`
   - `js/backtest.js` 的 `collectStrategyMetricSnapshot` 支援沿用既有滾動測試分數、達標率與摘要，並在比較表顯示版本代碼與更新日期，確保完成滾動測試後保存策略不再回到 placeholder 提示。
   - `README.md` 同步文檔版本編號與新說明，`log.md` 記錄補丁背景與後續驗證需求。
 - **Testing**: 受限於容器無法連線 Proxy，未能實際跑滾動測試；請於具備資料來源的環境實測自動／手動視窗模式與策略保存流程，確認瀏覽器 console 無錯誤並完成比較表更新。
+
+## 2026-07-28 — Patch LB-ROLLING-TRUST-20251109A
+- **Issue recap**: PSR/DSR 仍以年化 Sharpe 與總樣本數估計，未考慮自相關造成的樣本膨脹，也缺乏對參數嘗試相似度的折減。品質得分則同時受限於達標權重，嚴格模式需求亦無法切換。
+- **Fix**:
+  - `js/rolling-test.js` 導入每日樣本 Sharpe、有效樣本數 n_eff 與有效嘗試數 M_eff，重新計算 PSR@SR*=0/1 與 DSR，統計權重改為 `0.2 + 0.8 × √(PSR × DSR)`，並在 n_eff 低於 MinTRL 時限制或歸零（嚴格模式）。
+  - 逐窗表格新增 PSR/DSR 雙門檻、n_eff、MinTRL 與統計權重受限提示；總結文字與卡片說明同步更新，支援嚴格模式核取方塊並顯示 PSR@SR*=1 的達標比例。
+  - `js/worker.js` 回傳 OOS 報酬矩的同時計算自相關係數、有效樣本數與超額峰度，`sanitizeOosStats()` 保留欄位供前端估算；README、log.md 換版為 `LB-ROLLING-TRUST-20251109A` 並補充新流程。
+- **Testing**: 受限於容器無法連線 Proxy，未能跑實際滾動測試；請於具備資料來源的環境驗證一般模式與嚴格模式的 PSR/DSR 顯示、MinTRL 限制，以及逐窗表格與比較報告是否同步更新。

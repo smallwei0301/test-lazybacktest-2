@@ -2192,15 +2192,21 @@
                                                 <h3 class="text-sm font-semibold" style="color: var(--foreground);">執行 Walk-Forward 測試</h3>
                                                 <p class="text-xs mt-1 max-w-xl" style="color: var(--muted-foreground);">系統會依序重播每個滾動視窗，採用現有策略參數計算訓練期與測試期的報酬、風險與交易密度。過程中請勿關閉頁面。</p>
                                             </div>
-                                            <div class="flex items-center gap-3">
-                                                <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
-                                                    <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
-                                                    開始滾動測試
-                                                </button>
-                                                <button id="stop-rolling-test" class="btn-outline px-6 py-2.5 rounded-lg font-semibold hidden" style="border-color: var(--destructive); color: var(--destructive);">
-                                                    <i data-lucide="square" class="lucide w-4 h-4"></i>
-                                                    停止
-                                                </button>
+                                            <div class="flex flex-col gap-3 items-start lg:flex-row lg:items-center">
+                                                <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                    <input type="checkbox" id="rolling-strict-mode" class="rounded border-border focus:ring-ring" />
+                                                    <span>嚴格模式（PSR/DSR 以 SR*=1 檢驗，n_eff &lt; MinTRL 直接視為不可信）</span>
+                                                </label>
+                                                <div class="flex items-center gap-3">
+                                                    <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
+                                                        <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
+                                                        開始滾動測試
+                                                    </button>
+                                                    <button id="stop-rolling-test" class="btn-outline px-6 py-2.5 rounded-lg font-semibold hidden" style="border-color: var(--destructive); color: var(--destructive);">
+                                                        <i data-lucide="square" class="lucide w-4 h-4"></i>
+                                                        停止
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                         <div id="rolling-progress-panel" class="card-content border-t hidden" style="border-color: var(--border);">
@@ -2250,10 +2256,10 @@
                                             <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
                                                 <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
                                                 <ol class="list-decimal pl-4 space-y-1">
-                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤分別映射至 0～1，採 0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
-                                                    <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，平均後轉為 0.5～1 的 <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。</li>
-                                                    <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，跨窗取中位數，再以 WFE 中位數（取 0.8～1.2 區間）進行調整取得 Walk-Forward 總分。</li>
-                                                    <li>評級門檻：總分 ≥ 0.70、WFE 中位 ≥ 0.8、PSR≥95% 視窗比 ≥ 50%、DSR 中位 ≥ 0.7 判定「專業合格」；總分 ≥ 0.50、WFE 中位 ≥ 0.6、PSR≥95% 視窗比 ≥ 30% 判定「可進一步觀察」；其餘為「未通過建議調整」。若整體 DSR ≤ 0 會再下修一級。</li>
+                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤映射至 0～1，採 0.35／0.25／0.20／0.10／0.10 的權重平均為 <strong>OOS 品質</strong>。</li>
+                                                    <li>統計可信度：以每日樣本 Sharpe 計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，納入有效樣本數（n_eff）與有效嘗試數（M_eff）。</li>
+                                                    <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，其中 StatWeight = 0.2 + 0.8 × √(PSR × DSR)；若 n_eff 低於 MinTRL 則上限 0.3，嚴格模式會直接歸零。</li>
+                                                    <li>評級門檻：總分 ≥ 0.70、WFE 中位 ≥ 0.8、PSR@SR*=0≥95% 視窗比 ≥ 50%、DSR 中位 ≥ 0.7 判定「專業合格」；總分 ≥ 0.50、WFE 中位 ≥ 0.6、PSR@SR*=0≥95% 視窗比 ≥ 30% 判定「可進一步觀察」；其餘為「未通過建議調整」。若整體 DSR ≤ 0 會再下修一級。</li>
                                                 </ol>
                                             </div>
                                         </div>
