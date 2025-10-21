@@ -22,8 +22,9 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
-const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260715A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const LOADING_MASCOT_IMAGE_DIMENSION = 320;
 const loadingMascotState = {
     lastSource: null,
     rotation: {
@@ -3084,10 +3085,22 @@ function ensureLoadingMascotImageElement(container) {
         img.className = 'loading-mascot-image';
         img.alt = 'LazyBacktest 進度吉祥物動畫';
         img.decoding = 'async';
-        img.loading = 'eager';
+        img.loading = 'lazy';
         img.referrerPolicy = 'no-referrer';
         img.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
+        img.setAttribute('width', String(LOADING_MASCOT_IMAGE_DIMENSION));
+        img.setAttribute('height', String(LOADING_MASCOT_IMAGE_DIMENSION));
         container.appendChild(img);
+    } else {
+        if (!img.hasAttribute('loading')) {
+            img.loading = 'lazy';
+        }
+        if (!img.hasAttribute('width')) {
+            img.setAttribute('width', String(LOADING_MASCOT_IMAGE_DIMENSION));
+        }
+        if (!img.hasAttribute('height')) {
+            img.setAttribute('height', String(LOADING_MASCOT_IMAGE_DIMENSION));
+        }
     }
     container.classList.remove('loading-mascot-fallback');
     container.dataset.lbMascotMode = 'image';

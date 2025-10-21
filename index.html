@@ -4,9 +4,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://www.tpex.org.tw; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://i.imgur.com https://www.google-analytics.com https://www.googletagmanager.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://www.google-analytics.com https://www.googletagmanager.com https://www.twse.com.tw https://www.tpex.org.tw; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';">
     <title>📈 LazyBacktest - 台股回測系統 v0.1.1</title>
     <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"
+      integrity="sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb"
+      crossorigin="anonymous"
+    ></script>
     <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
@@ -14,9 +20,13 @@
 
     gtag('config', 'G-VNX2RVHZ5K');
     </script>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries" crossorigin="anonymous"></script>
     <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
     <link
       rel="stylesheet"
       as="style"
@@ -316,20 +326,58 @@
       .border-secondary { border-color: var(--secondary); }
       .border-accent { border-color: var(--accent); }
       
-      .lucide {
+      .lb-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         width: 1.25rem;
         height: 1.25rem;
+        line-height: 1;
+      }
+
+      .lb-icon svg {
+        display: block;
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+
+      .lucide {
         stroke-width: 2;
       }
-      
-      .lucide-sm {
+
+      .lucide svg {
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+
+      .lucide-sm,
+      .lucide-sm.lb-icon {
         width: 1rem;
         height: 1rem;
+      }
+
+      .lucide-sm svg,
+      .lucide-sm.lb-icon svg {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .lucide-xs,
+      .lucide-xs.lb-icon {
+        width: 0.875rem;
+        height: 0.875rem;
+      }
+
+      .lucide-xs svg,
+      .lucide-xs.lb-icon svg {
+        width: 0.875rem;
+        height: 0.875rem;
       }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script defer src="js/icons-lite.js"></script>
     <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64," /> <!-- From UI file -->
 </head>
 <body class="bg-white group/design-root" style='font-family: Inter, "Noto Sans", sans-serif;'>
@@ -1253,7 +1301,7 @@
                                             <div
                                                 id="loadingGif"
                                                 class="loading-mascot-canvas"
-                                                data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
+                                                data-lb-mascot-default="assets/mascot/hachiware-dance-fallback.svg,https://i.imgur.com/zwj3cZQ.gif"
                                                 data-lb-mascot-mode="image"
                                                 data-lb-mascot-hidden="false"
                                             >
@@ -1275,10 +1323,12 @@
                                                 </div>
                                                 <img
                                                     class="loading-mascot-image"
-                                                    src="https://i.imgur.com/zwj3cZQ.gif"
+                                                    src="assets/mascot/hachiware-dance-fallback.svg"
                                                     alt="LazyBacktest 進度吉祥物動畫"
                                                     decoding="async"
-                                                    loading="eager"
+                                                    loading="lazy"
+                                                    width="320"
+                                                    height="320"
                                                     referrerpolicy="no-referrer"
                                                     aria-hidden="false"
                                                 />
