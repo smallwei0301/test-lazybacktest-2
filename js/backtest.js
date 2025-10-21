@@ -9250,22 +9250,8 @@ function formatStrategyComparisonValue(metricKey, metrics) {
         }
         case 'rollingScore': {
             const score = normaliseMetricNumber(metrics.rollingScore);
-            const passRate = normaliseMetricNumber(metrics.rollingPassRate);
-            const summaryText = typeof metrics.rollingSummaryText === 'string' ? metrics.rollingSummaryText : '';
-            const generatedAtLabel = typeof metrics.rollingGeneratedAt === 'string'
-                ? formatIsoDateLabel(metrics.rollingGeneratedAt)
-                : '';
-            const versionLabel = typeof metrics.rollingVersion === 'string' ? metrics.rollingVersion : '';
-            if (score === null && passRate === null && !summaryText && !generatedAtLabel && !versionLabel) {
-                return placeholder;
-            }
-            const parts = [];
-            if (score !== null) parts.push(`${Math.round(score)} 分`);
-            if (passRate !== null) parts.push(`達標率 ${formatPercentPlain(passRate, 1)}`);
-            if (versionLabel) parts.push(`版本 ${versionLabel}`);
-            if (generatedAtLabel) parts.push(`更新 ${generatedAtLabel}`);
-            if (summaryText) parts.push(summaryText);
-            return parts.join('｜');
+            if (score === null) return placeholder;
+            return `${Math.round(score)} 分`;
         }
         case 'trendCurrent': {
             const label = resolveStrategyComparisonTrendLabel(metrics.trendLatestLabel);
