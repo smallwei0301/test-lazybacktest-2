@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.3 ---
-// Patch Tag: LB-ROLLING-TEST-20251028A
+// --- 滾動測試模組 - v2.4 ---
+// Patch Tag: LB-ROLLING-TEST-20251107A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,10 +18,11 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251028A',
+        version: 'LB-ROLLING-TEST-20251107A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
+        windowMode: 'count',
     };
 
     let planRefreshTimer = null;
@@ -114,6 +115,43 @@
         return !container.classList.contains('hidden');
     }
 
+    function setWindowMode(mode) {
+        const normalized = mode === 'duration' ? 'duration' : 'count';
+        state.windowMode = normalized;
+
+        const countInput = document.getElementById('rolling-window-count');
+        const toggle = document.getElementById('rolling-window-mode-toggle');
+        const help = document.getElementById('rolling-window-count-help');
+
+        if (normalized === 'duration') {
+            if (countInput) {
+                countInput.disabled = true;
+                countInput.classList.add('opacity-60', 'cursor-not-allowed');
+            }
+            if (toggle) toggle.textContent = '改用視窗數模式';
+            if (help) {
+                help.textContent = '視窗數將依訓練／測試／平移月數推算，請在下方輸入自訂長度。';
+            }
+            if (!isAdvancedSettingsActive()) {
+                setAdvancedToggleState(true);
+            }
+        } else {
+            if (countInput) {
+                countInput.disabled = false;
+                countInput.classList.remove('opacity-60', 'cursor-not-allowed');
+            }
+            if (toggle) toggle.textContent = '改用自訂視窗';
+            if (help) {
+                help.textContent = '系統會依據目前回測區間與預設比例自動調整訓練與測試長度。';
+            }
+            if (isAdvancedSettingsActive()) {
+                setAdvancedToggleState(false);
+            }
+        }
+
+        updateRollingPlanPreview();
+    }
+
     function initRollingTest() {
         if (state.initialized) return;
         const tab = document.getElementById('rolling-test-tab');
@@ -151,12 +189,21 @@
             });
         }
 
+        const windowModeToggle = document.getElementById('rolling-window-mode-toggle');
+        if (windowModeToggle) {
+            windowModeToggle.addEventListener('click', () => {
+                const nextMode = state.windowMode === 'count' ? 'duration' : 'count';
+                setWindowMode(nextMode);
+            });
+        }
+
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
             window.addEventListener('lazybacktest:visible-data-changed', handleVisibleDataChange, { passive: true });
         }
 
         updateRollingPlanPreview();
         syncRollingOptimizeUI();
+        setWindowMode(state.windowMode);
         state.initialized = true;
     }
 
@@ -657,6 +704,12 @@
         addItem('通過視窗', `${aggregate.passCount}/${aggregate.totalWindows}`);
 
         container.appendChild(list);
+
+        const explanation = document.createElement('p');
+        explanation.className = 'mt-2 text-[11px] leading-relaxed';
+        explanation.style.color = 'var(--muted-foreground)';
+        explanation.textContent = '窗分數 = 每個視窗的品質分數 × 統計權重（0.5～1），取所有視窗的窗分數中位後，再乘上限制於 0.8～1.2 的 WFE 調整，即為最終 Walk-Forward 總分。';
+        container.appendChild(explanation);
         return container;
     }
 
@@ -671,6 +724,12 @@
         const credibilityLine = document.createElement('p');
         credibilityLine.textContent = `統計可信度中位 ${formatProbability(aggregate.medianCredibility)}、統計權重中位 ${formatScore(aggregate.medianStatWeight)}。`;
         container.appendChild(credibilityLine);
+
+        const explain = document.createElement('p');
+        explain.className = 'text-[11px] leading-relaxed';
+        explain.style.color = 'var(--muted-foreground)';
+        explain.textContent = '每個視窗會先以年化 35%、Sharpe 25%、Sortino 20%、最大回撤 10%、勝率 10% 的權重計算品質加權原值（年化門檻改採該視窗的原始股票年化報酬率），再依達標的指標權重限制分數，品質分數中位則是將所有視窗的品質分數排序後取中間值。';
+        container.appendChild(explain);
 
         const gridWrapper = document.createElement('div');
         gridWrapper.className = 'space-y-1';
@@ -687,7 +746,9 @@
                 key: 'annualizedReturn',
                 label: '年化報酬',
                 median: aggregate.medianAnnualizedReturn,
-                threshold: thresholds.annualizedReturn,
+                threshold: Number.isFinite(aggregate.medianBaselineAnnualizedReturn)
+                    ? aggregate.medianBaselineAnnualizedReturn
+                    : thresholds.annualizedReturn,
                 comparator: '≥',
                 formatter: formatPercent,
             },
@@ -756,6 +817,38 @@
         });
 
         container.appendChild(gridWrapper);
+
+        const windowList = document.createElement('ul');
+        windowList.className = 'list-disc pl-4 space-y-1 text-[11px]';
+        windowList.style.color = 'var(--muted-foreground)';
+        aggregate.evaluations.forEach((evaluation, index) => {
+            const analysis = evaluation?.analysis;
+            if (!analysis) return;
+            const quality = analysis.oosQuality || {};
+            const baseline = evaluation?.metrics?.baselineAnnualizedReturn;
+            const parts = [];
+            if (Number.isFinite(baseline) || Number.isFinite(evaluation?.metrics?.annualizedReturn)) {
+                const baselineText = Number.isFinite(baseline) ? `原始年化 ${formatPercent(baseline)}` : null;
+                const strategyText = Number.isFinite(evaluation?.metrics?.annualizedReturn)
+                    ? `策略年化 ${formatPercent(evaluation.metrics.annualizedReturn)}`
+                    : null;
+                const pair = [baselineText, strategyText].filter(Boolean).join('，');
+                if (pair) parts.push(pair);
+            }
+            if (Number.isFinite(quality.value)) parts.push(`品質 ${formatScore(quality.value)}`);
+            if (Number.isFinite(quality.rawValue)) parts.push(`加權原值 ${formatScore(quality.rawValue)}`);
+            if (Number.isFinite(quality.passRatio)) parts.push(`達標比 ${formatProbability(quality.passRatio)}`);
+            if (Number.isFinite(analysis.statWeight)) parts.push(`統計權重 ${formatScore(analysis.statWeight)}`);
+            if (Number.isFinite(analysis.credibility)) parts.push(`可信度 ${formatProbability(analysis.credibility)}`);
+            if (parts.length === 0) return;
+            const li = document.createElement('li');
+            li.textContent = `視窗 ${index + 1}：${parts.join('；')}`;
+            windowList.appendChild(li);
+        });
+        if (windowList.children.length > 0) {
+            container.appendChild(windowList);
+        }
+
         return container;
     }
 
@@ -798,6 +891,12 @@
         const summary = document.createElement('p');
         summary.textContent = `PSR≥95% 視窗比 ${formatProbability(aggregate.psrAbove95Ratio)}，DSR 中位 ${formatProbability(aggregate.medianDsr)}，樣本中位 ${sampleText}${minTrlText}。`;
         container.appendChild(summary);
+
+        const explain = document.createElement('p');
+        explain.className = 'text-[11px] leading-relaxed';
+        explain.style.color = 'var(--muted-foreground)';
+        explain.textContent = '每個視窗的統計可信度為 (PSR + DSR) ÷ 2，統計權重則等於 0.5 + 0.5 × 可信度；中位數會先將所有視窗的可信度排序後取中間值，協助判斷樣本是否足夠支撐 OOS 指標。';
+        container.appendChild(explain);
 
         const list = document.createElement('ul');
         list.className = 'list-disc pl-4 space-y-1';
@@ -1009,6 +1108,11 @@
                 getValue: (entry) => formatPercent(entry.metrics.annualizedReturn),
             },
             {
+                label: '原始股年化%',
+                className: 'text-right',
+                getValue: (entry) => formatPercent(entry.metrics.baselineAnnualizedReturn),
+            },
+            {
                 label: 'Sharpe',
                 className: 'text-right',
                 getValue: (entry) => formatNumber(entry.metrics.sharpeRatio),
@@ -1052,6 +1156,26 @@
                 label: 'WFE%',
                 className: 'text-right',
                 getValue: (entry) => (Number.isFinite(entry.analysis?.wfe) ? formatPercent(entry.analysis.wfe) : '—'),
+            },
+            {
+                label: '品質分數',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.oosQuality?.value),
+            },
+            {
+                label: '品質加權原值',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.oosQuality?.rawValue),
+            },
+            {
+                label: '指標達標比',
+                className: 'text-right',
+                getValue: (entry) => formatProbability(entry.analysis?.oosQuality?.passRatio),
+            },
+            {
+                label: '統計權重',
+                className: 'text-right',
+                getValue: (entry) => formatScore(entry.analysis?.statWeight),
             },
             {
                 label: '窗分數',
@@ -1248,6 +1372,15 @@
         return value.toFixed(2).replace(/\.00$/, '').replace(/\.0$/, '');
     }
 
+    function buildWindowThresholds(metrics, baseThresholds) {
+        const resolved = { ...baseThresholds };
+        const baseline = toFiniteNumber(metrics?.baselineAnnualizedReturn);
+        if (baseline !== null) {
+            resolved.annualizedReturn = baseline;
+        }
+        return resolved;
+    }
+
     function computeAggregateReport(entries, thresholds, options = {}) {
         const srBenchmark = Number.isFinite(options?.srBenchmark) ? options.srBenchmark : thresholds.sharpeRatio;
         const optimizationTrials = options?.optimizationEnabled
@@ -1255,9 +1388,10 @@
             : 1;
 
         const evaluations = entries.map((entry) => {
-            const evaluation = evaluateWindow(entry.testing, thresholds);
+            const windowThresholds = buildWindowThresholds(entry.testing, thresholds);
+            const evaluation = evaluateWindow(entry.testing, windowThresholds);
             const commentParts = [];
-            const analysis = computeWindowAnalysis(entry.testing, thresholds, {
+            const analysis = computeWindowAnalysis(entry.testing, windowThresholds, {
                 srBenchmark,
                 trialCount: optimizationTrials,
             });
@@ -1297,6 +1431,7 @@
                 paramsSnapshot: entry.paramsSnapshot,
                 comment: commentParts.join('；') || '—',
                 analysis,
+                thresholdsUsed: windowThresholds,
             };
         });
 
@@ -1318,6 +1453,8 @@
         const medianMaxDrawdown = median(validMetrics.map((m) => m.maxDrawdown));
         const medianWinRate = median(validMetrics.map((m) => m.winRate));
         const medianTrades = median(validMetrics.map((m) => m.tradesCount));
+        const baselineAnnualizedValues = validMetrics.map((m) => m.baselineAnnualizedReturn);
+        const medianBaselineAnnualizedReturn = median(baselineAnnualizedValues);
         const passCount = evaluations.filter((ev) => ev.evaluation.pass).length;
         const passRate = evaluations.length > 0 ? (passCount / evaluations.length) * 100 : 0;
 
@@ -1341,6 +1478,9 @@
         const medianOosPassRatio = median(oosPassRatios);
         const qualityComponentsList = analyses.map((analysis) => (analysis?.oosQuality?.components && typeof analysis.oosQuality.components === 'object'
             ? analysis.oosQuality.components
+            : null));
+        const qualityDetailsList = analyses.map((analysis) => (analysis?.oosQuality?.details && typeof analysis.oosQuality.details === 'object'
+            ? analysis.oosQuality.details
             : null));
         const qualityComponentMedians = computeMedianComponents(qualityComponentsList);
         const credibilityValues = analyses.map((analysis) => (Number.isFinite(analysis?.credibility) ? analysis.credibility : null));
@@ -1413,6 +1553,8 @@
             gradeDowngraded,
         });
 
+        const scorePoints = Number.isFinite(totalScore) ? totalScore * 100 : null;
+
         return {
             evaluations,
             totalScore,
@@ -1428,6 +1570,7 @@
             gradeLevel: grade.level,
             gradeDowngraded,
             summaryText,
+            scorePoints,
             averageAnnualizedReturn,
             averageSharpe,
             averageSortino,
@@ -1454,6 +1597,7 @@
             medianOosQualityRaw,
             qualityComponentMedians,
             qualityComponents: qualityComponentsList,
+            qualityDetailsList,
             oosQualityValues,
             oosPassRatios,
             windowScores,
@@ -1464,6 +1608,8 @@
             sampleCounts,
             minTrackRecordValues,
             oosQualityRawValues,
+            baselineAnnualizedValues,
+            medianBaselineAnnualizedReturn,
         };
     }
 
@@ -1522,7 +1668,7 @@
         const checks = [];
         if (Number.isFinite(metrics.annualizedReturn)) {
             const pass = metrics.annualizedReturn >= thresholds.annualizedReturn;
-            if (!pass) reasons.push(`年化報酬低於 ${thresholds.annualizedReturn}%`);
+            if (!pass) reasons.push(`年化報酬低於 ${formatPercent(thresholds.annualizedReturn)}`);
             checks.push(pass);
         }
         if (Number.isFinite(metrics.sharpeRatio)) {
@@ -1572,6 +1718,7 @@
             winRate: toFiniteNumber(winRate),
             tradesCount: Number.isFinite(tradesCount) ? tradesCount : null,
             oosStats: sanitizeOosStats(result.oosDailyStats),
+            baselineAnnualizedReturn: toFiniteNumber(result.buyHoldAnnualizedReturn),
         };
     }
 
@@ -1727,19 +1874,101 @@
         return fallback;
     }
 
+    function resolveAnnualizedFloor(threshold) {
+        if (!Number.isFinite(threshold)) return 0;
+        if (threshold > 0) return 0;
+        if (threshold === 0) return -10;
+        const span = Math.max(Math.abs(threshold), 10);
+        return threshold - span;
+    }
+
+    function resolveSharpeFloor(threshold) {
+        if (!Number.isFinite(threshold)) return 0;
+        if (threshold > 0) return 0;
+        return threshold - 1;
+    }
+
+    function resolveWinRateFloor() {
+        return 0;
+    }
+
+    function resolveDrawdownCeiling(threshold) {
+        if (!Number.isFinite(threshold)) return 100;
+        const span = Math.max(Math.abs(threshold), 10);
+        return Math.min(100, threshold + span);
+    }
+
+    function computePositiveMetricScore(value, threshold, floor) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return 0;
+        const lower = Number.isFinite(floor) ? floor : 0;
+        if (threshold <= lower) {
+            return value >= threshold ? 1 : 0;
+        }
+        if (value >= threshold) return 1;
+        return clamp01((value - lower) / (threshold - lower));
+    }
+
+    function computeNegativeMetricScore(value, threshold, ceiling) {
+        if (!Number.isFinite(value) || !Number.isFinite(threshold)) return 0;
+        const upper = Number.isFinite(ceiling) ? ceiling : resolveDrawdownCeiling(threshold);
+        if (upper <= threshold) {
+            return value <= threshold ? 1 : 0;
+        }
+        if (value <= threshold) return 1;
+        return clamp01((upper - value) / (upper - threshold));
+    }
+
     function computeOosQualityScore(metrics, thresholds) {
         if (!metrics || metrics.error) {
-            return { value: null, components: {}, passRatio: 0, rawValue: null };
+            return { value: null, components: {}, passRatio: 0, rawValue: null, details: {} };
         }
         const components = {};
+        const details = {};
         let weightedSum = 0;
         let weightTotal = 0;
         let passWeight = 0;
 
-        const accumulate = (key, score, weight, passed) => {
-            const normalized = Number.isFinite(score) ? clamp01(score) : 0;
-            components[key] = normalized;
-            weightedSum += weight * normalized;
+        const accumulate = (key, config) => {
+            const weight = Number(config?.weight) || 0;
+            if (!(weight > 0)) return;
+
+            const value = toFiniteNumber(config?.value);
+            const threshold = toFiniteNumber(config?.threshold);
+            const direction = config?.direction === 'lower' ? 'lower' : 'higher';
+            let normalized = 0;
+            let passed = false;
+
+            if (direction === 'lower') {
+                const ceiling = Number.isFinite(config?.ceiling) ? config.ceiling : resolveDrawdownCeiling(threshold);
+                normalized = computeNegativeMetricScore(value, threshold, ceiling);
+                passed = Number.isFinite(value) && Number.isFinite(threshold) && value <= threshold;
+                details[key] = {
+                    score: normalized,
+                    threshold,
+                    value,
+                    ceiling,
+                    direction,
+                    weight,
+                    passed,
+                };
+            } else {
+                const floor = Number.isFinite(config?.floor) ? config.floor : 0;
+                normalized = computePositiveMetricScore(value, threshold, floor);
+                passed = Number.isFinite(value) && Number.isFinite(threshold) && value >= threshold;
+                details[key] = {
+                    score: normalized,
+                    threshold,
+                    value,
+                    floor,
+                    direction,
+                    weight,
+                    passed,
+                };
+            }
+
+            const clamped = Number.isFinite(normalized) ? clamp01(normalized) : 0;
+            components[key] = clamped;
+            weightedSum += weight * clamped;
             weightTotal += weight;
             if (passed) {
                 passWeight += weight;
@@ -1747,45 +1976,59 @@
         };
 
         const annThreshold = resolveThreshold(thresholds?.annualizedReturn, DEFAULT_THRESHOLDS.annualizedReturn);
-        const annTarget = annThreshold + QUALITY_OFFSETS.annualizedReturn;
-        const annValue = toFiniteNumber(metrics.annualizedReturn);
-        const annScore = normalizeRange(annValue, annThreshold, annTarget);
-        const annPass = Number.isFinite(annValue) && annValue >= annThreshold;
-        accumulate('annualizedReturn', annScore, QUALITY_WEIGHTS.annualizedReturn, annPass);
+        const annFloor = resolveAnnualizedFloor(annThreshold);
+        accumulate('annualizedReturn', {
+            value: metrics.annualizedReturn,
+            threshold: annThreshold,
+            floor: annFloor,
+            weight: QUALITY_WEIGHTS.annualizedReturn,
+            direction: 'higher',
+        });
 
         const sharpeThreshold = resolveThreshold(thresholds?.sharpeRatio, DEFAULT_THRESHOLDS.sharpeRatio);
-        const sharpeTarget = sharpeThreshold + QUALITY_OFFSETS.sharpeRatio;
-        const sharpeValue = toFiniteNumber(metrics.sharpeRatio);
-        const sharpeScore = normalizeRange(sharpeValue, sharpeThreshold, sharpeTarget);
-        const sharpePass = Number.isFinite(sharpeValue) && sharpeValue >= sharpeThreshold;
-        accumulate('sharpeRatio', sharpeScore, QUALITY_WEIGHTS.sharpeRatio, sharpePass);
+        const sharpeFloor = resolveSharpeFloor(sharpeThreshold);
+        accumulate('sharpeRatio', {
+            value: metrics.sharpeRatio,
+            threshold: sharpeThreshold,
+            floor: sharpeFloor,
+            weight: QUALITY_WEIGHTS.sharpeRatio,
+            direction: 'higher',
+        });
 
         const sortinoThreshold = resolveThreshold(thresholds?.sortinoRatio, DEFAULT_THRESHOLDS.sortinoRatio);
-        const sortinoTarget = sortinoThreshold + QUALITY_OFFSETS.sortinoRatio;
-        const sortinoValue = toFiniteNumber(metrics.sortinoRatio);
-        const sortinoScore = normalizeRange(sortinoValue, sortinoThreshold, sortinoTarget);
-        const sortinoPass = Number.isFinite(sortinoValue) && sortinoValue >= sortinoThreshold;
-        accumulate('sortinoRatio', sortinoScore, QUALITY_WEIGHTS.sortinoRatio, sortinoPass);
+        const sortinoFloor = resolveSharpeFloor(sortinoThreshold);
+        accumulate('sortinoRatio', {
+            value: metrics.sortinoRatio,
+            threshold: sortinoThreshold,
+            floor: sortinoFloor,
+            weight: QUALITY_WEIGHTS.sortinoRatio,
+            direction: 'higher',
+        });
 
         const drawdownThreshold = resolveThreshold(thresholds?.maxDrawdown, DEFAULT_THRESHOLDS.maxDrawdown);
-        const drawdownWorst = Math.max(drawdownThreshold, QUALITY_TARGETS.maxDrawdownFloor + 1);
-        const drawdownBest = Math.max(QUALITY_TARGETS.maxDrawdownFloor, drawdownWorst - QUALITY_TARGETS.maxDrawdownSpan);
-        const drawdownValue = toFiniteNumber(metrics.maxDrawdown);
-        const drawdownScore = normalizeInverseRange(drawdownValue, drawdownBest, drawdownWorst);
-        const drawdownPass = Number.isFinite(drawdownValue) && drawdownValue <= drawdownThreshold;
-        accumulate('maxDrawdown', drawdownScore, QUALITY_WEIGHTS.maxDrawdown, drawdownPass);
+        const drawdownCeiling = resolveDrawdownCeiling(drawdownThreshold);
+        accumulate('maxDrawdown', {
+            value: metrics.maxDrawdown,
+            threshold: drawdownThreshold,
+            ceiling: drawdownCeiling,
+            weight: QUALITY_WEIGHTS.maxDrawdown,
+            direction: 'lower',
+        });
 
         const winRateThreshold = resolveThreshold(thresholds?.winRate, DEFAULT_THRESHOLDS.winRate);
-        const winRateTarget = winRateThreshold + QUALITY_TARGETS.winRateBonus;
-        const winRateValue = toFiniteNumber(metrics.winRate);
-        const winRateScore = normalizeRange(winRateValue, winRateThreshold, winRateTarget);
-        const winRatePass = Number.isFinite(winRateValue) && winRateValue >= winRateThreshold;
-        accumulate('winRate', winRateScore, QUALITY_WEIGHTS.winRate, winRatePass);
+        const winRateFloor = resolveWinRateFloor(winRateThreshold);
+        accumulate('winRate', {
+            value: metrics.winRate,
+            threshold: winRateThreshold,
+            floor: winRateFloor,
+            weight: QUALITY_WEIGHTS.winRate,
+            direction: 'higher',
+        });
 
         const rawValue = weightTotal > 0 ? weightedSum / weightTotal : null;
         const passRatio = weightTotal > 0 ? clamp01(passWeight / weightTotal) : 0;
         const value = Number.isFinite(rawValue) ? Math.min(rawValue, passRatio) : null;
-        return { value, components, passRatio, rawValue };
+        return { value, components, passRatio, rawValue, details };
     }
 
     function computeMedianComponents(componentList) {
@@ -1850,6 +2093,8 @@
             confidence: MIN_TRACK_RECORD_CONFIDENCE,
         });
 
+        const thresholdsUsed = thresholds && typeof thresholds === 'object' ? { ...thresholds } : null;
+
         return {
             oosQuality: quality,
             psrProbability: Number.isFinite(psr) ? clamp01(psr) : null,
@@ -1861,6 +2106,7 @@
             sampleCount,
             stats,
             wfe,
+            thresholdsUsed,
         };
     }
 
@@ -2255,8 +2501,9 @@
     }
 
     function getRollingConfig(availability) {
+        const mode = state.windowMode === 'duration' ? 'duration' : 'count';
         const windowCountRaw = clampNumber(readInputValue('rolling-window-count', DEFAULT_WINDOW_COUNT), 1, 24);
-        const windowCount = Math.max(1, Math.round(windowCountRaw));
+        const windowCount = mode === 'count' ? Math.max(1, Math.round(windowCountRaw)) : null;
         const thresholds = {
             annualizedReturn: clampNumber(readInputValue('rolling-threshold-ann', DEFAULT_THRESHOLDS.annualizedReturn), 0, 200),
             sharpeRatio: clampNumber(readInputValue('rolling-threshold-sharpe', DEFAULT_THRESHOLDS.sharpeRatio), 0, 10),
@@ -2273,7 +2520,7 @@
         let testingMonths;
         let stepMonths;
 
-        if (isAdvancedSettingsActive()) {
+        if (mode === 'duration' || isAdvancedSettingsActive()) {
             trainingMonths = clampNumber(readInputValue('rolling-training-months', DEFAULT_WINDOW_RATIO.training), 6, 180);
             testingMonths = clampNumber(readInputValue('rolling-testing-months', DEFAULT_WINDOW_RATIO.testing), 3, 72);
             stepMonths = clampNumber(readInputValue('rolling-step-months', DEFAULT_WINDOW_RATIO.step), 1, 36);
@@ -2299,6 +2546,7 @@
             baseEnd,
             optimization,
             windowCount,
+            mode,
         };
     }
 
@@ -3179,6 +3427,8 @@
         const summaryParts = [];
         if (Number.isFinite(config.windowCount)) {
             summaryParts.push(`目標 ${config.windowCount} 次`);
+        } else if (config.mode === 'duration') {
+            summaryParts.push('自訂視窗模式');
         }
         summaryParts.push(`訓練 ${config.trainingMonths} 個月`);
         summaryParts.push(`測試 ${config.testingMonths} 個月`);

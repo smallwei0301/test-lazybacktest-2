@@ -1394,3 +1394,11 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2026-11-07 — Patch LB-ROLLING-TEST-20251107A
+- **Issue recap**: 使用者希望 OOS 品質分數依視窗原始基準判定、提供單窗細節與計算說明，並能以自訂視窗長度規劃 Walk-Forward；另回報策略比較在滾動測試後仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `index.html` 增加「自訂視窗」切換鈕與提示，禁用年化門檻輸入並說明改採原始股票年化報酬率。
+  - `js/rolling-test.js` 導入視窗模式狀態、原始年化門檻、線性遞減品質評分、單窗詳細列表與計算說明，並輸出 `scorePoints` 供外部使用。
+  - `js/backtest.js` 更新策略快照版本碼並改讀取新的滾動測試分數欄位，解除策略比較的佔位提示。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
