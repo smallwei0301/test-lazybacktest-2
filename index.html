@@ -2028,10 +2028,15 @@
                                         </div>
                                         <div class="card-content">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    滾動測試次數
+                                                <label id="rolling-window-count-wrapper" class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                    <div class="flex items-center justify-between gap-2">
+                                                        <span>滾動測試次數</span>
+                                                        <button type="button" id="rolling-window-mode-toggle" class="text-[11px] font-semibold inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);" aria-pressed="false">
+                                                            改用視窗長度
+                                                        </button>
+                                                    </div>
                                                     <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
+                                                    <span id="rolling-window-count-hint" class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                 </label>
                                                 <div class="md:col-span-2 xl:col-span-3 flex flex-col gap-3">
                                                     <button type="button" id="toggle-rolling-advanced" class="self-start text-xs font-semibold inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">

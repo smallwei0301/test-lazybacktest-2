@@ -1394,3 +1394,9 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+## 2025-07-05 — Patch LB-ROLLING-QUALITY-20250705A / LB-ROLLING-UI-20250705A / LB-STRATEGY-COMPARE-20260710D
+- **Issue recap**: Walk-Forward 報告的 OOS 品質分數缺乏單窗得分與計算說明，年化門檻沿用手動設定，信度/統計細節也不易理解；滾動測試次數只能固定輸入數量，無法改以訓練/測試視窗長度推算；策略比較面板在完成滾動測試後仍顯示「請先測試後保存策略」，難以對照最新評分。
+- **Fix**: 調整 OOS 品質計分為門檻即滿分、未達線性遞減，年化門檻改採原始股票年化報酬率，細節卡片補上中位數/加權原值/統計可信度的計算說明與單窗清單；新增「視窗數切換」按鈕，可在固定次數與視窗長度推算間切換並記錄偏好；滾動測試彙總提供 `score`（轉換為 0~100 分）供策略比較儲存使用。
+- **Diagnostics**: 滾動測試細節卡顯示每個視窗的品質原值、達標比、策略年化與原始股票年化；信度卡列出 PSR/DSR 與樣本需求；新的視窗模式提示文字會標示自動推算方式。
+- **Testing**: 受限於容器無法連線 Proxy，僅在本地開發模式檢視 UI 更新與資料彙整流程，待具網路環境時再以實際回測驗證。
+
