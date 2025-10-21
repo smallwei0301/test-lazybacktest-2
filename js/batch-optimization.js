@@ -6,6 +6,7 @@
 // Patch Tag: LB-BATCH-CACHE-20251024A
 // Patch Tag: LB-BATCH-CACHE-20251027A
 // Patch Tag: LB-BATCH-CACHE-20251030A
+// Patch Tag: LB-BATCH-CACHE-20251102A
 
 // 策略名稱映射：批量優化名稱 -> Worker名稱
 function getWorkerStrategyName(batchStrategyName) {
@@ -306,6 +307,42 @@ function datasetCoversRange(rows, startIso, endIso, toleranceMs = CACHE_DATE_TOL
     return true;
 }
 
+function sliceDatasetToRange(rows, startIso, endIso, toleranceMs = CACHE_DATE_TOLERANCE_MS) {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+
+    const tolerance = Number.isFinite(toleranceMs) && toleranceMs >= 0
+        ? toleranceMs
+        : CACHE_DATE_TOLERANCE_MS;
+
+    const startTs = parseIsoDateToUtcSafe(startIso);
+    const endTs = parseIsoDateToUtcSafe(endIso);
+    const hasStart = Number.isFinite(startTs);
+    const hasEnd = Number.isFinite(endTs);
+
+    if (!hasStart && !hasEnd) {
+        return rows.slice();
+    }
+
+    const trimmed = [];
+    for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        const ts = resolveRowTimestampForCache(row);
+        if (!Number.isFinite(ts)) {
+            trimmed.push(row);
+            continue;
+        }
+        if (hasStart && ts < (startTs - tolerance)) {
+            continue;
+        }
+        if (hasEnd && ts > (endTs + tolerance)) {
+            continue;
+        }
+        trimmed.push(row);
+    }
+
+    return trimmed;
+}
+
 function resolveWorkerCachePayload(params, options = {}) {
     const result = {
         useCachedData: false,
@@ -352,13 +389,30 @@ function resolveWorkerCachePayload(params, options = {}) {
 
     if (overrideData) {
         if (datasetCoversRange(overrideData, requestedStart, requestedEnd)) {
+            const trimmedOverride = sliceDatasetToRange(overrideData, requestedStart, requestedEnd);
+            if (!trimmedOverride || trimmedOverride.length === 0) {
+                result.reason = 'overrideTrimmedEmpty';
+                result.notes = ['cachedDataOverride 範圍裁切後無有效資料'];
+                return result;
+            }
+            const trimmedSummary = summariseDatasetRangeForDebug(trimmedOverride);
+            const removedRows = overrideData.length - trimmedOverride.length;
             result.useCachedData = true;
-            result.cachedData = overrideData;
+            result.cachedData = trimmedOverride;
             result.reason = 'overrideProvided';
             result.source = 'override';
-            result.datasetSummary = summariseDatasetRangeForDebug(overrideData);
+            result.datasetSummary = trimmedSummary;
+            if (removedRows > 0) {
+                result.notes = [
+                    `override 資料已裁切至需求區間（移除 ${removedRows} 筆）`,
+                    `裁切後範圍：${trimmedSummary.start || '未知'} → ${trimmedSummary.end || '未知'}`,
+                ];
+            }
             if (options.cachedMetaOverride) {
                 result.cachedMeta = options.cachedMetaOverride;
+                if (result.cachedMeta.summary && result.datasetSummary) {
+                    result.cachedMeta.summary = result.datasetSummary;
+                }
             }
             return result;
         }
@@ -508,11 +562,32 @@ function resolveWorkerCachePayload(params, options = {}) {
         return result;
     }
 
+    const originalSummary = summariseDatasetRangeForDebug(selectedDataset.rows);
+    const trimmedDataset = sliceDatasetToRange(selectedDataset.rows, coverageStart, normalizedSettings.endDate);
+    if (!trimmedDataset || trimmedDataset.length === 0) {
+        result.reason = 'trimmedDatasetEmpty';
+        result.notes = ['快取資料裁切後無有效日期'];
+        return result;
+    }
+    const trimmedSummary = summariseDatasetRangeForDebug(trimmedDataset);
+    const removedRows = selectedDataset.rows.length - trimmedDataset.length;
+
     result.useCachedData = true;
-    result.cachedData = selectedDataset.rows;
-    result.datasetSummary = summariseDatasetRangeForDebug(selectedDataset.rows);
+    result.cachedData = trimmedDataset;
+    result.datasetSummary = trimmedSummary;
     result.reason = 'globalCacheReusable';
     result.source = selectedDataset.source;
+    if (removedRows > 0 || (originalSummary?.end && trimmedSummary?.end && originalSummary.end !== trimmedSummary.end)) {
+        result.notes = [
+            `快取資料已依需求區間裁切（移除 ${removedRows > 0 ? removedRows : 0} 筆）`,
+            `原範圍：${originalSummary?.start || '未知'} → ${originalSummary?.end || '未知'}`,
+            `裁切後：${trimmedSummary.start || '未知'} → ${trimmedSummary.end || '未知'}`,
+        ];
+    }
+
+    if (result.cachedMeta && result.datasetSummary) {
+        result.cachedMeta.summary = result.datasetSummary;
+    }
 
     if (forceBypass) {
         result.useCachedData = false;
@@ -539,6 +614,7 @@ function logBatchCacheDecision(context, params, cachePayload) {
             priceMode: params?.priceMode
                 || (params?.adjustedPrice ? 'adjusted' : 'raw'),
             market: params?.market || params?.marketType || currentMarket || null,
+            notes: Array.isArray(cachePayload.notes) ? cachePayload.notes : undefined,
         });
         console.debug('[Batch Optimization][Cache]', {
             context,
@@ -550,6 +626,7 @@ function logBatchCacheDecision(context, params, cachePayload) {
             reason: cachePayload.reason,
             source: cachePayload.source,
             summary,
+            notes: cachePayload.notes || null,
         });
     } catch (error) {
         console.warn('[Batch Optimization] Failed to log cache decision:', error);

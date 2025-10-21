@@ -1,6 +1,15 @@
 
 
 
+## 2025-11-02 — Patch LB-BATCH-CACHE-20251102A
+- **Issue recap**: 調整回測結束日後再次啟動批量優化，沿用的快取資料仍包含較晚的日期，導致 Worker 讀到超出需求的行情並輸出不同最佳參數。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `sliceDatasetToRange`，在沿用全域快取或 override 資料前即裁切至需求起訖日（含容忍天數），並將裁切後的範圍寫入批量快取診斷日誌。
+  - 補強 `resolveWorkerCachePayload` 的回傳內容：若裁切移除資料會記錄提示字串、更新 `cachedMeta.summary`，避免後續流程仍引用原始範圍。
+  - `logBatchCacheDecision` 會把裁切說明同步寫入開發者模式卡片與 console，方便比對兩次批量優化的差異。
+- **Diagnostics**: 依操作手順「批量優化 → 變更結束日回測 → 再次批量優化」，確認第二次批量優化的診斷日誌顯示裁切後的資料區間與最佳參數恢復一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-30 — Patch LB-BATCH-CACHE-20251030A
 - **Issue recap**: 滾動測試或異動區間後批量優化仍可能沿用落後數日的快取資料，使得最佳參數與首次回測不一致，同時開發者模式缺少可複製的批量優化紀錄。
 - **Fix**:
