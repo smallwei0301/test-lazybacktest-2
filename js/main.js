@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-INDEX-UI-20250727A
 
 // 全局變量
 let stockChart = null;
@@ -840,7 +841,15 @@ function applyMarketPreset(market) {
 
     const marketHint = document.getElementById('marketAdjustedHint');
     if (marketHint) {
-        marketHint.classList.toggle('hidden', market !== 'US');
+        if (market === 'US' || market === 'INDEX') {
+            const hintText = market === 'INDEX'
+                ? '指數回測目前採用原始指數值，已自動停用除權息還原與拆分選項。'
+                : '美股回測目前採用原始股價，已自動停用除權息還原與拆分選項。';
+            marketHint.textContent = hintText;
+            marketHint.classList.remove('hidden');
+        } else {
+            marketHint.classList.add('hidden');
+        }
     }
 }
 

@@ -694,7 +694,7 @@
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div>
-                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票代碼 (目前無提供指數)</label>
+                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票與指數代碼 (非即時資訊)</label>
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <div class="flex-1 min-w-[160px] sm:min-w-[200px]">
                                                     <input
@@ -716,11 +716,12 @@
                                                         <option value="TWSE">上市</option>
                                                         <option value="TPEX">上櫃</option>
                                                         <option value="US">美股</option>
-                                                    </select>
-                                                </div>
+                                                        <option value="INDEX">指數</option>
+                                                </select>
                                             </div>
+                                        </div>
                                             <div id="marketAdjustedHint" class="mt-1 text-[11px] text-amber-600 hidden">
-                                                美股回測目前採用原始股價，已自動停用除權息還原與拆分選項。
+                                                美股或指數回測目前採用原始股價，已自動停用除權息還原與拆分選項。
                                             </div>
                                             <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
                                                 <!-- 股票名稱和市場切換提示將顯示在這裡 -->
@@ -781,14 +782,22 @@
                                         </div>
                                         <div>
                                             <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金-固定金額買入 (元)</label>
-                                            <input 
-                                                type="number" 
-                                                id="initialCapital" 
-                                                value="100000" 
-                                                step="1000" 
+                                            <input
+                                                type="number"
+                                                id="initialCapital"
+                                                value="100000"
+                                                step="1000"
                                                 class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                 style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                             />
+                                            <button
+                                                id="quickBacktestBtn"
+                                                type="button"
+                                                class="btn-outline mt-2 text-xs px-3 py-1.5 rounded-md font-medium transition duration-150 ease-in-out flex items-center gap-1"
+                                            >
+                                                <i data-lucide="zap" class="lucide-sm"></i>
+                                                立刻回測
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
