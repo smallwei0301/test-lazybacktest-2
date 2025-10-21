@@ -2195,7 +2195,7 @@
                                             <div class="flex items-center gap-3 flex-wrap justify-end">
                                                 <label class="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg border" for="rolling-strict-mode" style="border-color: var(--border); color: var(--muted-foreground); background: color-mix(in srgb, var(--muted) 10%, transparent);">
                                                     <input id="rolling-strict-mode" type="checkbox" class="rounded border border-border text-primary focus:ring-primary" />
-                                                    嚴格模式
+                                                    嚴格模式（SR* 換算日 ≈ 0.063）
                                                 </label>
                                                 <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
                                                     <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
@@ -2234,6 +2234,7 @@
                                             <div id="rolling-grade-card" class="p-4 border rounded-lg flex flex-col gap-2" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
                                                 <span class="text-xs font-medium" style="color: var(--muted-foreground);">判定等級</span>
                                                 <span id="rolling-grade-label" class="text-2xl font-semibold" style="color: var(--foreground);">—</span>
+                                                <p id="rolling-grade-note" class="text-xs hidden" style="color: var(--muted-foreground);"></p>
                                             </div>
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" id="rolling-scoreboard"></div>
                                             <details id="rolling-score-summary" class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">

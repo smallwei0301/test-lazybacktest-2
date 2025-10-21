@@ -1,5 +1,5 @@
 // --- 滾動測試模組 - v2.5 ---
-// Patch Tag: LB-ROLLING-TEST-20251109A
+// Patch Tag: LB-ROLLING-TEST-20251109B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20251109A',
+        version: 'LB-ROLLING-TEST-20251109B',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -50,6 +50,10 @@
     const DEFAULT_WINDOW_COUNT = 2;
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
     const DAYS_PER_YEAR = 252;
+    const STRICT_SR_BENCHMARK = 1 / Math.sqrt(DAYS_PER_YEAR);
+    const LOOSE_SR_BENCHMARK = 0;
+    const STRICT_SR_LABEL = `SR*=1（日 Sharpe ≈ ${STRICT_SR_BENCHMARK.toFixed(3)}）`;
+    const LOOSE_SR_LABEL = 'SR*=0';
     const RISK_FREE_RATE = 0.01;
     const MIN_TRACK_RECORD_CONFIDENCE = 0.95;
     const WFE_ADJUST_MIN = 0.8;
@@ -554,8 +558,8 @@
         const thresholds = state.config?.thresholds || DEFAULT_THRESHOLDS;
         const aggregate = computeAggregateReport(analysisEntries, thresholds, {
             strictMode: Boolean(state.strictMode),
-            srBenchmarkLoose: 0,
-            srBenchmarkStrict: 1,
+            srBenchmarkLoose: LOOSE_SR_BENCHMARK,
+            srBenchmarkStrict: STRICT_SR_BENCHMARK,
             optimizationEnabled: Boolean(state.config?.optimization?.enabled),
             optimizationTrials: state.config?.optimization?.trials,
         });
@@ -578,6 +582,7 @@
     function renderGradeCard(aggregate) {
         const card = document.getElementById('rolling-grade-card');
         const label = document.getElementById('rolling-grade-label');
+        const note = document.getElementById('rolling-grade-note');
         if (!card || !label) return;
 
         const gradeLabel = aggregate?.gradeLabel || '尚無結果';
@@ -587,6 +592,17 @@
         label.style.color = accent;
         card.style.borderColor = accent;
         card.style.backgroundColor = `color-mix(in srgb, ${accent} 12%, transparent)`;
+
+        if (note) {
+            const psrRatio = Number.isFinite(aggregate?.psrAbove95Ratio) ? aggregate.psrAbove95Ratio : null;
+            if (psrRatio !== null && psrRatio <= 0) {
+                note.textContent = 'PSR≥95% 視窗比為 0%，建議拉長測試區間以增加樣本。';
+                note.classList.remove('hidden');
+            } else {
+                note.textContent = '';
+                note.classList.add('hidden');
+            }
+        }
     }
 
     function renderSummaryDetails(aggregate) {
@@ -647,7 +663,7 @@
                 detailBuilder: () => buildWfeDetail(aggregate),
             },
             {
-                title: `PSR / DSR（${aggregate.psrBenchmarkLabel || 'SR*=0'}）`,
+                title: `PSR（${aggregate.psrBenchmarkLabel || LOOSE_SR_LABEL}） / DSR`,
                 value: `${formatProbability(aggregate.medianPsr)} / ${formatProbability(aggregate.medianDsr)}`,
                 description: describeCredibilityStatus(aggregate),
                 detailBuilder: () => buildCredibilityDetail(aggregate),
@@ -724,7 +740,7 @@
         const stepItems = [
             '每個視窗先計算 OOS 品質得分：指標達門檻得 1 分，未達門檻依落差線性遞減至 0，並乘上權重後加總。',
             '同時計算統計可信度：PSR 與 DSR 取幾何平均 √(PSR × DSR)，再換算統計權重 = 0.2 + 0.8 × 可信度（樣本不足時統計權重上限 0.3）。',
-            '窗分數 = 品質得分 × 統計權重；嚴格模式會採 SR*=1 並對樣本不足視窗直接將 PSR 歸零。',
+            `窗分數 = 品質得分 × 統計權重；嚴格模式會採 ${STRICT_SR_LABEL} 並對樣本不足視窗直接將 PSR 歸零。`,
             'Walk-Forward 總分 = 窗分數中位 × WFE 調整係數（介於 0.8～1.2），最後換算為 0～100 分。',
         ];
         stepItems.forEach((text) => {
@@ -975,6 +991,13 @@
         if (rawSampleText) summaryParts.push(rawSampleText);
         if (effectiveSampleText) summaryParts.push(effectiveSampleText);
         if (minTrlText) summaryParts.push(minTrlText);
+        if (Number.isFinite(aggregate.medianSampleSharpe)) {
+            summaryParts.push(`SR_hat 中位 ${formatNumber(aggregate.medianSampleSharpe)}`);
+        }
+        const srStarSummary = aggregate.strictMode ? aggregate.srBenchmarkStrict : aggregate.srBenchmarkLoose;
+        if (Number.isFinite(srStarSummary)) {
+            summaryParts.push(`SR* = ${formatNumber(srStarSummary)}`);
+        }
         summary.textContent = `${summaryParts.join('，')}。`;
         container.appendChild(summary);
 
@@ -988,7 +1011,7 @@
         [
             'PSR（Probabilistic Sharpe）以樣本 Sharpe、有效樣本數、偏度與峰度評估超越基準 Sharpe 的機率。',
             'DSR（Deflated Sharpe）會套用有效嘗試數，避免高度相關的參數組合重複計數。',
-            '可信度 = √(PSR × DSR)，統計權重 = 0.2 + 0.8 × 可信度；嚴格模式會改用 SR*=1 並對樣本不足的視窗直接歸零。',
+            `可信度 = √(PSR × DSR)，統計權重 = 0.2 + 0.8 × 可信度；嚴格模式會改用 ${STRICT_SR_LABEL} 並對樣本不足的視窗直接歸零。`,
             'MinTRL 估算 95% 信心水準下所需的最小交易日數，若有效樣本低於需求會在逐窗報表顯示提醒。',
         ].forEach((text) => {
             const item = document.createElement('li');
@@ -1040,14 +1063,25 @@
             if (psrExtras.length > 0) psrDetail += `（${psrExtras.join('／')}）`;
             details.push(psrDetail);
             let dsrDetail = `DSR ${dsrText}`;
-            const dsrExtras = [];
-            if (Number.isFinite(dsrLooseValues[index])) dsrExtras.push(`SR*=0 ${formatProbability(dsrLooseValues[index])}`);
-            if (Number.isFinite(dsrStrictValues[index])) dsrExtras.push(`SR*=1 ${formatProbability(dsrStrictValues[index])}`);
-            if (dsrExtras.length > 0) dsrDetail += `（${dsrExtras.join('／')}）`;
             details.push(dsrDetail);
-            if (effectiveValue !== null) details.push(`有效樣本 ${effectiveValue}`);
+            if (Number.isFinite(evaluation?.analysis?.sampleSharpe)) {
+                details.push(`SR_hat ${formatNumber(evaluation.analysis.sampleSharpe)}`);
+            }
+            const srBenchmarkValue = Number.isFinite(evaluation?.analysis?.srBenchmarkUsed)
+                ? evaluation.analysis.srBenchmarkUsed
+                : null;
+            if (srBenchmarkValue !== null) {
+                details.push(`SR* ${formatNumber(srBenchmarkValue)}`);
+            }
+            if (effectiveValue !== null) details.push(`n_eff ${effectiveValue}`);
             if (sampleValue !== null) details.push(`原始樣本 ${sampleValue}`);
-            if (minTrlValue !== null) details.push(`需求 ≥ ${minTrlValue}`);
+            if (Number.isFinite(evaluation?.analysis?.skewness)) {
+                details.push(`γ3 ${formatNumber(evaluation.analysis.skewness)}`);
+            }
+            if (Number.isFinite(evaluation?.analysis?.kurtosis)) {
+                details.push(`γ4 ${formatNumber(evaluation.analysis.kurtosis)}`);
+            }
+            if (minTrlValue !== null) details.push(`MinTRL ≥ ${minTrlValue}`);
             const statWeightValue = Number.isFinite(evaluation?.analysis?.statWeight) ? evaluation.analysis.statWeight : null;
             if (Number.isFinite(statWeightValue)) details.push(`統計權重 ${formatScore(statWeightValue)}`);
             if (details.length === 0) return;
@@ -1530,8 +1564,10 @@
 
     function computeAggregateReport(entries, thresholds, options = {}) {
         const strictMode = Boolean(options?.strictMode);
-        const srBenchmarkLoose = Number.isFinite(options?.srBenchmarkLoose) ? options.srBenchmarkLoose : 0;
-        const srBenchmarkStrict = Number.isFinite(options?.srBenchmarkStrict) ? options.srBenchmarkStrict : thresholds.sharpeRatio;
+        const srBenchmarkLoose = Number.isFinite(options?.srBenchmarkLoose) ? options.srBenchmarkLoose : LOOSE_SR_BENCHMARK;
+        const srBenchmarkStrict = Number.isFinite(options?.srBenchmarkStrict)
+            ? options.srBenchmarkStrict
+            : STRICT_SR_BENCHMARK;
         const srBenchmark = strictMode ? srBenchmarkStrict : srBenchmarkLoose;
         const rawTrialCount = options?.optimizationEnabled
             ? Math.max(1, Number(options?.optimizationTrials) || 60)
@@ -1662,12 +1698,17 @@
         }).length;
         const dsrBelow50Ratio = analyses.length > 0 ? dsrBelow50Count / analyses.length : 0;
 
+        const sampleSharpeValues = analyses.map((analysis) => (Number.isFinite(analysis?.sampleSharpe) ? analysis.sampleSharpe : null));
+        const medianSampleSharpe = median(sampleSharpeValues);
         const sampleCounts = analyses.map((analysis) => (Number.isFinite(analysis?.sampleCount) ? analysis.sampleCount : null));
         const effectiveSampleCounts = analyses.map((analysis) => (Number.isFinite(analysis?.effectiveSampleCount) ? analysis.effectiveSampleCount : null));
         const medianSampleCount = median(sampleCounts);
         const medianEffectiveSampleCount = median(effectiveSampleCounts);
         const minTrackRecordValues = analyses.map((analysis) => (Number.isFinite(analysis?.minTrackRecordLength) ? analysis.minTrackRecordLength : null));
         const medianMinTrackRecordLength = median(minTrackRecordValues);
+
+        const skewnessValues = analyses.map((analysis) => (Number.isFinite(analysis?.skewness) ? analysis.skewness : null));
+        const kurtosisValues = analyses.map((analysis) => (Number.isFinite(analysis?.kurtosis) ? analysis.kurtosis : null));
 
         const trialCorrelations = analyses.map((analysis) => (Number.isFinite(analysis?.trialCorrelation) ? analysis.trialCorrelation : null));
         const averageTrialCorrelation = average(trialCorrelations);
@@ -1734,7 +1775,7 @@
             gradeDowngraded,
             medianBaselineAnnualizedReturn,
             strictMode,
-            psrBenchmarkLabel: strictMode ? 'SR*=1' : 'SR*=0',
+            psrBenchmarkLabel: strictMode ? STRICT_SR_LABEL : LOOSE_SR_LABEL,
             dsrBelow50Ratio,
             medianEffectiveSampleCount,
         });
@@ -1762,10 +1803,14 @@
                 baselineAnnualizedReturn: Number.isFinite(ev.metrics?.baselineAnnualizedReturn)
                     ? ev.metrics.baselineAnnualizedReturn
                     : null,
+                sampleSharpe: Number.isFinite(analysis.sampleSharpe) ? analysis.sampleSharpe : null,
+                srBenchmarkUsed: Number.isFinite(analysis.srBenchmarkUsed) ? analysis.srBenchmarkUsed : null,
+                skewness: Number.isFinite(analysis.skewness) ? analysis.skewness : null,
+                kurtosis: Number.isFinite(analysis.kurtosis) ? analysis.kurtosis : null,
             };
         });
 
-        const psrBenchmarkLabel = strictMode ? 'SR*=1' : 'SR*=0';
+        const psrBenchmarkLabel = strictMode ? STRICT_SR_LABEL : LOOSE_SR_LABEL;
 
         return {
             evaluations,
@@ -1840,6 +1885,12 @@
             trialCorrelations,
             averageTrialCorrelation,
             score: Number.isFinite(totalScore) ? totalScore * 100 : null,
+            sampleSharpeValues,
+            medianSampleSharpe,
+            skewnessValues,
+            kurtosisValues,
+            srBenchmarkLoose: srBenchmarkLoose,
+            srBenchmarkStrict: srBenchmarkStrict,
         };
     }
 
@@ -1876,7 +1927,7 @@
             : '年化 ≥ 視窗買入持有';
         parts.push(`共有 ${context.passCount}/${context.total} 視窗符合門檻（${baselineClause}、Sharpe ≥ ${context.thresholds.sharpeRatio}、Sortino ≥ ${context.thresholds.sortinoRatio}、MaxDD ≤ ${formatPercent(context.thresholds.maxDrawdown)}、勝率 ≥ ${context.thresholds.winRate}%）`);
         if (context.strictMode) {
-            parts.push('已啟用嚴格模式，PSR/DSR 以 SR*=1 判定，樣本不足的視窗將直接扣除可信度');
+            parts.push(`已啟用嚴格模式，PSR/DSR 以 ${STRICT_SR_LABEL} 判定，樣本不足的視窗將直接扣除可信度`);
         }
         if (context.gradeDowngraded) {
             parts.push('整體 DSR 未達 0，已將等級下修一級');
@@ -2300,7 +2351,7 @@
 
     function computeWindowAnalysis(metrics, thresholds, options) {
         const resolvedThresholds = resolveWindowThresholds(metrics, thresholds);
-        const srBenchmarkLoose = Number.isFinite(options?.srBenchmarkLoose) ? options.srBenchmarkLoose : 0;
+        const srBenchmarkLoose = Number.isFinite(options?.srBenchmarkLoose) ? options.srBenchmarkLoose : LOOSE_SR_BENCHMARK;
         const srBenchmarkStrict = Number.isFinite(options?.srBenchmarkStrict)
             ? options.srBenchmarkStrict
             : resolvedThresholds.sharpeRatio;
@@ -2316,6 +2367,7 @@
         const sampleSharpe = computeSampleSharpe(stats);
         const skewness = Number.isFinite(stats?.skewness) ? stats.skewness : null;
         const kurtosis = Number.isFinite(stats?.kurtosis) ? stats.kurtosis : null;
+        const srBenchmarkUsed = usingStrict ? srBenchmarkStrict : srBenchmarkLoose;
 
         let psrLoose = computeProbabilisticSharpeProbability({
             sharpe: sampleSharpe,
@@ -2358,7 +2410,7 @@
 
         const minTrackRecordLength = computeMinTrackRecordLength({
             sharpe: sampleSharpe,
-            benchmark: usingStrict ? srBenchmarkStrict : srBenchmarkLoose,
+            benchmark: srBenchmarkUsed,
             sampleCount: effectiveSampleCount,
             skewness,
             kurtosis,
@@ -2409,6 +2461,12 @@
             strictMode: usingStrict,
             trialCorrelation: trialMeta.correlation,
             effectiveTrials: trialCount,
+            sampleSharpe: Number.isFinite(sampleSharpe) ? sampleSharpe : null,
+            skewness,
+            kurtosis,
+            srBenchmarkLoose,
+            srBenchmarkStrict,
+            srBenchmarkUsed,
         };
     }
 
