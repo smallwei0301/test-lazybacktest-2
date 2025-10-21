@@ -6232,7 +6232,10 @@ function computeReturnMomentSums(returns) {
 
   for (let i = 0; i < returns.length; i += 1) {
     const value = returns[i];
-    if (!Number.isFinite(value)) continue;
+    if (!Number.isFinite(value)) {
+      prevDiff = null;
+      continue;
+    }
     sampleCount += 1;
     sum1 += value;
     const squared = value * value;
@@ -6260,6 +6263,8 @@ function computeReturnMomentSums(returns) {
   let diff2Sum = 0;
   let diff3Sum = 0;
   let diff4Sum = 0;
+  let autocovLag1 = 0;
+  let prevDiff = null;
 
   for (let i = 0; i < returns.length; i += 1) {
     const value = returns[i];
@@ -6269,10 +6274,24 @@ function computeReturnMomentSums(returns) {
     diff2Sum += diff2;
     diff3Sum += diff2 * diff;
     diff4Sum += diff2 * diff2;
+    if (prevDiff !== null) {
+      autocovLag1 += prevDiff * diff;
+    }
+    prevDiff = diff;
   }
 
   const variance = sampleCount > 1 ? diff2Sum / (sampleCount - 1) : 0;
   const stdDev = variance > 0 ? Math.sqrt(variance) : 0;
+
+  let autocorrLag1 = null;
+  if (sampleCount > 1 && diff2Sum > 0) {
+    const denom = diff2Sum;
+    const normalised = autocovLag1 / denom;
+    if (Number.isFinite(normalised)) {
+      const clamped = Math.max(-0.99, Math.min(0.99, normalised));
+      autocorrLag1 = clamped;
+    }
+  }
 
   let skewness = null;
   if (sampleCount > 2 && diff2Sum > 0) {
@@ -6302,6 +6321,7 @@ function computeReturnMomentSums(returns) {
     mean,
     variance,
     stdDev,
+    lag1Autocorr: autocorrLag1,
     skewness,
     kurtosis,
   };
