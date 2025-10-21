@@ -1,5 +1,13 @@
 
 
+## 2026-07-07 — Patch LB-ROLLING-TEST-20260707A
+- **Scope**: 滾動測試嚴格模式門檻換算、PSR/DSR 詳細資訊與策略比較顯示調整。
+- **Updates**:
+  - `js/rolling-test.js` 將嚴格模式 Sharpe 基準改為每日值 `1/√252`，統一以常數管理並更新卡片、摘要與說明文字（顯示日 Sharpe ≈ 0.063）。
+  - 擴充 PSR/DSR 詳細資訊，逐窗顯示 SR_hat(每期)、SR*、n_eff、γ3、γ4、MinTRL，移除 DSR 的 SR* 標示，PSR≥95% 視窗比為 0% 時提醒拉長區間。
+  - `js/backtest.js` 策略比較表僅保留滾動測試總分顯示，避免與報告細節重複。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機驗證嚴格模式下的 PSR/DSR 顯示與計算。
+
 ## 2026-11-05 — Patch LB-ROLLING-TEST-20251105A
 - **Issue recap**: 需將 OOS 品質門檻與計算說明更貼近實際需求，揭露逐窗得分、改用買入持有年化作為門檻，並提供手動視窗切換；策略比較儲存後也要讀到滾動測試分數。
 - **Fix**:
