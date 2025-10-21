@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.7 ---
-// Patch Tag: LB-BATCH-OPT-20260718E
+// --- 批量策略優化功能 - v1.2.8 ---
+// Patch Tag: LB-BATCH-OPT-20260718G
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
@@ -48,7 +48,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718E';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718H';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -390,6 +390,43 @@ function buildCachedDatasetUsage(rows, requiredRange) {
         datasetForWorker,
         useCachedData
     };
+}
+
+function buildBatchDatasetMeta(params = {}) {
+    const meta = {};
+
+    if (params.stockNo) {
+        meta.stockNo = params.stockNo;
+    }
+
+    const market = params.market || params.marketType;
+    if (market) {
+        meta.market = market;
+    }
+
+    if (params.priceMode) {
+        meta.priceMode = params.priceMode;
+    } else if (typeof params.adjustedPrice === 'boolean') {
+        meta.priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
+    }
+
+    if (params.tradeTiming) {
+        meta.tradeTiming = params.tradeTiming;
+    }
+
+    if (params.startDate) {
+        meta.requestStartDate = params.startDate;
+    }
+
+    if (params.endDate) {
+        meta.requestEndDate = params.endDate;
+    }
+
+    if (Number.isFinite(params.lookbackDays)) {
+        meta.lookbackDays = params.lookbackDays;
+    }
+
+    return meta;
 }
 
 function summarizeRequiredRangeFromParams(params = {}) {
@@ -2938,6 +2975,7 @@ async function processStrategyCombinations(combinations, config) {
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
+        let datasetMeta = {};
         try {
             // 使用現有的回測邏輯
             const baseParamsOverride = options?.baseParamsOverride;
@@ -2988,6 +3026,7 @@ async function executeBacktestForCombination(combination, options = {}) {
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
             const preparedParams = enrichParamsWithLookback(params);
+            datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
             const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
             let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
@@ -2995,6 +3034,7 @@ async function executeBacktestForCombination(combination, options = {}) {
 
             if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
                 recordBatchDebug('cached-data-slice-applied', {
+                    context: 'executeBacktestForCombination',
                     combination: summarizeCombination(combination),
                     source: cachedSource,
                     requiredRange,
@@ -3002,11 +3042,13 @@ async function executeBacktestForCombination(combination, options = {}) {
                     summaryAfter: sliceSummary,
                     removedCount: cachedUsage.sliceInfo.removedCount,
                     removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
-                    bounds: cachedUsage.sliceInfo.bounds
+                    bounds: cachedUsage.sliceInfo.bounds,
+                    ...datasetMeta
                 }, { phase: 'worker', console: false });
             }
 
             recordBatchDebug('cached-data-evaluation', {
+                context: 'executeBacktestForCombination',
                 combination: summarizeCombination(combination),
                 source: cachedSource,
                 summary: cachedUsage.summary,
@@ -3017,16 +3059,19 @@ async function executeBacktestForCombination(combination, options = {}) {
                 sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
                 sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
                 useCachedData,
-                overrideProvided: Boolean(overrideData)
+                overrideProvided: Boolean(overrideData),
+                ...datasetMeta
             }, { phase: 'worker', console: false });
 
             if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
                 recordBatchDebug('cached-data-coverage-mismatch', {
+                    context: 'executeBacktestForCombination',
                     combination: summarizeCombination(combination),
                     source: cachedSource,
                     summary: cachedUsage.summary,
                     requiredRange,
-                    coverage: coverageEvaluation
+                    coverage: coverageEvaluation,
+                    ...datasetMeta
                 }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
             }
 
@@ -3038,12 +3083,14 @@ async function executeBacktestForCombination(combination, options = {}) {
             }
 
             recordBatchDebug('worker-run-start', {
+                context: 'executeBacktestForCombination',
                 combination: summarizeCombination(combination),
                 useOverride: Boolean(baseParamsOverride),
                 useCachedData,
                 cachedSource,
                 datasetLength: cachedUsage.summary.length,
-                sliceLength: sliceSummary ? sliceSummary.length : null
+                sliceLength: sliceSummary ? sliceSummary.length : null,
+                ...datasetMeta
             }, { phase: 'worker', console: false });
 
             // 創建臨時worker執行回測
@@ -3062,9 +3109,11 @@ async function executeBacktestForCombination(combination, options = {}) {
                         }
 
                         recordBatchDebug('worker-run-result', {
+                            context: 'executeBacktestForCombination',
                             combination: summarizeCombination(combination),
                             result: summarizeResult(result),
-                            usedCachedData: useCachedData
+                            usedCachedData: useCachedData,
+                            ...datasetMeta
                         }, { phase: 'worker', console: false });
 
                         tempWorker.terminate();
@@ -3072,8 +3121,10 @@ async function executeBacktestForCombination(combination, options = {}) {
                     } else if (e.data.type === 'error') {
                         console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
                         recordBatchDebug('worker-run-error', {
+                            context: 'executeBacktestForCombination',
                             combination: summarizeCombination(combination),
-                            message: e.data.data?.message || e.data.error
+                            message: e.data.data?.message || e.data.error,
+                            ...datasetMeta
                         }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                         tempWorker.terminate();
                         resolve(null);
@@ -3083,9 +3134,11 @@ async function executeBacktestForCombination(combination, options = {}) {
                 tempWorker.onerror = function(error) {
                     console.error('[Batch Optimization] Worker error:', error);
                     recordBatchDebug('worker-run-error', {
+                        context: 'executeBacktestForCombination',
                         combination: summarizeCombination(combination),
                         message: error?.message || String(error),
-                        stack: error?.stack || null
+                        stack: error?.stack || null,
+                        ...datasetMeta
                     }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                     tempWorker.terminate();
                     resolve(null);
@@ -3102,23 +3155,31 @@ async function executeBacktestForCombination(combination, options = {}) {
                 setTimeout(() => {
                     tempWorker.terminate();
                     recordBatchDebug('worker-run-timeout', {
-                        combination: summarizeCombination(combination)
+                        context: 'executeBacktestForCombination',
+                        combination: summarizeCombination(combination),
+                        message: 'Worker execution timed out after 30 seconds.',
+                        ...datasetMeta
                     }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
                     resolve(null);
                 }, 30000); // 30秒超時
             } else {
                 console.warn('[Batch Optimization] Worker URL not available');
                 recordBatchDebug('worker-missing-url', {
-                    combination: summarizeCombination(combination)
+                    context: 'executeBacktestForCombination',
+                    combination: summarizeCombination(combination),
+                    message: 'Worker URL is not available.',
+                    ...datasetMeta
                 }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                 resolve(null);
             }
         } catch (error) {
             console.error('[Batch Optimization] Error in executeBacktestForCombination:', error);
             recordBatchDebug('worker-run-exception', {
+                context: 'executeBacktestForCombination',
                 combination: summarizeCombination(combination),
                 message: error?.message || String(error),
-                stack: error?.stack || null
+                stack: error?.stack || null,
+                ...datasetMeta
             }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
             resolve(null);
         }
@@ -3435,6 +3496,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
         
         const preparedParams = enrichParamsWithLookback(params);
+        const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
         const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
         let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
@@ -3452,7 +3514,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                 summaryAfter: sliceSummary,
                 removedCount: cachedUsage.sliceInfo.removedCount,
                 removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
-                bounds: cachedUsage.sliceInfo.bounds
+                bounds: cachedUsage.sliceInfo.bounds,
+                ...datasetMeta
             }, { phase: 'optimize', console: false });
         }
 
@@ -3469,7 +3532,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
             sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
             useCachedData,
-            overrideProvided: Boolean(overrideData)
+            overrideProvided: Boolean(overrideData),
+            ...datasetMeta
         }, { phase: 'optimize', console: false });
 
         if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
@@ -3480,7 +3544,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                 source: cachedSource,
                 summary: cachedUsage.summary,
                 requiredRange,
-                coverage: coverageEvaluation
+                coverage: coverageEvaluation,
+                ...datasetMeta
             }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
         }
 
@@ -3625,6 +3690,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         };
         
         const preparedParams = enrichParamsWithLookback(params);
+        const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
         const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
         let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
@@ -3641,7 +3707,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
                 summaryAfter: sliceSummary,
                 removedCount: cachedUsage.sliceInfo.removedCount,
                 removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
-                bounds: cachedUsage.sliceInfo.bounds
+                bounds: cachedUsage.sliceInfo.bounds,
+                ...datasetMeta
             }, { phase: 'optimize', console: false });
         }
 
@@ -3657,7 +3724,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
             sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
             useCachedData,
-            overrideProvided: Boolean(overrideData)
+            overrideProvided: Boolean(overrideData),
+            ...datasetMeta
         }, { phase: 'optimize', console: false });
 
         if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
@@ -3667,7 +3735,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
                 source: cachedSource,
                 summary: cachedUsage.summary,
                 requiredRange,
-                coverage: coverageEvaluation
+                coverage: coverageEvaluation,
+                ...datasetMeta
             }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
         }
 

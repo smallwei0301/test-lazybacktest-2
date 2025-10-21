@@ -1376,3 +1376,21 @@ NODE`
   - `index.html` 微調除錯卡片的預設提示、內容間距與比較輸出欄位的 placeholder，保持中文用語並強調結果可直接複製貼上。
 - **Diagnostics**: 於瀏覽器啟動批量優化與滾動測試後檢視開發者卡片，確認事件列表出現彩色層級徽章、流程標籤與 JSON 摘要，且比較輸出區可直接複製中文化的報告。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-25 — Patch LB-BATCH-OPT-20260718G
+- **Issue recap**: 雖已改成中文介面，但事件列表仍是單純 JSON 區塊，無法直接閱讀快取來源、裁切摘要或決策；同時缺乏市場、價格模式等元資訊，導致比較兩次批量優化時仍需手動查詢背景設定。
+- **Fix**:
+  - `js/batch-optimization.js` 在快取評估、裁切與 worker 事件寫入時補充 `context`、`market`、`priceMode`、`tradeTiming` 等欄位，並同步標準化快取裁切訊息，統一輸出 `executeBacktestForCombination`、單參數與風控優化的資料摘要。
+  - `js/main.js` 新增批量除錯事件的中文呈現模板，整合場景、決策、覆蓋檢查與裁切筆數等資訊，並自動附上策略參數、風控與資料來源欄位，改以卡片格式呈現，同時提供 fallback，避免渲染失敗時缺乏資訊。
+  - 新增日期、數字與來源對應的格式化工具，保留組合摘要與資料筆數，確保貼上除錯日誌即可看出資料範圍與快取決策。
+- **Diagnostics**: 依「結束日 2024-02-19 → 2025-10-20 → 2025-02-19」重現流程後檢視開發者模式卡片，確認事件顯示「沿用快取／重新抓取」等中文敘述、裁切筆數與市場/價格模式資訊皆齊全，並與除錯比較報告交叉比對資料範圍。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-26 — Patch LB-BATCH-OPT-20260718H
+- **Issue recap**: 開發者模式卡片雖已換上中文模板，但快取診斷仍以英文欄位與一般列表呈現，無法一眼看出「沿用快取」決策、裁切後日期及筆數等關鍵資訊，貼給團隊時也缺乏條列式摘要。
+- **Fix**:
+  - `js/main.js` 將 `cached-data-evaluation` 模板改為逐行中文敘述，新增決策代碼、狀態欄位與裁切前後範圍，並把裁切筆數與細項改寫成可讀性更好的附註區塊。
+  - `renderBatchDebugEvent` 調整為類卡片排版，顯示中文徽章、時間與逐行欄位，並在需要時以色塊呈現裁切附註，貼上聊天室即可清楚閱讀。
+  - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
+- **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
