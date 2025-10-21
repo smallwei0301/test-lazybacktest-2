@@ -75,6 +75,16 @@ NODE`
   - 滾動測試模組記錄彙總評分至 `state.aggregate`，供策略比較表讀取滾動測試分數與產出時間。
 - **Testing**: 尚未執行自動化測試（需於瀏覽器環境驗證 UI 互動）。
 
+## 2026-11-06 — Patch LB-ROLLING-TEST-20251106A
+- **Issue recap**: OOS 品質指標在達標後仍因正規化上限低於 1 而無法拿到滿分，年化報酬門檻需改用股票原始表現；同時 Walk-Forward 儀表卡未清楚說明窗分數、品質分數與加權原值的計算方式，策略比較儲存後仍顯示「請先測試後保存策略」。
+- **Fix**:
+  - `js/rolling-test.js` 導入達標即滿分、未達門檻線性遞減的評分函式，年化報酬門檻改採各視窗買入持有年化報酬率，並在總分／品質卡片新增中文說明與基準中位數揭露。
+  - `js/rolling-test.js` 將視窗評估存回的門檻附加於分析結果，品質明細改顯示買入持有基準並解釋「加權原值」，摘要也追加「年化以原始股票為基準」。
+  - `js/backtest.js` 儲存策略時改寫滾動測試快照欄位，將總分轉為 0～100 分，確保策略比較表能顯示實際得分。
+  - `README.md` 更新 OOS 品質段落，說明新門檻與評分邏輯。
+- **Diagnostics**: 於瀏覽器完成滾動測試後檢視儀表卡，確認年化門檻顯示為買入持有中位數、品質卡片出現達標即滿分與加權原值說明，策略儲存後比較表可顯示「滾動測試評分」。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-10-28 — Patch LB-ROLLING-TEST-20251028A
 - **Issue recap**: 使用者希望 OOS 品質分數對應門檻、總分維持 0～100 顯示，同時需要更直覺的評級呈現、詳細計算明細與橫向比較視窗的表格，並取消強制的成交筆數門檻。
 - **Fix**:
