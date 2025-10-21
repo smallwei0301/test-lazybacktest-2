@@ -1,5 +1,14 @@
 
 
+## 2026-10-30 — Patch LB-ROLLING-TEST-20251028B
+- **Issue recap**: 使用者希望年化門檻改採原始買入持有績效、指標達標即給滿分並揭露各窗品質／信度細節，同時在 UI 說明品質中位與加權原值的計算流程，並提供以自訂視窗長度規劃滾動測試的快速切換。
+- **Fix**:
+  - `js/rolling-test.js` 以每個視窗的買入持有年化作為年化門檻，指標未達標時改為線性遞減至 0，並保留達標權重比限制；新增品質／統計權重／窗分數的逐窗表格與計算說明文字，更新摘要文字引用新的門檻資訊，版本碼調整為 `LB-ROLLING-TEST-20251028B`。
+  - `index.html` 在「滾動測試次數」旁新增模式切換按鈕，切換後即改用訓練／測試／平移月份決定視窗長度，並更新 Walk-Forward 公式說明文字。
+  - `js/backtest.js` 儲存策略快照時改寫為讀取 `totalScore` × 100，修正滾動測試評分欄位常顯示「請先測試後保存策略」的問題。
+  - `README.md` 更新 Walk-Forward 章節，補充年化門檻與統計權重的新計算方式。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js','js/backtest.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:
