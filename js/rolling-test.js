@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.6 ---
-// Patch Tag: LB-ROLLING-TEST-20260707A
+// --- 滾動測試模組 - v2.7 ---
+// Patch Tag: LB-ROLLING-TEST-20260730A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20260707A',
+        version: 'LB-ROLLING-TEST-20260730A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -1136,11 +1136,15 @@
     }
 
     function describeTotalScoreStatus(aggregate) {
-        if (!Number.isFinite(aggregate?.totalScore)) return '尚未計分';
-        if (aggregate.gradeLevel === 2) return '合格';
-        if (aggregate.gradeLevel === 1) return '可觀察';
-        if (aggregate.gradeLevel === 0) return '需調整';
-        return '尚未計分';
+        const score = Number.isFinite(aggregate?.totalScore) ? aggregate.totalScore : null;
+        if (score === null) return '尚未計分';
+        if (aggregate?.gradeLevel === 2) {
+            return '總分達標，可著重於檢視交易成本與實際執行細節。';
+        }
+        if (aggregate?.gradeLevel === 1) {
+            return '總分介於合格與調整之間，建議微調視窗設定或權重以提升穩定度。';
+        }
+        return '總分未達門檻，請重新檢視策略邏輯與風控設定。';
     }
 
     function describeQualityStatus(aggregate) {
@@ -1153,46 +1157,96 @@
         if (passRatio === null) {
             return '樣本不足';
         }
-        const qualityPass = quality >= 0.7;
-        const ratioPass = passRatio >= 0.7;
-        const credibilityPass = credibility >= 0.5;
-        if (qualityPass && ratioPass && credibilityPass) return '合格';
-        if (!ratioPass) return '指標多數未達標';
-        if (!qualityPass) return '品質需加強';
-        if (!credibilityPass) return '信度需加強';
-        return '持續觀察';
+
+        const suggestions = [];
+        if (quality >= 0.7 && credibility >= 0.6) {
+            suggestions.push('品質與可信度穩定，可維持目前門檻');
+        } else {
+            if (quality < 0.7) suggestions.push('OOS 品質偏低，建議調整指標權重或策略參數');
+            if (credibility < 0.5) suggestions.push('統計可信度不足，建議增加視窗樣本或縮小參數範圍');
+        }
+
+        const effective = Number.isFinite(aggregate?.medianEffectiveSampleCount) ? aggregate.medianEffectiveSampleCount : null;
+        const minTrl = Number.isFinite(aggregate?.medianMinTrackRecordLength) ? aggregate.medianMinTrackRecordLength : null;
+        if (Number.isFinite(effective) && Number.isFinite(minTrl) && effective < minTrl) {
+            suggestions.push('n_eff 低於 MinTRL，請拉長測試區間、降低視窗次數或延伸歷史資料');
+        } else if (Number.isFinite(effective) && effective < 150) {
+            suggestions.push('有效樣本低於 150 日，建議增加回測區間或視窗長度');
+        }
+
+        if (suggestions.length === 0) {
+            suggestions.push('品質指標略低，建議持續微調策略與權重');
+        }
+
+        return suggestions.join('；');
     }
 
     function describeWfeStatus(aggregate) {
         const wfe = Number.isFinite(aggregate?.medianWfePercent) ? aggregate.medianWfePercent : null;
         if (wfe === null) return '尚未評分';
-        if (wfe >= 80) return '合格';
-        if (wfe >= 60) return '略低';
-        return '不足';
+        if (wfe >= WALK_FORWARD_EFFICIENCY_BASELINE) return 'WFE 高於基準，視窗切分效率良好';
+        if (wfe >= 50) return `WFE 低於 ${WALK_FORWARD_EFFICIENCY_BASELINE}%，建議調整訓練/測試比例或步長`;
+        return 'WFE 偏低，請重新配置訓練長度或檢查策略穩定度';
     }
 
     function describeCredibilityStatus(aggregate) {
         const psrRatio = Number.isFinite(aggregate?.psrAbove95Ratio) ? aggregate.psrAbove95Ratio : null;
         const medianDsr = Number.isFinite(aggregate?.medianDsr) ? aggregate.medianDsr : null;
         const dsrBelow50 = Number.isFinite(aggregate?.dsrBelow50Ratio) ? aggregate.dsrBelow50Ratio : null;
+        const medianPsr = Number.isFinite(aggregate?.medianPsr) ? aggregate.medianPsr : null;
+        const effective = Number.isFinite(aggregate?.medianEffectiveSampleCount) ? aggregate.medianEffectiveSampleCount : null;
+        const minTrl = Number.isFinite(aggregate?.medianMinTrackRecordLength) ? aggregate.medianMinTrackRecordLength : null;
+        const kurtosis = Number.isFinite(aggregate?.medianKurtosis) ? aggregate.medianKurtosis : null;
+        const overallSharpe = Number.isFinite(aggregate?.overallSharpe) ? aggregate.overallSharpe : null;
+        const sharpeThreshold = Number.isFinite(aggregate?.thresholds?.sharpeRatio)
+            ? aggregate.thresholds.sharpeRatio
+            : DEFAULT_THRESHOLDS.sharpeRatio;
+
         if (psrRatio === null || medianDsr === null) {
             return '樣本不足';
         }
+
+        const addSuggestion = (list, text) => {
+            if (text && !list.includes(text)) list.push(text);
+        };
+
+        const suggestions = [];
         if (psrRatio === 0) {
-            return '建議拉長測試區間';
+            addSuggestion(suggestions, 'PSR≥95% 視窗為 0%，建議拉長測試區間或延伸歷史資料');
         }
+
+        if (Number.isFinite(medianPsr) && medianPsr >= 0.95) {
+            addSuggestion(suggestions, 'PSR 已達 95% 信心水準，可同步檢視 SR*=1 的嚴格模式');
+        } else {
+            const insufficientSamples = Number.isFinite(effective)
+                && ((Number.isFinite(minTrl) && effective < minTrl) || effective < 150);
+            if (insufficientSamples) {
+                addSuggestion(suggestions, '有效樣本不足（低於 MinTRL 或 150 日），請拉長測試區間、降低視窗次數或增加資料');
+            } else if (Number.isFinite(overallSharpe) && overallSharpe < sharpeThreshold) {
+                addSuggestion(suggestions, 'Sharpe 低於門檻，建議加上止損或更換策略組合');
+            }
+            addSuggestion(suggestions, 'PSR 未達 95%，請持續優化策略或風控設計');
+        }
+
+        if (Number.isFinite(kurtosis) && kurtosis > 5) {
+            addSuggestion(suggestions, 'γ₄ 超過 5，厚尾風險建議設定止損或移動停利');
+        }
+
+        if (Number.isFinite(medianDsr)) {
+            if (medianDsr >= 0.95) {
+                addSuggestion(suggestions, 'DSR ≥ 95%，統計可信度良好');
+            } else if (medianDsr < 0.5) {
+                addSuggestion(suggestions, 'DSR < 50%，疑似過度擬合，建議調整或更換策略組合');
+            } else {
+                addSuggestion(suggestions, 'DSR 介於 50%~95%，建議持續觀察參數穩定度');
+            }
+        }
+
         if (dsrBelow50 !== null && dsrBelow50 >= 0.5) {
-            return '多數視窗可信度偏低';
+            addSuggestion(suggestions, '多數視窗 DSR < 50%，請優先檢查過度擬合風險');
         }
-        const psrPass = psrRatio >= 0.5;
-        const dsrPass = medianDsr >= 0.7;
-        if (psrPass && dsrPass) {
-            if (dsrBelow50 !== null && dsrBelow50 > 0.3) return '部分視窗需留意';
-            return '合格';
-        }
-        if (!psrPass && dsrPass) return 'PSR 偏低';
-        if (psrPass && !dsrPass) return 'DSR 偏低';
-        return '需補樣本';
+
+        return suggestions.join('；');
     }
 
     function describeSharpeStatus(aggregate) {
@@ -1202,20 +1256,32 @@
         const sharpeThreshold = Number.isFinite(aggregate?.thresholds?.sharpeRatio)
             ? aggregate.thresholds.sharpeRatio
             : DEFAULT_THRESHOLDS.sharpeRatio;
-        const sharpePass = sharpe >= sharpeThreshold;
-        const dsrPass = Number.isFinite(dsr) && dsr > 0;
-        if (sharpePass && dsrPass) return '合格';
-        if (sharpePass) return '顯著度待加強';
-        if (dsrPass) return 'Sharpe 偏低';
-        return '未達門檻';
+        const suggestions = [];
+        if (sharpe >= sharpeThreshold && Number.isFinite(dsr) && dsr >= 0.95) {
+            return 'Sharpe 與 DSR 均達標，可轉向檢視交易執行與成本';
+        }
+        if (sharpe < sharpeThreshold) {
+            suggestions.push('Sharpe 低於門檻，建議加強停損、移動停利或調整策略');
+        }
+        if (Number.isFinite(dsr)) {
+            if (dsr < 0.5) {
+                suggestions.push('DSR < 50%，疑似過度擬合，建議重新規劃策略組合');
+            } else if (dsr < 0.95) {
+                suggestions.push('DSR 未達 95%，需增加樣本或調整參數範圍');
+            }
+        }
+        if (suggestions.length === 0) {
+            suggestions.push('Sharpe 達標但顯著度有限，建議持續觀察');
+        }
+        return suggestions.join('；');
     }
 
     function describePassRateStatus(aggregate) {
         const passRate = Number.isFinite(aggregate?.passRate) ? aggregate.passRate : null;
         if (passRate === null) return '尚未評分';
-        if (passRate >= 60) return '合格';
-        if (passRate >= 40) return '略低';
-        return '不足';
+        if (passRate >= 60) return '通過率≥60%，視窗表現穩定，可維持現有門檻';
+        if (passRate >= 40) return '通過率低於 60%，建議調整策略組合或檢查門檻設定';
+        return '通過率偏低，請調整策略組合或放寬門檻以提升一致性';
     }
 
     function renderWindowTable(aggregate) {
@@ -1253,6 +1319,25 @@
 
         const psrColumnLabel = aggregate?.psrBenchmarkLabel ? `PSR（${aggregate.psrBenchmarkLabel}）` : 'PSR';
 
+        const joinClassNames = (...parts) => parts.filter((part) => typeof part === 'string' && part.length > 0).join(' ');
+        const resolveThreshold = (entry, key) => {
+            if (Number.isFinite(entry?.thresholds?.[key])) return entry.thresholds[key];
+            if (Number.isFinite(aggregate?.thresholds?.[key])) return aggregate.thresholds[key];
+            return null;
+        };
+        const applyThresholdClass = (value, threshold, direction = 'gte') => {
+            if (!Number.isFinite(value) || !Number.isFinite(threshold)) return '';
+            const pass = direction === 'gte' ? value >= threshold : value <= threshold;
+            return pass ? 'text-emerald-600' : 'text-rose-600';
+        };
+        const applyProbabilityClass = (value, passThreshold, failThreshold = null, treatBelowPassAsFail = false) => {
+            if (!Number.isFinite(value)) return '';
+            if (Number.isFinite(passThreshold) && value >= passThreshold) return 'text-emerald-600';
+            if (Number.isFinite(failThreshold) && value < failThreshold) return 'text-rose-600';
+            if (treatBelowPassAsFail && Number.isFinite(passThreshold) && value < passThreshold) return 'text-rose-600';
+            return '';
+        };
+
         const rows = [
             {
                 label: '測試期間',
@@ -1262,10 +1347,11 @@
             {
                 label: '年化%',
                 className: (entry) => {
-                    if (Number.isFinite(entry.metrics.annualizedReturn)) {
-                        return `text-right ${entry.metrics.annualizedReturn >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
-                    }
-                    return 'text-right';
+                    const value = Number.isFinite(entry.metrics.annualizedReturn) ? entry.metrics.annualizedReturn : null;
+                    const threshold = resolveThreshold(entry, 'annualizedReturn')
+                        ?? (Number.isFinite(entry.metrics.baselineAnnualizedReturn) ? entry.metrics.baselineAnnualizedReturn : null);
+                    const color = applyThresholdClass(value, threshold, 'gte');
+                    return joinClassNames('text-right', color);
                 },
                 getValue: (entry) => formatPercent(entry.metrics.annualizedReturn),
             },
@@ -1273,32 +1359,49 @@
                 label: '年化門檻%',
                 className: 'text-right',
                 getValue: (entry) => {
-                    const threshold = Number.isFinite(entry.thresholds?.annualizedReturn)
-                        ? entry.thresholds.annualizedReturn
-                        : Number.isFinite(entry.metrics.baselineAnnualizedReturn)
-                            ? entry.metrics.baselineAnnualizedReturn
-                            : null;
+                    const threshold = resolveThreshold(entry, 'annualizedReturn')
+                        ?? (Number.isFinite(entry.metrics.baselineAnnualizedReturn) ? entry.metrics.baselineAnnualizedReturn : null);
                     return Number.isFinite(threshold) ? formatPercent(threshold) : '—';
                 },
             },
             {
                 label: 'Sharpe',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.metrics.sharpeRatio) ? entry.metrics.sharpeRatio : null;
+                    const threshold = resolveThreshold(entry, 'sharpeRatio');
+                    const color = applyThresholdClass(value, threshold, 'gte');
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatNumber(entry.metrics.sharpeRatio),
             },
             {
                 label: 'Sortino',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.metrics.sortinoRatio) ? entry.metrics.sortinoRatio : null;
+                    const threshold = resolveThreshold(entry, 'sortinoRatio');
+                    const color = applyThresholdClass(value, threshold, 'gte');
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatNumber(entry.metrics.sortinoRatio),
             },
             {
                 label: 'MaxDD%',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.metrics.maxDrawdown) ? entry.metrics.maxDrawdown : null;
+                    const threshold = resolveThreshold(entry, 'maxDrawdown');
+                    const color = applyThresholdClass(value, threshold, 'lte');
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatPercent(entry.metrics.maxDrawdown),
             },
             {
                 label: '勝率%',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.metrics.winRate) ? entry.metrics.winRate : null;
+                    const threshold = resolveThreshold(entry, 'winRate');
+                    const color = applyThresholdClass(value, threshold, 'gte');
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatPercent(entry.metrics.winRate),
             },
             {
@@ -1308,12 +1411,20 @@
             },
             {
                 label: psrColumnLabel,
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.analysis?.psrProbability) ? entry.analysis.psrProbability : null;
+                    const color = applyProbabilityClass(value, 0.95, null, true);
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatProbability(entry.analysis?.psrProbability),
             },
             {
                 label: 'DSR',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.analysis?.dsrProbability) ? entry.analysis.dsrProbability : null;
+                    const color = applyProbabilityClass(value, 0.95, 0.5);
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => formatProbability(entry.analysis?.dsrProbability),
             },
             {
@@ -1323,7 +1434,11 @@
             },
             {
                 label: 'WFE%',
-                className: 'text-right',
+                className: (entry) => {
+                    const value = Number.isFinite(entry.analysis?.wfe) ? entry.analysis.wfe : null;
+                    const color = applyThresholdClass(value, WALK_FORWARD_EFFICIENCY_BASELINE, 'gte');
+                    return joinClassNames('text-right', color);
+                },
                 getValue: (entry) => (Number.isFinite(entry.analysis?.wfe) ? formatPercent(entry.analysis.wfe) : '—'),
             },
             {
@@ -1353,7 +1468,7 @@
             },
             {
                 label: '樣本',
-                className: 'text-right',
+                className: 'text-right align-top',
                 getValue: (entry) => {
                     const effective = Number.isFinite(entry.analysis?.effectiveSampleCount)
                         ? Math.round(entry.analysis.effectiveSampleCount)
@@ -1371,13 +1486,13 @@
             },
             {
                 label: '參數摘要',
-                className: 'text-left whitespace-pre-wrap',
-                getValue: (entry) => buildParameterSummary(entry.paramsSnapshot),
+                className: 'text-left align-top',
+                renderCell: (cell, entry) => renderParameterSummaryCell(cell, entry.paramsSnapshot),
             },
             {
                 label: '評語',
-                className: 'text-left',
-                getValue: (entry) => entry.comment || '—',
+                className: 'text-left align-top',
+                renderCell: (cell, entry) => renderCommentCell(cell, entry.commentItems, entry.comment),
             },
         ];
 
@@ -1395,7 +1510,16 @@
                     ? rowConfig.className(entry, index)
                     : rowConfig.className || 'text-right';
                 cell.className = `px-3 py-2 ${className}`.trim();
-                cell.textContent = rowConfig.getValue(entry, index);
+                if (typeof rowConfig.renderCell === 'function') {
+                    rowConfig.renderCell(cell, entry, index);
+                } else {
+                    const value = rowConfig.getValue ? rowConfig.getValue(entry, index) : '—';
+                    if (value instanceof Node) {
+                        cell.appendChild(value);
+                    } else {
+                        cell.textContent = value;
+                    }
+                }
                 tr.appendChild(cell);
             });
 
@@ -1403,8 +1527,43 @@
         });
     }
 
+    function renderParameterSummaryCell(cell, params) {
+        cell.textContent = '';
+        const items = buildParameterSummary(params);
+        renderBulletList(cell, items);
+    }
+
+    function renderCommentCell(cell, commentItems, fallbackText) {
+        cell.textContent = '';
+        let items = Array.isArray(commentItems) ? commentItems : [];
+        if (items.length === 0 && typeof fallbackText === 'string') {
+            items = fallbackText.split('；');
+        }
+        renderBulletList(cell, items);
+    }
+
+    function renderBulletList(cell, items) {
+        const listItems = Array.isArray(items)
+            ? items
+                .map((item) => (typeof item === 'string' ? item.trim() : ''))
+                .filter((item) => item.length > 0 && item !== '—')
+            : [];
+        if (listItems.length === 0) {
+            cell.textContent = '—';
+            return;
+        }
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-4 space-y-1';
+        listItems.forEach((text) => {
+            const li = document.createElement('li');
+            li.textContent = text;
+            list.appendChild(li);
+        });
+        cell.appendChild(list);
+    }
+
     function buildParameterSummary(params) {
-        if (!params || typeof params !== 'object') return '—';
+        if (!params || typeof params !== 'object') return [];
         const segments = [];
 
         const longSegment = describeTradingSide('多頭', {
@@ -1433,7 +1592,7 @@
         const risk = buildRiskSummary(params);
         if (risk) segments.push(`風控：${risk}`);
 
-        return segments.length > 0 ? segments.join('｜') : '—';
+        return segments;
     }
 
     function describeTradingSide(label, config) {
@@ -1441,7 +1600,7 @@
         const exitSummary = describeStrategyFlow('出', config.exitStrategy, config.exitParams, config.exitStages, config.scopePrefix ? `${config.scopePrefix}Exit` : 'exit');
         const parts = [entrySummary, exitSummary].filter(Boolean);
         if (parts.length === 0) return '';
-        return `${label} ${parts.join(' → ')}`;
+        return `${label}：${parts.join(' → ')}`;
     }
 
     function describeStrategyFlow(prefix, strategyKey, paramObj, stages, scope) {
@@ -1450,7 +1609,7 @@
         const paramText = formatParamEntries(paramObj);
         const stageText = formatStageSummary(stages);
         const details = [paramText, stageText].filter(Boolean).join('、');
-        return `${prefix}:${strategyName}${details ? `（${details}）` : ''}`;
+        return `${prefix}：${strategyName}${details ? `（${details}）` : ''}`;
     }
 
     function resolveStrategyDisplayName(strategyKey, scope) {
@@ -1597,13 +1756,18 @@
                 }
             }
 
+            const commentItems = commentParts
+                .map((part) => (typeof part === 'string' ? part.trim() : ''))
+                .filter((part) => part.length > 0);
+
             return {
                 index: entry.index,
                 window: entry.window,
                 metrics: entry.testing,
                 evaluation,
                 paramsSnapshot: entry.paramsSnapshot,
-                comment: commentParts.join('；') || '—',
+                comment: commentItems.join('；') || '—',
+                commentItems,
                 analysis,
                 thresholds: windowThresholds,
                 optimization: entry.optimization || null,
@@ -1660,7 +1824,11 @@
         const credibilityValues = analyses.map((analysis) => (Number.isFinite(analysis?.credibility) ? analysis.credibility : null));
         const medianCredibility = median(credibilityValues);
         const statWeightValues = analyses.map((analysis) => (Number.isFinite(analysis?.statWeight) ? analysis.statWeight : null));
+        const skewnessValues = analyses.map((analysis) => (Number.isFinite(analysis?.stats?.skewness) ? analysis.stats.skewness : null));
+        const kurtosisValues = analyses.map((analysis) => (Number.isFinite(analysis?.stats?.kurtosis) ? analysis.stats.kurtosis : null));
         const medianStatWeight = median(statWeightValues);
+        const medianSkewness = median(skewnessValues);
+        const medianKurtosis = median(kurtosisValues);
 
         const psrValuesActive = analyses.map((analysis) => (Number.isFinite(analysis?.psrProbability) ? analysis.psrProbability : null));
         const psrLooseValues = analyses.map((analysis) => (Number.isFinite(analysis?.psrLoose) ? analysis.psrLoose : null));
@@ -1817,6 +1985,8 @@
             medianOosPassRatio,
             medianCredibility,
             medianStatWeight,
+            medianSkewness,
+            medianKurtosis,
             medianPsr,
             medianPsrLoose,
             medianPsrStrict,

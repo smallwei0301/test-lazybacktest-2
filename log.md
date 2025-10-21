@@ -1419,6 +1419,14 @@ NODE`
   - `README.md` 同步文檔版本編號與新說明，`log.md` 記錄補丁背景與後續驗證需求。
 - **Testing**: 受限於容器無法連線 Proxy，未能實際跑滾動測試；請於具備資料來源的環境實測自動／手動視窗模式與策略保存流程，確認瀏覽器 console 無錯誤並完成比較表更新。
 
+## 2026-07-30 — Patch LB-ROLLING-TEST-20260730A
+- **Issue recap**: 滾動測試報表仍以段落呈現參數與評語，難以掃描；逐窗數字缺乏門檻色彩，卡片僅顯示「合格」等簡短狀態，無法依 γ₄、PSR、DSR 與樣本量給出具體建議。
+- **Fix**:
+  - `js/rolling-test.js` 將逐窗參數摘要與評語改為條列排版，並依門檻著色年化、Sharpe、Sortino、MaxDD、PSR、DSR 與 WFE。
+  - `js/rolling-test.js` 擴充 Walk-Forward 卡片敘述：依 γ₄、n_eff、PSR、DSR、Sharpe 與通過率提供具體建議，涵蓋「拉長測試區間」「增設止損」等提示。
+- **Diagnostics**: 於本地重新整理滾動測試報表結構，確認逐窗表格改為條列項目、數值出現對應色彩，卡片描述能根據樣本量、厚尾與 PSR/DSR 狀態輸出建議文字。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-28 — Patch LB-ROLLING-TEST-20251109A
 - **Issue recap**: Walk-Forward 報表仍採算術平均結合 PSR/DSR，樣本不足時無法有效壓降統計權重，也缺少嚴格判定模式與有效樣本/嘗試資訊，導致可信度評估過於樂觀。
 - **Fix**:
