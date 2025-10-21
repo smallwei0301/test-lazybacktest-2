@@ -1,5 +1,14 @@
 
 
+## 2026-07-26 — Patch LB-INDEX-YAHOO-20250726A
+- **Scope**: 指數代碼（^ 前綴）輸入流程與資料來源擴充。
+- **Updates**:
+  - `js/main.js` 偵測 ^ 開頭代碼，自動切換為指數市場，調整資料來源測試面板與回測參數，並停用還原價與拆分選項。
+  - `js/backtest.js` 新增指數名稱查詢流程、快取與預設費率處理，支援 Yahoo Finance 指數資訊。
+  - `js/worker.js` 將指數視為獨立市場，透過新 proxy 串接 Yahoo 指數資料並沿用快取管線。
+  - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
+- **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
+
 ## 2026-07-18 — Patch LB-BATCH-OPT-20260718A
 - **Scope**: 滾動測試使用批量引擎時的狀態隔離與除錯面板整合。
 - **Updates**:
@@ -1394,3 +1403,12 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-INDEX-UX-20250728A
+- **Issue recap**: 指數回測啟用後，前端市場選擇仍缺少「指數」標籤，輸入 ^ 開頭代碼時需要手動切換市場且提示文字未更新；此外沒有在基本設定卡片內提供快速回測按鈕，導致體驗割裂。
+- **Fix**:
+  - `index.html` 市場下拉新增「指數」選項並更新代碼欄位文案，於本金欄下方加入「立刻回測」按鈕與圖示呼叫，保持卡片操作的一致性。
+  - `js/backtest.js` 建立 `lastNonIndexMarket` 狀態，自動在輸入 ^ 開頭代碼時切換至指數市場並在移除符號後還原先前市場，同步更新 `switchToMarket` 流程與提示快取。
+  - `js/main.js` 依市場顯示美股與指數的自動停用提醒，`js/loader.js` 讓新按鈕共用現有回測流程，避免重複邏輯。
+- **Diagnostics**: 於瀏覽器輸入 `^TWII`、`^GSPC` 確認市場自動切換並顯示指數提醒，再改回 `2330` 驗證市場還原；點擊「立刻回測」應與主按鈕行為一致。
+- **Testing**: 尚未執行（待連線 Yahoo Finance 與完整回測流程驗證）

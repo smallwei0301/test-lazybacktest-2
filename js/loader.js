@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
         document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
+        const quickBacktestBtn = document.getElementById('quickBacktestBtn');
+        if (quickBacktestBtn) {
+            quickBacktestBtn.addEventListener('click', runBacktestInternal);
+        }
         document.getElementById('optimizeEntryBtn').addEventListener('click', () => runOptimizationInternal('entry'));
         document.getElementById('optimizeExitBtn').addEventListener('click', () => runOptimizationInternal('exit'));
         document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));

@@ -13,6 +13,8 @@
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
+// Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-INDEX-UX-20250728A
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -8804,11 +8806,12 @@ function setDefaultFees(stockNo) {
     const isETF = stockCode.startsWith('00');
     const isTAIEX = stockCode === 'TAIEX';
     const isUSMarket = currentMarket === 'US';
+    const isIndex = isIndexTicker(stockCode);
 
-    if (isUSMarket) {
+    if (isUSMarket || isIndex) {
         buyFeeInput.value = '0.0000';
         sellFeeInput.value = '0.0000';
-        console.log(`[Fees] US market defaults applied for ${stockCode || '(未輸入)'}`);
+        console.log(`[Fees] ${(isUSMarket ? 'US market' : 'Index')} defaults applied for ${stockCode || '(未輸入)'}`);
         return;
     }
 
@@ -9452,6 +9455,7 @@ function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(
 
 // 全域變數
 let currentMarket = 'TWSE'; // 預設為上市
+let lastNonIndexMarket = 'TWSE'; // Patch Tag: LB-INDEX-UX-20250728A - 記錄最近使用的非指數市場
 let isAutoSwitching = false; // 防止無限重複切換
 // Patch Tag: LB-TW-NAMELOCK-20250616A
 let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動辨識
@@ -9496,6 +9500,7 @@ const MARKET_META = {
     TWSE: { label: '上市', fetchName: fetchStockNameFromTWSE },
     TPEX: { label: '上櫃', fetchName: fetchStockNameFromTPEX },
     US: { label: '美股', fetchName: fetchStockNameFromUS },
+    INDEX: { label: '指數', fetchName: fetchStockNameFromIndex },
 };
 
 function loadPersistentTaiwanNameCache() {
@@ -9735,6 +9740,11 @@ function getLeadingDigitCount(symbol) {
     if (!symbol) return 0;
     const match = symbol.match(/^\d+/);
     return match ? match[0].length : 0;
+}
+
+function isIndexTicker(symbol) {
+    if (!symbol) return false;
+    return symbol.startsWith('^') && symbol.length > 1;
 }
 
 function shouldEnforceNumericLookupGate(symbol) {
@@ -10107,6 +10117,9 @@ function resolveStockNameSearchOrder(stockCode, preferredMarket) {
     const restrictToTaiwan = shouldRestrictToTaiwanMarkets(normalizedCode);
     const preferred = normalizeMarketValue(preferredMarket || '');
     const baseOrder = [];
+    if (isIndexTicker(normalizedCode)) {
+        baseOrder.push('INDEX');
+    }
     if (restrictToTaiwan || startsWithFourDigits) {
         baseOrder.push('TWSE', 'TPEX');
     } else if (hasAlpha && !isNumeric && leadingDigits === 0) {
@@ -10217,6 +10230,9 @@ function initializeMarketSwitch() {
     if (!marketSelect || !stockNoInput) return;
 
     currentMarket = normalizeMarketValue(marketSelect.value || 'TWSE');
+    if (currentMarket !== 'INDEX') {
+        lastNonIndexMarket = currentMarket;
+    }
     window.applyMarketPreset?.(currentMarket);
 
     marketSelect.addEventListener('change', () => {
@@ -10226,6 +10242,9 @@ function initializeMarketSwitch() {
         const triggeredByAuto = isAutoSwitching === true;
         currentMarket = nextMarket;
         console.log(`[Market Switch] 切換到: ${currentMarket}`);
+        if (currentMarket !== 'INDEX') {
+            lastNonIndexMarket = currentMarket;
+        }
         if (triggeredByAuto) {
             manualMarketOverride = false;
             manualOverrideCodeSnapshot = '';
@@ -10254,6 +10273,26 @@ function initializeMarketSwitch() {
             manualOverrideCodeSnapshot = '';
         }
         manualOverrideCodeSnapshot = stockCode;
+        const isIndex = isIndexTicker(stockCode);
+        if (!manualMarketOverride && !isAutoSwitching) {
+            if (isIndex && currentMarket !== 'INDEX') {
+                if (currentMarket !== 'INDEX') {
+                    lastNonIndexMarket = currentMarket;
+                }
+                switchToMarket('INDEX', stockCode, { skipToast: true }).catch((error) => {
+                    console.warn('[Market Switch] 自動切換至指數市場失敗:', error);
+                });
+            } else if (!isIndex && currentMarket === 'INDEX') {
+                const fallbackMarket = lastNonIndexMarket && lastNonIndexMarket !== 'INDEX'
+                    ? lastNonIndexMarket
+                    : 'TWSE';
+                if (fallbackMarket !== 'INDEX' && fallbackMarket !== currentMarket) {
+                    switchToMarket(fallbackMarket, stockCode, { skipToast: true }).catch((error) => {
+                        console.warn('[Market Switch] 自動還原市場失敗:', error);
+                    });
+                }
+            }
+        }
         hideStockName();
         if (stockCode === 'TAIEX') {
             showStockName('台灣加權指數', 'success');
@@ -10536,6 +10575,46 @@ async function fetchStockNameFromUS(stockCode) {
     }
 }
 
+async function fetchStockNameFromIndex(stockCode) {
+    const normalized = (stockCode || '').trim().toUpperCase();
+    if (!normalized) return null;
+    try {
+        const params = new URLSearchParams({ stockNo: normalized, mode: 'info' });
+        const response = await fetch(`/api/index/?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+            const payload = await response.json();
+            if (payload && typeof payload === 'object') {
+                const name = (payload.stockName || payload.shortName || payload.displayName || '').toString().trim();
+                if (name) {
+                    const info = {
+                        name,
+                        market: 'INDEX',
+                        marketLabel: '指數 (Yahoo)',
+                        source: payload.source || 'Yahoo Finance',
+                        symbol: normalized,
+                    };
+                    storeStockNameCacheEntry('INDEX', normalized, info, { persistent: true });
+                    return info;
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('[Index Name] 透過 Yahoo 取得指數名稱失敗:', error);
+    }
+    const fallbackName = normalized.replace(/^\^/, '') || normalized;
+    const info = {
+        name: fallbackName,
+        market: 'INDEX',
+        marketLabel: '指數 (Yahoo)',
+        source: 'Yahoo Finance',
+        symbol: normalized,
+    };
+    storeStockNameCacheEntry('INDEX', normalized, info, { persistent: true });
+    return info;
+}
+
 // 使用代理伺服器獲取TPEX股票名稱
 async function fetchTPEXNameViaProxy(stockNo) {
     // **關鍵修正：使用一個固定的、格式完整的歷史日期**
@@ -10690,6 +10769,11 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
     manualOverrideCodeSnapshot = '';
     isAutoSwitching = true;
     currentMarket = normalizedMarket;
+    if (currentMarket !== 'INDEX') {
+        lastNonIndexMarket = currentMarket;
+    } else if (!lastNonIndexMarket || lastNonIndexMarket === 'INDEX') {
+        lastNonIndexMarket = 'TWSE';
+    }
 
     const marketSelect = document.getElementById('marketSelect');
     if (marketSelect && marketSelect.value !== normalizedMarket) {
