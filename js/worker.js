@@ -2113,7 +2113,13 @@ function differenceInDays(laterDate, earlierDate) {
   return Math.floor(diff / DAY_MS);
 }
 
+function isIndexSymbol(stockNo) {
+  if (!stockNo) return false;
+  return stockNo.startsWith('^') && stockNo.length > 1;
+}
+
 function getPrimaryForceSource(marketKey, adjusted) {
+  if (marketKey === "INDEX") return "yahoo";
   if (adjusted) {
     if (marketKey === "US") return null;
     return "yahoo";
@@ -2124,6 +2130,7 @@ function getPrimaryForceSource(marketKey, adjusted) {
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
+  if (marketKey === "INDEX") return null;
   if (adjusted) return null;
   if (marketKey === "TPEX" || marketKey === "US") return null;
   return "finmind";
@@ -4316,6 +4323,7 @@ async function fetchCurrentMonthGapPatch({
 
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  else if (marketKey === "INDEX") proxyPath = "/api/index/";
   const isTpex = marketKey === "TPEX";
   const aggregatedRows = [];
   const aggregatedSources = new Set();
@@ -4904,8 +4912,11 @@ async function fetchStockData(
   }
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
-  const adjusted = Boolean(options.adjusted || options.adjustedPrice);
-  const split = Boolean(options.splitAdjustment);
+  const indexSymbol = isIndexSymbol(stockNo);
+  const adjusted = indexSymbol
+    ? false
+    : Boolean(options.adjusted || options.adjustedPrice);
+  const split = indexSymbol ? false : Boolean(options.splitAdjustment);
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -4919,7 +4930,7 @@ async function fetchStockData(
   if (startDateObj > endDateObj) {
     throw new Error("開始日期需早於結束日期");
   }
-  const marketKey = getMarketKey(marketType);
+  const marketKey = indexSymbol ? "INDEX" : getMarketKey(marketType);
   const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
   const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(
@@ -4935,6 +4946,7 @@ async function fetchStockData(
   const fetchDiagnostics = {
     stockNo,
     marketKey,
+    indexSymbol,
     adjusted,
     split,
     requested: { start: startDate, end: endDate },
@@ -5275,6 +5287,7 @@ async function fetchStockData(
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
   else if (marketKey === "US") proxyPath = "/api/us/";
+  else if (marketKey === "INDEX") proxyPath = "/api/index/";
   const isTpex = marketKey === "TPEX";
   const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
