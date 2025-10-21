@@ -3303,9 +3303,45 @@ function renderLoadingMessage(percent) {
     }
 }
 
+function scrollElementIntoViewSmooth(element) {
+    if (!element) return;
+
+    const performScroll = () => {
+        let scrolled = false;
+        if (typeof element.scrollIntoView === 'function') {
+            try {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+                scrolled = true;
+            } catch (error) {
+                console.warn('[Loading] scrollIntoView failed, falling back to window scroll:', error);
+            }
+        }
+        if (!scrolled && typeof element.getBoundingClientRect === 'function') {
+            const rect = element.getBoundingClientRect();
+            if (rect && Number.isFinite(rect.top)) {
+                const offsetTop = Math.max(0, (window.scrollY || window.pageYOffset || 0) + rect.top - 24);
+                if (typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+                } else {
+                    window.scrollY = offsetTop;
+                }
+            }
+        }
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(performScroll);
+    } else {
+        setTimeout(performScroll, 16);
+    }
+}
+
 function showLoading(m = "處理中...") {
     const el = document.getElementById("loading");
-    if (el) el.classList.remove("hidden");
+    if (el) {
+        el.classList.remove("hidden");
+        scrollElementIntoViewSmooth(el);
+    }
 
     refreshLoadingMascotImage({ forceNew: true });
 

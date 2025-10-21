@@ -6229,14 +6229,40 @@ function handleBacktestResult(result, stockName, dataSource) {
         activateTab('summary');
 
         setTimeout(() => {
+            const rightPanel = document.querySelector('.right-panel');
+            if (rightPanel) {
+                try {
+                    if (typeof rightPanel.scrollTo === 'function') {
+                        rightPanel.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else {
+                        rightPanel.scrollTop = 0;
+                    }
+                } catch (panelError) {
+                    console.warn('[Main] Failed to reset right panel scroll:', panelError);
+                }
+            }
             const strategyCard = document.getElementById('strategy-status-card');
             if (strategyCard) {
-                strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                try {
+                    strategyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (scrollError) {
+                    console.warn('[Main] scrollIntoView for strategy card failed:', scrollError);
+                    if (typeof scrollElementIntoViewSmooth === 'function') {
+                        scrollElementIntoViewSmooth(strategyCard);
+                    }
+                }
                 return;
             }
             const chartContainer = document.getElementById('chart-container');
             if (chartContainer) {
-                chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                try {
+                    chartContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (chartScrollError) {
+                    console.warn('[Main] scrollIntoView for chart failed:', chartScrollError);
+                    if (typeof scrollElementIntoViewSmooth === 'function') {
+                        scrollElementIntoViewSmooth(chartContainer);
+                    }
+                }
             }
         }, 400);
 

@@ -1409,3 +1409,11 @@ NODE`
   - 正規化資料欄位附加邏輯，避免已經顯示「需求區間」時再重複列出「請求區間」，保持版面精簡。
 - **Diagnostics**: 按「2024-02-19 → 2025-10-20 → 2025-02-19」的重現步驟執行回測與批量優化，確認開發者卡片中的「批量快取診斷」事件呈現「INFO／沿用快取」、裁切筆數與原範圍／裁切後日期皆為中文敘述。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/batch-optimization.js','js/main.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-27 — Patch LB-INDEX-UI-20250727B
+- **Issue recap**: 「立刻回測」按鈕觸發後仍停留在設定卡片，無法立即看到進度條，完成後右側報表也維持舊的捲動位置，使用者需手動滑動才能檢視最新摘要。
+- **Fix**:
+  - `js/main.js` 新增 `scrollElementIntoViewSmooth`，在 `showLoading` 顯示進度卡片時自動捲動到進度條，確保「立刻回測」與「開始回測」擁有一致體驗。
+  - `js/backtest.js` 在回測結果回傳後重置右側內容區捲動位置，並在 `scrollIntoView` 失敗時使用新的平滑捲動輔助方法，避免不同瀏覽器下的焦點落差。
+- **Diagnostics**: 於桌機與手機尺寸測試快速回測，確認按下按鈕後畫面自動捲動到進度條，回測完成時右側「摘要」等分頁回到頂部並顯示最新結果。
+- **Testing**: （待在可連線 Yahoo Finance 的實際環境重新回測驗證畫面捲動與結果渲染）
