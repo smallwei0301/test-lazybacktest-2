@@ -1,4 +1,12 @@
 
+## 2026-10-21 — Patch LB-SECURITY-HARDEN-20261021A
+- **Scope**: Core Web Vitals / 前端安全強化（搭配 LB-AI-TF-LAZYLOAD-20261021A）。
+- **Updates**:
+  - `js/worker.js` 引入 `security-config.js` 並以 `ensureTF()` 延後載入 TFJS／WASM，支援完整性驗證並在訓練訊息進入時才啟動載入。
+  - `index.html` 建立 SRI 載入器（`window.lazybacktestSecurity`），所有外部腳本改採 `data-lb-src` 動態掛載、失敗時會記錄警告並移除完整性重新載入；同步將進度吉祥物預設圖片改為本地 SVG、設定 `width/height/ loading="lazy"`。
+  - 新增 `js/security-config.js` 管理外部腳本的 SRI 佔位設定，供後續部署環境覆寫；`netlify/headers` 設定 CSP、Referrer Policy、Permissions-Policy 等安全標頭。
+- **Testing**: 容器環境無法連線外部 CDN，僅以 `node - <<'NODE' const fs=require('fs'); const vm=require('vm'); const ctx={importScripts:()=>{},console, self:{}, window:{}, lazybacktestSecurityConfig:{}, crypto:{subtle:{digest:async()=>new ArrayBuffer(0)}}, fetch:async()=>({ok:false,status:0,arrayBuffer:async()=>new ArrayBuffer(0)}), URL:{createObjectURL:()=>"blob:mock", revokeObjectURL:()=>{}}, Blob:function(){}, btoa:()=>'', setTimeout, clearTimeout}; ctx.globalThis=ctx; ctx.window=ctx; ['js/security-config.js','js/worker.js'].forEach((file)=>{vm.runInNewContext(fs.readFileSync(file,'utf8'),ctx,{filename:file});}); console.log('scripts compiled'); NODE` 驗證語法，實際載入行為待 Netlify 線上環境確認。
+
 ## 2026-07-27 — Patch LB-INDEX-UI-20250727A
 - **Scope**: 指數市場輸入提示與快速回測控制。
 - **Updates**:
