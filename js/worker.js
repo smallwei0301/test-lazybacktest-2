@@ -3904,54 +3904,116 @@ async function fetchAdjustedPriceRange(
   };
 }
 
+// Patch Tag: LB-DATASOURCE-VOLUME-20260827A
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   try {
     let dateStr = null;
-    let open = null,
-      high = null,
-      low = null,
-      close = null,
-      volume = 0;
+    let open = null;
+    let high = null;
+    let low = null;
+    let close = null;
+    let volume = null;
+
+    const parseNumber = (val) => {
+      if (val === null || val === undefined) return null;
+      if (typeof val === "number") {
+        return Number.isFinite(val) ? val : null;
+      }
+      if (typeof val === "bigint") {
+        return Number(val);
+      }
+      const normalized = String(val).replace(/,/g, "").trim();
+      if (!normalized || normalized === "--" || normalized === "-") {
+        return null;
+      }
+      const num = Number(normalized);
+      return Number.isFinite(num) ? num : null;
+    };
+
+    const looksNumericLike = (val) => {
+      if (val === null || val === undefined) return false;
+      if (typeof val === "number" || typeof val === "bigint") return true;
+      if (typeof val !== "string") return false;
+      const trimmed = val.trim();
+      if (!trimmed) return false;
+      return /^[\d,.-]+$/.test(trimmed);
+    };
+
     if (Array.isArray(item)) {
       dateStr = item[0];
-      const parseNumber = (val) => {
-        if (val === null || val === undefined) return null;
-        const num = Number(String(val).replace(/,/g, ""));
-        return Number.isFinite(num) ? num : null;
-      };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
+      open = parseNumber(item[3]);
+      high = parseNumber(item[4]);
+      low = parseNumber(item[5]);
+      close = parseNumber(item[6]);
+
+      const codeField = item.length > 1 ? item[1] : null;
+      const nameField = item.length > 2 ? item[2] : null;
+      const codeStr = codeField !== null && codeField !== undefined ? String(codeField).trim() : "";
+      const codeHasAlpha = /[A-Za-z]/.test(codeStr);
+      const nameLooksText = typeof nameField === "string" && nameField.trim().length > 0 && !looksNumericLike(nameField);
+      const treatAsStockInfo = codeHasAlpha || nameLooksText;
+
+      const candidateVolumeIndices = [];
+      if (treatAsStockInfo) {
+        if (item.length > 8) candidateVolumeIndices.push(8);
+        const lastIndex = item.length - 1;
+        if (lastIndex > 0) candidateVolumeIndices.push(lastIndex);
+        if (item.length > 10) {
+          candidateVolumeIndices.push(10, 9);
+        }
+        candidateVolumeIndices.push(1);
       } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
+        candidateVolumeIndices.push(1);
+        if (isTpex && item.length > 12) {
+          candidateVolumeIndices.push(12, 11);
+        }
+      }
+
+      const seen = new Set();
+      for (let i = 0; i < candidateVolumeIndices.length; i += 1) {
+        const index = candidateVolumeIndices[i];
+        if (!Number.isInteger(index)) continue;
+        if (index <= 0 || index >= item.length) continue;
+        if (seen.has(index)) continue;
+        seen.add(index);
+        const parsed = parseNumber(item[index]);
+        if (parsed !== null) {
+          volume = parsed;
+          break;
+        }
+      }
+      if (volume === null) {
+        volume = 0;
       }
     } else if (item && typeof item === "object") {
-      const parseNumber = (val) => {
-        if (val === null || val === undefined) return null;
-        if (typeof val === "number") {
-          return Number.isFinite(val) ? val : null;
-        }
-        const normalized = String(val).replace(/,/g, "").trim();
-        if (!normalized) return null;
-        const num = Number(normalized);
-        return Number.isFinite(num) ? num : null;
-      };
       dateStr = item.date || item.Date || item.tradeDate || null;
       open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
       high = parseNumber(item.high ?? item.High ?? item.max ?? null);
       low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
       close = parseNumber(item.close ?? item.Close ?? null);
-      volume = parseNumber(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0) ?? 0;
+
+      const volumeCandidates = [
+        item.volume,
+        item.Volume,
+        item.Trading_Volume,
+        item.tradeVolume,
+        item.total_volume,
+        item.rawVolume,
+      ];
+      for (let i = 0; i < volumeCandidates.length; i += 1) {
+        const parsed = parseNumber(volumeCandidates[i]);
+        if (parsed !== null) {
+          volume = parsed;
+          break;
+        }
+      }
+      if (volume === null) {
+        volume = 0;
+      }
     } else {
       return null;
     }
+
     if (!dateStr) return null;
     let isoDate = null;
     const trimmed = String(dateStr).trim();
@@ -3965,15 +4027,12 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
     }
     if (!isoDate) return null;
     const d = new Date(isoDate);
-    if (Number.isNaN(d.getTime()) || d < startDateObj || d > endDateObj)
-      return null;
+    if (Number.isNaN(d.getTime()) || d < startDateObj || d > endDateObj) return null;
     if ((open === null || open === 0) && close !== null) open = close;
-    if ((high === null || high === 0) && close !== null)
-      high = Math.max(open ?? close, close);
-    if ((low === null || low === 0) && close !== null)
-      low = Math.min(open ?? close, close);
+    if ((high === null || high === 0) && close !== null) high = Math.max(open ?? close, close);
+    if ((low === null || low === 0) && close !== null) low = Math.min(open ?? close, close);
     const clean = (val) => (val === null || Number.isNaN(val) ? null : val);
-    const volNumber = Number(String(volume).replace(/,/g, "")) || 0;
+    const volNumber = Number.isFinite(volume) ? volume : 0;
     return {
       date: isoDate,
       open: clean(open),

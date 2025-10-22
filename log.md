@@ -1501,3 +1501,11 @@ NODE`
   - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
 - **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-27 — Patch LB-DATASOURCE-VOLUME-20260827A
+- **Issue recap**: 部分資料來源的 `aaData` 於前兩欄帶入「證券代碼／名稱」，Worker 與開發者測試表皆誤將第二欄視為成交量，致使 00631L 等標的在診斷卡與表格中出現 `volume×` 大量無效筆數。
+- **Fix**:
+  - `js/worker.js` 的 `normalizeProxyRow` 依欄位形態判斷是否為「代碼＋名稱」格式，優先改讀尾端或第八欄的成交量數值，並將陣列與物件格式統一走逗號清理與候選欄位掃描。
+  - `js/main.js` 的 `normalizeTesterRows` 對應相同判斷邏輯，確保開發者資料來源表格與診斷卡統一解析成交量欄位。
+- **Diagnostics**: 於實機啟動開發者資料來源測試卡，切換含「代碼＋名稱」欄位的來源（如 TWSE Proxy），展開「查看資料表格」並確認成交量不再顯示為代碼或 0，同時回測 00631L 驗證「無效欄位統計」僅在成交量實際為 0 時觸發。
+- **Testing**: 尚未執行（容器無法連線 Proxy／瀏覽器，需於 Netlify 實機操作測試卡並檢查 console 無錯誤）。

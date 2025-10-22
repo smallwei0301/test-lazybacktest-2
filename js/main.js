@@ -603,10 +603,52 @@ function normalizeTesterRows(payload, parseMode) {
 
     if (rows.length === 0 && Array.isArray(payload?.aaData)) {
         payload.aaData.forEach((entry) => {
-            if (!Array.isArray(entry) || entry.length < 9) return;
-            const [rawDate, , , open, high, low, close, , volume] = entry;
+            if (!Array.isArray(entry) || entry.length < 2) return;
+            const rawDate = entry[0];
             const date = rocToIsoDate(rawDate) || normalizeTesterDate(rawDate);
-            pushRow(date, open, high, low, close, volume);
+            if (!date) return;
+            const open = entry.length > 3 ? entry[3] : null;
+            const high = entry.length > 4 ? entry[4] : null;
+            const low = entry.length > 5 ? entry[5] : null;
+            const close = entry.length > 6 ? entry[6] : null;
+
+            const codeField = entry.length > 1 ? entry[1] : null;
+            const nameField = entry.length > 2 ? entry[2] : null;
+            const codeStr = codeField === null || codeField === undefined ? '' : String(codeField).trim();
+            const codeHasAlpha = /[A-Za-z]/.test(codeStr);
+            const nameLooksText = typeof nameField === 'string'
+                && nameField.trim().length > 0
+                && normalizeTesterNumber(nameField) === null;
+            const treatAsStockInfo = codeHasAlpha || nameLooksText;
+
+            const candidateVolumeIndices = [];
+            if (treatAsStockInfo) {
+                if (entry.length > 8) candidateVolumeIndices.push(8);
+                const lastIndex = entry.length - 1;
+                if (lastIndex > 0) candidateVolumeIndices.push(lastIndex);
+                if (entry.length > 10) candidateVolumeIndices.push(10, 9);
+                candidateVolumeIndices.push(1);
+            } else {
+                candidateVolumeIndices.push(1);
+                if (entry.length > 12) candidateVolumeIndices.push(12, 11);
+            }
+
+            let volumeRaw = null;
+            const seen = new Set();
+            for (let i = 0; i < candidateVolumeIndices.length; i += 1) {
+                const index = candidateVolumeIndices[i];
+                if (!Number.isInteger(index)) continue;
+                if (index <= 0 || index >= entry.length) continue;
+                if (seen.has(index)) continue;
+                seen.add(index);
+                const numeric = normalizeTesterNumber(entry[index]);
+                if (numeric !== null) {
+                    volumeRaw = entry[index];
+                    break;
+                }
+            }
+
+            pushRow(date, open, high, low, close, volumeRaw);
         });
     }
 
