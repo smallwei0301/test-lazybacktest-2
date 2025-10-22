@@ -1,4 +1,10 @@
 
+## 2026-08-28 — Patch LB-MASCOT-HTTPS-20240713A
+- **Scope**: 載入中吉祥物圖庫安全性調整。
+- **Updates**:
+  - `js/loading-mascot-sources.js` 將所有 Imgur 靜態圖庫來源統一改為 HTTPS，避免在 HTTPS 網站上觸發 Mixed Content 警示。
+- **Testing**: 容器環境僅更新靜態資源清單，後續於瀏覽器載入頁面時確認 console 無 Mixed Content 警示。
+
 ## 2026-08-27 — Patch LB-VOLUME-PARSER-20260827A
 - **Scope**: 月度價量補抓與資料來源測試表格的成交量解析。
 - **Updates**:
