@@ -13,6 +13,33 @@
   - 補充測試限制，說明需在具備瀏覽器與 Netlify Proxy 的實機環境重跑 2330/2412/0050 回測以比對暖身與買入持有基準。
 - **Testing**: 容器環境缺少 Netlify Proxy 與瀏覽器，無法執行 2330/2412/0050 本地回測；後續須於實機確認 console log 與暖身診斷。
 
+## 2026-09-12 — Patch LB-MASCOT-HTTPS-20260912A
+- **Scope**: Loading mascot 圖片來源的安全協定統一。
+- **Updates**:
+  - `js/loading-mascot-sources.js` 將所有 Imgur 圖片網址改用 HTTPS，搭配新補丁代碼以追蹤混合內容修正。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機於 Netlify 站台確認載入時無 Mixed Content 警示並正常輪播。
+
+
+## 2026-08-27 — Patch LB-VOLUME-PARSER-20260827A
+- **Scope**: 月度價量補抓與資料來源測試表格的成交量解析。
+- **Updates**:
+  - `js/worker.js` 調整 `normalizeProxyRow`，優先辨識 aaData 最後一欄的成交量並排除股票代碼欄位，並為物件格式資料補上 `tradeVolume`、`TradingVolume` 等欄位別名。
+  - `js/worker.js` 的還原服務解析流程延伸相同的成交量欄位清單，避免備援資料在還原後被歸零。
+  - `js/main.js` 開發者資料來源表格支援更多成交量欄位別名，確保視覺化結果與 Worker 解析一致。
+- **Testing**: 容器環境無法連線 Proxy，待實機以 00631L 等案例回測確認「無效欄位統計」不再出現 volume×N。
+
+## 2026-07-30 — Patch LB-DATASOURCE-TABLE-20260730A
+- **Scope**: 開發者模式資料來源測試表格閱覽。
+- **Updates**:
+  - `index.html` 於資料來源測試卡加入「查看資料表格」控制鈕與表格容器，可展開最近一次測試回傳的開高低收量資訊。
+  - `js/main.js` 正規化各來源回傳的日線資料，儲存最新樣本、提供表格切換、更新按鈕狀態，並在測試流程中同步清除或還原表格。
+- **Testing**: 容器環境無法連線 Proxy／啟動瀏覽器，待實機以開發者模式測試資料來源按鈕確認表格載入。
+## 2026-07-30 — Patch LB-SENSITIVITY-ANNUAL-20250714A
+- **Scope**: 摘要敏感度年化報酬呈現與文案調整。
+- **Updates**:
+  - `js/backtest.js` 改以年化報酬差異計算敏感度摘要的 PP 與方向指標，缺值時回退至原本的總體報酬率，tooltip 改寫為「年化報酬」。
+  - `js/backtest.js` 更新敏感度四大卡片的摘要句、方向提醒與漂移說明，改為專業且口語化的文案，並同步年化語意。
+- **Testing**: 容器環境無法連線 Proxy 與啟動瀏覽器，待實機回測確認敏感度卡片顯示與 tooltip。
 
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
@@ -897,7 +924,13 @@ NODE`
 - **Issue recap**: 使用者反映敏感度卡僅顯示 ±10% 場景且未說明方向指標門檻，穩定度分數未考量 Sharpe Δ，摘要卡文案也與下方動態網格脫節。
 - **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
-- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。
+
+# 2025-07-30 — Patch LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
+- **Issue recap**: 敏感度摘要改用年化報酬後，漂移與方向建議仍沿用總報酬門檻，導致 ±20pp／40pp 判準過寬，無法準確反映年化報酬的細微變動風險。
+- **Fix**: 導入 `ANNUALIZED_SENSITIVITY_THRESHOLDS` 統一管理年化漂移與方向門檻，將色碼、摘要建議、tooltip 與方向文案調整為「≤6pp 穩健、6～12pp 觀察、>12pp 警示」等級，並同步更新偏移方向與摘要句的提醒。
+- **Diagnostics**: 以 `console.log(result.parameterSensitivity.summary)` 檢視平均漂移、最大偏移與方向偏移數據，確認新門檻會驅動卡片色碼與建議文字變化；同時檢查 tooltip 文字與方向提示是否呈現新數值區間。
+- **Testing**: 受限於容器無法連線 Proxy，僅進行靜態程式檢查；待實際回測時再驗證敏感度卡片渲染與瀏覽器 console 無錯誤。
 
 ## 2025-10-05 — Patch LB-TREND-SENSITIVITY-20251005A
 - **Issue recap**: 新增 1→1000 靈敏度後，高檔滑桿仍以嚴格門檻回傳盤整為主，1000 時盤整覆蓋反而超過 40%，未能達成「靈敏度越高趨勢段越多」的預期行為。
@@ -1484,6 +1517,13 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-30 — Patch LB-SENSITIVITY-ANNUAL-SCORE-20250730A
+- **Issue recap**: 年化敏感度改採 ±6/±12pp 門檻後，舊有的「平均漂移等同扣分」公式讓穩定區仍被視為僅扣 0～6 分，與新的正常範圍（≤12pp）不匹配，總分解讀門檻也隨之失準。
+- **Fix**:
+  - `js/worker.js` 的 `evaluateSensitivityStability` 導入三段式漂移扣分模型：穩定區（≤6pp）壓縮至 0～10 分、觀察區（6～12pp）線性攀升至 30 分、超過 12pp 每多 1pp 再扣 4 分，同步回傳扣分區段標籤並更新評分版號為 `LB-SENSITIVITY-METRIC-20250730A`。
+  - `js/backtest.js` 追加 `ANNUALIZED_SENSITIVITY_SCORING` 常數與 `resolveDriftPenaltyBandLabel`，在穩定度 tooltip 說明新扣分曲線與區段標籤，並顯示實際扣分與所屬區間。
+- **Diagnostics**: 以相同敏感度結果對照前後版本，確認平均漂移 5pp 的案例扣分落在 8～9 分、12pp 時約 30 分，tooltip 會顯示「穩定區／觀察區／警戒區」標籤，並與 worker 回傳的扣分值一致。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 ## 2026-07-30 — Patch LB-UI-TABTONE-20260730A
 - **Issue recap**: 右側摘要分頁的標籤在切換時會一起縮小，策略摘要卡片文案亦帶有遊戲化語氣，與目標族群預期的專業體驗不符。
 - **Fix**:
@@ -1519,3 +1559,10 @@ NODE`
   - 調整各策略插件改用 `registry.getStrategyMetaById` 與 `registerStrategy`，Worker 透過 Registry 應用策略、Loader 暖身 `listStrategies` 供 UI 測試與隨機取樣使用。
 - **Diagnostics**: 待於可連線 Proxy 的實機環境隨機選取 manifest 內策略跑 2330/2412/0050 回測，比對暖身診斷與進出場訊號是否與舊版一致。
 - **Testing**: `npm run typecheck`（驗證插件契約與 manifest 型別一致性）。
+## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
+- **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
+- **Fix**:
+  - `js/worker.js` 的 `fetchAdjustedPriceRange` 將 `toNumber` 更新為移除千分位逗號並忽略空字串，確保成交量能被正確解析。
+  - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
+- **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。

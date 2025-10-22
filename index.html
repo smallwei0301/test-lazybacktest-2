@@ -457,6 +457,50 @@
                                                     <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
                                                     <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
                                                     <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                    <div
+                                                        id="dataSourceTesterTableControls"
+                                                        class="hidden flex flex-wrap items-center gap-2 text-[11px]"
+                                                        style="color: var(--muted-foreground);"
+                                                    >
+                                                        <button
+                                                            id="openDataSourceTesterTable"
+                                                            type="button"
+                                                            class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                            aria-expanded="false"
+                                                            aria-controls="dataSourceTesterTableWrapper"
+                                                        >
+                                                            查看資料表格
+                                                        </button>
+                                                        <span id="dataSourceTesterTableSource" class="hidden"></span>
+                                                        <span id="dataSourceTesterTableCount" class="hidden"></span>
+                                                    </div>
+                                                    <div
+                                                        id="dataSourceTesterTableWrapper"
+                                                        class="hidden border rounded-md bg-white/70"
+                                                        style="border-color: var(--border);"
+                                                    >
+                                                        <div class="overflow-x-auto max-h-64">
+                                                            <table class="min-w-full text-[11px]" style="color: var(--foreground);">
+                                                                <thead class="sticky top-0 bg-white">
+                                                                    <tr>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">日期</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">開盤</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">最高</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">最低</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">收盤</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">成交量</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody id="dataSourceTesterTableBody"></tbody>
+                                                            </table>
+                                                        </div>
+                                                        <div
+                                                            id="dataSourceTesterTableNote"
+                                                            class="px-3 py-2 text-[10px] border-t"
+                                                            style="border-color: var(--border); color: var(--muted-foreground);"
+                                                        ></div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

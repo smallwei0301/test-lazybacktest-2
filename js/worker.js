@@ -451,7 +451,7 @@ async function ensureTF() {
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
-// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -474,11 +474,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+
+const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
+  driftStable: 6,
+  driftCaution: 12,
+});
+
+const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
+  comfortPenaltyMax: 10,
+  cautionPenaltyMax: 30,
+  overflowPenaltySlope: 4,
+});
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -3817,7 +3828,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3832,7 +3848,21 @@ async function fetchAdjustedPriceRange(
     const high = toNumber(row.high ?? row.High ?? row.max);
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
-    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const volumeRaw =
+      toNumber(
+        row.volume ??
+          row.Volume ??
+          row.Trading_Volume ??
+          row.TradingVolume ??
+          row.trade_volume ??
+          row.tradeVolume ??
+          row.total_volume ??
+          row.totalVolume ??
+          row.vol ??
+          row.volume_shares ??
+          row.volumeShares ??
+          0,
+      ) || 0;
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -3964,26 +3994,92 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         const num = Number(String(val).replace(/,/g, ""));
         return Number.isFinite(num) ? num : null;
       };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      }
+      const resolveArrayVolume = () => {
+        const candidateSet = new Set();
+        if (item.length >= 9) {
+          candidateSet.add(8);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(1);
+        }
+        if (item.length >= 3) {
+          candidateSet.add(2);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(item.length - 1);
+        }
+        let resolved = null;
+        const tryResolve = (index) => {
+          if (index <= 0 || index >= item.length) return null;
+          const raw = item[index];
+          if (raw === null || raw === undefined) return null;
+          if (typeof raw === "string" && /[A-Za-z]/.test(raw)) return null;
+          const parsed = parseNumber(raw);
+          if (parsed === null || parsed < 0) return null;
+          return parsed;
+        };
+        for (const index of candidateSet) {
+          const candidate = tryResolve(index);
+          if (candidate !== null) {
+            resolved = candidate;
+            break;
+          }
+        }
+        if (resolved === null) {
+          for (let i = item.length - 1; i >= 1; i -= 1) {
+            const candidate = tryResolve(i);
+            if (candidate !== null) {
+              resolved = candidate;
+              break;
+            }
+          }
+        }
+        return resolved ?? 0;
+      };
+      volume = resolveArrayVolume();
+      open = parseNumber(item[3]);
+      high = parseNumber(item[4]);
+      low = parseNumber(item[5]);
+      close = parseNumber(item[6]);
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
+      const resolveObjectVolume = () => {
+        const candidates = [
+          item.volume,
+          item.Volume,
+          item.Trading_Volume,
+          item.TradingVolume,
+          item.trade_volume,
+          item.tradeVolume,
+          item.total_volume,
+          item.totalVolume,
+          item.vol,
+          item.volume_shares,
+          item.volumeShares,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+          const parsed = parseNumber(candidates[i]);
+          if (parsed !== null && parsed >= 0) {
+            return parsed;
+          }
+        }
+        return 0;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = resolveObjectVolume();
     } else {
       return null;
     }
@@ -10947,11 +11043,40 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      driftPenaltyBand: null,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
+
+  let driftPenalty = 0;
+  let driftPenaltyBand = null;
+  if (Number.isFinite(averageDrift)) {
+    const driftAbs = Math.max(0, Math.abs(averageDrift));
+    const { driftStable, driftCaution } = ANNUALIZED_SENSITIVITY_THRESHOLDS;
+    const {
+      comfortPenaltyMax,
+      cautionPenaltyMax,
+      overflowPenaltySlope,
+    } = ANNUALIZED_SENSITIVITY_SCORING;
+
+    if (driftStable > 0 && driftAbs <= driftStable) {
+      const comfortRatio = driftStable === 0 ? 1 : driftAbs / driftStable;
+      driftPenalty = comfortRatio * comfortPenaltyMax;
+      driftPenaltyBand = "comfort";
+    } else if (driftAbs <= driftCaution) {
+      const span = Math.max(1, driftCaution - driftStable);
+      const ratio = driftStable === driftCaution
+        ? 1
+        : (driftAbs - driftStable) / span;
+      const scaled = ratio * (cautionPenaltyMax - comfortPenaltyMax);
+      driftPenalty = comfortPenaltyMax + scaled;
+      driftPenaltyBand = "caution";
+    } else {
+      const overflow = Math.max(0, driftAbs - driftCaution);
+      driftPenalty = cautionPenaltyMax + overflow * overflowPenaltySlope;
+      driftPenaltyBand = "critical";
+    }
+  }
+
   const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
     ? Math.max(0, averageSharpeDrop) * 100
     : 0;
@@ -10962,6 +11087,7 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
     score,
     driftPenalty,
     sharpePenalty,
+    driftPenaltyBand,
   };
 }
 
@@ -11059,6 +11185,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         version: SENSITIVITY_SCORE_VERSION,
         driftPenalty: stabilityComponents.driftPenalty,
         sharpePenalty: stabilityComponents.sharpePenalty,
+        driftPenaltyBand: stabilityComponents.driftPenaltyBand,
       },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
@@ -11185,6 +11312,7 @@ function buildSensitivityGroup({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: groupStabilityComponents.driftPenalty,
       sharpePenalty: groupStabilityComponents.sharpePenalty,
+      driftPenaltyBand: groupStabilityComponents.driftPenaltyBand,
     },
     parameters,
   };
@@ -11367,6 +11495,7 @@ function evaluateSensitivityParameter({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: stabilityComponents.driftPenalty,
       sharpePenalty: stabilityComponents.sharpePenalty,
+      driftPenaltyBand: stabilityComponents.driftPenaltyBand,
     },
   };
 }
