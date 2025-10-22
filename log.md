@@ -1,4 +1,10 @@
 
+## 2026-08-15 — Patch LB-DATA-CLEANUP-20260815A / LB-ASSET-HTTPS-20260815A
+- **Issue recap**: Proxy 回傳的成交量含逗號或全形空白，導致 Worker 視為無效量能而在主執行緒與 Worker console 報出大量「volume」錯誤；Loading Mascot 仍引用 HTTP 圖片造成瀏覽器 Mixed Content 警告。
+- **Fix**: `js/worker.js` 與 `js/backtest.js` 新增數值正規化流程，移除千分位與全形空白後再轉為數字，確保量能／價格欄位被判為有效；`js/loading-mascot-sources.js` 將剩餘 HTTP 圖片來源全數改為 HTTPS。
+- **Diagnostics**: 無法於容器內實際呼叫 Proxy，後續請於瀏覽器回測 00631L 等量能較大的 ETF，確認 console 不再輸出「volume×」警示，並檢視 Network 面板確保 Loading Mascot 僅使用 HTTPS。
+- **Testing**: `node - <<'NODE' const fs=require('fs');['js/worker.js','js/backtest.js','js/loading-mascot-sources.js'].forEach((file)=>{new (require('vm').Script)(fs.readFileSync(file,'utf8'),{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:

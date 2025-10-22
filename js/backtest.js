@@ -1,5 +1,6 @@
 
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-DATA-CLEANUP-20260815A — Normalise numeric strings before chart rendering.
 // Patch Tag: LB-STAGING-OPTIMIZER-20250627A
 // Patch Tag: LB-COVERAGE-STREAM-20250705A
 // Patch Tag: LB-TREND-SENSITIVITY-20250726A
@@ -1663,8 +1664,25 @@ function sanitizeTrendRawRow(row) {
     const date = typeof row.date === 'string' ? row.date : null;
     if (!date) return null;
     const parseValue = (value) => {
-        const numeric = Number(value);
-        return Number.isFinite(numeric) ? numeric : null;
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) return null;
+            const normalised = trimmed
+                .replace(/[,_，]/g, '')
+                .replace(/[\s\u3000\uFEFF]/g, '')
+                .replace(/[^0-9+\-Ee.]/g, '');
+            if (!normalised) return null;
+            const parsed = Number(normalised);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+        if (typeof value === 'bigint') {
+            return Number(value);
+        }
+        return null;
     };
     return {
         date,
