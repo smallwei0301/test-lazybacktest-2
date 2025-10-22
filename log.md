@@ -1463,3 +1463,11 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+
+## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20260729A
+- **Issue recap**: Web Worker 啟動時即同步載入 TensorFlow.js 核心與 WASM 後端，即使使用者未啟用 AI 訓練，也會多載超過 1MB 的腳本，增加首屏下載與初始化時間。
+- **Fix**:
+  - `js/worker.js` 新增 `ensureTFReady` 與延遲載入流程，僅在接收到 AI 訊息時才載入 TensorFlow.js，並確保後端設定與隨機種子沿用既有策略。
+  - 讓 ANN 與 LSTM 的訓練入口在進行任何 TensorFlow 操作前呼叫 `ensureTFReady`，並保留原有的 WASM → CPU fallback 與診斷輸出。
+- **Diagnostics**: 透過 `console.log(tf?.getBackend?.())` 手動檢查於延遲載入後仍能初始化 WASM 後端，確認版本碼 `LB-AI-TF-LAZYLOAD-20260729A` 已在 Worker 註記；待能連線 Proxy 的環境實際執行 AI 訓練確保整體流程無誤。
+- **Testing**: 未執行（容器環境無法呼叫 Proxy/TensorFlow 資源，需於 Netlify 等實際部署環境確認 AI 訓練/推論 console 無錯誤）。
