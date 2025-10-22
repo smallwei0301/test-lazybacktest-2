@@ -3,6 +3,7 @@
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
 // Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
+// Patch Tag: LB-DATA-CLEANUP-20260815A — Normalise numeric fields from proxy payloads.
 // Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile separation for volatility tiers.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Volatility quartile diagnostics for reproducibility.
@@ -3767,8 +3768,24 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const normalised = trimmed
+        .replace(/[,_，]/g, "")
+        .replace(/[\s\u3000\uFEFF]/g, "")
+        .replace(/[^0-9+\-Ee.]/g, "");
+      if (!normalised) return null;
+      const parsed = Number(normalised);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (typeof value === "bigint") {
+      return Number(value);
+    }
+    return null;
   };
 
   const rows = Array.isArray(payload?.data) ? payload.data : [];
