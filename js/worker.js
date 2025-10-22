@@ -2758,7 +2758,14 @@ function summariseDatasetRows(rows, context = {}) {
     const high = Number.isFinite(row.high) ? row.high : null;
     const low = Number.isFinite(row.low) ? row.low : null;
     const close = Number.isFinite(row.close) ? row.close : null;
-    const volume = Number.isFinite(row.volume) ? row.volume : null;
+    const rawVolumeShares = Number.isFinite(row.rawVolume)
+      ? row.rawVolume
+      : null;
+    let volume = Number.isFinite(row.volume) ? row.volume : null;
+    if (volume === null && rawVolumeShares !== null) {
+      const derived = convertSharesToThousands(rawVolumeShares);
+      volume = Number.isFinite(derived) ? derived : null;
+    }
     const validClose = close !== null && close > 0;
     const validVolume = volume !== null && volume > 0;
 
@@ -2898,6 +2905,7 @@ function summariseDatasetRows(rows, context = {}) {
             low,
             close,
             volume,
+            rawVolume: rawVolumeShares,
           });
         }
         if (
@@ -2910,6 +2918,7 @@ function summariseDatasetRows(rows, context = {}) {
             index: i,
             close,
             volume,
+            rawVolume: rawVolumeShares,
             reasons: invalidReasons.slice(0, 5),
           };
         }
@@ -3730,6 +3739,23 @@ function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
   return { rows: adjustedRows, fallbackApplied: true };
 }
 
+// LB-VOLUME-NORMALIZE-20260805A: preserve raw volume precision to avoid false invalid flags
+function parseVolumeToShares(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  const cleaned = String(value).replace(/,/g, "").trim();
+  if (cleaned.length === 0) return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
+
+function convertSharesToThousands(volumeShares) {
+  if (!Number.isFinite(volumeShares)) return null;
+  return volumeShares / 1000;
+}
+
 async function fetchAdjustedPriceRange(
   stockNo,
   startDate,
@@ -3782,7 +3808,10 @@ async function fetchAdjustedPriceRange(
     const high = toNumber(row.high ?? row.High ?? row.max);
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
-    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const volumeShares = parseVolumeToShares(
+      row.volume ?? row.Volume ?? row.Trading_Volume,
+    );
+    const volumeThousands = convertSharesToThousands(volumeShares);
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -3822,7 +3851,8 @@ async function fetchAdjustedPriceRange(
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: Number.isFinite(volumeThousands) ? volumeThousands : null,
+      rawVolume: Number.isFinite(volumeShares) ? volumeShares : undefined,
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -3906,7 +3936,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       high = null,
       low = null,
       close = null,
-      volume = 0;
+      volume = null;
     if (Array.isArray(item)) {
       dateStr = item[0];
       const parseNumber = (val) => {
@@ -3915,13 +3945,13 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         return Number.isFinite(num) ? num : null;
       };
       if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
+        volume = parseNumber(item[1]);
         open = parseNumber(item[3]);
         high = parseNumber(item[4]);
         low = parseNumber(item[5]);
         close = parseNumber(item[6]);
       } else {
-        volume = parseNumber(item[1]) || 0;
+        volume = parseNumber(item[1]);
         open = parseNumber(item[3]);
         high = parseNumber(item[4]);
         low = parseNumber(item[5]);
@@ -3933,7 +3963,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       high = Number(item.high ?? item.High ?? item.max ?? null);
       low = Number(item.low ?? item.Low ?? item.min ?? null);
       close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      volume = item.volume ?? item.Volume ?? item.Trading_Volume ?? null;
     } else {
       return null;
     }
@@ -3958,14 +3988,16 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
     if ((low === null || low === 0) && close !== null)
       low = Math.min(open ?? close, close);
     const clean = (val) => (val === null || Number.isNaN(val) ? null : val);
-    const volNumber = Number(String(volume).replace(/,/g, "")) || 0;
+    const volumeShares = parseVolumeToShares(volume);
+    const volumeThousands = convertSharesToThousands(volumeShares);
     return {
       date: isoDate,
       open: clean(open),
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume: Number.isFinite(volumeThousands) ? volumeThousands : null,
+      rawVolume: Number.isFinite(volumeShares) ? volumeShares : undefined,
     };
   } catch (error) {
     return null;
@@ -7660,6 +7692,7 @@ function runStrategy(data, params, options = {}) {
             : sample.reasons,
           close: sample.close,
           volume: sample.volume,
+          rawVolume: sample.rawVolume,
         }),
       );
       console.table(invalidTable);

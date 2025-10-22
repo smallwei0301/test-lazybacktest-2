@@ -1486,3 +1486,11 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+## 2026-08-05 — Patch LB-VOLUME-NORMALIZE-20260805A
+- **Issue recap**: 00631L 回測時出現超過千筆 `volume` 無效資料警告，係因量能換算為千股時被四捨五入為 0；同時 Loading mascot 仍引用 HTTP 圖片，導致 HTTPS 網站出現 Mixed Content 警示。
+- **Fix**:
+  - `js/worker.js` 保留原始股數並改以千股小數表示量能，更新診斷輸出與 console table，避免因 rounding 導致誤判無效資料。
+  - `js/loading-mascot-sources.js` 全面改用 HTTPS 的 Imgur 圖片來源，排除瀏覽器 Mixed Content 警示。
+- **Diagnostics**: 請於可連線 Proxy 的環境重新回測 00631L、低量能標的與含量能指標策略，確認 console 不再重複出現無效量能警示且載入頁面無混合內容警告。
+- **Testing**: 尚未執行（開發容器無法呼叫 Proxy 或啟動瀏覽器，需於 Netlify 實機驗證回測與載入流程）。
+
