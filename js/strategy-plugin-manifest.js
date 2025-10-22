@@ -1,4 +1,4 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712A
+// Patch Tag: LB-PLUGIN-REGISTRY-20250720B
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope || !globalScope.StrategyPluginRegistry) {
@@ -10,18 +10,87 @@
     return;
   }
 
+  const loadedPluginUrls = new Set();
+
+  function computeManifestBaseUrl() {
+    try {
+      if (typeof document !== 'undefined') {
+        const current = document.currentScript;
+        if (current && current.src) {
+          return new URL('.', current.src).toString();
+        }
+        const scripts = document.getElementsByTagName('script');
+        for (let i = scripts.length - 1; i >= 0; i -= 1) {
+          const candidate = scripts[i];
+          if (candidate && candidate.src && candidate.src.indexOf('strategy-plugin-manifest.js') !== -1) {
+            return new URL('.', candidate.src).toString();
+          }
+        }
+      }
+      if (typeof globalScope !== 'undefined' && globalScope.location && globalScope.location.href) {
+        return new URL('.', globalScope.location.href).toString();
+      }
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[StrategyPluginManifest] 無法計算 base URL，改用相對路徑。', error);
+      }
+    }
+    return '';
+  }
+
+  const manifestBaseUrl = computeManifestBaseUrl();
+
+  function resolvePluginUrl(scriptPath) {
+    if (typeof scriptPath !== 'string' || !scriptPath) {
+      throw new TypeError('[StrategyPluginManifest] loader 需要有效的路徑字串');
+    }
+    if (/^(?:[a-z]+:)?\/\//i.test(scriptPath) || scriptPath.startsWith('data:')) {
+      return scriptPath;
+    }
+    const base = manifestBaseUrl || (globalScope && globalScope.location ? globalScope.location.href : undefined);
+    try {
+      return base ? new URL(scriptPath, base).toString() : scriptPath;
+    } catch (_error) {
+      return scriptPath;
+    }
+  }
+
+  function evaluateScriptContent(url, source) {
+    const evaluator = (0, eval);
+    evaluator(source + `\n//# sourceURL=${url}`);
+  }
+
+  function loadScriptInWindow(url) {
+    if (typeof XMLHttpRequest === 'undefined') {
+      throw new Error(`[StrategyPluginManifest] 此環境缺少 XMLHttpRequest，無法載入 ${url}`);
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, false);
+    xhr.send(null);
+    if (xhr.status >= 200 && xhr.status < 300) {
+      evaluateScriptContent(url, xhr.responseText || '');
+      return;
+    }
+    throw new Error(`[StrategyPluginManifest] 載入 ${url} 失敗（HTTP ${xhr.status || '未知'}）`);
+  }
+
   function createScriptLoader(scriptPath) {
+    const resolvedUrl = resolvePluginUrl(scriptPath);
     let loaded = false;
     return function load() {
-      if (loaded) {
-        return;
-      }
-      if (typeof importScripts === 'function') {
-        importScripts(scriptPath);
+      if (loaded || loadedPluginUrls.has(resolvedUrl)) {
         loaded = true;
         return;
       }
-      throw new Error(`[StrategyPluginManifest] 無法於此環境載入 ${scriptPath}`);
+      if (typeof importScripts === 'function') {
+        importScripts(resolvedUrl);
+        loaded = true;
+        loadedPluginUrls.add(resolvedUrl);
+        return;
+      }
+      loadScriptInWindow(resolvedUrl);
+      loaded = true;
+      loadedPluginUrls.add(resolvedUrl);
     };
   }
 

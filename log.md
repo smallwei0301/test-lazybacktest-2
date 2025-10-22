@@ -1566,3 +1566,12 @@ NODE`
   - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
 - **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-10 — Patch LB-PLUGIN-REGISTRY-20250720B / LB-DEV-VERIFICATION-20250720A
+- **Issue recap**: 前端手動驗證時，策略懶載入在瀏覽器主執行緒全部失敗，且缺少 BacktestRunner 介面供抽樣比對，開發者卡片亦無快速檢核清單。
+- **Fix**:
+  - `js/strategy-plugin-manifest.js` 導入 `LB-PLUGIN-REGISTRY-20250720B`，自動推導 manifest base URL，於瀏覽器以同步 XHR + eval 評估腳本，確保主執行緒與 Worker 皆可成功懶載入策略。
+  - `js/backtest.js` 暴露 `window.BacktestRunner.run`（`LB-BACKTEST-EXPOSE-RUN-20250720A`），保留既有 runner 物件並以凍結方式公開版本資訊，方便開發者呼叫與驗證。
+  - `index.html`／`js/main.js` 新增開發者卡片的「策略載入驗證」區塊（`LB-DEV-VERIFICATION-20250720A`），可一鍵列舉清單、檢查重複 ID、逐一嘗試懶載入並記錄結果與時間戳記。
+- **Diagnostics**: 於瀏覽器開啟開發者卡片，點擊「手動驗證」確認 20 策略全部載入成功、摘要顯示 BacktestRunner 可用，並抽樣呼叫 `BacktestRunner.run()` 進行實際回測比對結果。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實測懶載入與回測流程時檢查 console 是否無錯誤）。

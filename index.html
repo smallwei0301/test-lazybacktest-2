@@ -557,6 +557,36 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="strategyRegistryVerifierContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="list-checks" class="lucide w-4 h-4"></i>
+                                                    策略載入驗證
+                                                </div>
+                                                <span id="strategyRegistryVerifierTimestamp" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></span>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div class="px-3 py-2 border-b space-y-2" style="border-color: var(--border);">
+                                                    <div class="flex items-center gap-2">
+                                                        <button
+                                                            id="strategyRegistryVerifierRun"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            手動驗證
+                                                        </button>
+                                                        <span id="strategyRegistryVerifierStatus" class="text-[11px]" style="color: var(--muted-foreground);">
+                                                            尚未驗證。
+                                                        </span>
+                                                    </div>
+                                                    <div id="strategyRegistryVerifierSummary" class="text-[11px] hidden" style="color: var(--foreground);"></div>
+                                                </div>
+                                                <div class="px-3 py-3">
+                                                    <ul id="strategyRegistryVerifierList" class="space-y-2 text-[11px]" style="color: var(--muted-foreground);"></ul>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="dataSourceSummaryContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">

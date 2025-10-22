@@ -10955,3 +10955,17 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('[Market Switch] 市場切換功能已初始化');
     }, 100);
 });
+
+// Patch Tag: LB-BACKTEST-EXPOSE-RUN-20250720A
+if (typeof window !== 'undefined') {
+    const existingRunner = window.BacktestRunner && typeof window.BacktestRunner === 'object' ? window.BacktestRunner : {};
+    const backtestRun = function backtestRun() {
+        return runBacktestInternal();
+    };
+    window.BacktestRunner = Object.freeze(
+        Object.assign({}, existingRunner, {
+            run: backtestRun,
+            __version__: 'LB-BACKTEST-EXPOSE-RUN-20250720A',
+        }),
+    );
+}

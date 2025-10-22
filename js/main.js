@@ -3,6 +3,7 @@
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-TW-DIRECTORY-20250620A
+// Patch Tag: LB-DEV-VERIFICATION-20250720A
 // Patch Tag: LB-US-BACKTEST-20250621A
 // Patch Tag: LB-DEVELOPER-HERO-20250711A
 // Patch Tag: LB-TODAY-SUGGESTION-20250904A
@@ -3115,6 +3116,220 @@ function initBatchDebugLogPanel() {
     attemptSubscription();
 }
 
+const STRATEGY_REGISTRY_VERIFIER_VERSION = 'LB-DEV-VERIFICATION-20250720A';
+
+function formatStrategyVerifierTimestamp(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return '';
+    }
+    try {
+        return date.toLocaleString('zh-TW', { hour12: false });
+    } catch (_error) {
+        return date.toISOString();
+    }
+}
+
+function initStrategyRegistryVerifier() {
+    const container = document.getElementById('strategyRegistryVerifierContainer');
+    if (!container) return;
+
+    const runBtn = document.getElementById('strategyRegistryVerifierRun');
+    const statusEl = document.getElementById('strategyRegistryVerifierStatus');
+    const listEl = document.getElementById('strategyRegistryVerifierList');
+    const summaryEl = document.getElementById('strategyRegistryVerifierSummary');
+    const timestampEl = document.getElementById('strategyRegistryVerifierTimestamp');
+
+    if (!runBtn || !statusEl || !listEl || !summaryEl) {
+        return;
+    }
+
+    const baseStatusColor = statusEl.style.color;
+
+    const setStatus = (text, tone = 'info') => {
+        statusEl.textContent = text;
+        let color = baseStatusColor || 'var(--muted-foreground)';
+        if (tone === 'success') {
+            color = 'var(--emerald-600, #059669)';
+        } else if (tone === 'error') {
+            color = 'var(--rose-600, #dc2626)';
+        } else if (tone === 'warning') {
+            color = 'var(--amber-600, #d97706)';
+        }
+        statusEl.style.color = color;
+    };
+
+    const updateTimestamp = (date) => {
+        if (!timestampEl) return;
+        const formatted = date ? formatStrategyVerifierTimestamp(date) : '';
+        timestampEl.textContent = formatted ? `更新：${formatted}` : '';
+    };
+
+    const renderSummary = (text) => {
+        if (!summaryEl) return;
+        if (text && text.trim()) {
+            summaryEl.textContent = text.trim();
+            summaryEl.classList.remove('hidden');
+        } else {
+            summaryEl.textContent = '';
+            summaryEl.classList.add('hidden');
+        }
+    };
+
+    const renderList = (items) => {
+        listEl.innerHTML = '';
+        if (!items || items.length === 0) {
+            const empty = document.createElement('li');
+            empty.textContent = '策略清單為空，請確認 manifest 是否載入。';
+            listEl.appendChild(empty);
+            return;
+        }
+
+        items.forEach((item) => {
+            const li = document.createElement('li');
+            li.className = 'rounded-md border px-3 py-2 space-y-1';
+            li.style.borderColor = 'var(--border)';
+            li.style.backgroundColor = 'rgba(15, 23, 42, 0.03)';
+            li.style.color = 'var(--foreground)';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-center justify-between';
+
+            const idSpan = document.createElement('span');
+            idSpan.textContent = typeof item.id === 'string' && item.id ? item.id : '未知 ID';
+            header.appendChild(idSpan);
+
+            const statusSpan = document.createElement('span');
+            statusSpan.textContent = item.loaded ? '載入成功' : '載入失敗';
+            statusSpan.style.color = item.loaded ? 'var(--emerald-600, #059669)' : 'var(--rose-600, #dc2626)';
+            header.appendChild(statusSpan);
+
+            li.appendChild(header);
+
+            if (item.label) {
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'text-[10px]';
+                labelDiv.style.color = 'var(--muted-foreground)';
+                labelDiv.textContent = String(item.label || '');
+                li.appendChild(labelDiv);
+            }
+
+            if (item.errorMessage) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'text-[10px]';
+                errorDiv.style.color = 'var(--rose-600, #dc2626)';
+                errorDiv.textContent = String(item.errorMessage || '');
+                li.appendChild(errorDiv);
+            }
+
+            listEl.appendChild(li);
+        });
+    };
+
+    const runVerification = () => {
+        if (!window.StrategyPluginRegistry) {
+            setStatus('StrategyPluginRegistry 尚未就緒，請稍後再試。', 'error');
+            renderSummary('');
+            renderList([]);
+            return;
+        }
+
+        const registry = window.StrategyPluginRegistry;
+        if (typeof registry.listStrategies !== 'function' || typeof registry.getStrategyById !== 'function') {
+            setStatus('StrategyPluginRegistry 缺少必要 API。', 'error');
+            renderSummary('');
+            renderList([]);
+            return;
+        }
+
+        const manifest = registry.listStrategies({ includeLazy: true }) || [];
+        const seen = new Set();
+        const duplicates = [];
+        manifest.forEach((meta) => {
+            if (!meta || typeof meta.id !== 'string') {
+                return;
+            }
+            const id = meta.id;
+            if (seen.has(id)) {
+                duplicates.push(id);
+            } else {
+                seen.add(id);
+            }
+        });
+
+        const details = manifest.map((meta) => {
+            const id = meta?.id || '';
+            let loaded = false;
+            let errorMessage = '';
+            try {
+                const plugin = registry.getStrategyById(id);
+                loaded = Boolean(plugin && typeof plugin.run === 'function');
+                if (!loaded) {
+                    errorMessage = '插件未提供有效的 run 函式。';
+                }
+            } catch (error) {
+                loaded = false;
+                errorMessage = error?.message ? String(error.message) : '載入時發生未知錯誤。';
+            }
+            return {
+                id,
+                label: meta?.label || '',
+                loaded,
+                errorMessage,
+            };
+        });
+
+        const failed = details.filter((item) => !item.loaded);
+        const summaryParts = [];
+        summaryParts.push(`共 ${manifest.length} 策略`);
+        summaryParts.push(`成功 ${manifest.length - failed.length}`);
+        summaryParts.push(`失敗 ${failed.length}`);
+        if (duplicates.length > 0) {
+            summaryParts.push(`重複 ID：${duplicates.join(', ')}`);
+        }
+
+        if (window.BacktestRunner && typeof window.BacktestRunner.run === 'function') {
+            summaryParts.push('BacktestRunner.run 可用');
+        } else {
+            summaryParts.push('BacktestRunner.run 缺少');
+        }
+
+        renderSummary(summaryParts.join('；'));
+        renderList(details);
+
+        if (failed.length === 0 && duplicates.length === 0) {
+            setStatus('全部策略懶載入成功。', 'success');
+        } else if (failed.length > 0) {
+            setStatus('部分策略載入失敗，請檢查清單。', 'warning');
+        } else {
+            setStatus('策略清單包含重複項目，請檢查。', 'warning');
+        }
+
+        updateTimestamp(new Date());
+    };
+
+    runBtn.addEventListener('click', () => {
+        if (runBtn.disabled) {
+            return;
+        }
+        const originalLabel = runBtn.textContent;
+        runBtn.disabled = true;
+        runBtn.textContent = '驗證中...';
+        setStatus('正在檢查策略載入狀態...', 'info');
+        renderSummary('');
+        renderList([]);
+        requestAnimationFrame(() => {
+            try {
+                runVerification();
+            } finally {
+                runBtn.disabled = false;
+                runBtn.textContent = originalLabel || '手動驗證';
+            }
+        });
+    });
+
+    container.dataset.strategyRegistryVerifierVersion = STRATEGY_REGISTRY_VERIFIER_VERSION;
+}
+
 function initDeveloperAreaToggle() {
     const toggleBtn = document.getElementById('developerAreaToggle');
     const wrapper = document.getElementById('developerAreaWrapper');
@@ -4389,6 +4604,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initStrategyRegistryVerifier();
         initBatchDebugLogPanel();
 
         // 初始化頁籤功能
