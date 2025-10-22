@@ -95,7 +95,7 @@
 
   registerRsiPlugin({
     id: 'rsi_oversold',
-    label: 'RSI 超賣 (多頭進場)',
+    label: 'RSI超賣',
     indicatorKey: 'rsiEntry',
     signalField: 'enter',
     defaultThreshold: 30,
@@ -104,7 +104,7 @@
 
   registerRsiPlugin({
     id: 'rsi_overbought',
-    label: 'RSI 超買 (多頭出場)',
+    label: 'RSI超買',
     indicatorKey: 'rsiExit',
     signalField: 'exit',
     defaultThreshold: 70,
@@ -113,7 +113,7 @@
 
   registerRsiPlugin({
     id: 'short_rsi_overbought',
-    label: 'RSI 超買 (做空進場)',
+    label: 'RSI超買 (做空)',
     indicatorKey: 'rsiShortEntry',
     signalField: 'short',
     defaultThreshold: 70,
@@ -122,7 +122,7 @@
 
   registerRsiPlugin({
     id: 'cover_rsi_oversold',
-    label: 'RSI 超賣 (空單回補)',
+    label: 'RSI超賣 (回補)',
     indicatorKey: 'rsiCover',
     signalField: 'cover',
     defaultThreshold: 30,
