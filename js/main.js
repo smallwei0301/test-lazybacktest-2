@@ -460,6 +460,171 @@ const dataSourceTesterState = {
 
 const DATA_SOURCE_TESTER_TABLE_LIMIT = 120;
 
+// Patch Tag: LB-PLUGIN-VERIFIER-20260814A
+const STRATEGY_REGISTRY_ROLES = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
+
+function createStrategyRegistryExpectationState(overrides) {
+    return {
+        totalStrategies: 0,
+        countsByRole: {
+            longEntry: 0,
+            longExit: 0,
+            shortEntry: 0,
+            shortExit: 0,
+        },
+        missing: [],
+        extra: [],
+        labelMap: {},
+        expectedIds: [],
+        ...overrides,
+    };
+}
+
+function getStrategyDescriptionMap() {
+    return typeof strategyDescriptions === 'object' && strategyDescriptions
+        ? strategyDescriptions
+        : {};
+}
+
+function resolveStrategyConfigKeyForRole(role, rawValue, descriptions) {
+    if (!rawValue) return rawValue;
+    if (descriptions && descriptions[rawValue]) {
+        return rawValue;
+    }
+    if (role === 'longExit') {
+        const exitKey = `${rawValue}_exit`;
+        if (descriptions && descriptions[exitKey]) {
+            return exitKey;
+        }
+    } else if (role === 'shortEntry') {
+        const prefixed = rawValue.startsWith('short_') ? rawValue : `short_${rawValue}`;
+        if (descriptions && descriptions[prefixed]) {
+            return prefixed;
+        }
+    } else if (role === 'shortExit') {
+        const coverKey = rawValue.startsWith('cover_') ? rawValue : `cover_${rawValue}`;
+        if (descriptions && descriptions[coverKey]) {
+            return coverKey;
+        }
+    }
+    return rawValue;
+}
+
+function gatherStrategyRegistryExpectations() {
+    const descriptions = getStrategyDescriptionMap();
+    const labelMap = {};
+    Object.keys(descriptions).forEach((id) => {
+        const name = descriptions[id]?.name;
+        if (typeof name === 'string' && name.trim()) {
+            labelMap[id] = name.trim();
+        }
+    });
+
+    const selectIds = {
+        longEntry: 'entryStrategy',
+        longExit: 'exitStrategy',
+        shortEntry: 'shortEntryStrategy',
+        shortExit: 'shortExitStrategy',
+    };
+
+    const roleSets = {
+        longEntry: new Set(),
+        longExit: new Set(),
+        shortEntry: new Set(),
+        shortExit: new Set(),
+    };
+
+    const expectedIdSet = new Set(Object.keys(descriptions));
+
+    Object.entries(selectIds).forEach(([role, selectId]) => {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        Array.from(select.options || []).forEach((option) => {
+            const rawValue = option?.value || '';
+            const configKey = resolveStrategyConfigKeyForRole(role, rawValue, descriptions);
+            const finalKey = configKey || rawValue;
+            if (!finalKey) {
+                return;
+            }
+            roleSets[role].add(finalKey);
+            expectedIdSet.add(finalKey);
+            if (!labelMap[finalKey]) {
+                const optionLabel = typeof option?.text === 'string' && option.text.trim()
+                    ? option.text.trim()
+                    : (typeof option?.textContent === 'string' ? option.textContent.trim() : '');
+                if (optionLabel) {
+                    labelMap[finalKey] = optionLabel;
+                }
+            }
+        });
+    });
+
+    const countsByRole = {
+        longEntry: roleSets.longEntry.size,
+        longExit: roleSets.longExit.size,
+        shortEntry: roleSets.shortEntry.size,
+        shortExit: roleSets.shortExit.size,
+    };
+
+    const expectedIds = Array.from(expectedIdSet);
+    expectedIds.sort((a, b) => (labelMap[a] || a).localeCompare(labelMap[b] || b, 'zh-TW'));
+
+    return {
+        totalStrategies: expectedIds.length,
+        countsByRole,
+        expectedIds,
+        labelMap,
+    };
+}
+
+function describeSampleSelection(selection) {
+    if (!selection || typeof selection !== 'object') {
+        return '';
+    }
+    const parts = [];
+    if (selection.longEntry) {
+        parts.push(`做多進場「${selection.longEntry}」`);
+    }
+    if (selection.longExit) {
+        parts.push(`做多出場「${selection.longExit}」`);
+    }
+    if (selection.shortEnabled) {
+        if (selection.shortEntry) {
+            parts.push(`做空進場「${selection.shortEntry}」`);
+        }
+        if (selection.shortExit) {
+            parts.push(`回補出場「${selection.shortExit}」`);
+        }
+    }
+    if (parts.length === 0) {
+        return '';
+    }
+    return `策略組合：${parts.join('／')}`;
+}
+
+function buildSampleSelectionRecord(candidates, labelMap, enableShorting) {
+    const getLabel = (candidate) => {
+        if (!candidate) return '';
+        const configKey = candidate.configKey || candidate.strategyId || '';
+        const fallbackId = candidate.strategyId || candidate.configKey || '';
+        return labelMap[configKey]
+            || labelMap[fallbackId]
+            || configKey
+            || fallbackId
+            || '';
+    };
+
+    const record = {
+        longEntry: getLabel(candidates.longEntry),
+        longExit: getLabel(candidates.longExit),
+        shortEntry: enableShorting ? getLabel(candidates.shortEntry) : '',
+        shortExit: enableShorting ? getLabel(candidates.shortExit) : '',
+        shortEnabled: Boolean(enableShorting),
+    };
+    record.description = describeSampleSelection(record);
+    return record;
+}
+
 const strategyRegistryVerificationState = {
     running: false,
     results: [],
@@ -467,6 +632,8 @@ const strategyRegistryVerificationState = {
     lastRunAt: null,
     sampleRunning: false,
     sampleStatus: null,
+    expected: createStrategyRegistryExpectationState(),
+    sampleSelection: null,
 };
 
 const strategyRegistrySampleCandidates = {
@@ -3206,8 +3373,11 @@ function renderStrategyRegistrySampleStatus() {
     const statusEl = document.getElementById('strategyRegistrySampleStatus');
     if (!statusEl) return;
     const defaultMessage = '抽樣回測結果將顯示於此。';
+    const selectionDescription = strategyRegistryVerificationState.sampleSelection?.description || '';
     if (strategyRegistryVerificationState.sampleRunning) {
-        statusEl.textContent = '抽樣回測執行中…';
+        statusEl.textContent = selectionDescription
+            ? `抽樣回測執行中… ${selectionDescription}`
+            : '抽樣回測執行中…';
         statusEl.style.color = 'var(--foreground)';
         return;
     }
@@ -3217,7 +3387,11 @@ function renderStrategyRegistrySampleStatus() {
         statusEl.style.color = 'var(--muted-foreground)';
         return;
     }
-    statusEl.textContent = status.message || defaultMessage;
+    let message = status.message || defaultMessage;
+    if (selectionDescription && !message.includes('策略組合：')) {
+        message = `${message}；${selectionDescription}`;
+    }
+    statusEl.textContent = message;
     let toneColor = 'var(--muted-foreground)';
     if (status.tone === 'success') toneColor = 'var(--emerald-600, #059669)';
     else if (status.tone === 'error') toneColor = 'var(--rose-600, #dc2626)';
@@ -3258,6 +3432,8 @@ function renderStrategyRegistryVerification() {
         return;
     }
 
+    const expectation = strategyRegistryVerificationState.expected
+        || createStrategyRegistryExpectationState();
     const successCount = results.filter((entry) => entry.status === 'ok').length;
     const warningCount = results.filter((entry) => entry.status === 'warning').length;
     const errorCount = results.filter((entry) => entry.status === 'error').length;
@@ -3269,7 +3445,49 @@ function renderStrategyRegistryVerification() {
     if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
         summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
     }
-    summaryEl.textContent = summaryText;
+    const summaryLines = [summaryText];
+    if (expectation.totalStrategies > 0) {
+        const roleLabels = {
+            longEntry: '做多進場',
+            longExit: '做多出場',
+            shortEntry: '做空進場',
+            shortExit: '回補出場',
+        };
+        const categoryParts = [];
+        STRATEGY_REGISTRY_ROLES.forEach((roleKey) => {
+            const count = expectation.countsByRole?.[roleKey];
+            if (Number.isFinite(count) && count > 0 && roleLabels[roleKey]) {
+                categoryParts.push(`${roleLabels[roleKey]} ${count}`);
+            }
+        });
+        const configuredLine = categoryParts.length > 0
+            ? `策略設定共 ${expectation.totalStrategies} 組（${categoryParts.join('／')}）`
+            : `策略設定共 ${expectation.totalStrategies} 組`;
+        summaryLines.push(configuredLine);
+    }
+    const missingLabels = Array.isArray(expectation.missing)
+        ? expectation.missing
+            .map((item) => (item && (item.label || item.id) ? String(item.label || item.id).trim() : ''))
+            .filter((text) => Boolean(text))
+        : [];
+    const extraLabels = Array.isArray(expectation.extra)
+        ? expectation.extra
+            .map((item) => (item && (item.label || item.id) ? String(item.label || item.id).trim() : ''))
+            .filter((text) => Boolean(text))
+        : [];
+    if (missingLabels.length > 0 || extraLabels.length > 0) {
+        const diffParts = [];
+        if (missingLabels.length > 0) {
+            diffParts.push(`缺少：${missingLabels.join('、')}`);
+        }
+        if (extraLabels.length > 0) {
+            diffParts.push(`額外：${extraLabels.join('、')}`);
+        }
+        if (diffParts.length > 0) {
+            summaryLines.push(diffParts.join('；'));
+        }
+    }
+    summaryEl.innerHTML = summaryLines.map((line) => strategyRegistryEscapeHtml(line)).join('<br>');
     summaryEl.style.color = 'var(--foreground)';
 
     const statusLabelMap = { ok: '成功', warning: '提醒', error: '失敗' };
@@ -3305,6 +3523,7 @@ function runStrategyRegistryVerification() {
     if (strategyRegistryVerificationState.running) return;
     strategyRegistryVerificationState.running = true;
     strategyRegistryVerificationState.error = null;
+    strategyRegistryVerificationState.expected = createStrategyRegistryExpectationState();
     renderStrategyRegistryVerification();
 
     try {
@@ -3313,11 +3532,14 @@ function runStrategyRegistryVerification() {
             throw new Error('StrategyPluginRegistry 尚未就緒');
         }
         const list = registry.listStrategies({ includeLazy: true }) || [];
+        const expectations = gatherStrategyRegistryExpectations();
+        const labelMap = expectations.labelMap || {};
+        const expectedIdSet = new Set(expectations.expectedIds || []);
         const results = [];
         list.forEach((meta) => {
             const entry = {
                 id: meta?.id || '',
-                label: meta?.label || meta?.id || '未命名策略',
+                label: meta?.label || labelMap[meta?.id] || meta?.id || '未命名策略',
                 status: 'ok',
                 message: '載入成功',
             };
@@ -3345,12 +3567,57 @@ function runStrategyRegistryVerification() {
             }
             results.push(entry);
         });
-        results.sort((a, b) => a.label.localeCompare(b.label || '', 'zh-Hant'));
+        const actualIdSet = new Set(results.map((entry) => entry.id).filter((id) => typeof id === 'string' && id));
+        const missingIds = Array.from(expectedIdSet).filter((id) => id && !actualIdSet.has(id));
+        missingIds.forEach((id) => {
+            const missingLabel = labelMap[id] || id || '未命名策略';
+            results.push({
+                id,
+                label: missingLabel,
+                status: 'error',
+                message: '尚未註冊於 StrategyPluginRegistry',
+            });
+        });
+        const extraEntries = [];
+        results.forEach((entry) => {
+            if (!entry.id) return;
+            if (!expectedIdSet.has(entry.id)) {
+                const extraLabel = entry.label || labelMap[entry.id] || entry.id;
+                extraEntries.push({ id: entry.id, label: extraLabel });
+                if (entry.status === 'ok') {
+                    entry.status = 'warning';
+                    entry.message = '未在策略設定清單中';
+                } else if (!entry.message || entry.message === '載入成功') {
+                    entry.message = '未在策略設定清單中';
+                } else if (!entry.message.includes('未在策略設定清單中')) {
+                    entry.message = `${entry.message}；未在策略設定清單中`;
+                }
+            }
+        });
+        results.sort((a, b) => {
+            const labelA = a.label || labelMap[a.id] || a.id || '';
+            const labelB = b.label || labelMap[b.id] || b.id || '';
+            return labelA.localeCompare(labelB, 'zh-Hant');
+        });
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
+        strategyRegistryVerificationState.expected = createStrategyRegistryExpectationState({
+            totalStrategies: expectations.totalStrategies || 0,
+            countsByRole: {
+                longEntry: expectations.countsByRole?.longEntry || 0,
+                longExit: expectations.countsByRole?.longExit || 0,
+                shortEntry: expectations.countsByRole?.shortEntry || 0,
+                shortExit: expectations.countsByRole?.shortExit || 0,
+            },
+            missing: missingIds.map((id) => ({ id, label: labelMap[id] || id })),
+            extra: extraEntries,
+            labelMap,
+            expectedIds: expectations.expectedIds || [],
+        });
     } catch (error) {
         strategyRegistryVerificationState.results = [];
         strategyRegistryVerificationState.error = error && error.message ? error.message : String(error);
+        strategyRegistryVerificationState.expected = createStrategyRegistryExpectationState();
     } finally {
         strategyRegistryVerificationState.running = false;
         renderStrategyRegistryVerification();
@@ -3359,6 +3626,7 @@ function runStrategyRegistryVerification() {
 
 function runStrategyRegistrySample() {
     if (strategyRegistryVerificationState.sampleRunning) return;
+    strategyRegistryVerificationState.sampleSelection = null;
     if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
         strategyRegistryVerificationState.sampleStatus = {
             message: 'BacktestRunner 尚未載入，請重新整理或稍後重試。',
@@ -3384,8 +3652,6 @@ function runStrategyRegistrySample() {
         return;
     }
     strategyRegistryVerificationState.sampleRunning = true;
-    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
-    renderStrategyRegistrySampleStatus();
 
     const sampleParams = {
         ...params,
@@ -3395,6 +3661,8 @@ function runStrategyRegistrySample() {
         shortExitParams: { ...params.shortExitParams },
     };
 
+    const expectations = gatherStrategyRegistryExpectations();
+    const labelMap = expectations.labelMap || {};
     const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
     const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
     if (longEntryCandidate) {
@@ -3408,9 +3676,11 @@ function runStrategyRegistrySample() {
 
     const enableShorting = Math.random() < 0.75;
     sampleParams.enableShorting = enableShorting;
+    let shortEntryCandidate = null;
+    let shortExitCandidate = null;
     if (enableShorting) {
-        const shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
-        const shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+        shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+        shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
         if (shortEntryCandidate) {
             sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
             sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
@@ -3425,6 +3695,20 @@ function runStrategyRegistrySample() {
         sampleParams.shortEntryParams = {};
         sampleParams.shortExitParams = {};
     }
+
+    const selectionRecord = buildSampleSelectionRecord(
+        {
+            longEntry: longEntryCandidate,
+            longExit: longExitCandidate,
+            shortEntry: shortEntryCandidate,
+            shortExit: shortExitCandidate,
+        },
+        labelMap,
+        enableShorting,
+    );
+    strategyRegistryVerificationState.sampleSelection = selectionRecord;
+    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    renderStrategyRegistrySampleStatus();
 
     window.BacktestRunner.run(sampleParams)
         .then((result) => {
@@ -3444,14 +3728,16 @@ function runStrategyRegistrySample() {
                 parts.push(`涵蓋 ${coverage} 日資料`);
             }
             const summary = parts.length > 0 ? parts.join('，') : '完成，可於主畫面檢視詳細結果。';
+            const descriptionSuffix = selectionRecord?.description ? `；${selectionRecord.description}` : '';
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測完成：${summary}`,
+                message: `抽樣回測完成：${summary}${descriptionSuffix}`,
                 tone: 'success',
             };
         })
         .catch((error) => {
+            const descriptionSuffix = selectionRecord?.description ? `；${selectionRecord.description}` : '';
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
+                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}${descriptionSuffix}`,
                 tone: 'error',
             };
         })
