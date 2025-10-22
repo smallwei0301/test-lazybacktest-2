@@ -1,3 +1,18 @@
+## 2026-07-31 — Patch LB-PLUGIN-ATOMS-20250709A
+- **Scope**: RSI／KD／布林帶／均線交叉／移動停損策略插件化。
+- **Updates**:
+  - `js/strategy-plugin-registry.js` 建立插件註冊中心，並新增 `strategy-plugins/` 目錄提供 RSI、KD、布林帶、均線交叉與移動停損（ATR-style）插件，皆輸出 `meta` 與 `run` 且附 `paramsSchema`。
+  - `js/worker.js` 引入插件呼叫橋接層，於多空進出場流程優先透過插件產生訊號與指標診斷，保留原有邏輯為退回路徑，並傳遞移動停損所需的動態參考價。
+  - 調整回測流程的診斷欄位注入與 caching，確保 `priceIndicatorSeries` 與交易紀錄沿用插件回傳的 `meta` 資訊。
+- **Testing**: `npm run typecheck`；`node - <<'NODE' ...`（載入 `strategy-plugin-contract.js` 與 `worker.js` 確認可編譯）。
+
+## 2026-07-30 — Patch LB-PLUGIN-ROLLUP-20250701A
+- **Scope**: 現況盤點與暖身基準鎖定。
+- **Updates**:
+  - 新增 `docs/stage1-warmup-inventory.md`，整理 `backtest.js`、`worker.js`、`shared-lookback.js` 的依賴、策略入口與暖身流程，並記錄 `resolveDataWindow` 與 `priceIndicatorSeries` 的現有使用情況。
+  - 補充測試限制，說明需在具備瀏覽器與 Netlify Proxy 的實機環境重跑 2330/2412/0050 回測以比對暖身與買入持有基準。
+- **Testing**: 容器環境缺少 Netlify Proxy 與瀏覽器，無法執行 2330/2412/0050 本地回測；後續須於實機確認 console log 與暖身診斷。
+
 ## 2026-09-12 — Patch LB-MASCOT-HTTPS-20260912A
 - **Scope**: Loading mascot 圖片來源的安全協定統一。
 - **Updates**:
@@ -1527,6 +1542,23 @@ NODE`
 
 
 
+## 2026-08-05 — Patch LB-PLUGIN-CONTRACT-20250705A
+- **Issue recap**: 策略尚未具備統一插件介面，缺少型別契約導致後續拆分時難以驗證訊號欄位與停損/停利輸出；舊有布林判斷亦缺乏正式的 RuleResult 驗證。
+- **Fix**:
+  - 新增 `js/strategy-plugin-contract.js` 定義 `StrategyPlugin` 介面、`StrategyContext` 白名單 API 與 `RuleResult` 布林欄位，並提供 `ensureRuleResult`／`normaliseByRole` 與 legacy shim。
+  - `js/worker.js` 導入契約檢查，長/短進出場皆透過 `normaliseRuleResultFromLegacy` 將既有布林結果轉為 `RuleResult`，確保布林欄位、停損/停利值合法。
+  - `index.html` 預載契約腳本，新增 `types/strategy-plugin.d.ts` 與 `types/strategy-plugin-shim-check.ts` 供 TypeScript 驗證；`tsconfig.json` 建立型別檢查設定。
+- **Diagnostics**: 待於後續引入實際插件化策略時，確認 `StrategyPluginContract.ensureRuleResult` 能針對錯誤欄位立即拋出並記錄插件 ID／角色資訊。
+- **Testing**: `npm run typecheck`（使用容器內建 TypeScript 5.9.2 完成 JSDoc/.d.ts 驗證）。
+
+## 2026-08-08 — Patch LB-PLUGIN-REGISTRY-20250712A
+- **Issue recap**: 策略模組仍由 Worker 逐一載入具體檔案，無法集中檢查 meta／paramsSchema，也缺少列舉與動態載入能力，前端無法直接取得可用策略清單。
+- **Fix**:
+  - 重寫 `js/strategy-plugin-registry.js` 提供 `registerStrategy`／`registerLazyStrategy`／`getStrategyById`／`listStrategies` 等 API，驗證 `meta.id` 唯一性與 `paramsSchema` 結構並支援 Lazy loader。
+  - 新增 `js/strategy-plugin-manifest.js` 彙整 RSI、KD、布林、均線交叉、移動停損等 20 個插件的 meta 與載入器，Worker 與主執行緒僅需透過 Registry 查詢即可。
+  - 調整各策略插件改用 `registry.getStrategyMetaById` 與 `registerStrategy`，Worker 透過 Registry 應用策略、Loader 暖身 `listStrategies` 供 UI 測試與隨機取樣使用。
+- **Diagnostics**: 待於可連線 Proxy 的實機環境隨機選取 manifest 內策略跑 2330/2412/0050 回測，比對暖身診斷與進出場訊號是否與舊版一致。
+- **Testing**: `npm run typecheck`（驗證插件契約與 manifest 型別一致性）。
 ## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
 - **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
 - **Fix**:
