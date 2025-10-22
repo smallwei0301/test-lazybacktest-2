@@ -3778,7 +3778,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3793,7 +3798,21 @@ async function fetchAdjustedPriceRange(
     const high = toNumber(row.high ?? row.High ?? row.max);
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
-    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const volumeRaw =
+      toNumber(
+        row.volume ??
+          row.Volume ??
+          row.Trading_Volume ??
+          row.TradingVolume ??
+          row.trade_volume ??
+          row.tradeVolume ??
+          row.total_volume ??
+          row.totalVolume ??
+          row.vol ??
+          row.volume_shares ??
+          row.volumeShares ??
+          0,
+      ) || 0;
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -3925,26 +3944,92 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         const num = Number(String(val).replace(/,/g, ""));
         return Number.isFinite(num) ? num : null;
       };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      }
+      const resolveArrayVolume = () => {
+        const candidateSet = new Set();
+        if (item.length >= 9) {
+          candidateSet.add(8);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(1);
+        }
+        if (item.length >= 3) {
+          candidateSet.add(2);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(item.length - 1);
+        }
+        let resolved = null;
+        const tryResolve = (index) => {
+          if (index <= 0 || index >= item.length) return null;
+          const raw = item[index];
+          if (raw === null || raw === undefined) return null;
+          if (typeof raw === "string" && /[A-Za-z]/.test(raw)) return null;
+          const parsed = parseNumber(raw);
+          if (parsed === null || parsed < 0) return null;
+          return parsed;
+        };
+        for (const index of candidateSet) {
+          const candidate = tryResolve(index);
+          if (candidate !== null) {
+            resolved = candidate;
+            break;
+          }
+        }
+        if (resolved === null) {
+          for (let i = item.length - 1; i >= 1; i -= 1) {
+            const candidate = tryResolve(i);
+            if (candidate !== null) {
+              resolved = candidate;
+              break;
+            }
+          }
+        }
+        return resolved ?? 0;
+      };
+      volume = resolveArrayVolume();
+      open = parseNumber(item[3]);
+      high = parseNumber(item[4]);
+      low = parseNumber(item[5]);
+      close = parseNumber(item[6]);
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
+      const resolveObjectVolume = () => {
+        const candidates = [
+          item.volume,
+          item.Volume,
+          item.Trading_Volume,
+          item.TradingVolume,
+          item.trade_volume,
+          item.tradeVolume,
+          item.total_volume,
+          item.totalVolume,
+          item.vol,
+          item.volume_shares,
+          item.volumeShares,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+          const parsed = parseNumber(candidates[i]);
+          if (parsed !== null && parsed >= 0) {
+            return parsed;
+          }
+        }
+        return 0;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = resolveObjectVolume();
     } else {
       return null;
     }
