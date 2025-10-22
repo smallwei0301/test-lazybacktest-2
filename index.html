@@ -569,6 +569,46 @@
                                                 <div id="dataSourceDisplay" class="px-3 py-3 space-y-2 text-[11px]" style="color: var(--foreground);"></div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="strategyRegistryTesterContainer">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <div class="text-[11px]" style="color: var(--muted-foreground);">
+                                                    手動檢查策略清單與懶載入狀態
+                                                </div>
+                                                <div class="flex flex-wrap gap-2">
+                                                    <button
+                                                        id="strategyRegistryVerifyBtn"
+                                                        type="button"
+                                                        class="px-3 py-2 text-xs font-medium rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        檢查策略載入
+                                                    </button>
+                                                    <button
+                                                        id="strategyRegistrySampleBtn"
+                                                        type="button"
+                                                        class="px-3 py-2 text-xs font-medium rounded-md border transition-colors"
+                                                        style="color: var(--primary); border-color: var(--primary); background-color: rgba(59, 130, 246, 0.08);"
+                                                    >
+                                                        抽樣回測
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div
+                                                id="strategyRegistryTesterStatus"
+                                                class="text-xs rounded-md border px-3 py-2 hidden"
+                                                style="border-color: var(--border); background-color: rgba(15, 23, 42, 0.04); color: var(--foreground);"
+                                            ></div>
+                                            <div
+                                                id="strategyRegistryTesterSummary"
+                                                class="text-[11px] leading-relaxed space-y-1"
+                                                style="color: var(--muted-foreground);"
+                                            ></div>
+                                            <ul
+                                                id="strategyRegistryTesterLog"
+                                                class="space-y-1 max-h-40 overflow-y-auto text-[11px] rounded-md border px-3 py-2 hidden"
+                                                style="border-color: var(--border); background-color: rgba(15, 23, 42, 0.02); color: var(--muted-foreground);"
+                                            ></ul>
+                                        </div>
                                         <div class="space-y-2" id="batchDebugLogContainer">
                                             <div class="flex items-center justify-between">
                                             <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
