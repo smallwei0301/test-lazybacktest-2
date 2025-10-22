@@ -1,3 +1,21 @@
+## 2026-08-12 — Patch LB-PLUGIN-PAIRING-20250729A
+- **Scope**: 策略插件多空配對補齊與抽樣回測涵蓋面擴充。
+- **Updates**:
+  - `js/strategy-plugins/volume.js` 將成交量暴增策略拆分為多空進出場四組插件，調整比較函式支援自訂乘數並區分進場/出場條件。
+  - `js/strategy-plugins/ma-cross.js` 新增 `ma_cross_exit`、`ema_cross_exit` 插件 ID，補齊均線類策略的多頭出場註冊資料。
+  - `js/strategy-plugin-manifest.js` 增列上述新插件與成交量空方策略，確保驗證清單列出完整多空進出場策略。
+  - `js/main.js` 更新策略抽樣回測組合，改用顯式出場策略 ID 並納入成交量空單情境，維持驗證清單排序與滾動呈現。
+- **Testing**: `npm run typecheck`（靜態檢查腳本載入與策略參數 Schema）。
+
+## 2026-08-02 — Patch LB-PLUGIN-REGISTRY-20250721A
+- **Scope**: 策略插件全面擴充與開發者驗證流程整理。
+- **Updates**:
+  - `js/strategy-plugins/` 新增 MACD、均線價格突破、價格動能、海龜、成交量與威廉指標等插件，補齊多空進出場邏輯與 `meta` 定義。
+  - `js/strategy-plugin-manifest.js` 擴充載入清單與參數 Schema，新增 volume/williams/turtle 等 loader，並同步更新版本註記。
+  - `js/strategy-plugin-registry.js` 更新版本碼以覆寫舊版 registry；`js/worker.js` 對插件輸入補上 `volume` 序列供成交量策略使用。
+  - `js/main.js` 將驗證清單依名稱排序並在抽樣回測中輪測所有策略組合；`index.html` 調整開發者卡片說明與清單捲動容器。
+- **Testing**: 容器環境無法連線 Proxy／啟動瀏覽器，採程式碼靜態檢查；後續需於 Netlify 實機觸發驗證按鈕確認策略清單與抽樣回測結果。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:

@@ -1,11 +1,11 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712B
+// Patch Tag: LB-PLUGIN-REGISTRY-20250721A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope) {
     return;
   }
 
-  const REGISTRY_VERSION = 'LB-PLUGIN-REGISTRY-20250712B';
+  const REGISTRY_VERSION = 'LB-PLUGIN-REGISTRY-20250721A';
 
   if (
     globalScope.StrategyPluginRegistry &&

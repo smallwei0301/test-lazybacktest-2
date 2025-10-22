@@ -1,4 +1,5 @@
 // Patch Tag: LB-PLUGIN-ATOMS-20250709A
+// Patch Tag: LB-PLUGIN-MA-CROSS-20250729A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   const registry = globalScope?.StrategyPluginRegistry;
@@ -130,6 +131,20 @@
   });
 
   registerCrossPlugin({
+    id: 'ma_cross_exit',
+    label: '均線交叉 (多頭出場)',
+    roleMap: {
+      longExit: {
+        shortKey: 'maShortExit',
+        longKey: 'maLongExit',
+        comparator: ({ shortNow, shortPrev, longNow, longPrev }) =>
+          shortNow < longNow && shortPrev >= longPrev,
+        resultField: 'exit',
+      },
+    },
+  });
+
+  registerCrossPlugin({
     id: 'ema_cross',
     label: 'EMA 交叉 (多頭)',
     roleMap: {
@@ -140,6 +155,20 @@
           shortNow > longNow && shortPrev <= longPrev,
         resultField: 'enter',
       },
+      longExit: {
+        shortKey: 'maShortExit',
+        longKey: 'maLongExit',
+        comparator: ({ shortNow, shortPrev, longNow, longPrev }) =>
+          shortNow < longNow && shortPrev >= longPrev,
+        resultField: 'exit',
+      },
+    },
+  });
+
+  registerCrossPlugin({
+    id: 'ema_cross_exit',
+    label: 'EMA 交叉 (多頭出場)',
+    roleMap: {
       longExit: {
         shortKey: 'maShortExit',
         longKey: 'maLongExit',

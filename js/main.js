@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-DEV-STRATEGY-SAMPLES-20250729A
 
 // 全局變量
 let stockChart = null;
@@ -460,6 +461,11 @@ const dataSourceTesterState = {
 
 const DATA_SOURCE_TESTER_TABLE_LIMIT = 120;
 
+const strategyRegistryLabelCollator =
+    typeof Intl !== 'undefined' && typeof Intl.Collator === 'function'
+        ? new Intl.Collator('zh-Hant-TW', { sensitivity: 'base', numeric: true })
+        : null;
+
 const strategyRegistryVerificationState = {
     running: false,
     results: [],
@@ -468,6 +474,133 @@ const strategyRegistryVerificationState = {
     sampleRunning: false,
     sampleStatus: null,
 };
+
+const strategyRegistrySampleCombos = [
+    {
+        label: '均線交叉',
+        entry: 'ma_cross',
+        exit: 'ma_cross_exit',
+        shortEntry: 'short_ma_cross',
+        shortExit: 'cover_ma_cross',
+    },
+    {
+        label: '均線價格突破',
+        entry: 'ma_above',
+        exit: 'ma_below',
+        shortEntry: 'short_ma_below',
+        shortExit: 'cover_ma_above',
+    },
+    {
+        label: 'EMA 交叉',
+        entry: 'ema_cross',
+        exit: 'ema_cross_exit',
+        shortEntry: 'short_ema_cross',
+        shortExit: 'cover_ema_cross',
+    },
+    {
+        label: 'RSI 指標',
+        entry: 'rsi_oversold',
+        exit: 'rsi_overbought',
+        shortEntry: 'short_rsi_overbought',
+        shortExit: 'cover_rsi_oversold',
+    },
+    {
+        label: 'KD 指標',
+        entry: 'k_d_cross',
+        exit: 'k_d_cross_exit',
+        shortEntry: 'short_k_d_cross',
+        shortExit: 'cover_k_d_cross',
+    },
+    {
+        label: 'MACD 指標',
+        entry: 'macd_cross',
+        exit: 'macd_cross_exit',
+        shortEntry: 'short_macd_cross',
+        shortExit: 'cover_macd_cross',
+    },
+    {
+        label: '布林通道',
+        entry: 'bollinger_breakout',
+        exit: 'bollinger_reversal',
+        shortEntry: 'short_bollinger_reversal',
+        shortExit: 'cover_bollinger_breakout',
+    },
+    {
+        label: '威廉指標',
+        entry: 'williams_oversold',
+        exit: 'williams_overbought',
+        shortEntry: 'short_williams_overbought',
+        shortExit: 'cover_williams_oversold',
+    },
+    {
+        label: '價格突破/跌破',
+        entry: 'price_breakout',
+        exit: 'price_breakdown',
+        shortEntry: 'short_price_breakdown',
+        shortExit: 'cover_price_breakout',
+    },
+    {
+        label: '海龜交易',
+        entry: 'turtle_breakout',
+        exit: 'turtle_stop_loss',
+        shortEntry: 'short_turtle_stop_loss',
+        shortExit: 'cover_turtle_breakout',
+    },
+    {
+        label: '成交量暴增',
+        entry: 'volume_spike',
+        exit: 'volume_spike_exit',
+        shortEntry: 'short_volume_spike',
+        shortExit: 'cover_volume_spike',
+    },
+    {
+        label: '移動停損',
+        entry: 'ma_cross',
+        exit: 'trailing_stop',
+        shortEntry: 'short_ma_cross',
+        shortExit: 'cover_trailing_stop',
+    },
+];
+
+function cloneStrategyParams(params) {
+    if (!params || typeof params !== 'object') {
+        return {};
+    }
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(params);
+        } catch (error) {
+            // fall through to JSON clone
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(params));
+    } catch (error) {
+        return { ...params };
+    }
+}
+
+function buildSampleParams(baseParams, combo) {
+    const next = cloneStrategyParams(baseParams);
+    next.entryStrategy = combo.entry;
+    next.exitStrategy = combo.exit;
+    next.entryParams = {};
+    next.exitParams = {};
+    if (combo.shortEntry && combo.shortExit) {
+        next.enableShorting = true;
+        next.shortEntryStrategy = combo.shortEntry;
+        next.shortExitStrategy = combo.shortExit;
+        next.shortEntryParams = {};
+        next.shortExitParams = {};
+    } else {
+        next.enableShorting = false;
+        next.shortEntryStrategy = combo.shortEntry || '';
+        next.shortExitStrategy = combo.shortExit || '';
+        next.shortEntryParams = {};
+        next.shortExitParams = {};
+    }
+    return next;
+}
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -3211,7 +3344,18 @@ function renderStrategyRegistryVerification() {
         error: 'var(--rose-600, #dc2626)',
     };
 
-    listEl.innerHTML = results
+    const sortedResults = results
+        .slice()
+        .sort((a, b) => {
+            const labelA = (a && (a.label || a.id)) || '';
+            const labelB = (b && (b.label || b.id)) || '';
+            if (strategyRegistryLabelCollator) {
+                return strategyRegistryLabelCollator.compare(labelA, labelB);
+            }
+            return String(labelA).localeCompare(String(labelB));
+        });
+
+    listEl.innerHTML = sortedResults
         .map((entry) => {
             const label = entry.label || entry.id || '未命名策略';
             const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
@@ -3277,7 +3421,16 @@ function runStrategyRegistryVerification() {
             }
             results.push(entry);
         });
-        strategyRegistryVerificationState.results = results;
+        strategyRegistryVerificationState.results = results
+            .slice()
+            .sort((a, b) => {
+                const labelA = (a && (a.label || a.id)) || '';
+                const labelB = (b && (b.label || b.id)) || '';
+                if (strategyRegistryLabelCollator) {
+                    return strategyRegistryLabelCollator.compare(labelA, labelB);
+                }
+                return String(labelA).localeCompare(String(labelB));
+            });
         strategyRegistryVerificationState.lastRunAt = new Date();
     } catch (error) {
         strategyRegistryVerificationState.results = [];
@@ -3314,33 +3467,72 @@ function runStrategyRegistrySample() {
         renderStrategyRegistrySampleStatus();
         return;
     }
+    const baseParams = cloneStrategyParams(params);
+    const combos = Array.isArray(strategyRegistrySampleCombos)
+        ? strategyRegistrySampleCombos
+        : [];
+
     strategyRegistryVerificationState.sampleRunning = true;
-    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    strategyRegistryVerificationState.sampleStatus = {
+        message: `抽樣回測執行中… (0/${combos.length})`,
+        tone: 'info',
+    };
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
-        .then((result) => {
-            const tradeCount = Array.isArray(result?.data?.trades)
-                ? result.data.trades.length
-                : (result?.data?.summary?.overall?.tradeCount
-                    ?? result?.data?.summary?.overall?.totalTrades
-                    ?? null);
-            const coverage = Array.isArray(result?.data?.dates) ? result.data.dates.length : null;
-            const parts = [];
-            if (Number.isFinite(tradeCount)) {
-                parts.push(`交易 ${tradeCount} 筆`);
-            } else if (tradeCount !== null && tradeCount !== undefined) {
-                parts.push(`交易 ${tradeCount}`);
-            }
-            if (Number.isFinite(coverage)) {
-                parts.push(`涵蓋 ${coverage} 日資料`);
-            }
-            const summary = parts.length > 0 ? parts.join('，') : '完成，可於主畫面檢視詳細結果。';
+    const runSamples = async () => {
+        const results = [];
+        for (let index = 0; index < combos.length; index += 1) {
+            const combo = combos[index];
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測完成：${summary}`,
-                tone: 'success',
+                message: `抽樣回測進行中 (${index + 1}/${combos.length})：${combo.label}`,
+                tone: 'info',
             };
-        })
+            renderStrategyRegistrySampleStatus();
+
+            const scenarioParams = buildSampleParams(baseParams, combo);
+            try {
+                const result = await window.BacktestRunner.run(scenarioParams);
+                const tradeCount = Array.isArray(result?.data?.trades)
+                    ? result.data.trades.length
+                    : (result?.data?.summary?.overall?.tradeCount
+                        ?? result?.data?.summary?.overall?.totalTrades
+                        ?? null);
+                const coverage = Array.isArray(result?.data?.dates) ? result.data.dates.length : null;
+                results.push({
+                    label: combo.label,
+                    success: true,
+                    tradeCount,
+                    coverage,
+                });
+            } catch (error) {
+                const message = error && error.message ? error.message : String(error);
+                console.error('[Strategy Registry] 抽樣回測失敗', combo.label, error);
+                results.push({
+                    label: combo.label,
+                    success: false,
+                    error: message,
+                });
+            }
+        }
+
+        const successCount = results.filter((item) => item.success).length;
+        const tokens = results.map((item) => `${item.label}${item.success ? '✓' : '✗'}`);
+        let finalMessage = `抽樣回測完成：${successCount}/${results.length} 組成功；${tokens.join('、')}`;
+        const failed = results.filter((item) => !item.success);
+        if (failed.length > 0) {
+            const failureDetails = failed
+                .slice(0, 2)
+                .map((item) => `${item.label}：${item.error || '未知錯誤'}`)
+                .join('；');
+            finalMessage += `。失敗原因：${failureDetails}${failed.length > 2 ? '…' : ''}`;
+        }
+        strategyRegistryVerificationState.sampleStatus = {
+            message: finalMessage,
+            tone: failed.length === 0 ? 'success' : 'error',
+        };
+    };
+
+    runSamples()
         .catch((error) => {
             strategyRegistryVerificationState.sampleStatus = {
                 message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
