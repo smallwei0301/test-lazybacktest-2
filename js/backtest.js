@@ -15,6 +15,7 @@
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
+// Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250729A
 
 const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
     driftStable: 6,
@@ -6790,14 +6791,14 @@ function displayBacktestResult(result) {
             ? stabilityComponents.sharpePenalty
             : null;
         const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            '穩定度分數 = 100 − 漂移扣分（≤6pp 不扣；6～12pp 線性扣至 35 分；>12pp 最多扣 70 分） − Sharpe 懲罰（平均下滑 × 120，上限 30 分）。',
             Number.isFinite(stabilityDriftPenalty)
                 ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
                 : null,
             Number.isFinite(summarySharpeDrop) && Number.isFinite(stabilitySharpePenalty)
                 ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)} → 扣分 ${stabilitySharpePenalty.toFixed(1)} 分`
                 : Number.isFinite(summarySharpeDrop)
-                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
+                    ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1.2 分`
                     : null,
             '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
         ].filter(Boolean);
@@ -6909,7 +6910,7 @@ function displayBacktestResult(result) {
                             <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
                             <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
                             <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±${directionSafe}pp 內屬於常見穩健區間，超過 ${directionRisk}pp 則建議針對該方向再驗證。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 漂移扣分（≤6pp 不扣；6～12pp 線性扣至 35 分；>12pp 最多扣 70 分） − Sharpe 懲罰（平均下滑 × 120，上限 30 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
                             <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
                         </ul>
                     </div>

@@ -1482,4 +1482,11 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-SCORE-20250729A
+- **Issue recap**: 年化漂移門檻改為 6/12pp 後，舊的「平均漂移值直接扣分」公式仍假設 30 分內屬正常，導致穩定度分數無法反映新門檻下的風險落差。
+- **Fix**:
+  - `js/worker.js` 將敏感度穩定度評分改為分段扣分：≤6pp 不扣分、6～12pp 線性扣至 35 分、>12pp 最高扣 70 分，Sharpe 下滑則改為 ×120 並封頂 30 分，同步回傳扣分區間。
+  - `js/backtest.js` 更新穩定度提示語、說明卡片與 tooltip，改寫成對應新扣分公式的口語描述，避免使用者沿用舊的 30 分容忍範圍。
+- **Diagnostics**: 以假資料注入 `parameterSensitivity.summary`，確認穩定度 tooltip 顯示新扣分明細、卡片說明同步提到 6/12pp 門檻。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 

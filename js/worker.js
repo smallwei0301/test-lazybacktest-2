@@ -401,7 +401,8 @@ async function ensureTF() {
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
-// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250729B
+// Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250729A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -424,7 +425,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729B";
+const SENSITIVITY_STABILITY_RULES = Object.freeze({
+  driftSafe: 6,
+  driftWatch: 12,
+  driftCritical: 18,
+  driftPenaltyAtWatch: 35,
+  driftPenaltyAtCritical: 70,
+  sharpePenaltyMultiplier: 120,
+  sharpePenaltyCap: 30,
+});
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -10428,26 +10438,78 @@ function runStrategy(data, params, options = {}) {
 }
 
 function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
-  if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
+  const hasDrift = Number.isFinite(averageDrift);
+  const hasSharpe = Number.isFinite(averageSharpeDrop);
+  if (!hasDrift && !hasSharpe) {
     return {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      driftBand: null,
+      sharpePenaltyRaw: null,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
-  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
-    ? Math.max(0, averageSharpeDrop) * 100
-    : 0;
-  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
-  const baseScore = 100 - driftPenalty - sharpePenalty;
-  const score = Math.max(0, Math.min(100, baseScore));
+
+  let driftPenaltyForScore = 0;
+  let driftPenaltyDisplay = null;
+  let driftBand = null;
+  if (hasDrift) {
+    const driftAbs = Math.max(0, Math.abs(averageDrift));
+    const {
+      driftSafe,
+      driftWatch,
+      driftCritical,
+      driftPenaltyAtWatch,
+      driftPenaltyAtCritical,
+    } = SENSITIVITY_STABILITY_RULES;
+    if (driftAbs <= driftSafe) {
+      driftPenaltyForScore = 0;
+      driftPenaltyDisplay = 0;
+      driftBand = 'stable';
+    } else if (driftAbs <= driftWatch) {
+      const span = Math.max(1, driftWatch - driftSafe);
+      const ratio = (driftAbs - driftSafe) / span;
+      driftPenaltyForScore = ratio * driftPenaltyAtWatch;
+      driftPenaltyDisplay = driftPenaltyForScore;
+      driftBand = 'watch';
+    } else {
+      const span = Math.max(1, driftCritical - driftWatch);
+      const ratio = span > 0 ? Math.min(1, (driftAbs - driftWatch) / span) : 1;
+      driftPenaltyForScore =
+        driftPenaltyAtWatch +
+        ratio * (driftPenaltyAtCritical - driftPenaltyAtWatch);
+      if (driftPenaltyForScore >= driftPenaltyAtCritical) {
+        driftPenaltyForScore = driftPenaltyAtCritical;
+        driftBand = 'critical';
+      } else {
+        driftBand = 'risk';
+      }
+      driftPenaltyDisplay = driftPenaltyForScore;
+    }
+  }
+
+  let sharpePenaltyForScore = 0;
+  let sharpePenaltyDisplay = null;
+  let sharpePenaltyRaw = null;
+  if (hasSharpe) {
+    const drop = Math.max(0, averageSharpeDrop);
+    const { sharpePenaltyMultiplier, sharpePenaltyCap } = SENSITIVITY_STABILITY_RULES;
+    sharpePenaltyRaw = drop * sharpePenaltyMultiplier;
+    sharpePenaltyForScore = Math.min(sharpePenaltyCap, sharpePenaltyRaw);
+    sharpePenaltyDisplay = sharpePenaltyForScore;
+  }
+
+  const baseScore = 100 - driftPenaltyForScore - sharpePenaltyForScore;
+  const score = Number.isFinite(baseScore)
+    ? Math.max(0, Math.min(100, baseScore))
+    : null;
+
   return {
     score,
-    driftPenalty,
-    sharpePenalty,
+    driftPenalty: driftPenaltyDisplay,
+    sharpePenalty: sharpePenaltyDisplay,
+    driftBand,
+    sharpePenaltyRaw,
   };
 }
 
