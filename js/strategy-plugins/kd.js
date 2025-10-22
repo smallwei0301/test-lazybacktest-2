@@ -37,30 +37,47 @@
     return { prev, current, next };
   }
 
-  function registerKDPlugin(config) {
-    const plugin = createLegacyStrategyPlugin(
-      {
-        id: config.id,
-        label: config.label,
-        paramsSchema: {
-          type: 'object',
-          properties: {
-            period: {
-              type: 'integer',
-              minimum: 1,
-              maximum: 200,
-              default: 9,
-            },
-            [config.thresholdParam]: {
-              type: 'number',
-              minimum: 0,
-              maximum: 100,
-              default: config.defaultThreshold,
-            },
+  function getMeta(config) {
+    if (typeof registry.getStrategyMetaById === 'function') {
+      const meta = registry.getStrategyMetaById(config.id);
+      if (meta) {
+        return meta;
+      }
+    }
+    return {
+      id: config.id,
+      label: config.label,
+      paramsSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 200,
+            default: 9,
           },
-          additionalProperties: true,
+          [config.thresholdParam]: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            default: config.defaultThreshold,
+          },
         },
+        additionalProperties: true,
       },
+    };
+  }
+
+  function registerKDPlugin(config) {
+    const meta = getMeta(config);
+    const schema = meta?.paramsSchema;
+    const thresholdDefault =
+      schema && schema.properties && schema.properties[config.thresholdParam] &&
+      typeof schema.properties[config.thresholdParam].default === 'number'
+        ? schema.properties[config.thresholdParam].default
+        : config.defaultThreshold;
+    const plugin = createLegacyStrategyPlugin(
+      meta,
       (context, params) => {
         const idx = Number(context?.index) || 0;
         const kSeries = context?.helpers?.getIndicator
@@ -73,7 +90,7 @@
         const rawThreshold = Number(params?.[config.thresholdParam]);
         const threshold = Number.isFinite(rawThreshold)
           ? Math.min(Math.max(rawThreshold, 0), 100)
-          : config.defaultThreshold;
+          : thresholdDefault;
 
         let triggered = false;
         const { prev, current } = snapshots;
@@ -98,7 +115,7 @@
         return baseResult;
       },
     );
-    registry.register(plugin);
+    registry.registerStrategy(plugin);
   }
 
   registerKDPlugin({

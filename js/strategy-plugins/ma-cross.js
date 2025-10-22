@@ -36,30 +36,40 @@
     return base;
   }
 
+  function getMeta(config) {
+    if (typeof registry.getStrategyMetaById === 'function') {
+      const meta = registry.getStrategyMetaById(config.id);
+      if (meta) {
+        return meta;
+      }
+    }
+    return {
+      id: config.id,
+      label: config.label,
+      paramsSchema: {
+        type: 'object',
+        properties: {
+          shortPeriod: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 365,
+            default: 5,
+          },
+          longPeriod: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 365,
+            default: 20,
+          },
+        },
+        additionalProperties: true,
+      },
+    };
+  }
+
   function registerCrossPlugin(config) {
     const plugin = createLegacyStrategyPlugin(
-      {
-        id: config.id,
-        label: config.label,
-        paramsSchema: {
-          type: 'object',
-          properties: {
-            shortPeriod: {
-              type: 'integer',
-              minimum: 1,
-              maximum: 365,
-              default: 5,
-            },
-            longPeriod: {
-              type: 'integer',
-              minimum: 1,
-              maximum: 365,
-              default: 20,
-            },
-          },
-          additionalProperties: true,
-        },
-      },
+      getMeta(config),
       (context) => {
         const idx = Number(context?.index) || 0;
         const role = context?.role;
@@ -95,7 +105,7 @@
         });
       },
     );
-    registry.register(plugin);
+    registry.registerStrategy(plugin);
   }
 
   registerCrossPlugin({

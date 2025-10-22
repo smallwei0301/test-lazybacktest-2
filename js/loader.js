@@ -6,6 +6,18 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log("[Loader] Set workerUrl to:", workerUrl);
      }
 
+    if (typeof StrategyPluginRegistry !== 'undefined' && typeof StrategyPluginRegistry.listStrategies === 'function') {
+        try {
+            const manifest = StrategyPluginRegistry.listStrategies();
+            window.lazybacktestStrategyManifest = manifest;
+            console.log('[Loader] 策略清單暖身完成:', manifest.map((item) => item.id).join(', '));
+        } catch (manifestError) {
+            console.error('[Loader] 讀取策略清單失敗', manifestError);
+        }
+    } else {
+        console.warn('[Loader] StrategyPluginRegistry.listStrategies 尚未就緒，略過策略清單暖身。');
+    }
+
     try {
         initDates();
         initTabs();

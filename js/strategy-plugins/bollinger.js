@@ -30,30 +30,40 @@
     return { prev, current, next };
   }
 
+  function getMeta(config) {
+    if (typeof registry.getStrategyMetaById === 'function') {
+      const meta = registry.getStrategyMetaById(config.id);
+      if (meta) {
+        return meta;
+      }
+    }
+    return {
+      id: config.id,
+      label: config.label,
+      paramsSchema: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 365,
+            default: 20,
+          },
+          deviations: {
+            type: 'number',
+            minimum: 0.1,
+            maximum: 10,
+            default: 2,
+          },
+        },
+        additionalProperties: true,
+      },
+    };
+  }
+
   function registerBollingerPlugin(config) {
     const plugin = createLegacyStrategyPlugin(
-      {
-        id: config.id,
-        label: config.label,
-        paramsSchema: {
-          type: 'object',
-          properties: {
-            period: {
-              type: 'integer',
-              minimum: 1,
-              maximum: 365,
-              default: 20,
-            },
-            deviations: {
-              type: 'number',
-              minimum: 0.1,
-              maximum: 10,
-              default: 2,
-            },
-          },
-          additionalProperties: true,
-        },
-      },
+      getMeta(config),
       (context) => {
         const idx = Number(context?.index) || 0;
         const closeSeries = context?.series?.close;
@@ -91,7 +101,7 @@
         return baseResult;
       },
     );
-    registry.register(plugin);
+    registry.registerStrategy(plugin);
   }
 
   registerBollingerPlugin({

@@ -18,11 +18,7 @@
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
-importScripts('strategy-plugins/ma-cross.js');
-importScripts('strategy-plugins/rsi.js');
-importScripts('strategy-plugins/kd.js');
-importScripts('strategy-plugins/bollinger.js');
-importScripts('strategy-plugins/atr-stop.js');
+importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -7789,13 +7785,33 @@ function runStrategy(data, params, options = {}) {
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
-      typeof pluginRegistry.get !== 'function' ||
+      (typeof pluginRegistry.getStrategyById !== 'function' && typeof pluginRegistry.get !== 'function') ||
       typeof StrategyPluginContract === 'undefined' ||
       typeof StrategyPluginContract.ensureRuleResult !== 'function'
     ) {
       return null;
     }
-    const plugin = pluginRegistry.get(strategyId);
+    let plugin = null;
+    try {
+      if (typeof pluginRegistry.getStrategyById === 'function') {
+        plugin = pluginRegistry.getStrategyById(strategyId);
+      } else {
+        plugin = pluginRegistry.get(strategyId);
+      }
+    } catch (registryError) {
+      console.error(`[StrategyPlugin:${strategyId}] 載入策略時發生錯誤`, registryError);
+      return null;
+    }
+    if (!plugin || typeof plugin.run !== 'function') {
+      if (typeof pluginRegistry.ensureStrategyLoaded === 'function') {
+        try {
+          plugin = pluginRegistry.ensureStrategyLoaded(strategyId) || plugin;
+        } catch (ensureError) {
+          console.error(`[StrategyPlugin:${strategyId}] 載入策略失敗`, ensureError);
+          return null;
+        }
+      }
+    }
     if (!plugin || typeof plugin.run !== 'function') {
       return null;
     }

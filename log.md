@@ -1510,3 +1510,12 @@ NODE`
   - `index.html` 預載契約腳本，新增 `types/strategy-plugin.d.ts` 與 `types/strategy-plugin-shim-check.ts` 供 TypeScript 驗證；`tsconfig.json` 建立型別檢查設定。
 - **Diagnostics**: 待於後續引入實際插件化策略時，確認 `StrategyPluginContract.ensureRuleResult` 能針對錯誤欄位立即拋出並記錄插件 ID／角色資訊。
 - **Testing**: `npm run typecheck`（使用容器內建 TypeScript 5.9.2 完成 JSDoc/.d.ts 驗證）。
+
+## 2026-08-08 — Patch LB-PLUGIN-REGISTRY-20250712A
+- **Issue recap**: 策略模組仍由 Worker 逐一載入具體檔案，無法集中檢查 meta／paramsSchema，也缺少列舉與動態載入能力，前端無法直接取得可用策略清單。
+- **Fix**:
+  - 重寫 `js/strategy-plugin-registry.js` 提供 `registerStrategy`／`registerLazyStrategy`／`getStrategyById`／`listStrategies` 等 API，驗證 `meta.id` 唯一性與 `paramsSchema` 結構並支援 Lazy loader。
+  - 新增 `js/strategy-plugin-manifest.js` 彙整 RSI、KD、布林、均線交叉、移動停損等 20 個插件的 meta 與載入器，Worker 與主執行緒僅需透過 Registry 查詢即可。
+  - 調整各策略插件改用 `registry.getStrategyMetaById` 與 `registerStrategy`，Worker 透過 Registry 應用策略、Loader 暖身 `listStrategies` 供 UI 測試與隨機取樣使用。
+- **Diagnostics**: 待於可連線 Proxy 的實機環境隨機選取 manifest 內策略跑 2330/2412/0050 回測，比對暖身診斷與進出場訊號是否與舊版一致。
+- **Testing**: `npm run typecheck`（驗證插件契約與 manifest 型別一致性）。

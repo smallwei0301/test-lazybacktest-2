@@ -14,30 +14,46 @@
     return Number.isFinite(num) ? num : null;
   }
 
-  function registerTrailingPlugin(config) {
-    const plugin = createLegacyStrategyPlugin(
-      {
-        id: config.id,
-        label: config.label,
-        paramsSchema: {
-          type: 'object',
-          properties: {
-            percentage: {
-              type: 'number',
-              minimum: 0,
-              maximum: 100,
-              default: 5,
-            },
+  function getMeta(config) {
+    if (typeof registry.getStrategyMetaById === 'function') {
+      const meta = registry.getStrategyMetaById(config.id);
+      if (meta) {
+        return meta;
+      }
+    }
+    return {
+      id: config.id,
+      label: config.label,
+      paramsSchema: {
+        type: 'object',
+        properties: {
+          percentage: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            default: 5,
           },
-          additionalProperties: true,
         },
+        additionalProperties: true,
       },
+    };
+  }
+
+  function registerTrailingPlugin(config) {
+    const meta = getMeta(config);
+    const schema = meta?.paramsSchema;
+    const percentageDefault =
+      schema && schema.properties && schema.properties.percentage && typeof schema.properties.percentage.default === 'number'
+        ? schema.properties.percentage.default
+        : 5;
+    const plugin = createLegacyStrategyPlugin(
+      meta,
       (context, params) => {
         const runtime = params && typeof params.__runtime === 'object' ? params.__runtime : {};
         const currentPrice = toFinite(runtime.currentPrice);
         const referencePrice = toFinite(runtime.referencePrice);
         const rawPct = Number(params?.percentage);
-        const pct = Number.isFinite(rawPct) ? Math.max(rawPct, 0) : 5;
+        const pct = Number.isFinite(rawPct) ? Math.max(rawPct, 0) : percentageDefault;
         const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
 
         if (currentPrice === null || referencePrice === null || referencePrice <= 0) {
@@ -65,7 +81,7 @@
         return base;
       },
     );
-    registry.register(plugin);
+    registry.registerStrategy(plugin);
   }
 
   registerTrailingPlugin({
