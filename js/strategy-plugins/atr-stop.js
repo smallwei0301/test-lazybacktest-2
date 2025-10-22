@@ -96,7 +96,7 @@
 
   registerTrailingPlugin({
     id: 'cover_trailing_stop',
-    label: '移動停損 (%) (空單)',
+    label: '移動停損 (%) (空單停損)',
     signalField: 'cover',
     comparator: ({ currentPrice, referencePrice, percentage }) =>
       currentPrice > referencePrice * (1 + percentage / 100),
