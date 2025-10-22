@@ -1566,3 +1566,12 @@ NODE`
   - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
 - **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-15 — Patch LB-SENSITIVITY-GRID-20260815A
+- **Issue recap**: 敏感度分析仍沿用總報酬率差值計算漂移，導致年化報酬解讀失真；部分情境在沒有年化資料時回落為空值，前端顯示與扣分也會失準。
+- **Fix**:
+  - `js/worker.js` 的敏感度計算全面改用年化報酬率（備援回退至總報酬率），調整每個情境的漂移、正負向偏移與彙總平均，同步保留 `deltaReturn` 以維持相容性。
+  - `js/backtest.js` 的敏感度卡片改以年化報酬差值為主，並在缺少新欄位時沿用舊欄位，確保 Tooltip 與 PP 說明符合年化邏輯。
+  - 更新 `SENSITIVITY_GRID_VERSION` 為 `LB-SENSITIVITY-GRID-20260815A` 以標記本次年化漂移修正。
+- **Diagnostics**: 待於實際回測檢視敏感度卡片，確認 PP 提示內容顯示「調整後年化報酬 − 基準年化報酬」，且穩定度分數在年化差值改用後仍符合 ±6/±12pp 門檻預期。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際回測確認 console 無錯誤與敏感度結果）。
