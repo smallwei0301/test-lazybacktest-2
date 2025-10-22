@@ -14,6 +14,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-DATA-VOLUME-20260730A — 正規化還原股價成交量欄位，避免千分位字元導致 0 量。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -3767,7 +3768,14 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    const normalized = trimmed.replace(/[，,\s]/g, "");
+    if (!normalized) return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
