@@ -1117,71 +1117,71 @@ const SESSION_DATA_CACHE_INDEX_KEY = 'LB_SESSION_DATA_CACHE_INDEX_V20250723A';
 const SESSION_DATA_CACHE_ENTRY_PREFIX = 'LB_SESSION_DATA_CACHE_ENTRY_V20250723A::';
 const SESSION_DATA_CACHE_LIMIT = 24;
 
-const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20250920A';
+const STRATEGY_STATUS_VERSION = 'LB-STRATEGY-STATUS-20260730B';
 
 const STRATEGY_STATUS_CONFIG = {
     idle: {
-        badgeText: '等待開局',
+        badgeText: '等待回測',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--muted) 28%, transparent)',
             color: 'var(--muted-foreground)',
         },
-        title: '戰況房間尚未開啟',
-        subtitle: '回測一跑完就會推送戰術戰報，先在大廳補給一下。',
+        title: '尚未產生策略摘要',
+        subtitle: '完成一次回測後，這裡會比對策略與買入持有的表現並整理下一步建議。',
     },
     loading: {
-        badgeText: '戰況載入中',
+        badgeText: '摘要更新',
         badgeStyle: {
             backgroundColor: 'color-mix(in srgb, var(--accent) 24%, transparent)',
             color: 'var(--accent)',
         },
-        title: '策略戰況加載進度條...',
-        subtitle: '資料正在背景練等，馬上就能看到策略對上買入持有的實況。',
+        title: '正在整理策略摘要',
+        subtitle: '系統正在計算策略與買入持有的差異，稍後即會呈現重點摘要。',
     },
     leading: {
-        badgeText: '策略超神',
+        badgeText: '策略領先',
         badgeStyle: {
             backgroundColor: 'rgba(16, 185, 129, 0.18)',
             color: 'rgb(5, 122, 85)',
         },
-        title: '策略暫時打爆買入持有',
-        subtitle: '恭喜這局先搶下 MVP，記得補好防禦別被逆轉。',
+        title: '策略暫時領先買入持有',
+        subtitle: '策略表現優於買入持有，請持續檢視風險指標與資金配置。',
     },
     tie: {
-        badgeText: '僵持對決',
+        badgeText: '表現接近',
         badgeStyle: {
             backgroundColor: 'rgba(251, 191, 36, 0.18)',
             color: 'rgb(180, 83, 9)',
         },
-        title: '策略與買入持有互卡血條',
-        subtitle: '雙方血量貼著走，先看下一波波段再決定要不要衝。',
+        title: '策略與買入持有表現接近',
+        subtitle: '雙方績效接近，可搭配指標檢視挑選優化方向。',
     },
     behind: {
-        badgeText: '策略逆風',
+        badgeText: '策略落後',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.18)',
             color: 'rgb(220, 38, 38)',
         },
-        title: '買入持有暫時壓著打',
-        subtitle: '戰況逆風但還能救，快用條列提示找出翻盤套路。落後時請檢視優化與風控建議，盯緊分段資金配置。',
+        title: '策略暫時落後買入持有',
+        subtitle: '目前策略落後買入持有，建議優先檢視優化建議與風控設定的調整空間。',
     },
     missing: {
-        badgeText: '資料載入',
+        badgeText: '資料待補',
         badgeStyle: {
             backgroundColor: 'rgba(148, 163, 184, 0.2)',
             color: 'rgb(71, 85, 105)',
         },
-        title: '戰報還在整理',
-        subtitle: '買入持有基準尚未回傳，請先跑完一次回測再回來看戰況。',
+        title: '摘要尚未準備好',
+        subtitle: '尚未取得買入持有基準，請完成回測後再查看摘要。',
     },
     error: {
-        badgeText: '戰況當機',
+        badgeText: '摘要錯誤',
         badgeStyle: {
             backgroundColor: 'rgba(248, 113, 113, 0.24)',
             color: 'rgb(185, 28, 28)',
         },
-        title: '策略戰況暫停更新',
-        subtitle: '剛剛算戰況時跳出例外，重跑回測或調整參數再挑戰。',
+        title: '策略摘要暫停更新',
+        subtitle: '整理策略摘要時發生錯誤，請重新執行回測或調整參數。',
     },
 };
 
@@ -1224,7 +1224,7 @@ function renderStrategyStatusDetail({
     bulletLines = [],
     detailHTML = null,
     collapsible = false,
-    collapsibleSummary = '展開戰況條列',
+    collapsibleSummary = '展開完整摘要',
 } = {}) {
     const detailEl = strategyStatusElements.detail;
     if (!detailEl) return;
@@ -1244,7 +1244,7 @@ function renderStrategyStatusDetail({
     if (lines.length > 0) {
         const items = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
         if (collapsible) {
-            const summaryLabel = `${collapsibleSummary || '展開戰況條列'}（${lines.length} 則）`;
+            const summaryLabel = `${collapsibleSummary || '展開完整摘要'}（${lines.length} 則）`;
             const summaryText = escapeHtml(summaryLabel);
             htmlParts.push(
                 [
@@ -1302,8 +1302,8 @@ function resetStrategyStatusCard(stateKey = 'idle') {
     applyStrategyStatusState(stateKey, {
         detail: {
             bulletLines: [
-                '等你按下回測鍵，戰況小組就會開串直播策略對決買入持有。',
-                '回測結束後會送上懶人包條列，滑手機也能秒懂重點。',
+                '請先執行回測，系統會整理策略與買入持有的比較摘要。',
+                '完成後會提供指標檢查結果與下一步建議，協助快速掌握重點。',
             ],
         },
     });
@@ -1314,8 +1314,8 @@ function showStrategyStatusLoading() {
     applyStrategyStatusState('loading', {
         detail: {
             bulletLines: [
-                '策略戰況火速運算中，先泡杯咖啡等資料上線。',
-                '稍後就把策略差距與指標重點用條列送上版面。',
+                '系統正在計算策略與買入持有的差異與指標。',
+                '摘要完成後會列出關鍵數據與建議，請稍候。',
             ],
         },
     });
@@ -1563,7 +1563,7 @@ function updateStrategyStatusCard(result) {
             emphasisedLine: null,
             bulletLines: detailLines,
             collapsible: detailLines.length > 0,
-            collapsibleSummary: '展開完整戰況條列',
+            collapsibleSummary: '展開完整摘要',
         },
     });
 }
