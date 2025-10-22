@@ -1469,4 +1469,11 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-20250715A
+- **Issue recap**: 敏感度摘要仍以總體報酬率計算漂移，摘要卡片文案也偏向制式語氣，與最新的年化報酬評估與口語化簡潔要求不符。
+- **Fix**:
+  - `js/worker.js` 的敏感度計算全面改用年化報酬差值並保留總報酬快照，確保情境比較、平均漂移與穩定度分數都以年化基準評估。
+  - `js/backtest.js` 更新敏感度摘要卡片文案、tooltip 與判讀提示，明確標示年化報酬，並以專業但口語的語氣重寫四張摘要卡內容。
+- **Testing**: 受限於容器無法連線資料源，未能執行實際回測；後續需在 Proxy 可用的環境重跑敏感度測試，確認前端渲染與 console 均無錯誤。
+
 
