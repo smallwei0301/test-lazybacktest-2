@@ -1,4 +1,11 @@
 
+## 2026-09-20 — Patch LB-SENSITIVITY-ANNUAL-20250920A
+- **Scope**: 敏感度摘要年化報酬評估與摘要卡片文案調整。
+- **Updates**:
+  - `js/worker.js` 敏感度擾動改以年化報酬計算漂移與 PP 差值，並保留原始總報酬作為備援。
+  - `js/backtest.js` 摘要卡片改讀年化報酬差值、更新 tooltip 與提醒句為專業口語風格。
+- **Testing**: 容器環境無法連線 Proxy／啟動瀏覽器，僅靜態檢閱程式碼與 UI 樣板。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
