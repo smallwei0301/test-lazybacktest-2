@@ -1559,6 +1559,15 @@ NODE`
   - 調整各策略插件改用 `registry.getStrategyMetaById` 與 `registerStrategy`，Worker 透過 Registry 應用策略、Loader 暖身 `listStrategies` 供 UI 測試與隨機取樣使用。
 - **Diagnostics**: 待於可連線 Proxy 的實機環境隨機選取 manifest 內策略跑 2330/2412/0050 回測，比對暖身診斷與進出場訊號是否與舊版一致。
 - **Testing**: `npm run typecheck`（驗證插件契約與 manifest 型別一致性）。
+## 2026-08-12 — Patch LB-PLUGIN-REGISTRY-20250715A
+- **Issue recap**: 懶載入策略在瀏覽器環境無法解析 `strategy-plugins/*.js` 路徑，導致 20/20 策略載入失敗且缺少 BacktestRunner 與手動驗證流程。
+- **Fix**:
+  - `js/strategy-plugin-manifest.js` 新增 `resolveScriptUrl` 並在瀏覽器環境以 `<script>` 方式動態載入，保留 Worker 端 `importScripts` 行為，確保路徑相容性。
+  - `js/strategy-plugin-registry.js` 升級為 `LB-PLUGIN-REGISTRY-20250715A`，支援 Promise 型 loader 並提供 `loadStrategyById`／`load` API，避免重複載入並統一錯誤處理。
+  - 新增 `js/backtest-runner.js`（版本 `LB-BACKTEST-RUNNER-20250715A`）封裝 Worker 執行，提供 `BacktestRunner.run()`／`warmup()` 以供開發者卡片抽樣驗證。
+  - `index.html`／`js/main.js` 的開發者卡片加入「檢查策略註冊／抽樣回測」功能，整合 Registry 清單、錯誤摘要與 BacktestRunner 抽樣回測流程。
+- **Diagnostics**: 展開首頁開發者卡片後，點擊「檢查策略註冊」應顯示 20 策略全部載入成功；再點「抽樣回測（Registry）」需完成回測並顯示年化報酬、交易次數與耗時（實測時請確認 console 無錯誤）。
+- **Testing**: `npm run typecheck`；於瀏覽器手動操作新檢查／抽樣按鈕確認流程無誤。
 ## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
 - **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
 - **Fix**:
