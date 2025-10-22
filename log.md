@@ -1,4 +1,10 @@
 
+## 2026-09-15 — Patch LB-PROGRESS-MASCOT-20260310B
+- **Scope**: 載入吉祥物來源 URL 的安全性治理。
+- **Updates**:
+  - `js/loading-mascot-sources.js` 將所有仍為 `http://` 的 Imgur 連結全面改為 `https://`，避免 HTTPS 網站載入混合內容時觸發警告。
+- **Testing**: 容器環境僅調整靜態資源 URL，無需額外回測；待實機開啟載入畫面確認瀏覽器 console 不再顯示 Mixed Content 警示。
+
 ## 2026-08-27 — Patch LB-VOLUME-PARSER-20260827A
 - **Scope**: 月度價量補抓與資料來源測試表格的成交量解析。
 - **Updates**:
