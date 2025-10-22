@@ -8802,20 +8802,27 @@ function activateTab(tabId) {
     const contents = document.querySelectorAll('.tab-content'); 
     
     // Update button states
-    tabs.forEach(tab => { 
-        const currentTabId = tab.getAttribute('data-tab'); 
-        const isActive = currentTabId === tabId; 
-        
+    tabs.forEach(tab => {
+        const currentTabId = tab.getAttribute('data-tab');
+        const isActive = currentTabId === tabId;
+
+        tab.classList.toggle('text-xs', isActive);
+        tab.classList.toggle('text-sm', !isActive);
+        tab.classList.toggle('text-primary', isActive);
+        tab.classList.toggle('text-muted', !isActive);
+        tab.classList.toggle('border-primary', isActive);
+        tab.classList.toggle('border-transparent', !isActive);
+
         if (isActive) {
-            tab.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap';
+            tab.setAttribute('aria-current', 'page');
             tab.style.color = 'var(--primary)';
             tab.style.borderColor = 'var(--primary)';
         } else {
-            tab.className = 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap';
+            tab.removeAttribute('aria-current');
             tab.style.color = 'var(--muted-foreground)';
             tab.style.borderColor = 'transparent';
         }
-    }); 
+    });
     
     // Show corresponding content
     contents.forEach(content => { 
