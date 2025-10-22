@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-DATASOURCE-TABLE-20260811A
 
 // 全局變量
 let stockChart = null;
@@ -453,6 +454,9 @@ window.lazybacktestMultiStagePanel = {
 const dataSourceTesterState = {
     open: false,
     busy: false,
+    tableVisible: false,
+    lastTableRows: [],
+    lastTableLabel: '',
 };
 
 // Patch Tag: LB-DATASOURCE-20250328A
@@ -985,6 +989,216 @@ function setTesterButtonsDisabled(disabled) {
     });
 }
 
+function parseTesterNumeric(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/,/g, '').trim();
+        if (!cleaned) return null;
+        const numeric = Number(cleaned);
+        return Number.isFinite(numeric) ? numeric : null;
+    }
+    return null;
+}
+
+function resolveTesterDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) return null;
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        const date = new Date(value);
+        return resolveTesterDate(date);
+    }
+    const text = String(value).trim();
+    if (!text) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        return text;
+    }
+    const isoFromRoc = rocToIsoDate(text);
+    if (isoFromRoc) return isoFromRoc;
+    if (/^\d{8}$/.test(text)) {
+        const year = Number(text.slice(0, 4));
+        const month = Number(text.slice(4, 6));
+        const day = Number(text.slice(6, 8));
+        if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+    }
+    return text;
+}
+
+function formatTesterVolume(value) {
+    if (!Number.isFinite(value)) return '—';
+    const rounded = Math.round(value);
+    try {
+        return testerEscapeHtml(rounded.toLocaleString('zh-TW'));
+    } catch (error) {
+        return testerEscapeHtml(String(rounded));
+    }
+}
+
+function extractTesterTableRows(payload, parseMode) {
+    if (!payload || typeof payload !== 'object') return [];
+
+    if (parseMode === 'adjustedComposer') {
+        const rows = Array.isArray(payload.data) ? payload.data : [];
+        const normalized = rows
+            .map((item) => {
+                if (!item || typeof item !== 'object') return null;
+                const date = resolveTesterDate(item.date || item.Date || item.tradeDate || item.trade_date);
+                if (!date) return null;
+                const open = parseTesterNumeric(
+                    item.open ?? item.Open ?? item.openPrice ?? item.open_price ?? item.Opening,
+                );
+                const high = parseTesterNumeric(item.high ?? item.High ?? item.max ?? item.Max);
+                const low = parseTesterNumeric(item.low ?? item.Low ?? item.min ?? item.Min);
+                const close = parseTesterNumeric(
+                    item.close ?? item.Close ?? item.adjClose ?? item.AdjClose ?? item.ClosePrice,
+                );
+                const volume = parseTesterNumeric(
+                    item.volume ?? item.Volume ?? item.tradingVolume ?? item.TradingVolume ?? item.Trading_Volume,
+                );
+                return {
+                    date,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                };
+            })
+            .filter((row) => row && row.date);
+        return normalized.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+    }
+
+    const aaData = Array.isArray(payload.aaData) ? payload.aaData : [];
+    const aaRows = aaData
+        .map((row) => {
+            if (!Array.isArray(row)) return null;
+            const date = resolveTesterDate(row[0]);
+            if (!date) return null;
+            return {
+                date,
+                open: parseTesterNumeric(row[3]),
+                high: parseTesterNumeric(row[4]),
+                low: parseTesterNumeric(row[5]),
+                close: parseTesterNumeric(row[6]),
+                volume: parseTesterNumeric(row[8]),
+            };
+        })
+        .filter((row) => row && row.date);
+    if (aaRows.length > 0) {
+        return aaRows.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+    }
+
+    const dataRows = Array.isArray(payload.data) ? payload.data : [];
+    const normalizedData = dataRows
+        .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const date = resolveTesterDate(item.date || item.Date || item.tradeDate || item.trade_date);
+            if (!date) return null;
+            const open = parseTesterNumeric(
+                item.open ?? item.Open ?? item.open_price ?? item.OpenPrice ?? item.Opening,
+            );
+            const high = parseTesterNumeric(item.high ?? item.High ?? item.max ?? item.Max);
+            const low = parseTesterNumeric(item.low ?? item.Low ?? item.min ?? item.Min);
+            const close = parseTesterNumeric(
+                item.close ?? item.Close ?? item.adj_close ?? item.AdjClose ?? item.ClosePrice,
+            );
+            const volume = parseTesterNumeric(
+                item.volume ?? item.Volume ?? item.trading_volume ?? item.Trading_Volume ?? item.turnover,
+            );
+            return {
+                date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            };
+        })
+        .filter((row) => row && row.date);
+    return normalizedData.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+}
+
+function resetDataSourceTesterTable() {
+    dataSourceTesterState.lastTableRows = [];
+    dataSourceTesterState.lastTableLabel = '';
+    dataSourceTesterState.tableVisible = false;
+    const controls = document.getElementById('dataSourceTesterTableControls');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    const toggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    if (tbody) tbody.innerHTML = '';
+    if (wrapper) wrapper.classList.add('hidden');
+    if (controls) controls.classList.add('hidden');
+    if (toggleBtn) {
+        toggleBtn.textContent = '檢視資料表格';
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function applyDataSourceTesterTableVisibility() {
+    const controls = document.getElementById('dataSourceTesterTableControls');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const toggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    const hasRows = Array.isArray(dataSourceTesterState.lastTableRows)
+        && dataSourceTesterState.lastTableRows.length > 0;
+    if (!controls || !wrapper || !toggleBtn) return;
+    controls.classList.toggle('hidden', !hasRows);
+    if (!hasRows) {
+        wrapper.classList.add('hidden');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.textContent = '檢視資料表格';
+        return;
+    }
+    wrapper.classList.toggle('hidden', !dataSourceTesterState.tableVisible);
+    toggleBtn.setAttribute('aria-expanded', dataSourceTesterState.tableVisible ? 'true' : 'false');
+    const label = dataSourceTesterState.lastTableLabel || '資料來源';
+    toggleBtn.textContent = dataSourceTesterState.tableVisible
+        ? `隱藏 ${label} 表格`
+        : `檢視 ${label} 表格`;
+}
+
+function updateDataSourceTesterTable(rows, sourceLabel) {
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (!tbody) return;
+    if (!Array.isArray(rows) || rows.length === 0) {
+        resetDataSourceTesterTable();
+        return;
+    }
+    dataSourceTesterState.lastTableRows = rows;
+    dataSourceTesterState.lastTableLabel = sourceLabel || '資料來源';
+    dataSourceTesterState.tableVisible = false;
+    const rowHtml = rows
+        .map((row) => {
+            const dateText = testerEscapeHtml(row.date || '—');
+            const openText = formatTesterNumber(row.open, 4);
+            const highText = formatTesterNumber(row.high, 4);
+            const lowText = formatTesterNumber(row.low, 4);
+            const closeText = formatTesterNumber(row.close, 4);
+            const volumeText = formatTesterVolume(row.volume);
+            return `<tr>`
+                + `<td class="px-3 py-1.5 whitespace-nowrap" style="color: var(--foreground);">${dateText}</td>`
+                + `<td class="px-3 py-1.5 text-right" style="color: var(--foreground); font-variant-numeric: tabular-nums;">${openText}</td>`
+                + `<td class="px-3 py-1.5 text-right" style="color: var(--foreground); font-variant-numeric: tabular-nums;">${highText}</td>`
+                + `<td class="px-3 py-1.5 text-right" style="color: var(--foreground); font-variant-numeric: tabular-nums;">${lowText}</td>`
+                + `<td class="px-3 py-1.5 text-right" style="color: var(--foreground); font-variant-numeric: tabular-nums;">${closeText}</td>`
+                + `<td class="px-3 py-1.5 text-right" style="color: var(--foreground); font-variant-numeric: tabular-nums;">${volumeText}</td>`
+                + `</tr>`;
+        })
+        .join('');
+    tbody.innerHTML = rowHtml;
+    applyDataSourceTesterTableVisibility();
+}
+
 async function runDataSourceTester(sourceId, sourceLabel) {
     if (dataSourceTesterState.busy) return;
     const stockNo = getStockNoValue();
@@ -993,6 +1207,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
         return;
     }
+    resetDataSourceTesterTable();
     const uiMarket = getCurrentMarketFromUI();
     const market = isIndexSymbol(stockNo) ? 'INDEX' : uiMarket;
     const adjusted = isAdjustedMode();
@@ -1473,11 +1688,14 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             }
             detailHtml = detailLines.join('<br>');
         }
+        const tableRows = extractTesterTableRows(payload, parseMode);
+        updateDataSourceTesterTable(tableRows, sourceLabel);
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
     } catch (error) {
+        resetDataSourceTesterTable();
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
@@ -1513,6 +1731,7 @@ function refreshDataSourceTester() {
     if (missingInputs) {
         messageLines.push('請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。');
         clearTesterResult();
+        resetDataSourceTesterTable();
     } else if (adjusted) {
         messageLines.push(
             splitEnabled
@@ -1571,6 +1790,18 @@ function initDataSourceTester() {
     toggleBtn.addEventListener('click', () => toggleDataSourceTester());
     closeBtn.addEventListener('click', () => toggleDataSourceTester(false));
 
+    const tableToggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    if (tableToggleBtn) {
+        tableToggleBtn.addEventListener('click', () => {
+            if (!Array.isArray(dataSourceTesterState.lastTableRows)
+                || dataSourceTesterState.lastTableRows.length === 0) {
+                return;
+            }
+            dataSourceTesterState.tableVisible = !dataSourceTesterState.tableVisible;
+            applyDataSourceTesterTableVisibility();
+        });
+    }
+
     const stockNoInput = document.getElementById('stockNo');
     if (stockNoInput) {
         stockNoInput.addEventListener('input', refreshDataSourceTester);
@@ -1603,6 +1834,7 @@ function initDataSourceTester() {
         lucide.createIcons();
     }
 
+    resetDataSourceTesterTable();
     syncSplitAdjustmentState();
     refreshDataSourceTester();
     window.refreshDataSourceTester = refreshDataSourceTester;

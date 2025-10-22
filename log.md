@@ -1506,3 +1506,19 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
+- **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
+- **Fix**:
+  - `js/worker.js` 的 `fetchAdjustedPriceRange` 將 `toNumber` 更新為移除千分位逗號並忽略空字串，確保成交量能被正確解析。
+  - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
+- **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-11 — Patch LB-DATASOURCE-TABLE-20260811A
+- **Issue recap**: 開發者模式的資料來源測試僅輸出文字摘要，無法快速核對抓取到的開盤、收盤與成交量明細，除錯時仍需手動查閱 JSON。
+- **Fix**:
+  - `index.html` 在資料來源測試結果下方新增表格控制區域，提供開關按鈕與表格骨架顯示欄位。
+  - `js/main.js` 將測試結果解析為標準化的日期與 OHLCV 列表，加入「檢視/隱藏表格」按鈕邏輯與狀態儲存，支援 TWSE/FinMind/Yahoo 及還原管線格式。
+- **Diagnostics**: 於具備 Proxy 的環境分別測試 TWSE、FinMind、Yahoo 與還原備援來源，確認按鈕會在成功回應後顯示並可展開表格，欄位內容需與 JSON 資料一致。
+- **Testing**: 尚未執行（開發容器無法連線 Proxy，需在 Netlify 實際測試資料來源面板並確認 console 無錯誤）。
