@@ -14,6 +14,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-DATA-VOLUME-20250624A — 千股進位不再將有效成交量誤判為 0。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -3251,6 +3252,18 @@ function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
+function normalizeVolumeValue(raw) {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  const scaled = numeric / 1000;
+  if (scaled >= 1) {
+    return Math.round(scaled * 1000) / 1000;
+  }
+  return Math.round(numeric * 1000) / 1000;
+}
+
 function formatTWDateWorker(twDate) {
   try {
     if (!twDate || typeof twDate !== "string") return null;
@@ -3783,6 +3796,7 @@ async function fetchAdjustedPriceRange(
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
     const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const normalizedVolume = normalizeVolumeValue(volumeRaw);
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -3822,7 +3836,7 @@ async function fetchAdjustedPriceRange(
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: normalizedVolume,
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -3959,13 +3973,14 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       low = Math.min(open ?? close, close);
     const clean = (val) => (val === null || Number.isNaN(val) ? null : val);
     const volNumber = Number(String(volume).replace(/,/g, "")) || 0;
+    const normalizedVolume = normalizeVolumeValue(volNumber);
     return {
       date: isoDate,
       open: clean(open),
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume: normalizedVolume,
     };
   } catch (error) {
     return null;
