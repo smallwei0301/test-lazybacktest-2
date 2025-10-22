@@ -1327,7 +1327,7 @@
                                     <div class="border-b border-border" style="border-color: var(--border);">
                                         <nav class="flex space-x-8 overflow-x-auto">
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--primary); border-color: var(--primary);"
                                                 data-tab="summary"
                                                 aria-current="page"
@@ -1335,56 +1335,56 @@
                                                 <i data-lucide="clipboard-list" class="lucide-sm inline mr-1"></i>摘要
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="staging-optimizer"
                                             >
                                                 <i data-lucide="wand-2" class="lucide-sm inline mr-1"></i>分段優化
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="performance"
                                             >
                                                 <i data-lucide="bar-chart-3" class="lucide-sm inline mr-1"></i>績效分析
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="trades"
                                             >
                                                 <i data-lucide="receipt" class="lucide-sm inline mr-1"></i>交易記錄
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="optimization"
                                             >
                                                 <i data-lucide="sliders-horizontal" class="lucide-sm inline mr-1"></i>參數優化
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="batch-optimization"
                                             >
                                                 <i data-lucide="users" class="lucide-sm inline mr-1"></i>批量優化
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="rolling-test"
                                             >
                                                 <i data-lucide="repeat" class="lucide-sm inline mr-1"></i>滾動測試
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="strategy-compare"
                                             >
                                                 <i data-lucide="layout-dashboard" class="lucide-sm inline mr-1"></i>策略比較
                                             </button>
                                             <button
-                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
                                                 data-tab="ai-prediction"
                                             >
@@ -1407,14 +1407,14 @@
                                             </div>
                                             <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">策略戰況尚未更新</h3>
                                             <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                完成回測後，這張戰報會綜合策略與買入持有的差距、指標體檢與建議行動，請優先回到此卡片檢視結果。
+                                                回測完成後，此區會整合策略表現、買入持有差距、指標檢查與後續建議，建議完成測試後先回來確認重點。
                                             </p>
                                         </div>
                                     </div>
                                     <div class="card-content space-y-3">
                                         <div id="strategy-status-detail" class="text-sm leading-relaxed space-y-2" style="color: var(--muted-foreground);">
-                                            <p>• 等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。</p>
-                                            <p>• 回測完成後，這裡會用條列式寫給散戶看的戰況懶人包。</p>
+                                            <p>• 請先執行回測，系統會自動比較策略與買入持有並記錄主要差異。</p>
+                                            <p>• 回測完成後，這裡會提供條列式摘要與後續建議，協助快速掌握重點。</p>
                                         </div>
                                     </div>
                                 </div>
@@ -1483,7 +1483,7 @@
                                     </div>
                                     <div id="trend-analysis-content" class="card-content space-y-4 hidden" aria-hidden="true">
                                         <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                            將價格序列拆成牛市・高波動、熊市・高波動與盤整三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
+                                            系統會把價格分成「牛市・高波動」「盤整」「熊市・高波動」三種狀態，並透過 ADX、布林帶寬與 ATR 比值判斷門檻。滑桿 0 到 10 代表不同的信心門檻，預設值 5 適用於多數標的，數值越高代表條件越寬鬆、趨勢覆蓋率越高。
                                         </p>
                                         <div id="trend-card-legend" class="flex items-center gap-3 text-xs text-muted-foreground overflow-x-auto whitespace-nowrap">
                                             <div class="flex items-center gap-2 shrink-0">
@@ -1512,7 +1512,7 @@
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed hidden" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示牛市・高波動／盤整／熊市・高波動三態的覆蓋率、複利報酬與 Sigmoid 補償統計。
+                                            執行回測後會顯示各狀態的覆蓋率、複利報酬與補償統計，協助評估策略在不同行情的表現。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>

@@ -1,4 +1,11 @@
 
+## 2026-07-29 — Patch LB-SUMMARY-UX-20260729A
+- **Scope**: 摘要分頁導覽與說明文字體驗調整。
+- **Updates**:
+  - `js/backtest.js` 更新 `activateTab`，僅讓使用者當前點選的摘要分頁標籤縮小字級，其他標籤維持原有尺寸，避免整排同步縮小。
+  - `index.html` 將摘要分頁標籤預設字級調整為 `text-sm`，並重寫摘要卡片與趨勢分析卡片的文案，改用專業且簡潔的中文說明。
+- **Testing**: 未執行（容器環境無法啟動瀏覽器與 Proxy，待實機回測確認分頁樣式與文案顯示）。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
