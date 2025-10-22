@@ -710,12 +710,46 @@
                                                 <div id="blobUsageContent" class="px-3 py-3 space-y-3 text-[11px]" style="color: var(--foreground);"></div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="strategyRegistryTester">
+                                            <button
+                                                type="button"
+                                                class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                data-action="audit-strategies"
+                                            >
+                                                <i data-lucide="list-checks" class="lucide w-4 h-4"></i>
+                                                <span data-role="label">檢查策略註冊</span>
+                                            </button>
+                                            <div
+                                                data-role="audit-summary"
+                                                class="hidden text-[11px] leading-relaxed"
+                                                style="color: var(--muted-foreground);"
+                                            ></div>
+                                            <div
+                                                data-role="audit-details"
+                                                class="hidden border rounded-md bg-white/70 px-3 py-2 text-[11px] leading-relaxed"
+                                                style="border-color: var(--border); color: var(--muted-foreground);"
+                                            ></div>
+                                            <button
+                                                type="button"
+                                                class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                data-action="sample-backtest"
+                                            >
+                                                <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
+                                                <span data-role="label">抽樣回測（Registry）</span>
+                                            </button>
+                                            <div
+                                                data-role="sample-status"
+                                                class="text-[11px] leading-relaxed"
+                                                style="color: var(--muted-foreground);"
+                                            ></div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
                 <div class="container mx-auto px-4 py-8 flex-1 overflow-hidden">
                     <div class="main-grid h-full overflow-hidden overflow-x-hidden">
@@ -2692,6 +2726,7 @@
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/config.js"></script>
     <script src="js/loading-mascot-sources.js"></script>
+    <script src="js/backtest-runner.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>

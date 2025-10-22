@@ -1901,6 +1901,323 @@ function initDataSourceTester() {
     window.applyMarketPreset = applyMarketPreset;
 }
 
+function initStrategyRegistryTester() {
+    const container = document.getElementById('strategyRegistryTester');
+    if (!container) {
+        return;
+    }
+
+    const registry = window.StrategyPluginRegistry || null;
+    const auditBtn = container.querySelector('[data-action="audit-strategies"]');
+    const sampleBtn = container.querySelector('[data-action="sample-backtest"]');
+    const summaryEl = container.querySelector('[data-role="audit-summary"]');
+    const detailsEl = container.querySelector('[data-role="audit-details"]');
+    const sampleStatusEl = container.querySelector('[data-role="sample-status"]');
+    const timeFormatter = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
+        ? new Intl.DateTimeFormat('zh-TW', { dateStyle: 'short', timeStyle: 'medium' })
+        : null;
+
+    let lastManifest = [];
+
+    const getLabelElement = (button) => (button ? button.querySelector('[data-role="label"]') : null);
+
+    const rememberButtonLabel = (button) => {
+        const labelEl = getLabelElement(button);
+        if (labelEl && !labelEl.dataset.originalText) {
+            labelEl.dataset.originalText = labelEl.textContent || '';
+        }
+    };
+
+    const setButtonBusy = (button, busy, busyLabel) => {
+        if (!button) return;
+        rememberButtonLabel(button);
+        const labelEl = getLabelElement(button);
+        button.disabled = Boolean(busy);
+        button.classList.toggle('opacity-70', Boolean(busy));
+        if (!labelEl) {
+            return;
+        }
+        if (busy && busyLabel) {
+            labelEl.textContent = busyLabel;
+        } else if (!busy && labelEl.dataset.originalText) {
+            labelEl.textContent = labelEl.dataset.originalText;
+        }
+    };
+
+    const resetAuditDisplay = () => {
+        if (summaryEl) {
+            summaryEl.classList.add('hidden');
+            summaryEl.textContent = '';
+        }
+        if (detailsEl) {
+            detailsEl.classList.add('hidden');
+            detailsEl.innerHTML = '';
+        }
+    };
+
+    const formatTimestamp = () => {
+        try {
+            return timeFormatter ? timeFormatter.format(new Date()) : new Date().toLocaleString();
+        } catch (error) {
+            return new Date().toISOString();
+        }
+    };
+
+    const classifyStrategyMeta = (meta) => {
+        if (!meta || typeof meta.id !== 'string') {
+            return 'longEntry';
+        }
+        const label = typeof meta.label === 'string' ? meta.label : '';
+        if (/空單回補/.test(label) || meta.id.startsWith('cover_') || (/空單/.test(label) && /停損/.test(label))) {
+            return 'shortExit';
+        }
+        if (/做空/.test(label) || /空單進場/.test(label) || meta.id.startsWith('short_')) {
+            return 'shortEntry';
+        }
+        if (/多頭出場/.test(label) || /出場/.test(label) || meta.id === 'trailing_stop') {
+            return 'longExit';
+        }
+        if (/空單/.test(label)) {
+            return 'shortExit';
+        }
+        return 'longEntry';
+    };
+
+    const buildDefaultParams = (meta) => {
+        const params = {};
+        const schema = meta?.paramsSchema;
+        if (!schema || typeof schema !== 'object' || !schema.properties) {
+            return params;
+        }
+        Object.keys(schema.properties).forEach((key) => {
+            const descriptor = schema.properties[key];
+            if (descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'default')) {
+                params[key] = descriptor.default;
+            }
+        });
+        return params;
+    };
+
+    const renderFailureDetails = (failures) => {
+        if (!detailsEl) {
+            return;
+        }
+        if (!Array.isArray(failures) || failures.length === 0) {
+            detailsEl.classList.add('hidden');
+            detailsEl.innerHTML = '';
+            return;
+        }
+        const items = failures
+            .map((failure) => {
+                const id = failure.id || '(未知)';
+                const reason = failure.reason?.message || failure.reason?.toString?.() || '未知錯誤';
+                return `<div class="py-1"><span class="font-semibold" style="color: var(--foreground);">${testerEscapeHtml(id)}</span>：${testerEscapeHtml(reason)}</div>`;
+            })
+            .join('');
+        detailsEl.innerHTML = `<div class="font-medium mb-1" style="color: var(--foreground);">載入失敗的策略</div>${items}`;
+        detailsEl.classList.remove('hidden');
+    };
+
+    const runAudit = async () => {
+        if (!registry || typeof registry.listStrategies !== 'function') {
+            if (summaryEl) {
+                summaryEl.textContent = 'StrategyPluginRegistry 尚未就緒，無法檢查。';
+                summaryEl.classList.remove('hidden');
+            }
+            return;
+        }
+        setButtonBusy(auditBtn, true, '檢查中...');
+        resetAuditDisplay();
+        let manifest = [];
+        try {
+            manifest = registry.listStrategies({ includeLazy: true }) || [];
+            lastManifest = manifest;
+        } catch (error) {
+            if (summaryEl) {
+                summaryEl.textContent = `讀取策略清單失敗：${error?.message || error}`;
+                summaryEl.classList.remove('hidden');
+            }
+            setButtonBusy(auditBtn, false);
+            return;
+        }
+        if (!Array.isArray(manifest) || manifest.length === 0) {
+            if (summaryEl) {
+                summaryEl.textContent = '策略清單為空，請確認策略是否已註冊。';
+                summaryEl.classList.remove('hidden');
+            }
+            setButtonBusy(auditBtn, false);
+            return;
+        }
+        const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+        const outcomes = await Promise.all(
+            manifest.map((meta) => {
+                const id = typeof meta?.id === 'string' ? meta.id : null;
+                if (!id) {
+                    return Promise.resolve({ id: '(未知)', status: 'rejected', reason: new Error('缺少策略 ID') });
+                }
+                if (typeof registry.loadStrategyById === 'function') {
+                    return registry
+                        .loadStrategyById(id)
+                        .then(() => ({ id, status: 'fulfilled' }))
+                        .catch((error) => ({ id, status: 'rejected', reason: error }));
+                }
+                return new Promise((resolve) => {
+                    try {
+                        if (typeof registry.ensureStrategyLoaded === 'function') {
+                            registry.ensureStrategyLoaded(id);
+                        } else if (typeof registry.getStrategyById === 'function') {
+                            registry.getStrategyById(id);
+                        }
+                        resolve({ id, status: 'fulfilled' });
+                    } catch (error) {
+                        resolve({ id, status: 'rejected', reason: error });
+                    }
+                });
+            }),
+        );
+        const endedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+        const durationMs = Math.round(Math.max(0, endedAt - startedAt));
+        const successCount = outcomes.filter((entry) => entry.status === 'fulfilled').length;
+        const failureList = outcomes.filter((entry) => entry.status === 'rejected');
+
+        if (summaryEl) {
+            summaryEl.textContent = `於 ${formatTimestamp()} 檢查 ${manifest.length} 策略，成功 ${successCount}，失敗 ${failureList.length}，耗時 ${durationMs} ms。`;
+            summaryEl.classList.remove('hidden');
+        }
+        renderFailureDetails(failureList);
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+        setButtonBusy(auditBtn, false);
+    };
+
+    const pickRandom = (list) => {
+        if (!Array.isArray(list) || list.length === 0) {
+            return null;
+        }
+        const index = Math.floor(Math.random() * list.length);
+        return list[index];
+    };
+
+    const ensureManifest = () => {
+        if (lastManifest && lastManifest.length > 0) {
+            return lastManifest;
+        }
+        if (registry && typeof registry.listStrategies === 'function') {
+            try {
+                lastManifest = registry.listStrategies({ includeLazy: true }) || [];
+            } catch (error) {
+                lastManifest = [];
+            }
+        }
+        return lastManifest;
+    };
+
+    const runSample = async () => {
+        if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = 'BacktestRunner 尚未載入，無法抽樣回測。';
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+            return;
+        }
+        const manifest = ensureManifest();
+        if (!Array.isArray(manifest) || manifest.length === 0) {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = '尚未取得策略清單，請先執行註冊檢查。';
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+            return;
+        }
+        const groups = manifest.reduce(
+            (acc, meta) => {
+                const bucket = classifyStrategyMeta(meta);
+                if (!acc[bucket]) {
+                    acc[bucket] = [];
+                }
+                acc[bucket].push(meta);
+                return acc;
+            },
+            { longEntry: [], longExit: [], shortEntry: [], shortExit: [] },
+        );
+        const entryMeta = pickRandom(groups.longEntry);
+        const exitMeta = pickRandom(groups.longExit.length > 0 ? groups.longExit : groups.longEntry);
+        if (!entryMeta || !exitMeta) {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = '策略清單不足，無法抽樣回測。';
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+            return;
+        }
+        if (typeof getBacktestParams !== 'function') {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = '無法取得回測參數（getBacktestParams 未定義）。';
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+            return;
+        }
+        const params = getBacktestParams();
+        params.entryStrategy = entryMeta.id;
+        params.entryParams = buildDefaultParams(entryMeta);
+        params.exitStrategy = exitMeta.id;
+        params.exitParams = buildDefaultParams(exitMeta);
+        params.enableShorting = false;
+        params.shortEntryStrategy = null;
+        params.shortExitStrategy = null;
+        params.shortEntryParams = {};
+        params.shortExitParams = {};
+
+        if (sampleStatusEl) {
+            sampleStatusEl.textContent = `使用 ${entryMeta.label} / ${exitMeta.label} 回測中...`;
+            sampleStatusEl.style.color = 'var(--muted-foreground)';
+        }
+        setButtonBusy(sampleBtn, true, '回測中...');
+
+        try {
+            if (registry && typeof registry.loadStrategyById === 'function') {
+                await Promise.all([entryMeta.id, exitMeta.id].map((id) => registry.loadStrategyById(id)));
+            }
+        } catch (error) {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = `策略載入失敗：${error?.message || error}`;
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+            setButtonBusy(sampleBtn, false);
+            return;
+        }
+
+        try {
+            const response = await window.BacktestRunner.run({
+                params,
+                strategies: [entryMeta.id, exitMeta.id],
+            });
+            const annualized = Number.isFinite(response?.result?.annualizedReturn)
+                ? response.result.annualizedReturn.toFixed(2)
+                : 'N/A';
+            const trades = Number.isFinite(response?.result?.tradesCount)
+                ? response.result.tradesCount
+                : 0;
+            const durationText = Number.isFinite(response?.durationMs)
+                ? `${Math.round(response.durationMs)} ms`
+                : '—';
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = `完成抽樣：${entryMeta.label} → ${exitMeta.label}，年化報酬 ${annualized}% ，交易次數 ${trades}，耗時 ${durationText}。`;
+                sampleStatusEl.style.color = 'var(--foreground)';
+            }
+        } catch (error) {
+            if (sampleStatusEl) {
+                sampleStatusEl.textContent = `抽樣回測失敗：${error?.message || error}`;
+                sampleStatusEl.style.color = '#b91c1c';
+            }
+        } finally {
+            setButtonBusy(sampleBtn, false);
+        }
+    };
+
+    auditBtn?.addEventListener('click', runAudit);
+    sampleBtn?.addEventListener('click', runSample);
+}
+
 function formatBatchDebugTime(value) {
     if (value === null || value === undefined) {
         return '';
@@ -4389,6 +4706,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initStrategyRegistryTester();
         initBatchDebugLogPanel();
 
         // 初始化頁籤功能

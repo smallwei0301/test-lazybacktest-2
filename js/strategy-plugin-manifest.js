@@ -1,4 +1,4 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712A
+// Patch Tag: LB-PLUGIN-MANIFEST-20250715A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope || !globalScope.StrategyPluginRegistry) {
@@ -10,16 +10,63 @@
     return;
   }
 
+  function resolveScriptUrl(scriptPath) {
+    if (typeof scriptPath !== 'string' || !scriptPath.trim()) {
+      throw new Error('[StrategyPluginManifest] 無效的策略腳本路徑');
+    }
+    const trimmed = scriptPath.trim();
+    if (/^(?:[a-z]+:)?\/\//i.test(trimmed) || trimmed.startsWith('data:')) {
+      return trimmed;
+    }
+    if (typeof URL === 'function') {
+      try {
+        if (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) {
+          return new URL(trimmed, document.currentScript.src).toString();
+        }
+        if (globalScope && globalScope.location && typeof globalScope.location.href === 'string') {
+          return new URL(trimmed, globalScope.location.href).toString();
+        }
+      } catch (error) {
+        // fall back to relative path below
+      }
+    }
+    return trimmed;
+  }
+
   function createScriptLoader(scriptPath) {
+    const resolvedUrl = resolveScriptUrl(scriptPath);
     let loaded = false;
-    return function load() {
+    let loadingPromise = null;
+    return function load(context) {
       if (loaded) {
-        return;
+        return loadingPromise;
       }
       if (typeof importScripts === 'function') {
-        importScripts(scriptPath);
+        importScripts(resolvedUrl);
         loaded = true;
-        return;
+        return null;
+      }
+      if (typeof document !== 'undefined' && document.createElement) {
+        if (loadingPromise) {
+          return loadingPromise;
+        }
+        loadingPromise = new Promise((resolve, reject) => {
+          const scriptEl = document.createElement('script');
+          scriptEl.src = resolvedUrl;
+          scriptEl.async = false;
+          scriptEl.dataset.strategyPlugin = context?.id || resolvedUrl;
+          scriptEl.addEventListener('load', () => {
+            loaded = true;
+            resolve();
+          });
+          scriptEl.addEventListener('error', () => {
+            const error = new Error(`[StrategyPluginManifest] 無法載入 ${scriptPath}`);
+            reject(error);
+          });
+          const head = document.head || document.getElementsByTagName('head')[0];
+          (head || document.body || document.documentElement).appendChild(scriptEl);
+        });
+        return loadingPromise;
       }
       throw new Error(`[StrategyPluginManifest] 無法於此環境載入 ${scriptPath}`);
     };

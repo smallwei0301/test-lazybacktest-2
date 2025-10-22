@@ -1,11 +1,11 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712A
+// Patch Tag: LB-PLUGIN-REGISTRY-20250715A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope) {
     return;
   }
 
-  const REGISTRY_VERSION = 'LB-PLUGIN-REGISTRY-20250712A';
+  const REGISTRY_VERSION = 'LB-PLUGIN-REGISTRY-20250715A';
 
   if (
     globalScope.StrategyPluginRegistry &&
@@ -17,6 +17,10 @@
 
   const pluginMap = new Map();
   const loaderMap = new Map();
+
+  function isPromiseLike(value) {
+    return !!value && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
+  }
 
   function normaliseId(id) {
     if (typeof id !== 'string') {
@@ -165,7 +169,7 @@
     if (typeof loader !== 'function') {
       throw new TypeError(`[${id}] registerLazyStrategy 需要提供 loader 函式`);
     }
-    loaderMap.set(id, { meta: clonedMeta, loader, loading: false });
+    loaderMap.set(id, { meta: clonedMeta, loader, loading: false, promise: null });
     return clonedMeta;
   }
 
@@ -182,18 +186,109 @@
       return null;
     }
     if (lazyEntry.loading) {
+      if (lazyEntry.promise) {
+        return null;
+      }
       throw new Error(`[${normalisedId}] Lazy loader 正在載入，請避免循環呼叫`);
     }
     lazyEntry.loading = true;
+    let loadResult;
     try {
-      lazyEntry.loader({ id: normalisedId, meta: lazyEntry.meta });
-    } finally {
+      loadResult = lazyEntry.loader({ id: normalisedId, meta: lazyEntry.meta });
+    } catch (error) {
+      lazyEntry.loading = false;
+      throw error;
+    }
+    if (isPromiseLike(loadResult)) {
+      const promise = Promise.resolve(loadResult)
+        .then(() => {
+          lazyEntry.loading = false;
+          return pluginMap.get(normalisedId) || null;
+        })
+        .catch((error) => {
+          lazyEntry.loading = false;
+          if (lazyEntry.promise === promise) {
+            lazyEntry.promise = null;
+          }
+          throw error;
+        });
+      lazyEntry.promise = promise;
+    } else {
       lazyEntry.loading = false;
     }
     if (pluginMap.has(normalisedId)) {
       return pluginMap.get(normalisedId);
     }
     return null;
+  }
+
+  function loadStrategyById(id, options) {
+    const normalisedId = normaliseId(id);
+    if (!normalisedId) {
+      return Promise.reject(new Error('StrategyPlugin id 無效'));
+    }
+    if (pluginMap.has(normalisedId)) {
+      return Promise.resolve(pluginMap.get(normalisedId));
+    }
+    const lazyEntry = loaderMap.get(normalisedId);
+    if (!lazyEntry) {
+      return Promise.resolve(null);
+    }
+    if (lazyEntry.promise) {
+      return lazyEntry.promise;
+    }
+    if (lazyEntry.loading) {
+      return new Promise((resolve, reject) => {
+        const waitForCompletion = () => {
+          if (pluginMap.has(normalisedId)) {
+            resolve(pluginMap.get(normalisedId));
+            return;
+          }
+          if (!lazyEntry.loading && !lazyEntry.promise) {
+            resolve(null);
+          } else {
+            (lazyEntry.promise || Promise.resolve()).then(resolve, reject);
+          }
+        };
+        if (lazyEntry.promise) {
+          lazyEntry.promise.then(resolve, reject);
+        } else {
+          setTimeout(waitForCompletion, Number.isFinite(options?.pollIntervalMs) ? Math.max(0, options.pollIntervalMs) : 30);
+        }
+      });
+    }
+    lazyEntry.loading = true;
+    let loadResult;
+    try {
+      loadResult = lazyEntry.loader({ id: normalisedId, meta: lazyEntry.meta });
+    } catch (error) {
+      lazyEntry.loading = false;
+      return Promise.reject(error);
+    }
+    if (!isPromiseLike(loadResult)) {
+      lazyEntry.loading = false;
+      if (pluginMap.has(normalisedId)) {
+        return Promise.resolve(pluginMap.get(normalisedId));
+      }
+      return Promise.reject(new Error(`[${normalisedId}] Lazy loader 未註冊策略`));
+    }
+    const promise = Promise.resolve(loadResult)
+      .then(() => {
+        lazyEntry.loading = false;
+        if (pluginMap.has(normalisedId)) {
+          return pluginMap.get(normalisedId);
+        }
+        throw new Error(`[${normalisedId}] Lazy loader 已完成但尚未註冊策略`);
+      })
+      .catch((error) => {
+        lazyEntry.loading = false;
+        if (lazyEntry.promise === promise) {
+          lazyEntry.promise = null;
+        }
+        throw error;
+      });
+    lazyEntry.promise = promise;
+    return promise;
   }
 
   function getStrategyMetaById(id) {
@@ -263,6 +358,10 @@
     listStrategies,
     list(options) {
       return listStrategies(options);
+    },
+    loadStrategyById,
+    load(id, options) {
+      return loadStrategyById(id, options);
     },
     __version__: REGISTRY_VERSION,
   };
