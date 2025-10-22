@@ -49,6 +49,13 @@
   - 新增 `netlify/functions/index-proxy.js` 與 `/api/index/` 路由，自 Yahoo Finance 抓取指數日線與基本資訊。
 - **Testing**: 尚未執行（容器環境無法連線至 Yahoo/Netlify Proxy）。
 
+## 2026-07-21 — Patch LB-SENSITIVITY-ANNUAL-DRIFT-20250721A
+- **Scope**: 敏感度分析漂移指標年化一致性。
+- **Updates**:
+  - `js/worker.js` 以年化報酬為核心計算敏感度漂移，新增年化回報解析函式並改寫情境差異、偏移統計與摘要累積流程，確保各項指標皆採年化百分點。
+  - `js/backtest.js` 情境卡片優先顯示年化差值，並保留舊欄位作為後備來源，避免資料缺漏時的相容性問題。
+- **Testing**: 容器環境無法連線 Proxy 與啟動瀏覽器，後續於實機回測檢查敏感度卡片渲染與 console 是否維持無錯誤。
+
 ## 2026-07-07 — Patch LB-ROLLING-TEST-20260707A
 - **Scope**: 滾動測試嚴格模式門檻換算、PSR/DSR 詳細資訊與策略比較顯示調整。
 - **Updates**:
