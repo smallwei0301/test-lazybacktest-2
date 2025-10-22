@@ -1469,4 +1469,20 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-30 — Patch LB-UI-TABTONE-20260730A
+- **Issue recap**: 右側摘要分頁的標籤在切換時會一起縮小，策略摘要卡片文案亦帶有遊戲化語氣，與目標族群預期的專業體驗不符。
+- **Fix**:
+  - `index.html` 僅對使用者點選的分頁標籤套用縮放效果並更新 `aria-current`，同時調整策略摘要卡片文案為口語且專業的敘述。
+  - `css/style.css` 為分頁標籤新增縮放與色彩過渡效果，確保縮放僅作用於當前分頁。
+- **Diagnostics**: 待於瀏覽器點選各分頁，確認僅作用中的標籤縮放且策略摘要卡片文案維持專業語氣。
+- **Testing**: 尚未執行（開發容器未提供自動化測試指令）。
+
+## 2026-08-02 — Patch LB-STRATEGY-CARD-20260802A
+- **Issue recap**: 策略摘要卡片預設與運行中的文案仍帶有遊戲化語氣，缺乏具體建議與檢核步驟，無法符合投資用戶期待的專業風格。
+- **Fix**:
+  - `index.html` 更新策略摘要卡片的標題、說明與預設指引，提供回測前後需關注的行動，語氣改為專業且簡潔。
+  - `js/backtest.js` 重新撰寫摘要徽章、差距敘述、指標提醒與敏感度建議等文案，導入版本碼 `LB-STRATEGY-STATUS-20260802A` 以追蹤本次調整。
+- **Diagnostics**: 待於實機執行回測，檢視策略領先/落後、風險指標不足與敏感度等情境時，卡片內容皆能提供明確建議且維持專業語氣。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
+
 
