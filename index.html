@@ -657,6 +657,60 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="strategyRegistryVerifierContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="shield-check" class="lucide w-4 h-4"></i>
+                                                    策略註冊驗證
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="strategyRegistryVerifyBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        驗證清單
+                                                    </button>
+                                                    <button
+                                                        id="strategyRegistrySampleRunBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        抽樣回測
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div
+                                                    id="strategyRegistryVerifierSummary"
+                                                    class="px-3 py-2 text-[11px]"
+                                                    style="color: var(--muted-foreground);"
+                                                >
+                                                    尚未執行驗證。
+                                                </div>
+                                                <div
+                                                    id="strategyRegistryVerifierList"
+                                                    class="px-3 py-2 space-y-2 hidden"
+                                                    style="color: var(--foreground); border-top: 1px solid var(--border);"
+                                                ></div>
+                                                <div
+                                                    id="strategyRegistrySampleStatus"
+                                                    class="px-3 py-2 text-[11px] border-t"
+                                                    style="border-color: var(--border); color: var(--muted-foreground);"
+                                                >
+                                                    抽樣回測結果將顯示於此。
+                                                </div>
+                                                <div
+                                                    id="strategyRegistryVerifierFootnote"
+                                                    class="px-3 py-2 text-[10px] border-t"
+                                                    style="border-color: var(--border); color: var(--muted-foreground);"
+                                                >
+                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測使用 RSI 多空預設組合供快速比對。
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
@@ -2691,6 +2745,7 @@
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/backtest-runner.js"></script>
     <script src="js/loading-mascot-sources.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>

@@ -1,4 +1,4 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712A
+// Patch Tag: LB-PLUGIN-REGISTRY-20250712B
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope || !globalScope.StrategyPluginRegistry) {
@@ -10,18 +10,113 @@
     return;
   }
 
+  const manifestBaseUrl = (function resolveManifestBaseUrl() {
+    if (typeof document !== 'undefined') {
+      const current = document.currentScript;
+      if (current && current.src) {
+        return current.src.replace(/[^/]*$/, '');
+      }
+      const scripts = document.getElementsByTagName('script');
+      for (let i = scripts.length - 1; i >= 0; i -= 1) {
+        const candidate = scripts[i];
+        if (candidate && candidate.src && candidate.src.includes('strategy-plugin-manifest')) {
+          return candidate.src.replace(/[^/]*$/, '');
+        }
+      }
+      if (typeof document.baseURI === 'string') {
+        try {
+          return new URL('.', document.baseURI).toString();
+        } catch (error) {
+          // ignore and fall through
+        }
+      }
+    }
+    if (globalScope && globalScope.location && typeof globalScope.location.href === 'string') {
+      return globalScope.location.href.replace(/[^/]*$/, '');
+    }
+    return '';
+  })();
+
+  function resolveLoaderUrl(scriptPath) {
+    if (typeof scriptPath !== 'string') {
+      throw new TypeError('[StrategyPluginManifest] loader 路徑必須為字串');
+    }
+    const trimmed = scriptPath.trim();
+    if (!trimmed) {
+      throw new Error('[StrategyPluginManifest] loader 路徑不可為空');
+    }
+    if (/^(?:https?:)?\/\//i.test(trimmed) || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+      return trimmed;
+    }
+    if (manifestBaseUrl) {
+      try {
+        return new URL(trimmed, manifestBaseUrl).toString();
+      } catch (error) {
+        // ignore fallback below
+      }
+    }
+    return trimmed;
+  }
+
+  function fetchScriptSynchronously(url) {
+    if (!url) {
+      throw new Error('[StrategyPluginManifest] 載入路徑不可為空');
+    }
+    if (typeof globalScope.XMLHttpRequest !== 'function') {
+      throw new Error(`[StrategyPluginManifest] 此環境不支援同步載入 ${url}`);
+    }
+    const request = new globalScope.XMLHttpRequest();
+    request.open('GET', url, false);
+    try {
+      request.overrideMimeType && request.overrideMimeType('application/javascript');
+    } catch (overrideError) {
+      // ignore override errors
+    }
+    try {
+      request.send(null);
+    } catch (networkError) {
+      throw new Error(`[StrategyPluginManifest] 載入 ${url} 失敗: ${networkError && networkError.message ? networkError.message : networkError}`);
+    }
+    const status = request.status === 0 || (request.status >= 200 && request.status < 300);
+    if (!status) {
+      throw new Error(`[StrategyPluginManifest] 讀取 ${url} 失敗 (status=${request.status})`);
+    }
+    const response = request.responseText;
+    if (typeof response !== 'string' || !response.trim()) {
+      throw new Error(`[StrategyPluginManifest] ${url} 回傳空內容`);
+    }
+    return response;
+  }
+
+  function evaluateScriptSource(source, url) {
+    const scriptSource = `${source}\n//# sourceURL=${url}`;
+    const globalEval = (0, eval); // eslint-disable-line no-eval
+    globalEval(scriptSource);
+  }
+
   function createScriptLoader(scriptPath) {
     let loaded = false;
     return function load() {
       if (loaded) {
         return;
       }
+      const resolvedUrl = resolveLoaderUrl(scriptPath);
       if (typeof importScripts === 'function') {
-        importScripts(scriptPath);
+        importScripts(resolvedUrl);
         loaded = true;
         return;
       }
-      throw new Error(`[StrategyPluginManifest] 無法於此環境載入 ${scriptPath}`);
+      try {
+        const scriptContent = fetchScriptSynchronously(resolvedUrl);
+        evaluateScriptSource(scriptContent, resolvedUrl);
+        loaded = true;
+        return;
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.error) {
+          console.error(`[StrategyPluginManifest] 載入 ${resolvedUrl} 失敗`, error);
+        }
+        throw error;
+      }
     };
   }
 
