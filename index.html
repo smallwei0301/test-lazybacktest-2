@@ -692,8 +692,8 @@
                                                 </div>
                                                 <div
                                                     id="strategyRegistryVerifierList"
-                                                    class="px-3 py-2 space-y-2 hidden"
-                                                    style="color: var(--foreground); border-top: 1px solid var(--border);"
+                                                    class="px-3 py-2 space-y-2 hidden overflow-y-auto"
+                                                    style="color: var(--foreground); border-top: 1px solid var(--border); max-height: 260px; scrollbar-width: thin;"
                                                 ></div>
                                                 <div
                                                     id="strategyRegistrySampleStatus"
@@ -707,7 +707,7 @@
                                                     class="px-3 py-2 text-[10px] border-t"
                                                     style="border-color: var(--border); color: var(--muted-foreground);"
                                                 >
-                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測使用 RSI 多空預設組合供快速比對。
+                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測會依序測試均線、指標、價格、海龜、成交量與移動停損等多空策略組合。
                                                 </div>
                                             </div>
                                         </div>

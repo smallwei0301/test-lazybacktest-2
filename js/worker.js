@@ -7875,6 +7875,7 @@ function runStrategy(data, params, options = {}) {
     open: opens,
     high: highs,
     low: lows,
+    volume: volumes,
     date: dates,
   };
 
