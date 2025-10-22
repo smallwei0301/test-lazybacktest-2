@@ -1,3 +1,10 @@
+## 2026-07-30 — Patch LB-PLUGIN-ROLLUP-20250701A
+- **Scope**: 現況盤點與暖身基準鎖定。
+- **Updates**:
+  - 新增 `docs/stage1-warmup-inventory.md`，整理 `backtest.js`、`worker.js`、`shared-lookback.js` 的依賴、策略入口與暖身流程，並記錄 `resolveDataWindow` 與 `priceIndicatorSeries` 的現有使用情況。
+  - 補充測試限制，說明需在具備瀏覽器與 Netlify Proxy 的實機環境重跑 2330/2412/0050 回測以比對暖身與買入持有基準。
+- **Testing**: 容器環境缺少 Netlify Proxy 與瀏覽器，無法執行 2330/2412/0050 本地回測；後續須於實機確認 console log 與暖身診斷。
+
 
 ## 2026-07-30 — Patch LB-SENSITIVITY-ANNUAL-20250714A
 - **Scope**: 摘要敏感度年化報酬呈現與文案調整。
@@ -1506,3 +1513,24 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-06 — Patch LB-PLUGIN-ATOMS-20250710A
+- **Issue recap**: RSI、KD、布林帶、均線交叉與 ATR 停損仍散落於 Worker 內部邏輯，缺乏統一插件介面，無法確認抽離後的訊號是否與舊流程一致。
+- **Fix**:
+  - 新增 `js/strategy-plugin-registry.js`，提供插件註冊、別名解析與參數轉換，Worker 透過 `evaluateStrategyPlugin` 先行呼叫插件，再回退至舊邏輯。
+  - 建立 `js/strategy-plugins/` 下五個原子策略（RSI、KD、布林帶、均線交叉、ATR 止損），補齊 `meta` 與 `paramsSchema`（預設值、上下限）並禁止直接讀寫全域狀態。
+  - Worker 將長/短進出場的 RSI、KD、布林帶、均線交叉、ATR 停損改為優先走插件路徑，並透過契約 `ensureRuleResult` 驗證插件輸出；保留 Legacy fallback 以兼容尚未插件化策略。
+  - 建立 `scripts/strategy-plugin-parity-check.js` 將五類策略以 10 筆測試序列比對舊判斷邏輯，新增 `npm run plugin:parity` 指令供快速回歸。
+- **Diagnostics**: 後續需於具備 Proxy 的環境對 2330/2412/0050 實測 10 筆以上資料，確認 `priceIndicatorSeries` 與進出場點與線上版本完全一致。
+- **Testing**:
+  - `npm run typecheck`
+  - `npm run plugin:parity`
+
+## 2026-08-05 — Patch LB-PLUGIN-CONTRACT-20250705A
+- **Issue recap**: 策略尚未具備統一插件介面，缺少型別契約導致後續拆分時難以驗證訊號欄位與停損/停利輸出；舊有布林判斷亦缺乏正式的 RuleResult 驗證。
+- **Fix**:
+  - 新增 `js/strategy-plugin-contract.js` 定義 `StrategyPlugin` 介面、`StrategyContext` 白名單 API 與 `RuleResult` 布林欄位，並提供 `ensureRuleResult`／`normaliseByRole` 與 legacy shim。
+  - `js/worker.js` 導入契約檢查，長/短進出場皆透過 `normaliseRuleResultFromLegacy` 將既有布林結果轉為 `RuleResult`，確保布林欄位、停損/停利值合法。
+  - `index.html` 預載契約腳本，新增 `types/strategy-plugin.d.ts` 與 `types/strategy-plugin-shim-check.ts` 供 TypeScript 驗證；`tsconfig.json` 建立型別檢查設定。
+- **Diagnostics**: 待於後續引入實際插件化策略時，確認 `StrategyPluginContract.ensureRuleResult` 能針對錯誤欄位立即拋出並記錄插件 ID／角色資訊。
+- **Testing**: `npm run typecheck`（使用容器內建 TypeScript 5.9.2 完成 JSDoc/.d.ts 驗證）。
