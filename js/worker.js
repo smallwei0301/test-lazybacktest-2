@@ -401,7 +401,7 @@ async function ensureTF() {
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
-// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -424,11 +424,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+
+const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
+  driftStable: 6,
+  driftCaution: 12,
+});
+
+const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
+  comfortPenaltyMax: 10,
+  cautionPenaltyMax: 30,
+  overflowPenaltySlope: 4,
+});
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -10518,11 +10529,40 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      driftPenaltyBand: null,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
+
+  let driftPenalty = 0;
+  let driftPenaltyBand = null;
+  if (Number.isFinite(averageDrift)) {
+    const driftAbs = Math.max(0, Math.abs(averageDrift));
+    const { driftStable, driftCaution } = ANNUALIZED_SENSITIVITY_THRESHOLDS;
+    const {
+      comfortPenaltyMax,
+      cautionPenaltyMax,
+      overflowPenaltySlope,
+    } = ANNUALIZED_SENSITIVITY_SCORING;
+
+    if (driftStable > 0 && driftAbs <= driftStable) {
+      const comfortRatio = driftStable === 0 ? 1 : driftAbs / driftStable;
+      driftPenalty = comfortRatio * comfortPenaltyMax;
+      driftPenaltyBand = "comfort";
+    } else if (driftAbs <= driftCaution) {
+      const span = Math.max(1, driftCaution - driftStable);
+      const ratio = driftStable === driftCaution
+        ? 1
+        : (driftAbs - driftStable) / span;
+      const scaled = ratio * (cautionPenaltyMax - comfortPenaltyMax);
+      driftPenalty = comfortPenaltyMax + scaled;
+      driftPenaltyBand = "caution";
+    } else {
+      const overflow = Math.max(0, driftAbs - driftCaution);
+      driftPenalty = cautionPenaltyMax + overflow * overflowPenaltySlope;
+      driftPenaltyBand = "critical";
+    }
+  }
+
   const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
     ? Math.max(0, averageSharpeDrop) * 100
     : 0;
@@ -10533,6 +10573,7 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
     score,
     driftPenalty,
     sharpePenalty,
+    driftPenaltyBand,
   };
 }
 
@@ -10630,6 +10671,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         version: SENSITIVITY_SCORE_VERSION,
         driftPenalty: stabilityComponents.driftPenalty,
         sharpePenalty: stabilityComponents.sharpePenalty,
+        driftPenaltyBand: stabilityComponents.driftPenaltyBand,
       },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
@@ -10756,6 +10798,7 @@ function buildSensitivityGroup({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: groupStabilityComponents.driftPenalty,
       sharpePenalty: groupStabilityComponents.sharpePenalty,
+      driftPenaltyBand: groupStabilityComponents.driftPenaltyBand,
     },
     parameters,
   };
@@ -10938,6 +10981,7 @@ function evaluateSensitivityParameter({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: stabilityComponents.driftPenalty,
       sharpePenalty: stabilityComponents.sharpePenalty,
+      driftPenaltyBand: stabilityComponents.driftPenaltyBand,
     },
   };
 }
