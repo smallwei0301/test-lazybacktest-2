@@ -452,6 +452,7 @@ async function ensureTF() {
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250730A
+// Patch Tag: LB-SENSITIVITY-ANNUAL-DRIFT-20250721A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -11091,6 +11092,16 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
   };
 }
 
+function resolveAnnualizedReturn(primaryValue, fallbackValue = null) {
+  if (Number.isFinite(primaryValue)) {
+    return primaryValue;
+  }
+  if (Number.isFinite(fallbackValue)) {
+    return fallbackValue;
+  }
+  return null;
+}
+
 function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   if (!Array.isArray(data) || data.length === 0 || !baseParams) {
     return null;
@@ -11100,9 +11111,13 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+  const baselineReturnTotal = Number.isFinite(baselineMetrics?.returnRate)
     ? baselineMetrics.returnRate
-    : 0;
+    : null;
+  const baselineAnnualized = resolveAnnualizedReturn(
+    baselineMetrics?.annualizedReturn,
+    baselineReturnTotal,
+  );
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
@@ -11122,7 +11137,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         context: ctx,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualized,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -11194,10 +11209,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
-      returnRate: baselineReturn,
-      annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
-        ? baselineMetrics.annualizedReturn
-        : null,
+      returnRate: baselineReturnTotal,
+      annualizedReturn: baselineAnnualized,
       sharpeRatio: baselineSharpe,
     },
     groups,
@@ -11208,7 +11221,7 @@ function buildSensitivityGroup({
   context,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualized,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -11227,7 +11240,7 @@ function buildSensitivityGroup({
         baseValue: entry.value,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualized,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -11324,7 +11337,7 @@ function evaluateSensitivityParameter({
   baseValue,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualized,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -11361,15 +11374,20 @@ function evaluateSensitivityParameter({
     }
 
     if (scenarioResult && typeof scenarioResult === "object") {
-      const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
+      const scenarioReturnTotal = Number.isFinite(scenarioResult.returnRate)
         ? scenarioResult.returnRate
         : null;
-      const deltaReturn =
-        Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
-          ? scenarioReturn - baselineReturn
+      const scenarioAnnualized = resolveAnnualizedReturn(
+        scenarioResult.annualizedReturn,
+        scenarioReturnTotal,
+      );
+      const deltaAnnualized =
+        Number.isFinite(scenarioAnnualized) &&
+        Number.isFinite(baselineAnnualized)
+          ? scenarioAnnualized - baselineAnnualized
           : null;
       const driftPercent =
-        Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
+        Number.isFinite(deltaAnnualized) ? Math.abs(deltaAnnualized) : null;
       const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
         ? scenarioResult.sharpeRatio
         : null;
@@ -11390,13 +11408,13 @@ function evaluateSensitivityParameter({
         summaryAccumulator.driftValues.push(driftPercent);
         summaryAccumulator.scenarioCount += 1;
       }
-      if (Number.isFinite(deltaReturn)) {
-        if (deltaReturn >= 0) {
-          positiveDeltas.push(deltaReturn);
-          summaryAccumulator.positive.push(deltaReturn);
+      if (Number.isFinite(deltaAnnualized)) {
+        if (deltaAnnualized >= 0) {
+          positiveDeltas.push(deltaAnnualized);
+          summaryAccumulator.positive.push(deltaAnnualized);
         } else {
-          negativeDeltas.push(deltaReturn);
-          summaryAccumulator.negative.push(deltaReturn);
+          negativeDeltas.push(deltaAnnualized);
+          summaryAccumulator.negative.push(deltaAnnualized);
         }
       }
       if (Number.isFinite(deltaSharpe)) {
@@ -11415,16 +11433,13 @@ function evaluateSensitivityParameter({
         type: adjustment.type,
         direction: adjustment.direction,
         value: adjustment.value,
-        deltaReturn,
+        deltaAnnualized,
+        deltaReturn: deltaAnnualized,
         driftPercent,
         deltaSharpe,
         run: {
-          returnRate: scenarioReturn,
-          annualizedReturn: Number.isFinite(
-            scenarioResult.annualizedReturn
-          )
-            ? scenarioResult.annualizedReturn
-            : null,
+          returnRate: scenarioReturnTotal,
+          annualizedReturn: scenarioAnnualized,
           sharpeRatio: scenarioSharpe,
         },
       });
@@ -11434,6 +11449,7 @@ function evaluateSensitivityParameter({
         type: adjustment.type,
         direction: adjustment.direction,
         value: adjustment.value,
+        deltaAnnualized: null,
         deltaReturn: null,
         driftPercent: null,
         deltaSharpe: null,
