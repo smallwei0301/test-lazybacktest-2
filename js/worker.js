@@ -3767,7 +3767,13 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    let normalised = value;
+    if (typeof normalised === "string") {
+      const trimmed = normalised.trim();
+      if (!trimmed) return null;
+      normalised = trimmed.replace(/,/g, "");
+    }
+    const num = Number(normalised);
     return Number.isFinite(num) ? num : null;
   };
 

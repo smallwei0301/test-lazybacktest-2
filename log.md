@@ -1485,4 +1485,10 @@ NODE`
 - **Diagnostics**: 待於實機執行回測，檢視策略領先/落後、風險指標不足與敏感度等情境時，卡片內容皆能提供明確建議且維持專業語氣。
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
+## 2026-08-03 — Patch LB-DATA-PARSE-20260803A
+- **Issue recap**: 回測卡片顯示「無效欄位統計 volume×1217」，診斷樣本中的成交量均為 0，導致整段資料在暖身後仍被判定為無效。
+- **Fix**: `js/worker.js` 將 `fetchAdjustedPriceRange` 內的 `toNumber` 函式改為會去除千分位逗號並忽略空白字串，確保成交量能正確轉為數值。
+- **Diagnostics**: 實際回測 ETF 00631L，確認資料暖身診斷中的成交量恢復為正值，無效欄位統計不再累積 volume。
+- **Testing**: 受限於容器無法連線 Proxy，未能直接跑回測；待部署至 Netlify 後以 00631L 驗證資料暖身卡與 console 無錯誤。
+
 
