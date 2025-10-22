@@ -1,4 +1,11 @@
 
+## 2026-07-30 — Patch LB-SENSITIVITY-ANNUAL-20250714A
+- **Scope**: 摘要敏感度年化報酬呈現與文案調整。
+- **Updates**:
+  - `js/backtest.js` 改以年化報酬差異計算敏感度摘要的 PP 與方向指標，缺值時回退至原本的總體報酬率，tooltip 改寫為「年化報酬」。
+  - `js/backtest.js` 更新敏感度四大卡片的摘要句、方向提醒與漂移說明，改為專業且口語化的文案，並同步年化語意。
+- **Testing**: 容器環境無法連線 Proxy 與啟動瀏覽器，待實機回測確認敏感度卡片顯示與 tooltip。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
@@ -1468,5 +1475,12 @@ NODE`
   - 聚合報表回傳整體樣本 Sharpe 與 γ₄ 指標，並以版本碼 `LB-ROLLING-TEST-20260709A` 標示。
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-20250714B
+- **Issue recap**: 敏感度摘要改用年化報酬後，平均漂移與提醒文案仍沿用總報酬率門檻，無法準確反映年化偏移的合理範圍。
+- **Fix**:
+  - `js/backtest.js` 導入年化漂移門檻常數，將穩定度提醒、色彩分類與提示氣泡調整為 ≤8%、8%～15%、>15% 的區間，並同步更新摘要句與解讀提示，使年化漂移超標時能快速給出行動建議。
+- **Diagnostics**: 待能連線 Proxy 的環境重跑敏感度分析，確認漂移卡片色彩、摘要提醒與提示氣泡文字落在新門檻。
+- **Testing**: 未執行（容器無法連線 Proxy 與啟動實際回測流程）。
 
 
