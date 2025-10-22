@@ -106,7 +106,7 @@
 
   registerBollingerPlugin({
     id: 'bollinger_breakout',
-    label: '布林通道突破 (多頭進場)',
+    label: '布林通道突破',
     bandKey: 'bollingerUpperEntry',
     bandLabel: '上軌',
     signalField: 'enter',
@@ -116,7 +116,7 @@
 
   registerBollingerPlugin({
     id: 'bollinger_reversal',
-    label: '布林通道反轉 (多頭出場)',
+    label: '布林通道反轉',
     bandKey: 'bollingerMiddleExit',
     bandLabel: '中軌',
     signalField: 'exit',
@@ -136,7 +136,7 @@
 
   registerBollingerPlugin({
     id: 'cover_bollinger_breakout',
-    label: '布林通道突破 (空單回補)',
+    label: '布林通道突破 (回補)',
     bandKey: 'bollingerUpperCover',
     bandLabel: '上軌',
     signalField: 'cover',

@@ -469,6 +469,213 @@ const strategyRegistryVerificationState = {
     sampleStatus: null,
 };
 
+const STRATEGY_VERIFIER_VERSION = 'LB-STRATEGY-VERIFY-20250715A';
+
+const STRATEGY_VERIFICATION_DEFINITIONS = [
+    {
+        categoryKey: 'entry',
+        title: '做多進場',
+        items: [
+            { id: 'ma_cross' },
+            { id: 'ma_above' },
+            { id: 'rsi_oversold' },
+            { id: 'macd_cross' },
+            { id: 'bollinger_breakout' },
+            { id: 'k_d_cross' },
+            { id: 'volume_spike' },
+            { id: 'price_breakout' },
+            { id: 'williams_oversold' },
+            { id: 'turtle_breakout' },
+        ],
+    },
+    {
+        categoryKey: 'exit',
+        title: '做多出場',
+        items: [
+            { id: 'ma_cross', descKey: 'ma_cross_exit', skipLabelCheck: true },
+            { id: 'ma_below' },
+            { id: 'rsi_overbought' },
+            { id: 'macd_cross', descKey: 'macd_cross_exit', skipLabelCheck: true },
+            { id: 'bollinger_reversal' },
+            { id: 'k_d_cross', descKey: 'k_d_cross_exit', skipLabelCheck: true },
+            { id: 'volume_spike' },
+            { id: 'price_breakdown' },
+            { id: 'williams_overbought' },
+            { id: 'turtle_stop_loss' },
+            { id: 'trailing_stop' },
+            { id: 'fixed_stop_loss' },
+        ],
+    },
+    {
+        categoryKey: 'shortEntry',
+        title: '做空進場',
+        items: [
+            { id: 'short_ma_cross' },
+            { id: 'short_ma_below' },
+            { id: 'short_rsi_overbought' },
+            { id: 'short_macd_cross' },
+            { id: 'short_bollinger_reversal' },
+            { id: 'short_k_d_cross' },
+            { id: 'short_price_breakdown' },
+            { id: 'short_williams_overbought' },
+            { id: 'short_turtle_stop_loss' },
+        ],
+    },
+    {
+        categoryKey: 'shortExit',
+        title: '做空出場',
+        items: [
+            { id: 'cover_ma_cross' },
+            { id: 'cover_ma_above' },
+            { id: 'cover_rsi_oversold' },
+            { id: 'cover_macd_cross' },
+            { id: 'cover_bollinger_breakout' },
+            { id: 'cover_k_d_cross' },
+            { id: 'cover_price_breakout' },
+            { id: 'cover_williams_oversold' },
+            { id: 'cover_turtle_breakout' },
+            { id: 'cover_trailing_stop' },
+            { id: 'cover_fixed_stop_loss' },
+        ],
+    },
+];
+
+function buildStrategyVerificationData() {
+    const groups = STRATEGY_VERIFICATION_DEFINITIONS.map((definition) => {
+        const entries = (definition.items || [])
+            .map((item) => {
+                const descKey = item.descKey || item.id;
+                const description = strategyDescriptions?.[descKey] || {};
+                const label = item.label || description.name || item.id;
+                const defaultParams = description && typeof description.defaultParams === 'object'
+                    ? JSON.parse(JSON.stringify(description.defaultParams))
+                    : {};
+                return {
+                    id: item.id,
+                    descKey,
+                    label,
+                    categoryKey: definition.categoryKey,
+                    categoryTitle: definition.title,
+                    skipLabelCheck: Boolean(item.skipLabelCheck || descKey !== item.id),
+                    defaultParams,
+                };
+            })
+            .sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant-u-co-stroke', { numeric: true }));
+        return {
+            categoryKey: definition.categoryKey,
+            categoryTitle: definition.title,
+            entries,
+        };
+    });
+    const flat = groups.flatMap((group) => group.entries.map((entry) => ({ ...entry })));
+    const map = new Map(groups.map((group) => [group.categoryKey, group.entries]));
+    return {
+        groups,
+        flat,
+        byCategory(categoryKey) {
+            return map.get(categoryKey) || [];
+        },
+    };
+}
+
+const STRATEGY_VERIFICATION_DATA = buildStrategyVerificationData();
+
+function cloneDefaultStrategyParams(strategyKey) {
+    if (!strategyKey) return {};
+    const description = strategyDescriptions?.[strategyKey];
+    if (!description || typeof description.defaultParams !== 'object') {
+        return {};
+    }
+    try {
+        return JSON.parse(JSON.stringify(description.defaultParams));
+    } catch (error) {
+        console.warn('[Strategy Verification] 無法複製預設參數', strategyKey, error);
+        return { ...description.defaultParams };
+    }
+}
+
+function pickRandomStrategy(categoryKey) {
+    const pool = STRATEGY_VERIFICATION_DATA.byCategory(categoryKey);
+    if (!Array.isArray(pool) || pool.length === 0) {
+        return null;
+    }
+    const index = Math.floor(Math.random() * pool.length);
+    return pool[index] || null;
+}
+
+function ensureStrategyRegistryListStyles(target) {
+    if (!target || target.dataset.lbStrategyListStyled === 'true') {
+        return;
+    }
+    target.style.maxHeight = '260px';
+    target.style.overflowY = 'auto';
+    target.style.paddingRight = '4px';
+    if (!target.hasAttribute('tabindex')) {
+        target.setAttribute('tabindex', '0');
+    }
+    if (!target.hasAttribute('aria-label')) {
+        target.setAttribute('aria-label', '策略清單，可使用滾輪或鍵盤瀏覽');
+    }
+    target.dataset.lbStrategyListStyled = 'true';
+}
+
+function cloneBacktestParams(baseParams) {
+    if (!baseParams || typeof baseParams !== 'object') {
+        return {};
+    }
+    try {
+        return JSON.parse(JSON.stringify(baseParams));
+    } catch (error) {
+        console.warn('[Strategy Verification] 無法完整複製回測參數，改用淺層拷貝。', error);
+        return { ...baseParams };
+    }
+}
+
+function buildRandomSampleParams(baseParams) {
+    const cloned = cloneBacktestParams(baseParams);
+    const summary = [];
+
+    const longEntry = pickRandomStrategy('entry');
+    if (longEntry) {
+        cloned.entryStrategy = longEntry.id;
+        cloned.entryParams = cloneDefaultStrategyParams(longEntry.descKey);
+        summary.push(`做多進場：${longEntry.label}`);
+    }
+
+    const longExit = pickRandomStrategy('exit');
+    if (longExit) {
+        cloned.exitStrategy = longExit.id;
+        cloned.exitParams = cloneDefaultStrategyParams(longExit.descKey);
+        summary.push(`做多出場：${longExit.label}`);
+    }
+
+    const shortEntry = pickRandomStrategy('shortEntry');
+    const shortExit = pickRandomStrategy('shortExit');
+    if (shortEntry && shortExit) {
+        cloned.enableShorting = true;
+        cloned.shortEntryStrategy = shortEntry.id;
+        cloned.shortEntryParams = cloneDefaultStrategyParams(shortEntry.descKey);
+        cloned.shortExitStrategy = shortExit.id;
+        cloned.shortExitParams = cloneDefaultStrategyParams(shortExit.descKey);
+        summary.push(`做空：${shortEntry.label}／${shortExit.label}`);
+    } else {
+        cloned.enableShorting = false;
+        cloned.shortEntryStrategy = null;
+        cloned.shortExitStrategy = null;
+        cloned.shortEntryParams = {};
+        cloned.shortExitParams = {};
+    }
+
+    if (!Array.isArray(cloned.entryStages) || cloned.entryStages.length === 0) {
+        cloned.entryStages = [cloned.positionSize || 100];
+    }
+    if (!Array.isArray(cloned.exitStages) || cloned.exitStages.length === 0) {
+        cloned.exitStages = [100];
+    }
+
+    return { params: cloned, summary };
+}
+
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
 // Patch Tag: LB-DATASOURCE-20250410A
@@ -3197,7 +3404,7 @@ function renderStrategyRegistryVerification() {
     parts.push(`成功 ${successCount}`);
     if (warningCount > 0) parts.push(`提醒 ${warningCount}`);
     if (errorCount > 0) parts.push(`失敗 ${errorCount}`);
-    let summaryText = `驗證完成：${parts.join('／')}`;
+    let summaryText = `驗證完成：${parts.join('／')}｜${STRATEGY_VERIFIER_VERSION}`;
     if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
         summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
     }
@@ -3210,27 +3417,44 @@ function renderStrategyRegistryVerification() {
         warning: 'var(--amber-600, #d97706)',
         error: 'var(--rose-600, #dc2626)',
     };
-
-    listEl.innerHTML = results
-        .map((entry) => {
-            const label = entry.label || entry.id || '未命名策略';
-            const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
-            const statusLabel = statusLabelMap[entry.status] || '狀態';
-            const message = entry.message ? strategyRegistryEscapeHtml(entry.message) : '—';
-            const identifier = entry.id ? strategyRegistryEscapeHtml(entry.id) : '';
+    ensureStrategyRegistryListStyles(listEl);
+    const groupedContent = STRATEGY_VERIFICATION_DATA.groups
+        .map((definition) => {
+            const entries = results.filter((entry) => entry.categoryKey === definition.categoryKey);
+            if (entries.length === 0) {
+                return '';
+            }
+            const items = entries
+                .map((entry) => {
+                    const label = entry.label || entry.id || '未命名策略';
+                    const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
+                    const statusLabel = statusLabelMap[entry.status] || '狀態';
+                    const message = entry.message ? strategyRegistryEscapeHtml(entry.message) : '—';
+                    const identifier = entry.id ? strategyRegistryEscapeHtml(entry.id) : '';
+                    return `
+                        <div class="rounded border px-3 py-2 text-[11px]" style="border-color: var(--border); background-color: rgba(255,255,255,0.65);">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="font-semibold" style="color: var(--foreground);">${strategyRegistryEscapeHtml(label)}</span>
+                                <span style="color: ${statusColor};">${statusLabel}</span>
+                            </div>
+                            <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">ID：${identifier}</div>
+                            <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${message}</div>
+                        </div>
+                    `;
+                })
+                .join('');
             return `
-                <div class="rounded border px-3 py-2 text-[11px]" style="border-color: var(--border); background-color: rgba(255,255,255,0.65);">
-                    <div class="flex items-center justify-between gap-2">
-                        <span class="font-semibold" style="color: var(--foreground);">${strategyRegistryEscapeHtml(label)}</span>
-                        <span style="color: ${statusColor};">${statusLabel}</span>
-                    </div>
-                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${identifier}</div>
-                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${message}</div>
+                <div class="space-y-2">
+                    <div class="text-[10px] font-semibold tracking-wide uppercase" style="color: var(--muted-foreground);">${strategyRegistryEscapeHtml(definition.categoryTitle)}</div>
+                    <div class="space-y-2">${items}</div>
                 </div>
             `;
         })
+        .filter(Boolean)
         .join('');
-    listEl.classList.toggle('hidden', results.length === 0);
+
+    listEl.innerHTML = groupedContent;
+    listEl.classList.toggle('hidden', !groupedContent);
 }
 
 function runStrategyRegistryVerification() {
@@ -3241,42 +3465,52 @@ function runStrategyRegistryVerification() {
 
     try {
         const registry = window.StrategyPluginRegistry;
-        if (!registry || typeof registry.listStrategies !== 'function') {
+        if (!registry || typeof registry.hasStrategy !== 'function') {
             throw new Error('StrategyPluginRegistry 尚未就緒');
         }
-        const list = registry.listStrategies({ includeLazy: true }) || [];
-        const results = [];
-        list.forEach((meta) => {
+
+        const results = STRATEGY_VERIFICATION_DATA.flat.map((definition) => {
             const entry = {
-                id: meta?.id || '',
-                label: meta?.label || meta?.id || '未命名策略',
+                id: definition.id,
+                label: definition.label,
+                categoryKey: definition.categoryKey,
+                categoryTitle: definition.categoryTitle,
                 status: 'ok',
-                message: '載入成功',
+                message: '已註冊',
             };
-            if (!entry.id) {
-                entry.status = 'warning';
-                entry.message = '缺少策略 ID';
-            } else {
-                try {
-                    if (typeof registry.ensureStrategyLoaded === 'function') {
-                        registry.ensureStrategyLoaded(entry.id);
-                    } else if (typeof registry.getStrategyById === 'function') {
-                        registry.getStrategyById(entry.id);
-                    }
-                    const plugin = typeof registry.getStrategyById === 'function'
-                        ? registry.getStrategyById(entry.id, { loadIfNeeded: false })
-                        : null;
-                    if (!plugin || typeof plugin.run !== 'function') {
-                        entry.status = 'warning';
-                        entry.message = '已載入但缺少 run(context, params)';
-                    }
-                } catch (error) {
-                    entry.status = 'error';
-                    entry.message = error && error.message ? error.message : String(error);
+            try {
+                const hasStrategy = registry.hasStrategy(definition.id);
+                if (!hasStrategy) {
+                    entry.status = 'warning';
+                    entry.message = '尚未於 StrategyPluginRegistry 註冊';
+                    return entry;
                 }
+                const meta = typeof registry.getStrategyMetaById === 'function'
+                    ? registry.getStrategyMetaById(definition.id)
+                    : null;
+                if (!meta) {
+                    entry.status = 'warning';
+                    entry.message = '缺少策略描述（meta）';
+                    return entry;
+                }
+                if (!definition.skipLabelCheck) {
+                    const registeredLabel = (meta.label || '').trim();
+                    if (registeredLabel && registeredLabel !== definition.label.trim()) {
+                        entry.status = 'warning';
+                        entry.message = `註冊名稱為「${registeredLabel}」`;
+                    } else {
+                        entry.message = registeredLabel ? `註冊名稱：${registeredLabel}` : '已註冊';
+                    }
+                } else {
+                    entry.message = meta.label ? `註冊名稱：${meta.label}` : '已註冊';
+                }
+            } catch (error) {
+                entry.status = 'error';
+                entry.message = error && error.message ? error.message : String(error);
             }
-            results.push(entry);
+            return entry;
         });
+
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
     } catch (error) {
@@ -3314,11 +3548,16 @@ function runStrategyRegistrySample() {
         renderStrategyRegistrySampleStatus();
         return;
     }
+    const { params: sampleParams, summary: strategySummary } = buildRandomSampleParams(params);
+    const strategySummaryText = strategySummary.length > 0 ? strategySummary.join('；') : '';
     strategyRegistryVerificationState.sampleRunning = true;
-    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    strategyRegistryVerificationState.sampleStatus = {
+        message: strategySummaryText ? `抽樣回測執行中…（${strategySummaryText}）` : '抽樣回測執行中…',
+        tone: 'info',
+    };
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
+    window.BacktestRunner.run(sampleParams)
         .then((result) => {
             const tradeCount = Array.isArray(result?.data?.trades)
                 ? result.data.trades.length
@@ -3327,6 +3566,9 @@ function runStrategyRegistrySample() {
                     ?? null);
             const coverage = Array.isArray(result?.data?.dates) ? result.data.dates.length : null;
             const parts = [];
+            if (strategySummaryText) {
+                parts.push(strategySummaryText);
+            }
             if (Number.isFinite(tradeCount)) {
                 parts.push(`交易 ${tradeCount} 筆`);
             } else if (tradeCount !== null && tradeCount !== undefined) {
