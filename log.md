@@ -1,3 +1,9 @@
+## 2026-09-12 — Patch LB-MASCOT-HTTPS-20260912A
+- **Scope**: Loading mascot 圖片來源的安全協定統一。
+- **Updates**:
+  - `js/loading-mascot-sources.js` 將所有 Imgur 圖片網址改用 HTTPS，搭配新補丁代碼以追蹤混合內容修正。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機於 Netlify 站台確認載入時無 Mixed Content 警示並正常輪播。
+
 
 ## 2026-08-27 — Patch LB-VOLUME-PARSER-20260827A
 - **Scope**: 月度價量補抓與資料來源測試表格的成交量解析。
