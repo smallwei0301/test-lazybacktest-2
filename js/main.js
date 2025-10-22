@@ -460,6 +460,15 @@ const dataSourceTesterState = {
 
 const DATA_SOURCE_TESTER_TABLE_LIMIT = 120;
 
+const strategyRegistryVerificationState = {
+    running: false,
+    results: [],
+    error: null,
+    lastRunAt: null,
+    sampleRunning: false,
+    sampleStatus: null,
+};
+
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
 // Patch Tag: LB-DATASOURCE-20250410A
@@ -3115,6 +3124,255 @@ function initBatchDebugLogPanel() {
     attemptSubscription();
 }
 
+function strategyRegistryEscapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderStrategyRegistrySampleStatus() {
+    const statusEl = document.getElementById('strategyRegistrySampleStatus');
+    if (!statusEl) return;
+    const defaultMessage = '抽樣回測結果將顯示於此。';
+    if (strategyRegistryVerificationState.sampleRunning) {
+        statusEl.textContent = '抽樣回測執行中…';
+        statusEl.style.color = 'var(--foreground)';
+        return;
+    }
+    const status = strategyRegistryVerificationState.sampleStatus;
+    if (!status) {
+        statusEl.textContent = defaultMessage;
+        statusEl.style.color = 'var(--muted-foreground)';
+        return;
+    }
+    statusEl.textContent = status.message || defaultMessage;
+    let toneColor = 'var(--muted-foreground)';
+    if (status.tone === 'success') toneColor = 'var(--emerald-600, #059669)';
+    else if (status.tone === 'error') toneColor = 'var(--rose-600, #dc2626)';
+    else if (status.tone === 'info') toneColor = 'var(--foreground)';
+    statusEl.style.color = toneColor;
+}
+
+function renderStrategyRegistryVerification() {
+    const summaryEl = document.getElementById('strategyRegistryVerifierSummary');
+    const listEl = document.getElementById('strategyRegistryVerifierList');
+    if (!summaryEl || !listEl) return;
+
+    if (strategyRegistryVerificationState.running) {
+        summaryEl.textContent = '驗證中，請稍候…';
+        summaryEl.style.color = 'var(--muted-foreground)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    if (strategyRegistryVerificationState.error) {
+        summaryEl.textContent = `驗證失敗：${strategyRegistryVerificationState.error}`;
+        summaryEl.style.color = 'var(--rose-600, #dc2626)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    const results = Array.isArray(strategyRegistryVerificationState.results)
+        ? strategyRegistryVerificationState.results
+        : [];
+
+    if (results.length === 0) {
+        summaryEl.textContent = '尚未執行驗證。';
+        summaryEl.style.color = 'var(--muted-foreground)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    const successCount = results.filter((entry) => entry.status === 'ok').length;
+    const warningCount = results.filter((entry) => entry.status === 'warning').length;
+    const errorCount = results.filter((entry) => entry.status === 'error').length;
+    const parts = [`總數 ${results.length}`];
+    parts.push(`成功 ${successCount}`);
+    if (warningCount > 0) parts.push(`提醒 ${warningCount}`);
+    if (errorCount > 0) parts.push(`失敗 ${errorCount}`);
+    let summaryText = `驗證完成：${parts.join('／')}`;
+    if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
+        summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
+    }
+    summaryEl.textContent = summaryText;
+    summaryEl.style.color = 'var(--foreground)';
+
+    const statusLabelMap = { ok: '成功', warning: '提醒', error: '失敗' };
+    const statusColorMap = {
+        ok: 'var(--emerald-600, #059669)',
+        warning: 'var(--amber-600, #d97706)',
+        error: 'var(--rose-600, #dc2626)',
+    };
+
+    listEl.innerHTML = results
+        .map((entry) => {
+            const label = entry.label || entry.id || '未命名策略';
+            const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
+            const statusLabel = statusLabelMap[entry.status] || '狀態';
+            const message = entry.message ? strategyRegistryEscapeHtml(entry.message) : '—';
+            const identifier = entry.id ? strategyRegistryEscapeHtml(entry.id) : '';
+            return `
+                <div class="rounded border px-3 py-2 text-[11px]" style="border-color: var(--border); background-color: rgba(255,255,255,0.65);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-semibold" style="color: var(--foreground);">${strategyRegistryEscapeHtml(label)}</span>
+                        <span style="color: ${statusColor};">${statusLabel}</span>
+                    </div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${identifier}</div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${message}</div>
+                </div>
+            `;
+        })
+        .join('');
+    listEl.classList.toggle('hidden', results.length === 0);
+}
+
+function runStrategyRegistryVerification() {
+    if (strategyRegistryVerificationState.running) return;
+    strategyRegistryVerificationState.running = true;
+    strategyRegistryVerificationState.error = null;
+    renderStrategyRegistryVerification();
+
+    try {
+        const registry = window.StrategyPluginRegistry;
+        if (!registry || typeof registry.listStrategies !== 'function') {
+            throw new Error('StrategyPluginRegistry 尚未就緒');
+        }
+        const list = registry.listStrategies({ includeLazy: true }) || [];
+        const results = [];
+        list.forEach((meta) => {
+            const entry = {
+                id: meta?.id || '',
+                label: meta?.label || meta?.id || '未命名策略',
+                status: 'ok',
+                message: '載入成功',
+            };
+            if (!entry.id) {
+                entry.status = 'warning';
+                entry.message = '缺少策略 ID';
+            } else {
+                try {
+                    if (typeof registry.ensureStrategyLoaded === 'function') {
+                        registry.ensureStrategyLoaded(entry.id);
+                    } else if (typeof registry.getStrategyById === 'function') {
+                        registry.getStrategyById(entry.id);
+                    }
+                    const plugin = typeof registry.getStrategyById === 'function'
+                        ? registry.getStrategyById(entry.id, { loadIfNeeded: false })
+                        : null;
+                    if (!plugin || typeof plugin.run !== 'function') {
+                        entry.status = 'warning';
+                        entry.message = '已載入但缺少 run(context, params)';
+                    }
+                } catch (error) {
+                    entry.status = 'error';
+                    entry.message = error && error.message ? error.message : String(error);
+                }
+            }
+            results.push(entry);
+        });
+        strategyRegistryVerificationState.results = results;
+        strategyRegistryVerificationState.lastRunAt = new Date();
+    } catch (error) {
+        strategyRegistryVerificationState.results = [];
+        strategyRegistryVerificationState.error = error && error.message ? error.message : String(error);
+    } finally {
+        strategyRegistryVerificationState.running = false;
+        renderStrategyRegistryVerification();
+    }
+}
+
+function runStrategyRegistrySample() {
+    if (strategyRegistryVerificationState.sampleRunning) return;
+    if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        strategyRegistryVerificationState.sampleStatus = {
+            message: 'BacktestRunner 尚未載入，請重新整理或稍後重試。',
+            tone: 'error',
+        };
+        renderStrategyRegistrySampleStatus();
+        return;
+    }
+    let params = null;
+    if (typeof getBacktestParams === 'function') {
+        try {
+            params = getBacktestParams();
+        } catch (error) {
+            console.warn('[Strategy Registry] 讀取當前回測參數失敗', error);
+        }
+    }
+    if (!params || typeof params !== 'object') {
+        strategyRegistryVerificationState.sampleStatus = {
+            message: '無法取得目前回測參數，請先在主畫面設定後再試。',
+            tone: 'error',
+        };
+        renderStrategyRegistrySampleStatus();
+        return;
+    }
+    strategyRegistryVerificationState.sampleRunning = true;
+    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    renderStrategyRegistrySampleStatus();
+
+    window.BacktestRunner.run(params)
+        .then((result) => {
+            const tradeCount = Array.isArray(result?.data?.trades)
+                ? result.data.trades.length
+                : (result?.data?.summary?.overall?.tradeCount
+                    ?? result?.data?.summary?.overall?.totalTrades
+                    ?? null);
+            const coverage = Array.isArray(result?.data?.dates) ? result.data.dates.length : null;
+            const parts = [];
+            if (Number.isFinite(tradeCount)) {
+                parts.push(`交易 ${tradeCount} 筆`);
+            } else if (tradeCount !== null && tradeCount !== undefined) {
+                parts.push(`交易 ${tradeCount}`);
+            }
+            if (Number.isFinite(coverage)) {
+                parts.push(`涵蓋 ${coverage} 日資料`);
+            }
+            const summary = parts.length > 0 ? parts.join('，') : '完成，可於主畫面檢視詳細結果。';
+            strategyRegistryVerificationState.sampleStatus = {
+                message: `抽樣回測完成：${summary}`,
+                tone: 'success',
+            };
+        })
+        .catch((error) => {
+            strategyRegistryVerificationState.sampleStatus = {
+                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
+                tone: 'error',
+            };
+        })
+        .finally(() => {
+            strategyRegistryVerificationState.sampleRunning = false;
+            renderStrategyRegistrySampleStatus();
+        });
+}
+
+function initStrategyRegistryVerification() {
+    const verifyBtn = document.getElementById('strategyRegistryVerifyBtn');
+    const sampleBtn = document.getElementById('strategyRegistrySampleRunBtn');
+    if (!verifyBtn && !sampleBtn) {
+        return;
+    }
+    if (verifyBtn) {
+        verifyBtn.addEventListener('click', () => {
+            runStrategyRegistryVerification();
+        });
+    }
+    if (sampleBtn) {
+        sampleBtn.addEventListener('click', () => {
+            runStrategyRegistrySample();
+        });
+    }
+    renderStrategyRegistryVerification();
+    renderStrategyRegistrySampleStatus();
+}
+
 function initDeveloperAreaToggle() {
     const toggleBtn = document.getElementById('developerAreaToggle');
     const wrapper = document.getElementById('developerAreaWrapper');
@@ -4390,6 +4648,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
         initBatchDebugLogPanel();
+        initStrategyRegistryVerification();
 
         // 初始化頁籤功能
         initTabs();

@@ -1,3 +1,13 @@
+## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
+- **Scope**: 策略註冊懶載入修復與手動驗證入口。
+- **Updates**:
+  - `js/strategy-plugin-manifest.js` 依據當前腳本 URL 建立絕對路徑，於瀏覽器環境改用同步 XHR + `eval` 載入策略檔案，並保留 Web Worker `importScripts` 支援。
+  - `js/strategy-plugin-registry.js` 更新版本碼，確保新載入器覆寫舊版 Registry 定義。
+  - 新增 `js/backtest-runner.js` 暴露 `BacktestRunner.run`，自 `StrategyPluginRegistry` 讀取參數結構後啟動 worker 回測，便於抽樣比對結果。
+  - `index.html` 開發者卡片新增「策略註冊驗證／抽樣回測」控制，並載入 `backtest-runner` 腳本供測試使用。
+  - `js/main.js` 接線驗證按鈕、渲染清單與抽樣回測狀態，支援即時顯示載入成果與錯誤訊息。
+- **Testing**: 容器環境無法連線 Proxy／啟動瀏覽器，僅靜態檢查；待部署環境以開發者卡手動驗證策略清單與抽樣回測。
+
 ## 2026-07-31 — Patch LB-PLUGIN-ATOMS-20250709A
 - **Scope**: RSI／KD／布林帶／均線交叉／移動停損策略插件化。
 - **Updates**:
