@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-STRATEGY-VERIFIER-20250730A
 
 // 全局變量
 let stockChart = null;
@@ -468,6 +469,209 @@ const strategyRegistryVerificationState = {
     sampleRunning: false,
     sampleStatus: null,
 };
+
+const STRATEGY_REGISTRY_EXPECTATIONS = (() => {
+    const entries = [
+        { key: 'bollinger_breakout', label: '布林通道突破', pluginId: 'bollinger_breakout' },
+        { key: 'bollinger_reversal', label: '布林通道反轉', pluginId: 'bollinger_reversal' },
+        { key: 'cover_bollinger_breakout', label: '布林通道突破 (回補)', pluginId: 'cover_bollinger_breakout' },
+        { key: 'cover_k_d_cross', label: 'KD黃金交叉 (D<X) (回補)', pluginId: 'cover_k_d_cross' },
+        { key: 'cover_ma_above', label: '價格突破均線 (回補)', pluginId: 'cover_ma_above' },
+        { key: 'cover_ma_cross', label: '均線黃金交叉 (回補)', pluginId: 'cover_ma_cross' },
+        { key: 'macd_cross', label: 'MACD黃金交叉 (DI版)', pluginId: 'macd_cross' },
+        { key: 'macd_cross_exit', label: 'MACD死亡交叉 (DI版)', pluginId: 'macd_cross' },
+        { key: 'cover_macd_cross', label: 'MACD黃金交叉 (DI版) (回補)', pluginId: 'cover_macd_cross' },
+        { key: 'cover_rsi_oversold', label: 'RSI超賣 (回補)', pluginId: 'cover_rsi_oversold' },
+        { key: 'cover_price_breakout', label: '價格突破前高 (回補)', pluginId: 'cover_price_breakout' },
+        { key: 'cover_trailing_stop', label: '移動停損 (%) (空單停損)', pluginId: 'cover_trailing_stop' },
+        { key: 'cover_turtle_breakout', label: '海龜N日高 (回補)', pluginId: 'cover_turtle_breakout' },
+        { key: 'cover_williams_oversold', label: '威廉指標超賣 (回補)', pluginId: 'cover_williams_oversold' },
+        { key: 'k_d_cross', label: 'KD黃金交叉 (D<X)', pluginId: 'k_d_cross' },
+        { key: 'k_d_cross_exit', label: 'KD死亡交叉 (D>Y)', pluginId: 'k_d_cross' },
+        { key: 'ma_above', label: '價格突破均線', pluginId: 'ma_above' },
+        { key: 'ma_below', label: '價格跌破均線', pluginId: 'ma_below' },
+        { key: 'ma_cross', label: '均線黃金交叉', pluginId: 'ma_cross' },
+        { key: 'ma_cross_exit', label: '均線死亡交叉', pluginId: 'ma_cross' },
+        { key: 'price_breakdown', label: '價格跌破前低', pluginId: 'price_breakdown' },
+        { key: 'price_breakout', label: '價格突破前高', pluginId: 'price_breakout' },
+        { key: 'rsi_overbought', label: 'RSI超買', pluginId: 'rsi_overbought' },
+        { key: 'rsi_oversold', label: 'RSI超賣', pluginId: 'rsi_oversold' },
+        { key: 'short_bollinger_reversal', label: '布林通道反轉 (做空)', pluginId: 'short_bollinger_reversal' },
+        { key: 'short_k_d_cross', label: 'KD死亡交叉 (D>Y) (做空)', pluginId: 'short_k_d_cross' },
+        { key: 'short_ma_below', label: '價格跌破均線 (做空)', pluginId: 'short_ma_below' },
+        { key: 'short_ma_cross', label: '均線死亡交叉 (做空)', pluginId: 'short_ma_cross' },
+        { key: 'short_macd_cross', label: 'MACD死亡交叉 (DI版) (做空)', pluginId: 'short_macd_cross' },
+        { key: 'short_price_breakdown', label: '價格跌破前低 (做空)', pluginId: 'short_price_breakdown' },
+        { key: 'short_rsi_overbought', label: 'RSI超買 (做空)', pluginId: 'short_rsi_overbought' },
+        { key: 'short_turtle_stop_loss', label: '海龜N日低 (做空)', pluginId: 'short_turtle_stop_loss' },
+        { key: 'short_williams_overbought', label: '威廉指標超買 (做空)', pluginId: 'short_williams_overbought' },
+        { key: 'trailing_stop', label: '移動停損 (%)', pluginId: 'trailing_stop' },
+        { key: 'turtle_breakout', label: '海龜突破 (僅進場)', pluginId: 'turtle_breakout' },
+        { key: 'turtle_stop_loss', label: '海龜停損 (N日低)', pluginId: 'turtle_stop_loss' },
+        { key: 'volume_spike', label: '成交量暴增', pluginId: 'volume_spike' },
+        { key: 'williams_overbought', label: '威廉指標超買', pluginId: 'williams_overbought' },
+        { key: 'williams_oversold', label: '威廉指標超賣', pluginId: 'williams_oversold' },
+    ];
+    const uniqueEntries = new Map();
+    entries.forEach((entry) => {
+        uniqueEntries.set(`${entry.label}|${entry.pluginId}`, entry);
+    });
+    return Object.freeze(
+        Array.from(uniqueEntries.values()).sort((a, b) =>
+            a.label.localeCompare(b.label, 'zh-Hant-TW', { numeric: true })
+        )
+    );
+})();
+
+const STRATEGY_REGISTRY_ENTRY_POOL = Object.freeze([
+    'ma_cross',
+    'ma_above',
+    'rsi_oversold',
+    'macd_cross',
+    'bollinger_breakout',
+    'k_d_cross',
+    'volume_spike',
+    'price_breakout',
+    'williams_oversold',
+    'turtle_breakout',
+]);
+
+const STRATEGY_REGISTRY_EXIT_POOL = Object.freeze([
+    'ma_cross',
+    'ma_below',
+    'rsi_overbought',
+    'macd_cross',
+    'bollinger_reversal',
+    'k_d_cross',
+    'volume_spike',
+    'price_breakdown',
+    'williams_overbought',
+    'turtle_stop_loss',
+    'trailing_stop',
+]);
+
+const STRATEGY_REGISTRY_SHORT_ENTRY_POOL = Object.freeze([
+    'short_ma_cross',
+    'short_ma_below',
+    'short_rsi_overbought',
+    'short_macd_cross',
+    'short_bollinger_reversal',
+    'short_k_d_cross',
+    'short_price_breakdown',
+    'short_williams_overbought',
+    'short_turtle_stop_loss',
+]);
+
+const STRATEGY_REGISTRY_SHORT_EXIT_POOL = Object.freeze([
+    'cover_ma_cross',
+    'cover_ma_above',
+    'cover_rsi_oversold',
+    'cover_macd_cross',
+    'cover_bollinger_breakout',
+    'cover_k_d_cross',
+    'cover_price_breakout',
+    'cover_williams_oversold',
+    'cover_turtle_breakout',
+    'cover_trailing_stop',
+]);
+
+const STRATEGY_CONFIG_ALIAS = {
+    exit: {
+        ma_cross: 'ma_cross_exit',
+        macd_cross: 'macd_cross_exit',
+        k_d_cross: 'k_d_cross_exit',
+        ema_cross: 'ema_cross_exit',
+    },
+    shortEntry: {
+        ma_cross: 'short_ma_cross',
+        ma_below: 'short_ma_below',
+        ema_cross: 'short_ema_cross',
+        rsi_overbought: 'short_rsi_overbought',
+        macd_cross: 'short_macd_cross',
+        bollinger_reversal: 'short_bollinger_reversal',
+        k_d_cross: 'short_k_d_cross',
+        price_breakdown: 'short_price_breakdown',
+        williams_overbought: 'short_williams_overbought',
+        turtle_stop_loss: 'short_turtle_stop_loss',
+    },
+    shortExit: {
+        ma_cross: 'cover_ma_cross',
+        ma_above: 'cover_ma_above',
+        ema_cross: 'cover_ema_cross',
+        rsi_oversold: 'cover_rsi_oversold',
+        macd_cross: 'cover_macd_cross',
+        bollinger_breakout: 'cover_bollinger_breakout',
+        k_d_cross: 'cover_k_d_cross',
+        price_breakout: 'cover_price_breakout',
+        williams_oversold: 'cover_williams_oversold',
+        turtle_breakout: 'cover_turtle_breakout',
+        trailing_stop: 'cover_trailing_stop',
+    },
+};
+
+function resolveStrategyConfigKey(strategyKey, roleType) {
+    if (!strategyKey) return null;
+    if (roleType && STRATEGY_CONFIG_ALIAS[roleType] && STRATEGY_CONFIG_ALIAS[roleType][strategyKey]) {
+        return STRATEGY_CONFIG_ALIAS[roleType][strategyKey];
+    }
+    return strategyKey;
+}
+
+function getDefaultParamsForStrategy(configKey) {
+    if (!configKey || !strategyDescriptions || !strategyDescriptions[configKey]) {
+        return {};
+    }
+    const defaults = strategyDescriptions[configKey].defaultParams || {};
+    const clone = {};
+    Object.keys(defaults).forEach((paramKey) => {
+        const value = defaults[paramKey];
+        clone[paramKey] = typeof value === 'number' ? Number(value) : value;
+    });
+    return clone;
+}
+
+function clonePlainObject(value) {
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(value);
+        } catch (error) {
+            // fall through to JSON clone
+        }
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (jsonError) {
+        if (!value || typeof value !== 'object') return value;
+        const shallow = Array.isArray(value) ? [] : {};
+        Object.keys(value).forEach((key) => {
+            shallow[key] = value[key];
+        });
+        return shallow;
+    }
+}
+
+function pickRandom(array) {
+    if (!Array.isArray(array) || array.length === 0) return null;
+    const index = Math.floor(Math.random() * array.length);
+    return array[index];
+}
+
+function getStrategyLabelForKey(key) {
+    if (!key) return '';
+    if (strategyDescriptions && strategyDescriptions[key] && strategyDescriptions[key].name) {
+        return strategyDescriptions[key].name;
+    }
+    return key;
+}
+
+function formatStrategySummary(plan) {
+    if (!plan) return '';
+    const longEntryLabel = getStrategyLabelForKey(plan.entryConfigKey || plan.entryKey);
+    const longExitLabel = getStrategyLabelForKey(plan.exitConfigKey || plan.exitKey);
+    const shortEntryLabel = getStrategyLabelForKey(plan.shortEntryConfigKey || plan.shortEntryKey);
+    const shortExitLabel = getStrategyLabelForKey(plan.shortExitConfigKey || plan.shortExitKey);
+    return `多頭：${longEntryLabel} → ${longExitLabel}；空頭：${shortEntryLabel} → ${shortExitLabel}`;
+}
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -3217,7 +3421,18 @@ function renderStrategyRegistryVerification() {
             const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
             const statusLabel = statusLabelMap[entry.status] || '狀態';
             const message = entry.message ? strategyRegistryEscapeHtml(entry.message) : '—';
-            const identifier = entry.id ? strategyRegistryEscapeHtml(entry.id) : '';
+            const identifierParts = [];
+            if (entry.strategyKey) {
+                identifierParts.push(`鍵：${strategyRegistryEscapeHtml(entry.strategyKey)}`);
+            }
+            if (entry.pluginId && entry.pluginId !== entry.strategyKey) {
+                identifierParts.push(`插件：${strategyRegistryEscapeHtml(entry.pluginId)}`);
+            }
+            const identifier = identifierParts.length > 0
+                ? identifierParts.join('｜')
+                : entry.id
+                ? strategyRegistryEscapeHtml(entry.id)
+                : '';
             return `
                 <div class="rounded border px-3 py-2 text-[11px]" style="border-color: var(--border); background-color: rgba(255,255,255,0.65);">
                     <div class="flex items-center justify-between gap-2">
@@ -3241,41 +3456,45 @@ function runStrategyRegistryVerification() {
 
     try {
         const registry = window.StrategyPluginRegistry;
-        if (!registry || typeof registry.listStrategies !== 'function') {
+        if (!registry) {
             throw new Error('StrategyPluginRegistry 尚未就緒');
         }
-        const list = registry.listStrategies({ includeLazy: true }) || [];
-        const results = [];
-        list.forEach((meta) => {
+        const expectations = Array.isArray(STRATEGY_REGISTRY_EXPECTATIONS)
+            ? STRATEGY_REGISTRY_EXPECTATIONS
+            : [];
+        const results = expectations.map((expectation) => {
+            const pluginId = expectation.pluginId || expectation.key;
             const entry = {
-                id: meta?.id || '',
-                label: meta?.label || meta?.id || '未命名策略',
+                id: pluginId || expectation.key || '',
+                label: expectation.label || expectation.key || '未命名策略',
                 status: 'ok',
                 message: '載入成功',
+                pluginId,
+                strategyKey: expectation.key || pluginId || '',
             };
-            if (!entry.id) {
+            if (!pluginId) {
                 entry.status = 'warning';
-                entry.message = '缺少策略 ID';
-            } else {
-                try {
-                    if (typeof registry.ensureStrategyLoaded === 'function') {
-                        registry.ensureStrategyLoaded(entry.id);
-                    } else if (typeof registry.getStrategyById === 'function') {
-                        registry.getStrategyById(entry.id);
-                    }
-                    const plugin = typeof registry.getStrategyById === 'function'
-                        ? registry.getStrategyById(entry.id, { loadIfNeeded: false })
-                        : null;
-                    if (!plugin || typeof plugin.run !== 'function') {
-                        entry.status = 'warning';
-                        entry.message = '已載入但缺少 run(context, params)';
-                    }
-                } catch (error) {
-                    entry.status = 'error';
-                    entry.message = error && error.message ? error.message : String(error);
-                }
+                entry.message = '未指定插件 ID';
+                return entry;
             }
-            results.push(entry);
+            try {
+                if (typeof registry.ensureStrategyLoaded === 'function') {
+                    registry.ensureStrategyLoaded(pluginId);
+                } else if (typeof registry.getStrategyById === 'function') {
+                    registry.getStrategyById(pluginId);
+                }
+                const plugin = typeof registry.getStrategyById === 'function'
+                    ? registry.getStrategyById(pluginId, { loadIfNeeded: false })
+                    : null;
+                if (!plugin || typeof plugin.run !== 'function') {
+                    entry.status = 'warning';
+                    entry.message = '已載入但缺少 run(context, params)';
+                }
+            } catch (error) {
+                entry.status = 'error';
+                entry.message = error && error.message ? error.message : String(error);
+            }
+            return entry;
         });
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
@@ -3314,11 +3533,47 @@ function runStrategyRegistrySample() {
         renderStrategyRegistrySampleStatus();
         return;
     }
+    const sampleParams = clonePlainObject(params);
+    const samplePlan = {};
+
+    samplePlan.entryKey =
+        pickRandom(STRATEGY_REGISTRY_ENTRY_POOL)
+        || params.entryStrategy
+        || STRATEGY_REGISTRY_ENTRY_POOL[0];
+    samplePlan.entryConfigKey = resolveStrategyConfigKey(samplePlan.entryKey, 'entry');
+    sampleParams.entryStrategy = samplePlan.entryKey;
+    sampleParams.entryParams = getDefaultParamsForStrategy(samplePlan.entryConfigKey);
+
+    samplePlan.exitKey =
+        pickRandom(STRATEGY_REGISTRY_EXIT_POOL)
+        || params.exitStrategy
+        || STRATEGY_REGISTRY_EXIT_POOL[0];
+    samplePlan.exitConfigKey = resolveStrategyConfigKey(samplePlan.exitKey, 'exit');
+    sampleParams.exitStrategy = samplePlan.exitKey;
+    sampleParams.exitParams = getDefaultParamsForStrategy(samplePlan.exitConfigKey);
+
+    samplePlan.shortEntryKey =
+        pickRandom(STRATEGY_REGISTRY_SHORT_ENTRY_POOL)
+        || params.shortEntryStrategy
+        || STRATEGY_REGISTRY_SHORT_ENTRY_POOL[0];
+    samplePlan.shortEntryConfigKey = resolveStrategyConfigKey(samplePlan.shortEntryKey, 'shortEntry');
+    samplePlan.shortExitKey =
+        pickRandom(STRATEGY_REGISTRY_SHORT_EXIT_POOL)
+        || params.shortExitStrategy
+        || STRATEGY_REGISTRY_SHORT_EXIT_POOL[0];
+    samplePlan.shortExitConfigKey = resolveStrategyConfigKey(samplePlan.shortExitKey, 'shortExit');
+
+    sampleParams.enableShorting = true;
+    sampleParams.shortEntryStrategy = samplePlan.shortEntryKey;
+    sampleParams.shortEntryParams = getDefaultParamsForStrategy(samplePlan.shortEntryConfigKey);
+    sampleParams.shortExitStrategy = samplePlan.shortExitKey;
+    sampleParams.shortExitParams = getDefaultParamsForStrategy(samplePlan.shortExitConfigKey);
+
     strategyRegistryVerificationState.sampleRunning = true;
     strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
+    window.BacktestRunner.run(sampleParams)
         .then((result) => {
             const tradeCount = Array.isArray(result?.data?.trades)
                 ? result.data.trades.length
@@ -3336,14 +3591,20 @@ function runStrategyRegistrySample() {
                 parts.push(`涵蓋 ${coverage} 日資料`);
             }
             const summary = parts.length > 0 ? parts.join('，') : '完成，可於主畫面檢視詳細結果。';
+            const strategySummary = formatStrategySummary(samplePlan);
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測完成：${summary}`,
+                message: strategySummary
+                    ? `抽樣回測完成：${summary}（${strategySummary}）`
+                    : `抽樣回測完成：${summary}`,
                 tone: 'success',
             };
         })
         .catch((error) => {
+            const strategySummary = formatStrategySummary(samplePlan);
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
+                message: strategySummary
+                    ? `抽樣回測失敗：${error && error.message ? error.message : String(error)}（${strategySummary}）`
+                    : `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
                 tone: 'error',
             };
         })
