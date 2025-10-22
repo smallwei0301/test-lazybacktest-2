@@ -1,4 +1,11 @@
 
+## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
+- **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
+- **Updates**:
+  - `js/worker.js` 新增 `ensureTF()`，延後載入 TFJS 與 WASM 後端，僅在 ANN/LSTM AI 任務觸發時初始化，並保留原有的隨機種子與後端切換流程。
+  - `js/worker.js` 的 LSTM 與 ANN 訊息入口改為在開始時等待 `ensureTF()`，確保延遲載入後仍能取得已就緒的 TensorFlow.js。
+- **Testing**: 未執行（容器環境無法連線 Proxy／瀏覽器，AI 功能需於實機回測時確認 console 無錯誤）。
+
 ## 2026-07-27 — Patch LB-INDEX-UI-20250727A
 - **Scope**: 指數市場輸入提示與快速回測控制。
 - **Updates**:
