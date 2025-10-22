@@ -120,7 +120,7 @@
 
   registerKDPlugin({
     id: 'k_d_cross',
-    label: 'KD 黃金交叉 (多頭)',
+    label: 'KD黃金交叉 (D<X)',
     kKey: 'kEntry',
     dKey: 'dEntry',
     signalField: 'enter',
@@ -132,7 +132,7 @@
 
   registerKDPlugin({
     id: 'k_d_cross_exit',
-    label: 'KD 死亡交叉 (多頭出場)',
+    label: 'KD死亡交叉 (D>Y)',
     kKey: 'kExit',
     dKey: 'dExit',
     signalField: 'exit',
@@ -144,7 +144,7 @@
 
   registerKDPlugin({
     id: 'short_k_d_cross',
-    label: 'KD 死亡交叉 (做空)',
+    label: 'KD死亡交叉 (D>Y) (做空)',
     kKey: 'kShortEntry',
     dKey: 'dShortEntry',
     signalField: 'short',
@@ -156,7 +156,7 @@
 
   registerKDPlugin({
     id: 'cover_k_d_cross',
-    label: 'KD 黃金交叉 (空單回補)',
+    label: 'KD黃金交叉 (D<X) (回補)',
     kKey: 'kCover',
     dKey: 'dCover',
     signalField: 'cover',

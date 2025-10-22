@@ -469,6 +469,74 @@ const strategyRegistryVerificationState = {
     sampleStatus: null,
 };
 
+const strategyRegistrySampleCandidates = {
+    longEntry: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross' },
+        { strategyId: 'ma_above', configKey: 'ma_above' },
+        { strategyId: 'rsi_oversold', configKey: 'rsi_oversold' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross' },
+        { strategyId: 'bollinger_breakout', configKey: 'bollinger_breakout' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross' },
+        { strategyId: 'volume_spike', configKey: 'volume_spike' },
+        { strategyId: 'price_breakout', configKey: 'price_breakout' },
+        { strategyId: 'williams_oversold', configKey: 'williams_oversold' },
+        { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
+    ],
+    longExit: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_below', configKey: 'ma_below' },
+        { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
+        { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
+        { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
+        { strategyId: 'trailing_stop', configKey: 'trailing_stop' },
+        { strategyId: 'fixed_stop_loss', configKey: 'fixed_stop_loss' },
+    ],
+    shortEntry: [
+        { strategyId: 'short_ma_cross', configKey: 'short_ma_cross' },
+        { strategyId: 'short_ma_below', configKey: 'short_ma_below' },
+        { strategyId: 'short_rsi_overbought', configKey: 'short_rsi_overbought' },
+        { strategyId: 'short_macd_cross', configKey: 'short_macd_cross' },
+        { strategyId: 'short_bollinger_reversal', configKey: 'short_bollinger_reversal' },
+        { strategyId: 'short_k_d_cross', configKey: 'short_k_d_cross' },
+        { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
+        { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
+        { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
+    ],
+    shortExit: [
+        { strategyId: 'cover_ma_cross', configKey: 'cover_ma_cross' },
+        { strategyId: 'cover_ma_above', configKey: 'cover_ma_above' },
+        { strategyId: 'cover_rsi_oversold', configKey: 'cover_rsi_oversold' },
+        { strategyId: 'cover_macd_cross', configKey: 'cover_macd_cross' },
+        { strategyId: 'cover_bollinger_breakout', configKey: 'cover_bollinger_breakout' },
+        { strategyId: 'cover_k_d_cross', configKey: 'cover_k_d_cross' },
+        { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
+        { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
+        { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
+        { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
+        { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
+    ],
+};
+
+function pickRandomStrategyCandidate(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return null;
+    }
+    const index = Math.floor(Math.random() * list.length);
+    return list[index];
+}
+
+function cloneDefaultStrategyParams(configKey) {
+    const descriptor = strategyDescriptions?.[configKey];
+    if (!descriptor || !descriptor.defaultParams) {
+        return {};
+    }
+    return JSON.parse(JSON.stringify(descriptor.defaultParams));
+}
+
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
 // Patch Tag: LB-DATASOURCE-20250410A
@@ -3277,6 +3345,7 @@ function runStrategyRegistryVerification() {
             }
             results.push(entry);
         });
+        results.sort((a, b) => a.label.localeCompare(b.label || '', 'zh-Hant'));
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
     } catch (error) {
@@ -3318,7 +3387,46 @@ function runStrategyRegistrySample() {
     strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
+    const sampleParams = {
+        ...params,
+        entryParams: { ...params.entryParams },
+        exitParams: { ...params.exitParams },
+        shortEntryParams: { ...params.shortEntryParams },
+        shortExitParams: { ...params.shortExitParams },
+    };
+
+    const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+    const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+    if (longEntryCandidate) {
+        sampleParams.entryStrategy = longEntryCandidate.strategyId;
+        sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+    }
+    if (longExitCandidate) {
+        sampleParams.exitStrategy = longExitCandidate.strategyId;
+        sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+    }
+
+    const enableShorting = Math.random() < 0.75;
+    sampleParams.enableShorting = enableShorting;
+    if (enableShorting) {
+        const shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+        const shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+        if (shortEntryCandidate) {
+            sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+            sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+        }
+        if (shortExitCandidate) {
+            sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+            sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+        }
+    } else {
+        sampleParams.shortEntryStrategy = null;
+        sampleParams.shortExitStrategy = null;
+        sampleParams.shortEntryParams = {};
+        sampleParams.shortExitParams = {};
+    }
+
+    window.BacktestRunner.run(sampleParams)
         .then((result) => {
             const tradeCount = Array.isArray(result?.data?.trades)
                 ? result.data.trades.length
