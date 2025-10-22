@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-DATASOURCE-TABLE-20260820A
 
 // 全局變量
 let stockChart = null;
@@ -453,6 +454,9 @@ window.lazybacktestMultiStagePanel = {
 const dataSourceTesterState = {
     open: false,
     busy: false,
+    tableRows: [],
+    tableVisible: false,
+    tableMeta: null,
 };
 
 // Patch Tag: LB-DATASOURCE-20250328A
@@ -948,6 +952,337 @@ function clearTesterResult() {
     resultEl.className = 'text-xs hidden';
 }
 
+function resetDataSourceTesterTable() {
+    dataSourceTesterState.tableRows = [];
+    dataSourceTesterState.tableVisible = false;
+    dataSourceTesterState.tableMeta = null;
+    const section = document.getElementById('dataSourceTesterTableSection');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const noteEl = document.getElementById('dataSourceTesterTableNote');
+    const toggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    const labelEl = document.getElementById('dataSourceTesterTableToggleLabel');
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (section) section.classList.add('hidden');
+    if (wrapper) wrapper.classList.add('hidden');
+    if (noteEl) {
+        noteEl.textContent = '';
+        noteEl.classList.add('hidden');
+    }
+    if (tbody) {
+        tbody.innerHTML = '';
+    }
+    if (toggleBtn) {
+        toggleBtn.disabled = true;
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
+    }
+    if (labelEl) {
+        labelEl.textContent = '查看資料表格';
+    } else if (toggleBtn) {
+        toggleBtn.textContent = '查看資料表格';
+    }
+}
+
+function formatTesterVolume(value) {
+    if (!Number.isFinite(value)) return '—';
+    const number = Number(value);
+    const decimalPart = String(number).split('.')[1] || '';
+    const digits = decimalPart.length > 0 ? Math.min(4, decimalPart.length) : 0;
+    try {
+        return testerEscapeHtml(
+            number.toLocaleString('zh-TW', {
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits,
+            }),
+        );
+    } catch (error) {
+        const fixed = number.toFixed(digits);
+        return testerEscapeHtml(fixed.replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1'));
+    }
+}
+
+function renderDataSourceTesterTableRows() {
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (!tbody) return;
+    const rows = Array.isArray(dataSourceTesterState.tableRows) ? dataSourceTesterState.tableRows : [];
+    if (rows.length === 0) {
+        tbody.innerHTML =
+            '<tr><td colspan="6" class="px-3 py-2 text-[10px]" style="color: var(--muted-foreground);">尚未取得可顯示的資料列。</td></tr>';
+        return;
+    }
+    const html = rows
+        .map((row) => {
+            const cells = [
+                testerEscapeHtml(row.date || '—'),
+                formatTesterNumber(row.open, 4),
+                formatTesterNumber(row.high, 4),
+                formatTesterNumber(row.low, 4),
+                formatTesterNumber(row.close, 4),
+                formatTesterVolume(row.volume),
+            ];
+            return (
+                '<tr>'
+                + cells
+                    .map(
+                        (cell) =>
+                            `<td class="px-3 py-2 border-b align-top" style="border-color: var(--border); color: var(--foreground);">${cell}</td>`,
+                    )
+                    .join('')
+                + '</tr>'
+            );
+        })
+        .join('');
+    tbody.innerHTML = html;
+}
+
+function setDataSourceTesterTable(rows, meta = {}) {
+    const normalisedRows = Array.isArray(rows) ? rows : [];
+    const totalRecords = Number.isFinite(meta.totalRecords) ? meta.totalRecords : normalisedRows.length;
+    dataSourceTesterState.tableRows = normalisedRows;
+    dataSourceTesterState.tableMeta = {
+        total: totalRecords,
+        sourceLabel: meta.sourceLabel || '',
+    };
+    dataSourceTesterState.tableVisible = false;
+
+    const section = document.getElementById('dataSourceTesterTableSection');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const toggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    const labelEl = document.getElementById('dataSourceTesterTableToggleLabel');
+    const noteEl = document.getElementById('dataSourceTesterTableNote');
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (tbody) tbody.innerHTML = '';
+    if (wrapper) wrapper.classList.add('hidden');
+    if (toggleBtn) {
+        toggleBtn.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.disabled = normalisedRows.length === 0;
+    }
+    if (labelEl) {
+        labelEl.textContent = normalisedRows.length > 0
+            ? `查看資料表格（${normalisedRows.length} 筆）`
+            : '查看資料表格';
+    } else if (toggleBtn) {
+        toggleBtn.textContent = normalisedRows.length > 0
+            ? `查看資料表格（${normalisedRows.length} 筆）`
+            : '查看資料表格';
+    }
+    if (section) {
+        const shouldHide = normalisedRows.length === 0 && !Number.isFinite(totalRecords);
+        section.classList.toggle('hidden', shouldHide);
+    }
+    if (noteEl) {
+        const noteParts = [];
+        if (meta.sourceLabel) {
+            noteParts.push(`來源：${testerEscapeHtml(meta.sourceLabel)}`);
+        }
+        if (Number.isFinite(totalRecords)) {
+            noteParts.push(`原始筆數 ${testerEscapeHtml(totalRecords)}`);
+        }
+        if (normalisedRows.length > 0) {
+            noteParts.push('資料依原始順序顯示');
+        } else {
+            noteParts.push('未解析到可顯示的價量欄位，請檢查原始回應。');
+        }
+        noteEl.innerHTML = noteParts.join(' ・ ');
+        noteEl.classList.toggle('hidden', noteParts.length === 0);
+    }
+}
+
+function toggleDataSourceTesterTable(forceOpen) {
+    const rows = Array.isArray(dataSourceTesterState.tableRows) ? dataSourceTesterState.tableRows : [];
+    if (rows.length === 0) {
+        return;
+    }
+    const shouldOpen = typeof forceOpen === 'boolean'
+        ? forceOpen
+        : !dataSourceTesterState.tableVisible;
+    dataSourceTesterState.tableVisible = shouldOpen;
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const toggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    if (wrapper) {
+        wrapper.classList.toggle('hidden', !shouldOpen);
+    }
+    if (toggleBtn) {
+        toggleBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+        toggleBtn.classList.toggle('border-primary', shouldOpen);
+        toggleBtn.classList.toggle('text-primary', shouldOpen);
+        toggleBtn.classList.toggle('bg-primary/10', shouldOpen);
+    }
+    if (shouldOpen) {
+        renderDataSourceTesterTableRows();
+    }
+}
+
+function parseTesterNumericValue(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    const text = String(value).trim();
+    if (!text || /^[-]+$/.test(text) || /^\u2014+$/.test(text)) {
+        return null;
+    }
+    const normalised = text.replace(/,/g, '').replace(/\s+/g, '');
+    if (!normalised) {
+        return null;
+    }
+    const parsed = Number(normalised);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pickTesterValue(row, keys) {
+    if (!row || typeof row !== 'object') return undefined;
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined && row[key] !== null) {
+            return row[key];
+        }
+    }
+    return undefined;
+}
+
+function normaliseTesterDate(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return '';
+        const date = new Date(value);
+        if (!Number.isFinite(date.getTime())) return '';
+        return date.toISOString().slice(0, 10);
+    }
+    const text = String(value).trim();
+    if (!text) return '';
+    const rocDate = rocToIsoDate(text);
+    if (rocDate) return rocDate;
+    if (/^\d{8}$/.test(text)) {
+        const year = text.slice(0, 4);
+        const month = text.slice(4, 6);
+        const day = text.slice(6, 8);
+        return `${year}-${month}-${day}`;
+    }
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(text)) {
+        return text.slice(0, 10);
+    }
+    return text;
+}
+
+function normaliseDataSourceTesterRows(payload, parseMode) {
+    const rows = [];
+    if (parseMode === 'adjustedComposer') {
+        const adjustedRows = Array.isArray(payload?.data) ? payload.data : [];
+        adjustedRows.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = normaliseTesterDate(pickTesterValue(row, ['date', 'Date', 'tradeDate', 'tradingDate']));
+            const open = parseTesterNumericValue(
+                pickTesterValue(row, ['open', 'Open', 'openingPrice', 'openPrice', 'OpeningPrice']),
+            );
+            const high = parseTesterNumericValue(
+                pickTesterValue(row, ['high', 'High', 'max', 'Max', 'highestPrice', 'highPrice', 'HighPrice']),
+            );
+            const low = parseTesterNumericValue(
+                pickTesterValue(row, ['low', 'Low', 'min', 'Min', 'lowestPrice', 'lowPrice', 'LowPrice']),
+            );
+            const close = parseTesterNumericValue(
+                pickTesterValue(row, ['close', 'Close', 'closingPrice', 'ClosingPrice', 'adjClose', 'AdjClose', 'price']),
+            );
+            const volume = parseTesterNumericValue(
+                pickTesterValue(row, ['volume', 'Volume', 'TradingVolume', 'tradeVolume', 'turnover', 'vol', 'Vol']),
+            );
+            if (!date && !Number.isFinite(open) && !Number.isFinite(high) && !Number.isFinite(low) && !Number.isFinite(close) && !Number.isFinite(volume)) {
+                return;
+            }
+            rows.push({
+                date: date || '—',
+                open,
+                high,
+                low,
+                close,
+                volume,
+            });
+        });
+        return rows;
+    }
+
+    const aaData = Array.isArray(payload?.aaData) ? payload.aaData : [];
+    if (aaData.length > 0) {
+        aaData.forEach((row) => {
+            if (!Array.isArray(row) || row.length === 0) return;
+            const date = normaliseTesterDate(row[0]);
+            const volume = parseTesterNumericValue(row[1]);
+            const open = parseTesterNumericValue(row[3]);
+            const high = parseTesterNumericValue(row[4]);
+            const low = parseTesterNumericValue(row[5]);
+            const close = parseTesterNumericValue(row[6]);
+            if (!date && !Number.isFinite(open) && !Number.isFinite(high) && !Number.isFinite(low) && !Number.isFinite(close) && !Number.isFinite(volume)) {
+                return;
+            }
+            rows.push({
+                date: date || '—',
+                open,
+                high,
+                low,
+                close,
+                volume,
+            });
+        });
+        return rows;
+    }
+
+    const dataRows = Array.isArray(payload?.data) ? payload.data : [];
+    dataRows.forEach((row) => {
+        if (Array.isArray(row)) {
+            if (row.length === 0) return;
+            const date = normaliseTesterDate(row[0]);
+            const open = parseTesterNumericValue(row[1]);
+            const high = parseTesterNumericValue(row[2]);
+            const low = parseTesterNumericValue(row[3]);
+            const close = parseTesterNumericValue(row[4]);
+            const volume = parseTesterNumericValue(row[5]);
+            if (!date && !Number.isFinite(open) && !Number.isFinite(high) && !Number.isFinite(low) && !Number.isFinite(close) && !Number.isFinite(volume)) {
+                return;
+            }
+            rows.push({
+                date: date || '—',
+                open,
+                high,
+                low,
+                close,
+                volume,
+            });
+            return;
+        }
+        if (!row || typeof row !== 'object') return;
+        const date = normaliseTesterDate(pickTesterValue(row, ['date', 'Date', 'tradeDate', 'tradingDate']));
+        const open = parseTesterNumericValue(
+            pickTesterValue(row, ['open', 'Open', 'openingPrice', 'openPrice', 'OpeningPrice']),
+        );
+        const high = parseTesterNumericValue(
+            pickTesterValue(row, ['high', 'High', 'max', 'Max', 'highestPrice', 'highPrice', 'HighPrice']),
+        );
+        const low = parseTesterNumericValue(
+            pickTesterValue(row, ['low', 'Low', 'min', 'Min', 'lowestPrice', 'lowPrice', 'LowPrice']),
+        );
+        const close = parseTesterNumericValue(
+            pickTesterValue(row, ['close', 'Close', 'closingPrice', 'ClosingPrice', 'adjClose', 'AdjClose', 'price']),
+        );
+        const volume = parseTesterNumericValue(
+            pickTesterValue(row, ['volume', 'Volume', 'TradingVolume', 'tradeVolume', 'turnover', 'vol', 'Vol']),
+        );
+        if (!date && !Number.isFinite(open) && !Number.isFinite(high) && !Number.isFinite(low) && !Number.isFinite(close) && !Number.isFinite(volume)) {
+            return;
+        }
+        rows.push({
+            date: date || '—',
+            open,
+            high,
+            low,
+            close,
+            volume,
+        });
+    });
+
+    return rows;
+}
+
 function renderDataSourceTesterButtons(sources, disabled) {
     const container = document.getElementById('dataSourceTesterButtons');
     if (!container) return;
@@ -1038,6 +1373,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         requestUrl = `${endpoint}?${params.toString()}`;
     }
 
+    resetDataSourceTesterTable();
     dataSourceTesterState.busy = true;
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
@@ -1059,9 +1395,12 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         }
         let detailHtml = '';
         const extraSections = [];
+        let reportedTotal = null;
+        let tableSourceLabel = sourceLabel;
         if (parseMode === 'adjustedComposer') {
             const rows = Array.isArray(payload.data) ? payload.data : [];
             const total = rows.length;
+            reportedTotal = Number.isFinite(total) ? total : rows.length;
             const firstDate = rows.length > 0 ? rows[0]?.date || start : start;
             const lastDate = rows.length > 0 ? rows[rows.length - 1]?.date || end : end;
             const summary = payload && typeof payload.summary === 'object' ? payload.summary : {};
@@ -1069,6 +1408,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 ? summary.sources.join(' + ')
                 : null;
             const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
+            tableSourceLabel = sourceSummary;
             const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
             const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
             const aggregatedEvents = Array.isArray(payload?.dividendEvents) ? payload.dividendEvents : [];
@@ -1441,6 +1781,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 : aaData.length > 0
                     ? aaData.length
                     : dataRows.length;
+            reportedTotal = Number.isFinite(total) ? total : dataRows.length;
             const isoDates = aaData
                 .map((row) => (Array.isArray(row) ? rocToIsoDate(row[0]) : null))
                 .filter((value) => Boolean(value));
@@ -1461,6 +1802,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 : payload?.dataSource
                     ? [payload.dataSource]
                     : ['未知資料來源'];
+            tableSourceLabel = sourcesRaw.join('、');
             const detailLines = [
                 `來源摘要: <span class="font-semibold">${testerEscapeHtml(sourcesRaw.join('、'))}</span>`,
                 `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
@@ -1473,11 +1815,18 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             }
             detailHtml = detailLines.join('<br>');
         }
+        const tableRows = normaliseDataSourceTesterRows(payload, parseMode);
+        setDataSourceTesterTable(tableRows, {
+            sourceLabel: tableSourceLabel,
+            totalRecords: reportedTotal,
+        });
+
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
     } catch (error) {
+        resetDataSourceTesterTable();
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
@@ -1513,6 +1862,7 @@ function refreshDataSourceTester() {
     if (missingInputs) {
         messageLines.push('請輸入股票代碼並選擇開始與結束日期後，再執行資料來源測試。');
         clearTesterResult();
+        resetDataSourceTesterTable();
     } else if (adjusted) {
         messageLines.push(
             splitEnabled
@@ -1561,6 +1911,7 @@ function toggleDataSourceTester(forceOpen) {
     } else {
         toggleBtn.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
         toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleDataSourceTesterTable(false);
     }
 }
 
@@ -1597,6 +1948,11 @@ function initDataSourceTester() {
             }
             refreshDataSourceTester();
         });
+    }
+
+    const tableToggleBtn = document.getElementById('dataSourceTesterTableToggle');
+    if (tableToggleBtn) {
+        tableToggleBtn.addEventListener('click', () => toggleDataSourceTesterTable());
     }
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
