@@ -1,3 +1,10 @@
+## 2026-09-30 — Patch LB-SENSITIVITY-ANNUAL-20260930A
+- **Scope**: 敏感度分析漂移計算與方向偏移統一採用年化報酬。
+- **Updates**:
+  - `js/worker.js` 改以年化報酬差異推算敏感度漂移、方向偏移與摘要統計，缺少年化資訊時才回退至總報酬率，確保 PP 與漂移指標一致。
+  - `js/worker.js` 回傳敏感度基準時同步輸出年化報酬快照，情境結果的年化報酬與總報酬率分別保留，方便前端渲染 tooltip 與備援資訊。
+- **Testing**: 容器環境無法連線 Proxy 與啟動瀏覽器，待實際回測確認敏感度卡片顯示的年化漂移與 PP 資訊。
+
 ## 2026-09-12 — Patch LB-MASCOT-HTTPS-20260912A
 - **Scope**: Loading mascot 圖片來源的安全協定統一。
 - **Updates**:
