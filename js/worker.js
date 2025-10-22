@@ -3767,7 +3767,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3899,7 +3904,141 @@ async function fetchAdjustedPriceRange(
   };
 }
 
-function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
+const proxyAaDataFieldAliases = {
+  volume: [
+    'volume',
+    'tradingvolume',
+    'tradevolume',
+    'totalvolume',
+    '成交股數',
+    '成交股數千股',
+    '成交量',
+    '成交量千股',
+  ],
+  open: [
+    'open',
+    'openprice',
+    'opening',
+    'openingprice',
+    '開盤價',
+    '開盤價元',
+    '開盤',
+  ],
+  high: [
+    'high',
+    'highestprice',
+    '最高價',
+    '最高價元',
+    '最高',
+  ],
+  low: [
+    'low',
+    'lowestprice',
+    '最低價',
+    '最低價元',
+    '最低',
+  ],
+  close: [
+    'close',
+    'closingprice',
+    'adjclose',
+    '收盤價',
+    '收盤價元',
+    '收盤',
+  ],
+};
+
+function normalizeProxyFieldKey(key) {
+  if (key === null || key === undefined) return '';
+  return String(key)
+    .trim()
+    .toLowerCase()
+    .replace(/[()（）]/g, '')
+    .replace(/\s+/g, '');
+}
+
+function parseProxyNumeric(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  const normalized = String(value).replace(/,/g, '').trim();
+  if (!normalized) return null;
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : null;
+}
+
+function detectProxyAaDataSchema(entry, fields) {
+  if (!Array.isArray(entry) || entry.length === 0) return null;
+  const length = entry.length;
+  const normalizedFields = Array.isArray(fields) && fields.length === length
+    ? fields.map((field) => normalizeProxyFieldKey(field))
+    : null;
+
+  if (normalizedFields) {
+    const findIndex = (aliases) => {
+      for (const alias of aliases) {
+        const normalizedAlias = normalizeProxyFieldKey(alias);
+        const idx = normalizedFields.indexOf(normalizedAlias);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    const volumeIdx = findIndex(proxyAaDataFieldAliases.volume);
+    const openIdx = findIndex(proxyAaDataFieldAliases.open);
+    const highIdx = findIndex(proxyAaDataFieldAliases.high);
+    const lowIdx = findIndex(proxyAaDataFieldAliases.low);
+    const closeIdx = findIndex(proxyAaDataFieldAliases.close);
+    if ([volumeIdx, openIdx, highIdx, lowIdx, closeIdx].every((idx) => idx >= 0 && idx < length)) {
+      return {
+        volume: volumeIdx,
+        open: openIdx,
+        high: highIdx,
+        low: lowIdx,
+        close: closeIdx,
+      };
+    }
+  }
+
+  const candidateSets = [
+    { volume: 1, open: 3, high: 4, low: 5, close: 6 },
+    { volume: 2, open: 4, high: 5, low: 6, close: 7 },
+    { volume: 3, open: 5, high: 6, low: 7, close: 8 },
+  ];
+  const priceThreshold = 1_000_000;
+
+  let bestSchema = null;
+  let bestScore = -Infinity;
+  candidateSets.forEach((schema) => {
+    const indexes = [schema.volume, schema.open, schema.high, schema.low, schema.close];
+    if (indexes.some((idx) => idx < 0 || idx >= length)) return;
+    const open = parseProxyNumeric(entry[schema.open]);
+    const high = parseProxyNumeric(entry[schema.high]);
+    const low = parseProxyNumeric(entry[schema.low]);
+    const close = parseProxyNumeric(entry[schema.close]);
+    const priceValues = [open, high, low, close];
+    const priceScore = priceValues.reduce(
+      (score, value) => score + (value !== null && Math.abs(value) <= priceThreshold ? 1 : 0),
+      0,
+    );
+    if (priceScore === 0) return;
+    const tolerance = 1e-6;
+    let penalty = 0;
+    if (open !== null && high !== null && open > high + tolerance) penalty += 1;
+    if (close !== null && high !== null && close > high + tolerance) penalty += 1;
+    if (open !== null && low !== null && open < low - tolerance) penalty += 1;
+    if (close !== null && low !== null && close < low - tolerance) penalty += 1;
+    const score = priceScore * 10 - penalty;
+    if (score > bestScore) {
+      bestScore = score;
+      bestSchema = schema;
+    }
+  });
+
+  return bestSchema;
+}
+
+function normalizeProxyRow(item, isTpex, startDateObj, endDateObj, fields) {
   try {
     let dateStr = null;
     let open = null,
@@ -3909,31 +4048,29 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       volume = 0;
     if (Array.isArray(item)) {
       dateStr = item[0];
-      const parseNumber = (val) => {
-        if (val === null || val === undefined) return null;
-        const num = Number(String(val).replace(/,/g, ""));
-        return Number.isFinite(num) ? num : null;
-      };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
+      const schema = detectProxyAaDataSchema(item, fields);
+      if (schema) {
+        volume = parseProxyNumeric(item[schema.volume]) || 0;
+        open = parseProxyNumeric(item[schema.open]);
+        high = parseProxyNumeric(item[schema.high]);
+        low = parseProxyNumeric(item[schema.low]);
+        close = parseProxyNumeric(item[schema.close]);
       } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
+        const baseVolumeIdx = isTpex ? 1 : 1;
+        const fallbackVolume = parseProxyNumeric(item[baseVolumeIdx]);
+        volume = Number.isFinite(fallbackVolume) ? fallbackVolume : 0;
+        open = parseProxyNumeric(item[3]);
+        high = parseProxyNumeric(item[4]);
+        low = parseProxyNumeric(item[5]);
+        close = parseProxyNumeric(item[6]);
       }
     } else if (item && typeof item === "object") {
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseProxyNumeric(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseProxyNumeric(item.high ?? item.High ?? item.max ?? null);
+      low = parseProxyNumeric(item.low ?? item.Low ?? item.min ?? null);
+      close = parseProxyNumeric(item.close ?? item.Close ?? null);
+      volume = parseProxyNumeric(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0) ?? 0;
     } else {
       return null;
     }
@@ -4432,6 +4569,7 @@ async function fetchCurrentMonthGapPatch({
         isTpex,
         startDateObj,
         endDateObj,
+        Array.isArray(payload?.fields) ? payload.fields : null,
       );
       if (
         normalized &&
@@ -4577,7 +4715,13 @@ async function tryFetchRangeFromBlob({
 
   const normalizedRows = payload.aaData
     .map((row) =>
-      normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj),
+      normalizeProxyRow(
+        row,
+        marketKey === "TPEX",
+        startDateObj,
+        endDateObj,
+        Array.isArray(payload?.fields) ? payload.fields : null,
+      ),
     )
     .filter(Boolean);
   if (normalizedRows.length === 0) {
@@ -5516,6 +5660,7 @@ async function fetchStockData(
               isTpex,
               startDateObj,
               endDateObj,
+              Array.isArray(payload?.fields) ? payload.fields : null,
             );
             if (normalizedRow) normalized.push(normalizedRow);
           });

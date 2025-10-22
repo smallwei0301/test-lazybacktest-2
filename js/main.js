@@ -453,7 +453,12 @@ window.lazybacktestMultiStagePanel = {
 const dataSourceTesterState = {
     open: false,
     busy: false,
+    tableOpen: false,
+    lastRows: [],
+    lastSourceLabel: '',
 };
+
+const DATA_SOURCE_TESTER_TABLE_LIMIT = 120;
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -463,6 +468,139 @@ const testerAdjustmentReasonLabels = {
     invalidBaseClose: '無效基準價',
     ratioOutOfRange: '調整比例異常',
 };
+
+const testerAaDataFieldAliases = {
+    volume: [
+        'volume',
+        'tradingvolume',
+        'tradevolume',
+        'totalvolume',
+        '成交股數',
+        '成交股數千股',
+        '成交量',
+        '成交量千股',
+        '成交股數股',
+        '成交股數股數',
+    ],
+    open: [
+        'open',
+        'openprice',
+        'opening',
+        'openingprice',
+        '開盤價',
+        '開盤價元',
+        '開盤',
+        '開盤指數',
+    ],
+    high: [
+        'high',
+        'highestprice',
+        '最高價',
+        '最高價元',
+        '最高',
+        '最高指數',
+    ],
+    low: [
+        'low',
+        'lowestprice',
+        '最低價',
+        '最低價元',
+        '最低',
+        '最低指數',
+    ],
+    close: [
+        'close',
+        'closingprice',
+        'adjclose',
+        '收盤價',
+        '收盤價元',
+        '收盤',
+        '收盤指數',
+    ],
+};
+
+function normalizeTesterFieldKey(key) {
+    if (key === null || key === undefined) return '';
+    return String(key)
+        .trim()
+        .toLowerCase()
+        .replace(/[()（）]/g, '')
+        .replace(/\s+/g, '');
+}
+
+function detectTesterAaDataSchema(entry, fields) {
+    if (!Array.isArray(entry) || entry.length === 0) return null;
+    const length = entry.length;
+    const normalizedFields = Array.isArray(fields) && fields.length === length
+        ? fields.map((field) => normalizeTesterFieldKey(field))
+        : null;
+
+    if (normalizedFields) {
+        const findIndex = (aliases) => {
+            for (const alias of aliases) {
+                const normalizedAlias = normalizeTesterFieldKey(alias);
+                const idx = normalizedFields.indexOf(normalizedAlias);
+                if (idx !== -1) return idx;
+            }
+            return -1;
+        };
+        const volumeIdx = findIndex(testerAaDataFieldAliases.volume);
+        const openIdx = findIndex(testerAaDataFieldAliases.open);
+        const highIdx = findIndex(testerAaDataFieldAliases.high);
+        const lowIdx = findIndex(testerAaDataFieldAliases.low);
+        const closeIdx = findIndex(testerAaDataFieldAliases.close);
+        if ([volumeIdx, openIdx, highIdx, lowIdx, closeIdx].every((idx) => idx >= 0 && idx < length)) {
+            return {
+                volume: volumeIdx,
+                open: openIdx,
+                high: highIdx,
+                low: lowIdx,
+                close: closeIdx,
+            };
+        }
+    }
+
+    const candidateSets = [
+        { volume: 1, open: 3, high: 4, low: 5, close: 6 },
+        { volume: 2, open: 4, high: 5, low: 6, close: 7 },
+        { volume: 3, open: 5, high: 6, low: 7, close: 8 },
+    ];
+    const priceThreshold = 1_000_000;
+    const parseCandidateNumber = (idx) => {
+        if (idx < 0 || idx >= length) return null;
+        return normalizeTesterNumber(entry[idx]);
+    };
+
+    let bestSchema = null;
+    let bestScore = -Infinity;
+    candidateSets.forEach((schema) => {
+        const indexes = [schema.volume, schema.open, schema.high, schema.low, schema.close];
+        if (indexes.some((idx) => idx < 0 || idx >= length)) return;
+        const open = parseCandidateNumber(schema.open);
+        const high = parseCandidateNumber(schema.high);
+        const low = parseCandidateNumber(schema.low);
+        const close = parseCandidateNumber(schema.close);
+        const priceValues = [open, high, low, close];
+        const priceScore = priceValues.reduce(
+            (score, value) => score + (value !== null && Math.abs(value) <= priceThreshold ? 1 : 0),
+            0,
+        );
+        if (priceScore === 0) return;
+        const tolerance = 1e-6;
+        let penalty = 0;
+        if (open !== null && high !== null && open > high + tolerance) penalty += 1;
+        if (close !== null && high !== null && close > high + tolerance) penalty += 1;
+        if (open !== null && low !== null && open < low - tolerance) penalty += 1;
+        if (close !== null && low !== null && close < low - tolerance) penalty += 1;
+        const score = priceScore * 10 - penalty;
+        if (score > bestScore) {
+            bestScore = score;
+            bestSchema = schema;
+        }
+    });
+
+    return bestSchema;
+}
 
 function testerEscapeHtml(text) {
     if (text === null || text === undefined) return '';
@@ -502,6 +640,274 @@ function formatTesterFieldHints(fields) {
             return numeric ? `${key}=${raw}（解析後 ${numeric}）` : `${key}=${raw}`;
         })
         .join('、');
+}
+
+function normalizeTesterNumber(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.replace(/,/g, '').trim();
+        if (!trimmed || trimmed === '--' || trimmed === '-') return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'bigint') {
+        return Number(value);
+    }
+    return null;
+}
+
+function normalizeTesterDate(value) {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().split('T')[0];
+    }
+    const raw = String(value).trim();
+    if (!raw) return '';
+    if (/^\d{3}\/\d{1,2}\/\d{1,2}$/.test(raw)) {
+        return rocToIsoDate(raw) || '';
+    }
+    if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(raw)) {
+        const normalized = raw.replace(/\//g, '-');
+        const [y, m, d] = normalized.split('-');
+        return `${y.padStart(4, '0')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    if (/^\d{8}$/.test(raw)) {
+        return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    }
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+        if (raw.length === 8) {
+            return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+        }
+        if (numeric > 1e11) {
+            const fromMs = new Date(numeric);
+            if (!Number.isNaN(fromMs.getTime())) return fromMs.toISOString().split('T')[0];
+        }
+        if (numeric > 1e9) {
+            const fromSeconds = new Date(numeric * 1000);
+            if (!Number.isNaN(fromSeconds.getTime())) return fromSeconds.toISOString().split('T')[0];
+        }
+    }
+    return raw;
+}
+
+function resolveTesterValue(row, keys) {
+    if (!row || typeof row !== 'object' || !Array.isArray(keys)) return null;
+    for (const key of keys) {
+        if (key in row) {
+            const numeric = normalizeTesterNumber(row[key]);
+            if (numeric !== null) return numeric;
+        }
+    }
+    return null;
+}
+
+function normalizeTesterRows(payload, parseMode) {
+    const rows = [];
+    const pushRow = (rawDate, rawOpen, rawHigh, rawLow, rawClose, rawVolume) => {
+        const date = normalizeTesterDate(rawDate);
+        const open = normalizeTesterNumber(rawOpen);
+        const high = normalizeTesterNumber(rawHigh);
+        const low = normalizeTesterNumber(rawLow);
+        const close = normalizeTesterNumber(rawClose);
+        const volume = normalizeTesterNumber(rawVolume);
+        if (!date) return;
+        const hasValue = [open, high, low, close, volume].some((value) => value !== null);
+        if (!hasValue) return;
+        rows.push({ date, open, high, low, close, volume });
+    };
+
+    if (parseMode === 'adjustedComposer') {
+        const dataRows = Array.isArray(payload?.data) ? payload.data : [];
+        dataRows.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = row.date || row.trade_date || row.tradeDate || row.tradingDate;
+            const open = resolveTesterValue(row, ['open', 'Open', 'openPrice', 'openingPrice', 'opening_price']);
+            const high = resolveTesterValue(row, ['high', 'High', 'max', 'highestPrice', 'highest_price']);
+            const low = resolveTesterValue(row, ['low', 'Low', 'min', 'lowestPrice', 'lowest_price']);
+            const close = resolveTesterValue(row, ['close', 'Close', 'adjClose', 'closingPrice', 'closing_price']);
+            const volume = resolveTesterValue(row, ['volume', 'Volume', 'Trading_Volume', 'tradingVolume', 'rawVolume']);
+            pushRow(date, open, high, low, close, volume);
+        });
+    }
+
+    if (rows.length === 0 && Array.isArray(payload?.aaData)) {
+        const fields = Array.isArray(payload?.fields) ? payload.fields : null;
+        payload.aaData.forEach((entry) => {
+            if (!Array.isArray(entry) || entry.length < 7) return;
+            const schema = detectTesterAaDataSchema(entry, fields);
+            if (!schema) return;
+            const dateRaw = entry[0];
+            const date = rocToIsoDate(dateRaw) || normalizeTesterDate(dateRaw);
+            if (!date) return;
+            const { volume: volumeIdx, open: openIdx, high: highIdx, low: lowIdx, close: closeIdx } = schema;
+            pushRow(
+                date,
+                entry[openIdx],
+                entry[highIdx],
+                entry[lowIdx],
+                entry[closeIdx],
+                entry[volumeIdx],
+            );
+        });
+    }
+
+    if (rows.length === 0 && Array.isArray(payload?.data)) {
+        payload.data.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = row.date || row.Date || row.trade_date || row.trading_date;
+            const open = resolveTesterValue(row, ['open', 'Open', 'open_price', 'first_price', 'opening_price']);
+            const high = resolveTesterValue(row, ['high', 'High', 'max', 'highest_price']);
+            const low = resolveTesterValue(row, ['low', 'Low', 'min', 'lowest_price']);
+            const close = resolveTesterValue(row, ['close', 'Close', 'price', 'closing_price', 'adj_close']);
+            const volume = resolveTesterValue(row, ['volume', 'Volume', 'Trading_Volume', 'trade_volume', 'total_volume']);
+            pushRow(date, open, high, low, close, volume);
+        });
+    }
+
+    if (rows.length === 0 && payload?.chart?.result?.[0]) {
+        const result = payload.chart.result[0];
+        const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+        const quote = result?.indicators?.quote?.[0] || {};
+        for (let i = 0; i < timestamps.length; i += 1) {
+            const ts = timestamps[i];
+            if (!Number.isFinite(ts)) continue;
+            const date = normalizeTesterDate(ts * 1000);
+            const open = Array.isArray(quote.open) ? quote.open[i] : null;
+            const high = Array.isArray(quote.high) ? quote.high[i] : null;
+            const low = Array.isArray(quote.low) ? quote.low[i] : null;
+            const close = Array.isArray(quote.close) ? quote.close[i] : null;
+            const volume = Array.isArray(quote.volume) ? quote.volume[i] : null;
+            pushRow(date, open, high, low, close, volume);
+        }
+    }
+
+    return rows;
+}
+
+function formatTesterTablePrice(value) {
+    if (!Number.isFinite(value)) return '—';
+    const fixed = Number(value).toFixed(4).replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
+    return fixed;
+}
+
+function formatTesterTableVolume(value) {
+    if (!Number.isFinite(value)) return '—';
+    const rounded = Math.round(Number(value));
+    return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function renderTesterTableRows() {
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const rows = Array.isArray(dataSourceTesterState.lastRows) ? dataSourceTesterState.lastRows : [];
+    const limit = Math.min(rows.length, DATA_SOURCE_TESTER_TABLE_LIMIT);
+    for (let i = 0; i < limit; i += 1) {
+        const row = rows[i];
+        const tr = document.createElement('tr');
+        if (i % 2 === 1) {
+            tr.className = 'bg-slate-50/60';
+        }
+        const dateTd = document.createElement('td');
+        dateTd.className = 'px-3 py-1.5 border-b text-left whitespace-nowrap';
+        dateTd.style.borderColor = 'var(--border)';
+        dateTd.textContent = row?.date || '—';
+        tr.appendChild(dateTd);
+
+        const numericValues = [
+            formatTesterTablePrice(row?.open),
+            formatTesterTablePrice(row?.high),
+            formatTesterTablePrice(row?.low),
+            formatTesterTablePrice(row?.close),
+            formatTesterTableVolume(row?.volume),
+        ];
+        numericValues.forEach((text) => {
+            const td = document.createElement('td');
+            td.className = 'px-3 py-1.5 border-b text-right font-mono';
+            td.style.borderColor = 'var(--border)';
+            td.textContent = text;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    }
+}
+
+function updateTesterTableAvailability() {
+    const controls = document.getElementById('dataSourceTesterTableControls');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const toggleBtn = document.getElementById('openDataSourceTesterTable');
+    const countEl = document.getElementById('dataSourceTesterTableCount');
+    const sourceEl = document.getElementById('dataSourceTesterTableSource');
+    const noteEl = document.getElementById('dataSourceTesterTableNote');
+    if (!controls || !wrapper || !toggleBtn || !noteEl) return;
+    const rows = Array.isArray(dataSourceTesterState.lastRows) ? dataSourceTesterState.lastRows : [];
+    const hasRows = rows.length > 0;
+    controls.classList.toggle('hidden', !hasRows);
+    wrapper.classList.toggle('hidden', !hasRows || !dataSourceTesterState.tableOpen);
+    toggleBtn.disabled = dataSourceTesterState.busy || !hasRows;
+    toggleBtn.textContent = dataSourceTesterState.tableOpen ? '隱藏資料表格' : '查看資料表格';
+    toggleBtn.setAttribute('aria-expanded', dataSourceTesterState.tableOpen ? 'true' : 'false');
+
+    if (hasRows) {
+        const total = rows.length;
+        const limit = Math.min(rows.length, DATA_SOURCE_TESTER_TABLE_LIMIT);
+        if (countEl) {
+            countEl.textContent = `共 ${total} 筆`;
+            countEl.classList.remove('hidden');
+        }
+        if (sourceEl) {
+            if (dataSourceTesterState.lastSourceLabel) {
+                sourceEl.textContent = `來源：${dataSourceTesterState.lastSourceLabel}`;
+                sourceEl.classList.remove('hidden');
+            } else {
+                sourceEl.textContent = '';
+                sourceEl.classList.add('hidden');
+            }
+        }
+        noteEl.textContent = total > limit
+            ? `顯示前 ${limit} 筆，總計 ${total} 筆資料。`
+            : `共顯示 ${total} 筆資料。`;
+    } else {
+        if (countEl) {
+            countEl.textContent = '';
+            countEl.classList.add('hidden');
+        }
+        if (sourceEl) {
+            sourceEl.textContent = '';
+            sourceEl.classList.add('hidden');
+        }
+        noteEl.textContent = '';
+    }
+}
+
+function clearTesterTableData() {
+    dataSourceTesterState.lastRows = [];
+    dataSourceTesterState.lastSourceLabel = '';
+    dataSourceTesterState.tableOpen = false;
+    renderTesterTableRows();
+    updateTesterTableAvailability();
+}
+
+function setTesterTableData(rows, sourceLabel) {
+    dataSourceTesterState.lastRows = Array.isArray(rows) ? rows : [];
+    dataSourceTesterState.lastSourceLabel = sourceLabel || '';
+    dataSourceTesterState.tableOpen = false;
+    renderTesterTableRows();
+    updateTesterTableAvailability();
+}
+
+function toggleTesterTable() {
+    if (dataSourceTesterState.busy) return;
+    if (!Array.isArray(dataSourceTesterState.lastRows) || dataSourceTesterState.lastRows.length === 0) return;
+    dataSourceTesterState.tableOpen = !dataSourceTesterState.tableOpen;
+    if (dataSourceTesterState.tableOpen) {
+        renderTesterTableRows();
+    }
+    updateTesterTableAvailability();
 }
 
 function buildTesterDebugStepsHtml(steps) {
@@ -991,6 +1397,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     const { start, end } = getDateRangeFromUI();
     if (!stockNo || !start || !end) {
         showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
+        clearTesterTableData();
         return;
     }
     const uiMarket = getCurrentMarketFromUI();
@@ -999,6 +1406,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     const splitEnabled = isSplitAdjustmentEnabled();
     let requestUrl = '';
     let parseMode = 'proxy';
+    clearTesterTableData();
     if (adjusted) {
         if (sourceId === 'netlifyAdjusted') {
             const params = new URLSearchParams({
@@ -1039,6 +1447,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
 
     dataSourceTesterState.busy = true;
+    updateTesterTableAvailability();
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
 
@@ -1058,6 +1467,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             throw new Error(message);
         }
         let detailHtml = '';
+        let tableSourceLabel = sourceLabel;
         const extraSections = [];
         if (parseMode === 'adjustedComposer') {
             const rows = Array.isArray(payload.data) ? payload.data : [];
@@ -1069,6 +1479,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 ? summary.sources.join(' + ')
                 : null;
             const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
+            tableSourceLabel = sourceSummary;
             const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
             const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
             const aggregatedEvents = Array.isArray(payload?.dividendEvents) ? payload.dividendEvents : [];
@@ -1466,6 +1877,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
                 `涵蓋區間: <span class="font-semibold">${testerEscapeHtml(firstDate)} ~ ${testerEscapeHtml(lastDate)}</span>`,
             ];
+            tableSourceLabel = sourcesRaw.join('、');
             if (payload?.fallback?.reason) {
                 const fallbackSource = testerEscapeHtml(payload.dataSource || '備援來源');
                 const fallbackReason = testerEscapeHtml(payload.fallback.reason);
@@ -1473,11 +1885,14 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             }
             detailHtml = detailLines.join('<br>');
         }
+        const normalizedRows = normalizeTesterRows(payload, parseMode);
+        setTesterTableData(normalizedRows, tableSourceLabel);
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
     } catch (error) {
+        clearTesterTableData();
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
@@ -1542,6 +1957,11 @@ function refreshDataSourceTester() {
 
     hintEl.style.color = messageColor;
     hintEl.innerHTML = messageLines.map((line) => testerEscapeHtml(line)).join('<br>');
+    if (missingInputs) {
+        clearTesterTableData();
+    } else {
+        updateTesterTableAvailability();
+    }
     setTesterButtonsDisabled(dataSourceTesterState.busy || missingInputs);
 }
 
@@ -1570,6 +1990,11 @@ function initDataSourceTester() {
     if (!toggleBtn || !closeBtn) return;
     toggleBtn.addEventListener('click', () => toggleDataSourceTester());
     closeBtn.addEventListener('click', () => toggleDataSourceTester(false));
+
+    const tableToggleBtn = document.getElementById('openDataSourceTesterTable');
+    if (tableToggleBtn) {
+        tableToggleBtn.addEventListener('click', toggleTesterTable);
+    }
 
     const stockNoInput = document.getElementById('stockNo');
     if (stockNoInput) {

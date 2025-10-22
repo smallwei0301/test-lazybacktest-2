@@ -1,4 +1,11 @@
 
+## 2026-07-30 — Patch LB-DATASOURCE-TABLE-20260730A
+- **Scope**: 開發者模式資料來源測試表格閱覽。
+- **Updates**:
+  - `index.html` 於資料來源測試卡加入「查看資料表格」控制鈕與表格容器，可展開最近一次測試回傳的開高低收量資訊。
+  - `js/main.js` 正規化各來源回傳的日線資料，儲存最新樣本、提供表格切換、更新按鈕狀態，並在測試流程中同步清除或還原表格。
+- **Testing**: 容器環境無法連線 Proxy／啟動瀏覽器，待實機以開發者模式測試資料來源按鈕確認表格載入。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
@@ -1486,3 +1493,19 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
+- **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
+- **Fix**:
+  - `js/worker.js` 的 `fetchAdjustedPriceRange` 將 `toNumber` 更新為移除千分位逗號並忽略空字串，確保成交量能被正確解析。
+  - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
+- **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-24 — Patch LB-DATASOURCE-VOLUME-20260824A
+- **Issue recap**: TWSE/TPEX 來源的 `aaData` 部分月份新增「證券代號／名稱」欄位，舊版解析仍以固定索引讀取成交量與 OHLC，導致成交量被誤讀成股票代碼或成交筆數，前端開發者測試表格亦顯示異常數值。
+- **Fix**:
+  - `js/main.js` 引入欄位別名映射與動態 schema 偵測，優先依 `fields` 對應成交量與 OHLC 欄位，缺少欄位描述時再以價格合理性與高低點順序選擇合適索引，確保資料表格顯示正確成交量。
+  - `js/worker.js` 同步導入欄位別名與偵測邏輯，Proxy 端 `normalizeProxyRow` 可辨識含代號/名稱的陣列格式，避免在還原與月度快取期間將股票代碼誤當成交量處理。
+- **Diagnostics**: 待於可連線 Proxy 的環境測試同日含「證券代號／名稱」與舊格式的資料來源，確認回測診斷卡與開發者模式表格的成交量與 OHLC 正常，且無新增 console 警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際測試新舊格式來源）。
