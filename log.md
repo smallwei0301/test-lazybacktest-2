@@ -1,3 +1,9 @@
+ 
+## 2026-09-16 — Patch LB-MASCOT-HTTPS-20260916A
+- **Scope**: Loading 動畫吉祥物圖庫連結安全性。
+- **Updates**:
+  - `js/loading-mascot-sources.js` 將仍以 HTTP 載入的 Imgur 靜態圖改為 HTTPS，並更新模組補丁代碼。
+- **Testing**: 容器環境無法啟動瀏覽器與回測流程，待實機確認載入時 console 無 Mixed Content 警告。
 
 ## 2026-08-27 — Patch LB-VOLUME-PARSER-20260827A
 - **Scope**: 月度價量補抓與資料來源測試表格的成交量解析。
