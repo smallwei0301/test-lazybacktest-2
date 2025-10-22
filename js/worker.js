@@ -3767,7 +3767,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3928,12 +3933,22 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         close = parseNumber(item[6]);
       }
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = parseNumber(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0) ?? 0;
     } else {
       return null;
     }

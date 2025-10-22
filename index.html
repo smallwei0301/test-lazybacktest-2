@@ -457,6 +457,37 @@
                                                     <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
                                                     <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
                                                     <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                    <div id="dataSourceTesterTableControls" class="hidden space-y-2">
+                                                        <button
+                                                            id="dataSourceTesterTableToggle"
+                                                            type="button"
+                                                            class="px-3 py-2 text-[11px] font-medium rounded-md border transition-colors w-full sm:w-auto"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            檢視資料表格
+                                                        </button>
+                                                        <div
+                                                            id="dataSourceTesterTableWrapper"
+                                                            class="hidden border rounded-md overflow-hidden"
+                                                            style="border-color: var(--border);"
+                                                        >
+                                                            <div class="overflow-x-auto max-h-72">
+                                                                <table id="dataSourceTesterTable" class="min-w-full text-left text-[11px]">
+                                                                    <thead class="sticky top-0" style="background-color: var(--muted); color: var(--muted-foreground);">
+                                                                        <tr>
+                                                                            <th class="px-3 py-2 font-medium">日期</th>
+                                                                            <th class="px-3 py-2 font-medium">開盤</th>
+                                                                            <th class="px-3 py-2 font-medium">最高</th>
+                                                                            <th class="px-3 py-2 font-medium">最低</th>
+                                                                            <th class="px-3 py-2 font-medium">收盤</th>
+                                                                            <th class="px-3 py-2 font-medium">成交量</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody id="dataSourceTesterTableBody" class="divide-y" style="border-color: var(--border);"></tbody>
+                                                                </table>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
