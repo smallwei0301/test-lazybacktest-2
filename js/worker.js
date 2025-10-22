@@ -14,6 +14,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-DATA-CLEANSE-20260815A — 將零成交量視為有效資料，避免誤判停牌或冷門 ETF。
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -2760,7 +2761,7 @@ function summariseDatasetRows(rows, context = {}) {
     const close = Number.isFinite(row.close) ? row.close : null;
     const volume = Number.isFinite(row.volume) ? row.volume : null;
     const validClose = close !== null && close > 0;
-    const validVolume = volume !== null && volume > 0;
+    const validVolume = Number.isFinite(volume) && volume >= 0;
 
     if (
       warmupStartISO &&

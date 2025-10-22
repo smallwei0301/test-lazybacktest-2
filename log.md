@@ -1486,3 +1486,11 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+## 2026-08-15 — Patch LB-DATA-CLEANSE-20260815A / LB-MASCOT-HTTPS-20260815A
+- **Issue recap**: 主控台出現大量「無效資料 volume」警示並持續刷屏，同時瀏覽器在 HTTPS 網站載入時觸發混合內容升級提醒。
+- **Fix**:
+  - `js/worker.js` 更新成交量驗證邏輯，接受零成交量作為有效輸入，避免 ETF 或冷門標的在停券日被誤判為無效資料。
+  - `js/loading-mascot-sources.js` 將所有 Imgur 圖片來源改為 HTTPS，消除瀏覽器混合內容警告。
+- **Diagnostics**: 待於具備 Proxy 的環境實際執行回測與載入等待吉祥物，確認 volume 警示消失且瀏覽器不再出現混合內容升級訊息。
+- **Testing**: 未執行（容器無法連線 Proxy 與啟動前端回測介面，後續需於 Netlify 部署環境驗證）。
+
