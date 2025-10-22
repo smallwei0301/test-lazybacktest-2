@@ -15,6 +15,7 @@
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
+// Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
@@ -473,6 +474,10 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
+const MONTH_STALE_REVALIDATE_TW_MS = 1000 * 60 * 60 * 18; // 台股/上櫃：約 18 小時內需刷新一次
+const MONTH_STALE_REVALIDATE_US_MS = 1000 * 60 * 60 * 12; // 美股：預設 12 小時內刷新
+const MONTH_STALE_REVALIDATE_DEFAULT_MS = 1000 * 60 * 60 * 18;
+const STALE_RANGE_TOUCH_TOLERANCE_MS = DAY_MS / 2;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20260810A";
 const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
@@ -2213,6 +2218,18 @@ function getMarketKey(marketType) {
 
 function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
+}
+
+function getMonthlyStaleRevalidateMs(marketKey) {
+  switch (marketKey) {
+    case "US":
+      return MONTH_STALE_REVALIDATE_US_MS;
+    case "TWSE":
+    case "TPEX":
+      return MONTH_STALE_REVALIDATE_TW_MS;
+    default:
+      return MONTH_STALE_REVALIDATE_DEFAULT_MS;
+  }
 }
 
 function buildCacheKey(
@@ -5548,6 +5565,8 @@ async function fetchStockData(
       const forcedRangeKeys = new Set(
         forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
       );
+      const targetEndExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+      const staleRevalidateMs = getMonthlyStaleRevalidateMs(marketKey);
       const monthSourceFlags = new Set(
         monthEntry.sources instanceof Set
           ? Array.from(monthEntry.sources)
@@ -5557,14 +5576,53 @@ async function fetchStockData(
       const forcedSourceUsage = new Set();
       let monthStockName = monthEntry.stockName || "";
       let forcedReloadCompleted = false;
+      let staleReloadTriggered = false;
 
       if (missingRanges.length > 0) {
         for (let i = 0; i < missingRanges.length; i += 1) {
           const missingRange = missingRanges[i];
           const { startISO, endISO } = rangeBoundsToISO(missingRange);
           const rangeKey = `${missingRange.start}-${missingRange.end}`;
-          const shouldForceRange =
+          const nowMs = Date.now();
+          const touchesRangeEnd =
+            Number.isFinite(targetEndExclusive) &&
+            Math.abs(missingRange.end - targetEndExclusive) <=
+              STALE_RANGE_TOUCH_TOLERANCE_MS;
+          const lastUpdatedMs = Number.isFinite(monthEntry.lastUpdated)
+            ? monthEntry.lastUpdated
+            : 0;
+          const lastForcedMs = Number.isFinite(monthEntry.lastForcedReloadAt)
+            ? monthEntry.lastForcedReloadAt
+            : 0;
+          const staleReloadDue =
+            touchesRangeEnd &&
+            staleRevalidateMs > 0 &&
+            lastUpdatedMs > 0 &&
+            nowMs - lastUpdatedMs > staleRevalidateMs &&
+            (!lastForcedMs || nowMs - lastForcedMs > staleRevalidateMs);
+          let shouldForceRange =
             forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+          if (staleReloadDue) {
+            shouldForceRange = true;
+            staleReloadTriggered = true;
+            const ageHours = Math.max(
+              1,
+              Math.round((nowMs - lastUpdatedMs) / (60 * 60 * 1000)),
+            );
+            console.warn(
+              `[Worker] ${stockNo} ${monthInfo.monthKey} 月度快取已 ${ageHours} 小時未更新，重新驗證 ${startISO}~${endISO}。`,
+            );
+            if (!Array.isArray(fetchDiagnostics.staleRevalidations)) {
+              fetchDiagnostics.staleRevalidations = [];
+            }
+            fetchDiagnostics.staleRevalidations.push({
+              monthKey: monthInfo.monthKey,
+              range: { start: startISO, end: endISO },
+              lastUpdatedAt: lastUpdatedMs,
+              ageHours,
+            });
+            monthEntry.lastForcedReloadAt = nowMs;
+          }
           const candidateSources = [];
           if (shouldForceRange) {
             if (primaryForceSource) candidateSources.push(primaryForceSource);
@@ -5729,7 +5787,10 @@ async function fetchStockData(
         monthSourceFlags.add(label);
       });
 
-      if (forcedRepairRanges.length > 0 && forcedReloadCompleted) {
+      if (
+        forcedReloadCompleted &&
+        (forcedRepairRanges.length > 0 || staleReloadTriggered)
+      ) {
         monthEntry.lastForcedReloadAt = Date.now();
       }
 
@@ -5756,6 +5817,7 @@ async function fetchStockData(
           rowsForRange[rowsForRange.length - 1]?.date || null,
         cacheSources: Array.from(monthSourceFlags),
         forcedSources: Array.from(forcedSourceUsage),
+        staleReload: staleReloadTriggered,
         queuePhase: monthInfo.phase || "active",
       };
       return {
