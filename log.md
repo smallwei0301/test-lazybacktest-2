@@ -1470,3 +1470,11 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-20250718A
+- **Issue recap**: 摘要段的敏感度分析仍以總報酬率推算漂移與方向，tooltip 與卡片文案也偏制式，使用者難以從年化角度解讀參數穩定度。
+- **Fix**:
+  - `js/backtest.js` 改以年化報酬率為基準計算敏感度差異、PP 說明與 baseline 指標，並在缺少年化值時回退總報酬資料。
+  - 敏感度四張重點卡片更新為口語化專業提醒，tooltip、判讀提示與方向建議同步改寫為年化報酬語彙，維持行動版可讀性。
+- **Testing**: 受限於容器無法連線資料源，未能實際執行回測；待可用環境重跑敏感度流程並確認瀏覽器 console 無錯誤。
+
+

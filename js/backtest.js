@@ -6481,7 +6481,9 @@ function displayBacktestResult(result) {
             return 'text-rose-600';
         };
         const baselineMetrics = {
-            returnRate: Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null,
+            annualizedReturn: Number.isFinite(data?.baseline?.annualizedReturn)
+                ? data.baseline.annualizedReturn
+                : (Number.isFinite(data?.baseline?.returnRate) ? data.baseline.returnRate : null),
             sharpeRatio: Number.isFinite(data?.baseline?.sharpeRatio) ? data.baseline.sharpeRatio : null,
         };
         const renderScenarioChip = (scenario) => {
@@ -6500,22 +6502,34 @@ function displayBacktestResult(result) {
                     <p class="sensitivity-scenario-chip__empty">${status}</p>
                 </div>`;
             }
-            const deltaText = formatDelta(scenario.deltaReturn);
+            const baselineAnnualized = baselineMetrics.annualizedReturn;
+            const scenarioAnnualized = Number.isFinite(scenario.run?.annualizedReturn)
+                ? scenario.run.annualizedReturn
+                : (Number.isFinite(scenario.run?.returnRate) ? scenario.run.returnRate : NaN);
+            const deltaAnnualized = Number.isFinite(scenario.deltaAnnualizedReturn)
+                ? scenario.deltaAnnualizedReturn
+                : (Number.isFinite(baselineAnnualized) && Number.isFinite(scenarioAnnualized)
+                    ? scenarioAnnualized - baselineAnnualized
+                    : NaN);
+            const deltaValue = Number.isFinite(deltaAnnualized)
+                ? deltaAnnualized
+                : (Number.isFinite(scenario.deltaReturn) ? scenario.deltaReturn : NaN);
+            const deltaText = formatDelta(deltaValue);
             const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
             const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
-            const deltaCls = Number.isFinite(scenario.deltaReturn)
-                ? (scenario.deltaReturn >= 0 ? 'text-emerald-600' : 'text-rose-600')
+            const deltaCls = Number.isFinite(deltaValue)
+                ? (deltaValue >= 0 ? 'text-emerald-600' : 'text-rose-600')
                 : 'text-muted-foreground';
             const driftCls = driftClass(scenario.driftPercent);
-            const returnText = formatPercentSigned(scenario.run?.returnRate ?? NaN, 2);
-            const baselineReturnText = formatPercentSigned(baselineMetrics.returnRate, 2);
-            const ppTooltip = `PP（百分點）= 調整後報酬 (${returnText}) − 基準報酬 (${baselineReturnText})。`;
+            const returnText = formatPercentSigned(scenarioAnnualized, 2);
+            const baselineReturnText = formatPercentSigned(baselineAnnualized, 2);
+            const ppTooltip = `PP（百分點）= 調整後年化報酬 (${returnText}) − 基準年化報酬 (${baselineReturnText})。`;
             const sharpeBase = Number.isFinite(baselineMetrics.sharpeRatio)
                 ? `（基準 Sharpe ${baselineMetrics.sharpeRatio.toFixed(2)}）`
                 : '';
             const tooltipContent = [
                 `調整值：${formatParamValue(scenario.value)}`,
-                `回報：${returnText}`,
+                `年化報酬：${returnText}`,
                 ppTooltip,
                 `漂移：${driftText}`,
                 `Sharpe Δ：${sharpeText}${sharpeBase}`
@@ -6708,7 +6722,7 @@ function displayBacktestResult(result) {
                                         擾動網格
                                         <span class="tooltip">
                                             <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                            <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察報酬與 Sharpe 的變化。</span>
+                                            <span class="tooltiptext tooltiptext--sensitivity">針對該參數套用 ±5%、±10%、±20% 及步階調整等多個擾動樣本，觀察年化報酬與 Sharpe 的變化。</span>
                                         </span>
                                     </span>
                                 </th>
@@ -6746,7 +6760,7 @@ function displayBacktestResult(result) {
             ? stabilityComponents.sharpePenalty
             : null;
         const stabilityTooltipLines = [
-            '穩定度分數 = 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
+            '穩定度分數 = 100 − 年化報酬平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。',
             Number.isFinite(stabilityDriftPenalty)
                 ? `漂移扣分：約 ${stabilityDriftPenalty.toFixed(1)} 分`
                 : null,
@@ -6755,7 +6769,7 @@ function displayBacktestResult(result) {
                 : Number.isFinite(summarySharpeDrop)
                     ? `平均 Sharpe 下滑 ${(-summarySharpeDrop).toFixed(2)}，每下降 0.01 約扣 1 分`
                     : null,
-            '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
+            '分數 ≥70 表示穩健，40～69 建議延長樣本驗證，低於 40 需特別留意。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
         let directionSafeTooltip = null;
@@ -6765,7 +6779,7 @@ function displayBacktestResult(result) {
             const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
             const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
             if (positiveAbs === null && negativeAbs === null) {
-                return '需更多樣本才能評估調高／調低方向的敏感度。';
+                return '樣本再多一些，才能看出調高或調低時的年化報酬變化。';
             }
             const dominantDirection = positiveAbs !== null && (negativeAbs === null || positiveAbs >= negativeAbs)
                 ? '調高'
@@ -6774,28 +6788,28 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                directionSafeTooltip = '兩側平均偏移皆在 ±10pp 內，可視為方向相對穩健。';
-                return '方向偏移穩健，維持現行節奏即可。';
+                directionSafeTooltip = '兩側平均年化報酬偏移都在 ±10pp，方向算是穩健。';
+                return '兩側年化報酬偏移穩定，照目前參數觀察即可。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}方向平均偏移已超過 15pp，建議對該方向進行批量優化或調整風控。`;
+                return `${dominantDirection}方向平均年化報酬偏移超過 15pp，建議先針對該方向做批量優化或調整風控。`;
             }
-            return `${dominantDirection}方向平均偏移介於 10～15pp，建議針對該方向再延伸樣本驗證。`;
+            return `${dominantDirection}方向平均年化報酬偏移落在 10～15pp，建議再延長該方向的樣本驗證。`;
         })();
         const summarySentence = (() => {
             const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
             const driftAbs = Number.isFinite(overallDrift) ? Math.abs(overallDrift) : null;
             const maxAbs = Number.isFinite(overallMaxDrift) ? Math.abs(overallMaxDrift) : null;
             if (stabilityScore === null && driftAbs === null && maxAbs === null) {
-                return '目前樣本不足，請先補齊回測資料再檢視敏感度。';
+                return '樣本還不夠，先補齊回測資料再看敏感度結果。';
             }
             if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
-                return '整體擾動反應平穩，可照現有參數持續觀察。';
+                return '整體年化報酬變動平穩，維持現有參數持續觀察即可。';
             }
             if (stabilityScore !== null && stabilityScore >= 55) {
-                return '敏感度略偏波動，建議搭配分段風控或延長樣本觀察。';
+                return '年化報酬偏移略高，建議搭配分段風控或延長觀察樣本。';
             }
-            return '敏感度偏向敏感，建議縮小部位並重新檢視參數設定。';
+            return '年化報酬對參數很敏感，先縮小部位並重新檢視設定。';
         })();
         const directionTooltipHtml = directionSafeTooltip
             ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
@@ -6812,7 +6826,7 @@ function displayBacktestResult(result) {
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">以漂移與 Sharpe 變化綜合評估敏感度穩健性。</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">結合年化報酬漂移與 Sharpe 變化評分，分數越高越穩。</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
@@ -6821,7 +6835,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                             <span class="tooltip">
                                 <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移幅度 = 所有擾動樣本（比例與步階）的年化報酬偏移絕對值平均。<br><strong>&le; 20%</strong>：多數量化平臺視為穩健。<br><strong>20%～40%</strong>：建議延長樣本或透過「批量優化」功能比對不同時間窗的結果。<br><strong>&gt; 40%</strong>：策略對參數高度敏感，常見於過擬合案例。</span>
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
@@ -6829,12 +6843,13 @@ function displayBacktestResult(result) {
                             <span>最大偏移 ${formatPercentMagnitude(overallMaxDrift, 1)}</span>
                             <span>樣本 ${Number.isFinite(overallSamples) ? overallSamples : '—'}</span>
                         </div>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">觀察參數微調後年化報酬的平均變動幅度。</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, #60a5fa 10%, var(--background)) 0%, color-mix(in srgb, #3b82f6 4%, var(--background)) 100%); border-color: color-mix(in srgb, #3b82f6 20%, transparent);">
                     <div class="flex flex-col items-center text-center gap-3">
                         <div class="flex items-center gap-2">
-                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">偏移方向 (平均)</p>
+                            <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均方向偏移</p>
                             ${directionTooltipHtml}
                         </div>
                         <div class="flex items-center justify-center gap-4 text-lg font-semibold">
@@ -6846,7 +6861,7 @@ function displayBacktestResult(result) {
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--muted) 10%, var(--background)) 0%, color-mix(in srgb, var(--muted) 6%, var(--background)) 100%); border-color: color-mix(in srgb, var(--border) 70%, transparent);">
                     <div class="flex flex-col items-center text-center gap-3">
-                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">敏感度摘要提醒</p>
+                        <p class="text-sm font-medium" style="color: var(--muted-foreground);">快速提醒</p>
                         <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${summarySentence}</p>
                     </div>
                 </div>
@@ -6858,12 +6873,12 @@ function displayBacktestResult(result) {
                     <div>
                         <p class="text-sm font-semibold mb-2" style="color: var(--foreground);">如何解讀敏感度結果</p>
                         <ul style="margin: 0; padding-left: 1.1rem; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; list-style: disc;">
-                            <li><strong>PP（百分點）</strong>：調整後報酬率與原始回測報酬率的差異，正值代表績效提升，負值代表下滑。</li>
+                            <li><strong>PP（百分點）</strong>：調整後年化報酬率與原始年化報酬率的差異，正值代表績效提升，負值代表下滑。</li>
                             <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
-                            <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
+                            <li><strong>漂移幅度</strong>：所有擾動樣本的年化報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
                             <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
-                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
+                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均年化報酬差，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
+                            <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 年化報酬平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
                             <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
                         </ul>
                     </div>
