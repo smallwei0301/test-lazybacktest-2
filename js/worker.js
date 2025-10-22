@@ -10451,6 +10451,7 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
   };
 }
 
+// Patch Tag: LB-SENSITIVITY-ANNUAL-20250920A
 function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   if (!Array.isArray(data) || data.length === 0 || !baseParams) {
     return null;
@@ -10460,9 +10461,11 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
-    ? baselineMetrics.returnRate
-    : 0;
+  const baselineReturn = Number.isFinite(baselineMetrics?.annualizedReturn)
+    ? baselineMetrics.annualizedReturn
+    : Number.isFinite(baselineMetrics?.returnRate)
+      ? baselineMetrics.returnRate
+      : 0;
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
@@ -10719,9 +10722,11 @@ function evaluateSensitivityParameter({
     }
 
     if (scenarioResult && typeof scenarioResult === "object") {
-      const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
-        ? scenarioResult.returnRate
-        : null;
+      const scenarioReturn = Number.isFinite(scenarioResult.annualizedReturn)
+        ? scenarioResult.annualizedReturn
+        : Number.isFinite(scenarioResult.returnRate)
+          ? scenarioResult.returnRate
+          : null;
       const deltaReturn =
         Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
           ? scenarioReturn - baselineReturn
@@ -10777,12 +10782,14 @@ function evaluateSensitivityParameter({
         driftPercent,
         deltaSharpe,
         run: {
-          returnRate: scenarioReturn,
-          annualizedReturn: Number.isFinite(
-            scenarioResult.annualizedReturn
-          )
-            ? scenarioResult.annualizedReturn
+          returnRate: Number.isFinite(scenarioResult.returnRate)
+            ? scenarioResult.returnRate
             : null,
+          annualizedReturn: Number.isFinite(scenarioResult.annualizedReturn)
+            ? scenarioResult.annualizedReturn
+            : Number.isFinite(scenarioResult.returnRate)
+              ? scenarioResult.returnRate
+              : null,
           sharpeRatio: scenarioSharpe,
         },
       });
