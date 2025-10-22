@@ -1,3 +1,10 @@
+## 2026-07-30 — Patch LB-PLUGIN-ROLLUP-20250701A
+- **Scope**: 現況盤點與暖身基準鎖定。
+- **Updates**:
+  - 新增 `docs/stage1-warmup-inventory.md`，整理 `backtest.js`、`worker.js`、`shared-lookback.js` 的依賴、策略入口與暖身流程，並記錄 `resolveDataWindow` 與 `priceIndicatorSeries` 的現有使用情況。
+  - 補充測試限制，說明需在具備瀏覽器與 Netlify Proxy 的實機環境重跑 2330/2412/0050 回測以比對暖身與買入持有基準。
+- **Testing**: 容器環境缺少 Netlify Proxy 與瀏覽器，無法執行 2330/2412/0050 本地回測；後續須於實機確認 console log 與暖身診斷。
+
 
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
@@ -1486,3 +1493,29 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-05 — Patch LB-PLUGIN-CONTRACT-20250705A
+- **Issue recap**: 策略尚未具備統一插件介面，缺少型別契約導致後續拆分時難以驗證訊號欄位與停損/停利輸出；舊有布林判斷亦缺乏正式的 RuleResult 驗證。
+- **Fix**:
+  - 新增 `js/strategy-plugin-contract.js` 定義 `StrategyPlugin` 介面、`StrategyContext` 白名單 API 與 `RuleResult` 布林欄位，並提供 `ensureRuleResult`／`normaliseByRole` 與 legacy shim。
+  - `js/worker.js` 導入契約檢查，長/短進出場皆透過 `normaliseRuleResultFromLegacy` 將既有布林結果轉為 `RuleResult`，確保布林欄位、停損/停利值合法。
+  - `index.html` 預載契約腳本，新增 `types/strategy-plugin.d.ts` 與 `types/strategy-plugin-shim-check.ts` 供 TypeScript 驗證；`tsconfig.json` 建立型別檢查設定。
+- **Diagnostics**: 待於後續引入實際插件化策略時，確認 `StrategyPluginContract.ensureRuleResult` 能針對錯誤欄位立即拋出並記錄插件 ID／角色資訊。
+- **Testing**: `npm run typecheck`（使用容器內建 TypeScript 5.9.2 完成 JSDoc/.d.ts 驗證）。
+
+## 2026-08-07 — Patch LB-PLUGIN-ATOMS-20250707B
+- **Issue recap**: Stage 3 插件化後，`paramsSchema` 仍缺少必要欄位限制與預設值，Sandbox／優化器暫時無法直接引用上下限資訊。
+- **Fix**:
+  - `js/strategy-plugins/moving-average-cross.js`、`kd-cross.js`、`bollinger-band.js`、`trailing-stop.js` 補上 `required` 與 `additionalProperties: false`，鎖定短長週期、布林參數與停損百分比的白名單設定。
+  - `js/strategy-plugins/rsi-threshold.js` 依多空角色產生專屬 schema，為 `threshold` 設定 30/70 預設值並禁止其他欄位，確保 UI 與 Sandbox 可以直接引用數值界線。
+- **Diagnostics**: 待於具備資料來源的環境，以 RSI/KD/布林/均線/移動停損單一策略跑 10 筆資料，確認插件 `paramsSchema` 補強後仍可還原舊版訊號序列。
+- **Testing**: `npm run typecheck`
+
+## 2026-08-06 — Patch LB-PLUGIN-ATOMS-20250707A
+- **Issue recap**: RSI、KD、布林、均線交叉與移動停損仍散落於 `worker.js` 的巨型 switch 中，缺乏統一插件化輸出，無法沿用 Stage 2 的 `StrategyPlugin` 契約驗證，也不利後續拆分與 Sandbox 化。
+- **Fix**:
+  - 新增 `js/strategy-plugins/` 目錄，實作 `moving-average-cross.js`、`rsi-threshold.js`、`kd-cross.js`、`bollinger-band.js` 與 `trailing-stop.js` 五組插件，透過 `StrategyPluginRegistry` 註冊 `meta`／`run` 並輸出對應的 `paramsSchema` 與 `RuleResult`。
+  - `js/worker.js` 匯入插件註冊檔並以 `runStrategyPluginSignal` 轉接 `longEntry`／`longExit`／`shortEntry`／`shortExit`，將 RSI/KD/布林/均線/移動停損訊號改由插件產生，同步保留既有邏輯作為 fallback；移動停損額外回傳 peak/trough，取代舊有全域狀態。
+  - 為短線進出場補上 `currentShortPositionId` 追蹤與 `StrategyPlugin` runtime 場景資訊，並紀錄版本碼 `LB-PLUGIN-ATOMS-20250707A`。
+- **Diagnostics**: 待於可連線 Proxy 的環境分別以單一策略跑 10 筆資料，確認插件訊號與舊版一致、移動停損高低點同步更新，console 無新增錯誤。
+- **Testing**: `npm run typecheck`（驗證插件檔案與 worker 綁定後語法正確）。
