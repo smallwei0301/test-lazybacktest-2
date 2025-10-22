@@ -1506,3 +1506,20 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
+- **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
+- **Fix**:
+  - `js/worker.js` 的 `fetchAdjustedPriceRange` 將 `toNumber` 更新為移除千分位逗號並忽略空字串，確保成交量能被正確解析。
+  - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
+- **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
+
+## 2026-08-11 — Patch LB-DATA-VOLUME-20260811A
+- **Issue recap**: 即使移除千分位符號，成交量仍可能因原始股數低於千股而在四捨五入後歸零，造成整段區間被判定為無效；同時開發者模式缺乏可直接檢視來源資料的工具。
+- **Fix**:
+  - `js/worker.js` 新增 `normalizeVolumeToLots`，保證只要原始股數大於 0 即回傳至少 1 千股，並套用到 `fetchAdjustedPriceRange` 與 `normalizeProxyRow`。
+  - `index.html` 與 `js/main.js` 的測試來源面板加入「查看資料表格」按鈕與表格渲染邏輯，可展開檢視開盤、最高、最低、收盤與成交量（含原始股數）資料，方便交叉驗證來源品質。
+  - `js/main.js` 擴充資料解析工具函式，統一處理數值、日期與成交量單位並支援表格顯示。
+- **Diagnostics**: 建議於具備 Proxy 的環境依序測試 TWSE/TPEX/還原模式來源，展開表格確認成交量欄位同時顯示原始股數與千股單位，並再次檢視 00631L 等標的確保不再標記 `volume×N`。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際回測檢查 console 無錯誤並驗證表格互動）。
