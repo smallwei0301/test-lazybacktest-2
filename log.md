@@ -1469,4 +1469,19 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-30 — Patch LB-UI-TABTONE-20260730A
+- **Issue recap**: 右側摘要分頁的標籤在切換時會一起縮小，策略摘要卡片文案亦帶有遊戲化語氣，與目標族群預期的專業體驗不符。
+- **Fix**:
+  - `index.html` 僅對使用者點選的分頁標籤套用縮放效果並更新 `aria-current`，同時調整策略摘要卡片文案為口語且專業的敘述。
+  - `css/style.css` 為分頁標籤新增縮放與色彩過渡效果，確保縮放僅作用於當前分頁。
+- **Diagnostics**: 待於瀏覽器點選各分頁，確認僅作用中的標籤縮放且策略摘要卡片文案維持專業語氣。
+- **Testing**: 尚未執行（開發容器未提供自動化測試指令）。
+
+## 2026-07-30 — Patch LB-UI-SUMMARYCOPY-20260730B
+- **Issue recap**: 策略摘要卡片仍維持舊有提醒語氣，缺乏專業且直接的建議說明，與近期分頁互動調整方向不一致。
+- **Fix**:
+  - `index.html` 更新策略摘要卡片標題、副標題與重點條列，改以精簡、專業的語氣說明回測後會提供的亮點、風險與下一步建議，並補充引導使用者調整參數。
+- **Diagnostics**: 待回測流程跑完後檢查卡片文字是否保持專業語氣且能清楚傳達下一步操作建議。
+- **Testing**: 尚未執行（開發容器未提供自動化測試指令）。
+
 
