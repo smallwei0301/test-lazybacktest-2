@@ -1,4 +1,11 @@
 
+## 2026-07-30 — Patch LB-DATA-VOLUME-20260730A
+- **Scope**: 資料行量正規化與載入吉祥物資源的安全性。
+- **Updates**:
+  - `js/worker.js` 的 `normalizeProxyRow` 改為保留千股以下的小數成交量，避免四捨五入為 0 造成大量 `volume` 無效筆數警示，同時統一價格/成交量的數值解析流程。
+  - `js/loading-mascot-sources.js` 將所有 Imgur 資源改用 HTTPS，修正 Netlify 正式站的 Mixed Content 警告。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機執行回測流程確認 console 無錯誤。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:

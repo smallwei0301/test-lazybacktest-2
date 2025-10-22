@@ -3900,28 +3900,39 @@ async function fetchAdjustedPriceRange(
 }
 
 function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
+  // Patch Tag: LB-DATA-VOLUME-20260730A
   try {
+    const parseNumeric = (val) => {
+      if (val === null || val === undefined) return null;
+      if (typeof val === "number") {
+        return Number.isFinite(val) ? val : null;
+      }
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed.replace(/,/g, ""));
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
     let dateStr = null;
     let open = null,
       high = null,
       low = null,
-      close = null,
-      volume = 0;
+      close = null;
+    let rawVolumeValue = null;
+
     if (Array.isArray(item)) {
       dateStr = item[0];
-      const parseNumber = (val) => {
-        if (val === null || val === undefined) return null;
-        const num = Number(String(val).replace(/,/g, ""));
-        return Number.isFinite(num) ? num : null;
-      };
+      const parseNumber = parseNumeric;
+      rawVolumeValue = item[1];
       if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
         open = parseNumber(item[3]);
         high = parseNumber(item[4]);
         low = parseNumber(item[5]);
         close = parseNumber(item[6]);
       } else {
-        volume = parseNumber(item[1]) || 0;
         open = parseNumber(item[3]);
         high = parseNumber(item[4]);
         low = parseNumber(item[5]);
@@ -3929,11 +3940,12 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
       }
     } else if (item && typeof item === "object") {
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumeric(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumeric(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumeric(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumeric(item.close ?? item.Close ?? null);
+      rawVolumeValue =
+        item.volume ?? item.Volume ?? item.Trading_Volume ?? null;
     } else {
       return null;
     }
@@ -3958,14 +3970,21 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
     if ((low === null || low === 0) && close !== null)
       low = Math.min(open ?? close, close);
     const clean = (val) => (val === null || Number.isNaN(val) ? null : val);
-    const volNumber = Number(String(volume).replace(/,/g, "")) || 0;
+    const volumeNumber = parseNumeric(rawVolumeValue);
+    const normalizedVolume =
+      volumeNumber !== null && volumeNumber >= 0
+        ? volumeNumber / 1000
+        : null;
     return {
       date: isoDate,
       open: clean(open),
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume:
+        normalizedVolume !== null && Number.isFinite(normalizedVolume)
+          ? normalizedVolume
+          : null,
     };
   } catch (error) {
     return null;
