@@ -8807,7 +8807,7 @@ function activateTab(tabId) {
         const isActive = currentTabId === tabId; 
         
         if (isActive) {
-            tab.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap';
+            tab.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap';
             tab.style.color = 'var(--primary)';
             tab.style.borderColor = 'var(--primary)';
         } else {
