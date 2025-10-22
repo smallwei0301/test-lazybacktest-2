@@ -457,6 +457,24 @@
                                                     <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
                                                     <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
                                                     <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                    <div id="dataSourceTesterTableSection" class="hidden space-y-2">
+                                                        <button
+                                                            id="toggleDataSourceTesterTable"
+                                                            type="button"
+                                                            class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                            aria-expanded="false"
+                                                        >
+                                                            <i data-lucide="table" class="lucide w-4 h-4"></i>
+                                                            <span>查看資料表格</span>
+                                                        </button>
+                                                        <p
+                                                            id="dataSourceTesterTableInfo"
+                                                            class="text-[10px] text-muted-foreground hidden"
+                                                            style="color: var(--muted-foreground);"
+                                                        ></p>
+                                                        <div id="dataSourceTesterTableContainer" class="hidden"></div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

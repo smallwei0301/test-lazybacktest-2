@@ -3730,6 +3730,19 @@ function maybeApplyAdjustments(rows, adjustments, dividendEvents) {
   return { rows: adjustedRows, fallbackApplied: true };
 }
 
+// Patch Tag: LB-DATA-VOLUME-20260811A
+function normalizeVolumeToLots(rawVolume) {
+  if (!Number.isFinite(rawVolume) || rawVolume <= 0) {
+    return 0;
+  }
+  const scaled = rawVolume / 1000;
+  if (!Number.isFinite(scaled) || scaled <= 0) {
+    return 0;
+  }
+  const rounded = Math.round(scaled);
+  return rounded > 0 ? rounded : 1;
+}
+
 async function fetchAdjustedPriceRange(
   stockNo,
   startDate,
@@ -3767,7 +3780,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3782,7 +3800,7 @@ async function fetchAdjustedPriceRange(
     const high = toNumber(row.high ?? row.High ?? row.max);
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
-    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? null);
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -3822,7 +3840,7 @@ async function fetchAdjustedPriceRange(
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: normalizeVolumeToLots(Number.isFinite(volumeRaw) ? volumeRaw : 0),
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -3928,12 +3946,22 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         close = parseNumber(item[6]);
       }
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = parseNumber(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0) ?? 0;
     } else {
       return null;
     }
@@ -3958,14 +3986,15 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
     if ((low === null || low === 0) && close !== null)
       low = Math.min(open ?? close, close);
     const clean = (val) => (val === null || Number.isNaN(val) ? null : val);
-    const volNumber = Number(String(volume).replace(/,/g, "")) || 0;
+    const parsedVolume = Number(String(volume).replace(/,/g, ""));
+    const volNumber = Number.isFinite(parsedVolume) ? parsedVolume : 0;
     return {
       date: isoDate,
       open: clean(open),
       high: clean(high),
       low: clean(low),
       close: clean(close),
-      volume: Math.round(volNumber / 1000),
+      volume: normalizeVolumeToLots(volNumber),
     };
   } catch (error) {
     return null;
