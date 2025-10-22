@@ -1,4 +1,11 @@
 
+## 2026-07-29 — Patch LB-UI-TABS-20250729A
+- **Scope**: 右側頁籤互動與摘要卡片敘述語氣調整。
+- **Updates**:
+  - `js/backtest.js`、`js/backtest_corrupted.js` 調整 `activateTab`，僅讓作用中的頁籤縮小字級並回復其他頁籤的預設大小，同步新增 `aria-current` 輔助屬性。
+  - `index.html` 更新策略戰況、趨勢評估與摘要 placeholder 文案，改為專業且精簡的提醒語氣。
+- **Testing**: 容器環境缺少瀏覽器與 Proxy，未能執行互動測試；待實機啟動回測功能確認。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:

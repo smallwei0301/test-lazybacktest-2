@@ -1416,25 +1416,29 @@ function initTabs() {
     // Initialize with summary tab active
     activateTab('summary'); 
 }
-function activateTab(tabId) { 
-    const tabs = document.querySelectorAll('[data-tab]'); 
-    const contents = document.querySelectorAll('.tab-content'); 
-    
-    // Update button states
-    tabs.forEach(tab => { 
-        const currentTabId = tab.getAttribute('data-tab'); 
-        const isActive = currentTabId === tabId; 
-        
+// Patch Tag: LB-UI-TABS-20250729A — ensure 僅有作用中的頁籤縮小字級，並保留其餘頁籤的既有尺寸。
+function activateTab(tabId) {
+    const tabs = document.querySelectorAll('[data-tab]');
+    const contents = document.querySelectorAll('.tab-content');
+
+    const baseClass = 'tab py-4 px-1 border-b-2 font-medium whitespace-nowrap';
+    const activeClass = `${baseClass} border-primary text-primary text-xs`;
+    const inactiveClass = `${baseClass} border-transparent text-muted hover:text-foreground text-sm`;
+
+    tabs.forEach((tab) => {
+        const currentTabId = tab.getAttribute('data-tab');
+        const isActive = currentTabId === tabId;
+
+        tab.className = isActive ? activeClass : inactiveClass;
+        tab.style.color = isActive ? 'var(--primary)' : 'var(--muted-foreground)';
+        tab.style.borderColor = isActive ? 'var(--primary)' : 'transparent';
+
         if (isActive) {
-            tab.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-sm whitespace-nowrap';
-            tab.style.color = 'var(--primary)';
-            tab.style.borderColor = 'var(--primary)';
+            tab.setAttribute('aria-current', 'page');
         } else {
-            tab.className = 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-sm whitespace-nowrap';
-            tab.style.color = 'var(--muted-foreground)';
-            tab.style.borderColor = 'transparent';
+            tab.removeAttribute('aria-current');
         }
-    }); 
+    });
     
     // Show corresponding content
     contents.forEach(content => { 
