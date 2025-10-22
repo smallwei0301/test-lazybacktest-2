@@ -6561,9 +6561,13 @@ function displayBacktestResult(result) {
             const baselineAnnualized = Number.isFinite(baselineMetrics.annualizedReturn)
                 ? baselineMetrics.annualizedReturn
                 : null;
+            const legacyDelta = Number.isFinite(scenario.deltaReturn) ? scenario.deltaReturn : null;
+            const scenarioDelta = Number.isFinite(scenario.deltaAnnualized)
+                ? scenario.deltaAnnualized
+                : legacyDelta;
             const computedDelta = baselineAnnualized !== null && scenarioAnnualized !== null
                 ? scenarioAnnualized - baselineAnnualized
-                : (Number.isFinite(scenario.deltaReturn) ? scenario.deltaReturn : null);
+                : scenarioDelta;
             const deltaText = formatDelta(computedDelta);
             const driftText = formatPercentMagnitude(scenario.driftPercent, 1);
             const sharpeText = formatSharpeDelta(scenario.deltaSharpe);
