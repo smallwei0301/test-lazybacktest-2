@@ -3767,7 +3767,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -3914,26 +3919,38 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         const num = Number(String(val).replace(/,/g, ""));
         return Number.isFinite(num) ? num : null;
       };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      }
+      const secondRaw = typeof item[1] === "string" ? item[1].trim() : "";
+      const thirdRaw = typeof item[2] === "string" ? item[2].trim() : "";
+      const secondHasLetter = /[A-Za-z]/.test(secondRaw);
+      const secondNumeric = parseNumber(secondRaw);
+      const thirdLooksLikeName =
+        thirdRaw.length > 0 &&
+        (/[^\d.,\-]/.test(thirdRaw) || parseNumber(thirdRaw) === null);
+      const useTailVolume =
+        item.length >= 9 && (secondHasLetter || secondNumeric === null || thirdLooksLikeName);
+      const volumeIndex = useTailVolume ? 8 : 1;
+      volume = parseNumber(item[volumeIndex]) || 0;
+      open = parseNumber(item[3]);
+      high = parseNumber(item[4]);
+      low = parseNumber(item[5]);
+      close = parseNumber(item[6]);
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = parseNumber(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0) ?? 0;
     } else {
       return null;
     }
