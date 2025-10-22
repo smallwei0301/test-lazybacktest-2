@@ -1,3 +1,18 @@
+## 2026-07-31 — Patch LB-PLUGIN-ATOMS-20250709A
+- **Scope**: RSI／KD／布林帶／均線交叉／移動停損策略插件化。
+- **Updates**:
+  - `js/strategy-plugin-registry.js` 建立插件註冊中心，並新增 `strategy-plugins/` 目錄提供 RSI、KD、布林帶、均線交叉與移動停損（ATR-style）插件，皆輸出 `meta` 與 `run` 且附 `paramsSchema`。
+  - `js/worker.js` 引入插件呼叫橋接層，於多空進出場流程優先透過插件產生訊號與指標診斷，保留原有邏輯為退回路徑，並傳遞移動停損所需的動態參考價。
+  - 調整回測流程的診斷欄位注入與 caching，確保 `priceIndicatorSeries` 與交易紀錄沿用插件回傳的 `meta` 資訊。
+- **Testing**: `npm run typecheck`；`node - <<'NODE' ...`（載入 `strategy-plugin-contract.js` 與 `worker.js` 確認可編譯）。
+
+## 2026-07-30 — Patch LB-PLUGIN-ROLLUP-20250701A
+- **Scope**: 現況盤點與暖身基準鎖定。
+- **Updates**:
+  - 新增 `docs/stage1-warmup-inventory.md`，整理 `backtest.js`、`worker.js`、`shared-lookback.js` 的依賴、策略入口與暖身流程，並記錄 `resolveDataWindow` 與 `priceIndicatorSeries` 的現有使用情況。
+  - 補充測試限制，說明需在具備瀏覽器與 Netlify Proxy 的實機環境重跑 2330/2412/0050 回測以比對暖身與買入持有基準。
+- **Testing**: 容器環境缺少 Netlify Proxy 與瀏覽器，無法執行 2330/2412/0050 本地回測；後續須於實機確認 console log 與暖身診斷。
+
 
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
@@ -1486,3 +1501,22 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-05 — Patch LB-PLUGIN-CONTRACT-20250705A
+- **Issue recap**: 策略尚未具備統一插件介面，缺少型別契約導致後續拆分時難以驗證訊號欄位與停損/停利輸出；舊有布林判斷亦缺乏正式的 RuleResult 驗證。
+- **Fix**:
+  - 新增 `js/strategy-plugin-contract.js` 定義 `StrategyPlugin` 介面、`StrategyContext` 白名單 API 與 `RuleResult` 布林欄位，並提供 `ensureRuleResult`／`normaliseByRole` 與 legacy shim。
+  - `js/worker.js` 導入契約檢查，長/短進出場皆透過 `normaliseRuleResultFromLegacy` 將既有布林結果轉為 `RuleResult`，確保布林欄位、停損/停利值合法。
+  - `index.html` 預載契約腳本，新增 `types/strategy-plugin.d.ts` 與 `types/strategy-plugin-shim-check.ts` 供 TypeScript 驗證；`tsconfig.json` 建立型別檢查設定。
+- **Diagnostics**: 待於後續引入實際插件化策略時，確認 `StrategyPluginContract.ensureRuleResult` 能針對錯誤欄位立即拋出並記錄插件 ID／角色資訊。
+- **Testing**: `npm run typecheck`（使用容器內建 TypeScript 5.9.2 完成 JSDoc/.d.ts 驗證）。
+
+## 2026-08-06 — Patch LB-PLUGIN-REGISTRY-20250712A
+- **Issue recap**: 原子策略雖已拆成插件，但 Registry 僅提供簡單 Map 查詢，缺乏 meta 驗證、重複註冊防護與集中式載入；核心仍需逐一匯入腳本，UI 也無法統一列出策略清單。
+- **Fix**:
+  - `js/strategy-plugin-registry.js` 改寫為具備 `registerStrategy`／`getStrategyById`／`listStrategies` API，新增 meta 與 paramsSchema 驗證、唯一性檢查與載入錯誤追蹤，並保留 `register`／`get`／`list` 等相容接口。
+  - 新增 `js/strategy-plugin-manifest.js` 以集中宣告 RSI、KD、布林、均線交叉與移動停損插件的 meta 與 loader，統一由 Registry 處理延遲載入。
+  - `js/worker.js` 僅匯入 Registry 與 Manifest，執行時改透過 `getStrategyById` 呼叫插件，移除對個別策略腳本的直接依賴。
+  - `types/strategy-plugin.d.ts`／`types/strategy-plugin-shim-check.ts` 擴充 Registry 型別與檢查腳本，確保 JSDoc/.d.ts 介面與實作一致。
+- **Diagnostics**: 以 Node 腳本載入 Registry 與 Manifest 後呼叫 `StrategyPluginRegistry.listStrategies()`，確認所有策略 meta 皆註冊完成且於 `getStrategyById` 時會同步載入對應腳本。
+- **Testing**: `npm run typecheck`（驗證合併後的契約與 Registry 介面）。
