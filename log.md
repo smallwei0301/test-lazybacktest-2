@@ -1,4 +1,11 @@
 
+## 2026-07-28 — Patch LB-AI-TF-LAZYLOAD-20260728A
+- **Scope**: Web Worker 中的 TensorFlow.js 延後載入與後端初始化。
+- **Updates**:
+  - `js/worker.js` 新增 `ensureTF`，僅在 AI 訊息進入時匯入 TFJS/WASM 並設定後端，避免首屏載入 1MB+ 套件。
+  - `js/worker.js` 將 LSTM 與 ANN 訓練流程改為呼叫 `ensureTF`，維持播種與除錯流程同時降低初次載入成本。
+- **Testing**: 容器環境無法啟動瀏覽器與 Proxy，待實機以回測介面驗證 AI 訓練流程（需確認 console 無錯誤）。
+
 ## 2026-07-27 — Patch LB-INDEX-UI-20250727A
 - **Scope**: 指數市場輸入提示與快速回測控制。
 - **Updates**:
