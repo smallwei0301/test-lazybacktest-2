@@ -14,7 +14,15 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 importScripts('shared-lookback.js');
+importScripts('strategy-plugin-contract.js');
+importScripts('strategy-plugins/registry.js');
+importScripts('strategy-plugins/moving-average-cross.js');
+importScripts('strategy-plugins/rsi-threshold.js');
+importScripts('strategy-plugins/kd-cross.js');
+importScripts('strategy-plugins/bollinger-band.js');
+importScripts('strategy-plugins/trailing-stop.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -36,6 +44,133 @@ const CLASSIFICATION_MODES = {
   BINARY: 'binary',
   MULTICLASS: 'multiclass',
 };
+
+const legacyRuleResultNormaliser =
+  typeof self !== 'undefined' &&
+  self.LegacyStrategyPluginShim &&
+  typeof self.LegacyStrategyPluginShim.normaliseResult === 'function'
+    ? self.LegacyStrategyPluginShim.normaliseResult.bind(self.LegacyStrategyPluginShim)
+    : null;
+
+function normaliseRuleResultFromLegacy(pluginId, role, candidate, index) {
+  if (legacyRuleResultNormaliser) {
+    return legacyRuleResultNormaliser(pluginId, role, candidate, { index });
+  }
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn(
+      `[StrategyPluginContract] 未載入 LegacyStrategyPluginShim，使用退化布林判斷 (${pluginId || '未知策略'})`,
+    );
+  }
+  if (candidate && typeof candidate === 'object') {
+    const record = /** @type {Record<string, unknown>} */ (candidate);
+    return {
+      enter: role === 'longEntry' ? record.enter === true : false,
+      exit: role === 'longExit' ? record.exit === true : false,
+      short: role === 'shortEntry' ? record.short === true : false,
+      cover: role === 'shortExit' ? record.cover === true : false,
+      stopLossPercent:
+        typeof record.stopLossPercent === 'number' && Number.isFinite(record.stopLossPercent)
+          ? record.stopLossPercent
+          : null,
+      takeProfitPercent:
+        typeof record.takeProfitPercent === 'number' && Number.isFinite(record.takeProfitPercent)
+          ? record.takeProfitPercent
+          : null,
+      meta: {},
+    };
+  }
+  const value = candidate === true;
+  return {
+    enter: role === 'longEntry' ? value : false,
+    exit: role === 'longExit' ? value : false,
+    short: role === 'shortEntry' ? value : false,
+    cover: role === 'shortExit' ? value : false,
+    stopLossPercent: null,
+    takeProfitPercent: null,
+    meta: {},
+  };
+}
+
+const strategyPluginCacheStore = new Map();
+
+function getStrategyPluginInstance(id) {
+  if (
+    typeof self === 'undefined' ||
+    !self.StrategyPluginRegistry ||
+    typeof self.StrategyPluginRegistry.get !== 'function'
+  ) {
+    return null;
+  }
+  return self.StrategyPluginRegistry.get(id);
+}
+
+function getStrategyPluginCache(id) {
+  if (!strategyPluginCacheStore.has(id)) {
+    strategyPluginCacheStore.set(id, new Map());
+  }
+  return strategyPluginCacheStore.get(id);
+}
+
+function runStrategyPluginSignal(strategyKey, role, index, params, extras) {
+  const plugin = getStrategyPluginInstance(strategyKey);
+  if (!plugin) {
+    return null;
+  }
+  try {
+    const pluginId = plugin.meta?.id || strategyKey;
+    const cache = getStrategyPluginCache(pluginId);
+    const indicatorSource = extras?.indicators || {};
+    const seriesSource = extras?.series || {};
+    const runtimeBase = extras?.runtime || {};
+    const context = {
+      role,
+      index,
+      series: {
+        close: Array.isArray(seriesSource.close) ? seriesSource.close : [],
+        open: Array.isArray(seriesSource.open) ? seriesSource.open : [],
+        high: Array.isArray(seriesSource.high) ? seriesSource.high : [],
+        low: Array.isArray(seriesSource.low) ? seriesSource.low : [],
+        date: Array.isArray(seriesSource.date) ? seriesSource.date : [],
+      },
+      helpers: {
+        getIndicator(key) {
+          const value = indicatorSource?.[key];
+          return Array.isArray(value) ? value : [];
+        },
+        log(message, details) {
+          if (typeof console !== 'undefined' && typeof console.log === 'function') {
+            if (details) {
+              console.log(`[StrategyPlugin:${pluginId}] ${message}`, details);
+            } else {
+              console.log(`[StrategyPlugin:${pluginId}] ${message}`);
+            }
+          }
+        },
+        setCache(key, value) {
+          cache.set(key, value);
+        },
+        getCache(key) {
+          return cache.get(key);
+        },
+      },
+      runtime: { ...runtimeBase },
+    };
+
+    const rawResult = plugin.run(context, params || {});
+    return StrategyPluginContract.ensureRuleResult(rawResult, {
+      pluginId,
+      role,
+      index,
+    });
+  } catch (err) {
+    if (typeof console !== 'undefined' && typeof console.error === 'function') {
+      console.error(`[${
+        strategyKey || 'StrategyPlugin'
+      }] 執行角色 ${role} 時發生錯誤：`, err);
+    }
+    return null;
+  }
+}
 
 const ANN_FEATURE_NAMES = [
   'SMA30',
@@ -7852,6 +7987,8 @@ function runStrategy(data, params, options = {}) {
     let filledEntryStages = 0;
     let currentLongPositionId = null;
     let nextLongPositionId = 1;
+    let currentShortPositionId = null;
+    let nextShortPositionId = 1;
     let filledExitStages = 0;
     let lastLongStagePrice = null;
     let lastEntryStageTrigger = null;
@@ -7874,6 +8011,43 @@ function runStrategy(data, params, options = {}) {
   const shortSigs = [];
   const coverSigs = [];
   const shortPl = Array(n).fill(0);
+
+  const pluginSeries = {
+    close: closes,
+    open: opens,
+    high: highs,
+    low: lows,
+    date: dates,
+  };
+
+  const pluginRuntimeBase = {
+    warmupStartIndex: startIdx,
+    effectiveStartIndex: effectiveStartIdx,
+    length: n,
+  };
+
+  const buildPluginExtras = () => ({
+    series: pluginSeries,
+    indicators,
+    runtime: {
+      ...pluginRuntimeBase,
+      position: {
+        long: {
+          positionId: currentLongPositionId,
+          entryPrice: lastBuyP,
+          currentPeakPrice: Number.isFinite(curPeakP) ? curPeakP : null,
+        },
+        short: {
+          positionId: currentShortPositionId,
+          entryPrice: lastShortP,
+          currentTroughPrice:
+            Number.isFinite(currentLowSinceShort) && currentLowSinceShort !== Infinity
+              ? currentLowSinceShort
+              : null,
+        },
+      },
+    },
+  });
 
   if (startIdx >= n || n < 2) {
     return {
@@ -8276,6 +8450,10 @@ function runStrategy(data, params, options = {}) {
             lastShortP = actualTradePrice;
             currentLowSinceShort = actualTradePrice;
             shortShares = actualShares;
+            if (!currentShortPositionId) {
+              currentShortPositionId = nextShortPositionId;
+              nextShortPositionId += 1;
+            }
 
             const tradeData = {
               type: "short",
@@ -8287,6 +8465,7 @@ function runStrategy(data, params, options = {}) {
               triggeringStrategy: pendingTrade.strategy,
               simType: "short",
             };
+            tradeData.positionId = currentShortPositionId;
 
             // 添加指標值資訊
             if (pendingTrade.kdValues)
@@ -8318,7 +8497,19 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         switch (exitStrategy) {
           case "ma_cross":
-          case "ema_cross":
+          case "ema_cross": {
+            const pluginResult = runStrategyPluginSignal(
+              exitStrategy,
+              'longExit',
+              i,
+              exitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              sellSignal = pluginResult.exit === true;
+              exitIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             sellSignal =
               check(indicators.maShortExit[i]) &&
               check(indicators.maLongExit[i]) &&
@@ -8340,6 +8531,7 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
+          }
           case "ma_below":
             sellSignal =
               check(indicators.maExit[i]) &&
@@ -8357,7 +8549,19 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
-          case "rsi_overbought":
+          case "rsi_overbought": {
+            const pluginResult = runStrategyPluginSignal(
+              'rsi_overbought',
+              'longExit',
+              i,
+              exitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              sellSignal = pluginResult.exit === true;
+              exitIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const rX = indicators.rsiExit[i],
               rPX = indicators.rsiExit[i - 1],
               rThX = exitParams.threshold || 70;
@@ -8367,6 +8571,7 @@ function runStrategy(data, params, options = {}) {
                 RSI: [rPX, rX, indicators.rsiExit[i + 1] ?? null],
               };
             break;
+          }
           case "macd_cross":
             const difX = indicators.macdExit[i],
               deaX = indicators.macdSignalExit[i],
@@ -8389,7 +8594,19 @@ function runStrategy(data, params, options = {}) {
                 deaNext: indicators.macdSignalExit[i + 1] ?? null,
               };
             break;
-          case "bollinger_reversal":
+          case "bollinger_reversal": {
+            const pluginResult = runStrategyPluginSignal(
+              'bollinger_reversal',
+              'longExit',
+              i,
+              exitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              sellSignal = pluginResult.exit === true;
+              exitIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const midX = indicators.bollingerMiddleExit[i];
             const midPX = indicators.bollingerMiddleExit[i - 1];
             sellSignal =
@@ -8408,7 +8625,20 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
-          case "k_d_cross":
+          }
+          case "k_d_cross": {
+            const pluginResult = runStrategyPluginSignal(
+              'k_d_cross',
+              'longExit',
+              i,
+              exitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              sellSignal = pluginResult.exit === true;
+              exitKDValues = pluginResult.meta?.kdValues || null;
+              break;
+            }
             const kX = indicators.kExit[i],
               dX = indicators.dExit[i],
               kPX = indicators.kExit[i - 1],
@@ -8432,7 +8662,23 @@ function runStrategy(data, params, options = {}) {
                 dNext: indicators.dExit[i + 1] ?? null,
               };
             break;
-          case "trailing_stop":
+          }
+          case "trailing_stop": {
+            const pluginResult = runStrategyPluginSignal(
+              'trailing_stop',
+              'longExit',
+              i,
+              exitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              if (typeof pluginResult.meta?.nextPeak === 'number') {
+                curPeakP = pluginResult.meta.nextPeak;
+              }
+              sellSignal = pluginResult.exit === true;
+              exitIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const trailP = exitParams.percentage || 5;
             if (check(curH) && lastBuyP > 0) {
               curPeakP = Math.max(curPeakP, curH);
@@ -8448,6 +8694,7 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
+          }
           case "price_breakdown":
             const bpX = exitParams.period || 20;
             if (i >= bpX) {
@@ -8501,6 +8748,14 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        const exitRuleResult = normaliseRuleResultFromLegacy(
+          exitStrategy,
+          'longExit',
+          { exit: sellSignal },
+          i,
+        );
+        sellSignal = exitRuleResult.exit === true;
+
         if (!sellSignal && globalSL > 0 && lastBuyP > 0) {
           if (curC <= lastBuyP * (1 - globalSL / 100)) slTrig = true;
         }
@@ -8752,7 +9007,19 @@ function runStrategy(data, params, options = {}) {
           coverIndicatorValues = null;
         switch (shortExitStrategy) {
           case "cover_ma_cross":
-          case "cover_ema_cross":
+          case "cover_ema_cross": {
+            const pluginResult = runStrategyPluginSignal(
+              shortExitStrategy,
+              'shortExit',
+              i,
+              shortExitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              coverIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             coverSignal =
               check(indicators.maShortCover[i]) &&
               check(indicators.maLongCover[i]) &&
@@ -8774,6 +9041,7 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
+          }
           case "cover_ma_above":
             coverSignal =
               check(indicators.maExit[i]) &&
@@ -8791,7 +9059,19 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
-          case "cover_rsi_oversold":
+          case "cover_rsi_oversold": {
+            const pluginResult = runStrategyPluginSignal(
+              'cover_rsi_oversold',
+              'shortExit',
+              i,
+              shortExitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              coverIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const rC = indicators.rsiCover[i],
               rPC = indicators.rsiCover[i - 1],
               rThC = shortExitParams.threshold || 30;
@@ -8801,6 +9081,7 @@ function runStrategy(data, params, options = {}) {
                 RSI: [rPC, rC, indicators.rsiCover[i + 1] ?? null],
               };
             break;
+          }
           case "cover_macd_cross":
             const difC = indicators.macdCover[i],
               deaC = indicators.macdSignalCover[i],
@@ -8823,7 +9104,19 @@ function runStrategy(data, params, options = {}) {
                 deaNext: indicators.macdSignalCover[i + 1] ?? null,
               };
             break;
-          case "cover_bollinger_breakout":
+          case "cover_bollinger_breakout": {
+            const pluginResult = runStrategyPluginSignal(
+              'cover_bollinger_breakout',
+              'shortExit',
+              i,
+              shortExitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              coverIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const upperC = indicators.bollingerUpperCover[i];
             const upperPC = indicators.bollingerUpperCover[i - 1];
             coverSignal =
@@ -8842,7 +9135,20 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
-          case "cover_k_d_cross":
+          }
+          case "cover_k_d_cross": {
+            const pluginResult = runStrategyPluginSignal(
+              'cover_k_d_cross',
+              'shortExit',
+              i,
+              shortExitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              coverKDValues = pluginResult.meta?.kdValues || null;
+              break;
+            }
             const kC = indicators.kCover[i],
               dC = indicators.dCover[i],
               kPC = indicators.kCover[i - 1],
@@ -8866,6 +9172,7 @@ function runStrategy(data, params, options = {}) {
                 dNext: indicators.dCover[i + 1] ?? null,
               };
             break;
+          }
           case "cover_price_breakout":
             const bpC = shortExitParams.period || 20;
             if (i >= bpC) {
@@ -8915,7 +9222,22 @@ function runStrategy(data, params, options = {}) {
                 };
             }
             break;
-          case "cover_trailing_stop":
+          case "cover_trailing_stop": {
+            const pluginResult = runStrategyPluginSignal(
+              'cover_trailing_stop',
+              'shortExit',
+              i,
+              shortExitParams,
+              buildPluginExtras(),
+            );
+            if (pluginResult) {
+              if (typeof pluginResult.meta?.nextTrough === 'number') {
+                currentLowSinceShort = pluginResult.meta.nextTrough;
+              }
+              coverSignal = pluginResult.cover === true;
+              coverIndicatorValues = pluginResult.meta?.indicatorValues || null;
+              break;
+            }
             const shortTrailP = shortExitParams.percentage || 5;
             if (check(curL) && lastShortP > 0) {
               currentLowSinceShort = Math.min(currentLowSinceShort, curL);
@@ -8932,10 +9254,19 @@ function runStrategy(data, params, options = {}) {
                 ],
               };
             break;
+          }
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
         }
+        const shortExitRuleResult = normaliseRuleResultFromLegacy(
+          shortExitStrategy,
+          'shortExit',
+          { cover: coverSignal },
+          i,
+        );
+        coverSignal = shortExitRuleResult.cover === true;
+
         if (!coverSignal && globalSL > 0 && lastShortP > 0) {
           if (curC >= lastShortP * (1 + globalSL / 100)) shortSlTrig = true;
         }
@@ -9012,6 +9343,7 @@ function runStrategy(data, params, options = {}) {
             shortShares = 0;
             lastShortP = 0;
             currentLowSinceShort = Infinity;
+            currentShortPositionId = null;
           } else {
             console.warn(
               `[Worker SHORT] Invalid trade price (${tradePrice}) or zero shares for Cover Signal on ${dates[i]}`,
@@ -9032,7 +9364,19 @@ function runStrategy(data, params, options = {}) {
         entryIndicatorValues = null;
       switch (entryStrategy) {
         case "ma_cross":
-        case "ema_cross":
+        case "ema_cross": {
+          const pluginResult = runStrategyPluginSignal(
+            entryStrategy,
+            'longEntry',
+            i,
+            entryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            buySignal = pluginResult.enter === true;
+            entryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           buySignal =
             check(indicators.maShort[i]) &&
             check(indicators.maLong[i]) &&
@@ -9054,6 +9398,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
         case "ma_above":
           buySignal =
             check(indicators.maExit[i]) &&
@@ -9071,7 +9416,19 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
-        case "rsi_oversold":
+        case "rsi_oversold": {
+          const pluginResult = runStrategyPluginSignal(
+            'rsi_oversold',
+            'longEntry',
+            i,
+            entryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            buySignal = pluginResult.enter === true;
+            entryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           const rE = indicators.rsiEntry[i],
             rPE = indicators.rsiEntry[i - 1],
             rThE = entryParams.threshold || 30;
@@ -9081,6 +9438,7 @@ function runStrategy(data, params, options = {}) {
               RSI: [rPE, rE, indicators.rsiEntry[i + 1] ?? null],
             };
           break;
+        }
         case "macd_cross":
           const difE = indicators.macdEntry[i],
             deaE = indicators.macdSignalEntry[i],
@@ -9103,7 +9461,19 @@ function runStrategy(data, params, options = {}) {
               deaNext: indicators.macdSignalEntry[i + 1] ?? null,
             };
           break;
-        case "bollinger_breakout":
+        case "bollinger_breakout": {
+          const pluginResult = runStrategyPluginSignal(
+            'bollinger_breakout',
+            'longEntry',
+            i,
+            entryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            buySignal = pluginResult.enter === true;
+            entryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           buySignal =
             check(indicators.bollingerUpperEntry[i]) &&
             check(prevC) &&
@@ -9120,7 +9490,20 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
-        case "k_d_cross":
+        }
+        case "k_d_cross": {
+          const pluginResult = runStrategyPluginSignal(
+            'k_d_cross',
+            'longEntry',
+            i,
+            entryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            buySignal = pluginResult.enter === true;
+            entryKDValues = pluginResult.meta?.kdValues || null;
+            break;
+          }
           const kE = indicators.kEntry[i],
             dE = indicators.dEntry[i],
             kPE = indicators.kEntry[i - 1],
@@ -9144,6 +9527,7 @@ function runStrategy(data, params, options = {}) {
               dNext: indicators.dEntry[i + 1] ?? null,
             };
           break;
+        }
         case "volume_spike":
           const vAE = indicators.volumeAvgEntry[i],
             vME = entryParams.multiplier || 2;
@@ -9203,7 +9587,14 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
-        let shouldEnterStage = false;
+      const entryRuleResult = normaliseRuleResultFromLegacy(
+        entryStrategy,
+        'longEntry',
+        { enter: buySignal },
+        i,
+      );
+      buySignal = entryRuleResult.enter === true;
+      let shouldEnterStage = false;
         let stageTriggerType = null;
         if (buySignal) {
           shouldEnterStage = true;
@@ -9295,7 +9686,19 @@ function runStrategy(data, params, options = {}) {
         shortEntryIndicatorValues = null;
       switch (shortEntryStrategy) {
         case "short_ma_cross":
-        case "short_ema_cross":
+        case "short_ema_cross": {
+          const pluginResult = runStrategyPluginSignal(
+            shortEntryStrategy,
+            'shortEntry',
+            i,
+            shortEntryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            shortSignal = pluginResult.short === true;
+            shortEntryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           shortSignal =
             check(indicators.maShortShortEntry[i]) &&
             check(indicators.maLongShortEntry[i]) &&
@@ -9318,6 +9721,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
         case "short_ma_below":
           shortSignal =
             check(indicators.maExit[i]) &&
@@ -9335,7 +9739,19 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
-        case "short_rsi_overbought":
+        case "short_rsi_overbought": {
+          const pluginResult = runStrategyPluginSignal(
+            'short_rsi_overbought',
+            'shortEntry',
+            i,
+            shortEntryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            shortSignal = pluginResult.short === true;
+            shortEntryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           const rSE = indicators.rsiShortEntry[i],
             rPSE = indicators.rsiShortEntry[i - 1],
             rThSE = shortEntryParams.threshold || 70;
@@ -9346,6 +9762,7 @@ function runStrategy(data, params, options = {}) {
               RSI: [rPSE, rSE, indicators.rsiShortEntry[i + 1] ?? null],
             };
           break;
+        }
         case "short_macd_cross":
           const difSE = indicators.macdShortEntry[i],
             deaSE = indicators.macdSignalShortEntry[i],
@@ -9368,7 +9785,19 @@ function runStrategy(data, params, options = {}) {
               deaNext: indicators.macdSignalShortEntry[i + 1] ?? null,
             };
           break;
-        case "short_bollinger_reversal":
+        case "short_bollinger_reversal": {
+          const pluginResult = runStrategyPluginSignal(
+            'short_bollinger_reversal',
+            'shortEntry',
+            i,
+            shortEntryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            shortSignal = pluginResult.short === true;
+            shortEntryIndicatorValues = pluginResult.meta?.indicatorValues || null;
+            break;
+          }
           const midSE = indicators.bollingerMiddleShortEntry[i];
           const midPSE = indicators.bollingerMiddleShortEntry[i - 1];
           shortSignal =
@@ -9387,7 +9816,20 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
-        case "short_k_d_cross":
+        }
+        case "short_k_d_cross": {
+          const pluginResult = runStrategyPluginSignal(
+            'short_k_d_cross',
+            'shortEntry',
+            i,
+            shortEntryParams,
+            buildPluginExtras(),
+          );
+          if (pluginResult) {
+            shortSignal = pluginResult.short === true;
+            shortEntryKDValues = pluginResult.meta?.kdValues || null;
+            break;
+          }
           const kSE = indicators.kShortEntry[i],
             dSE = indicators.dShortEntry[i],
             kPSE = indicators.kShortEntry[i - 1],
@@ -9411,6 +9853,7 @@ function runStrategy(data, params, options = {}) {
               dNext: indicators.dShortEntry[i + 1] ?? null,
             };
           break;
+        }
         case "short_price_breakdown":
           const bpSE = shortEntryParams.period || 20;
           if (i >= bpSE) {
@@ -9461,6 +9904,13 @@ function runStrategy(data, params, options = {}) {
             };
           break;
       }
+      const shortEntryRuleResult = normaliseRuleResultFromLegacy(
+        shortEntryStrategy,
+        'shortEntry',
+        { short: shortSignal },
+        i,
+      );
+      shortSignal = shortEntryRuleResult.short === true;
       if (shortSignal) {
         if (tradeTiming === "close") {
           tradePrice = curC;
@@ -9518,6 +9968,10 @@ function runStrategy(data, params, options = {}) {
             shortPos = 1;
             lastShortP = tradePrice;
             currentLowSinceShort = tradePrice;
+            if (!currentShortPositionId) {
+              currentShortPositionId = nextShortPositionId;
+              nextShortPositionId += 1;
+            }
             const tradeData = {
               type: "short",
               date: tradeDate,
@@ -9528,6 +9982,7 @@ function runStrategy(data, params, options = {}) {
               triggeringStrategy: shortEntryStrategy,
               simType: "short",
             };
+            tradeData.positionId = currentShortPositionId;
             if (shortEntryKDValues) tradeData.kdValues = shortEntryKDValues;
             if (shortEntryMACDValues)
               tradeData.macdValues = shortEntryMACDValues;
