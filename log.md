@@ -1584,3 +1584,11 @@ NODE`
   - 敏感度情境回傳的 `deltaReturn` 及聚合統計全面改採年化百分點差，確保 UI 呈現的 PP、平均漂移與穩定度門檻一致。
 - **Diagnostics**: 待於實際回測環境比對長、短回測區間，確認敏感度卡片顯示的漂移百分點會隨年化報酬變化，並檢視穩定度評分是否與 ±6/±12pp 門檻吻合。
 - **Testing**: 尚未執行（容器無法連線 Proxy，請於 Netlify 實機回測至少 2330 與 0050，確認 console 無錯誤並驗證敏感度卡片數據）。
+
+## 2026-08-11 — Patch LB-MONTH-REVALIDATE-20250712A
+- **Issue recap**: 長時間開啟頁面時，Worker 月度快取雖有缺口但未超過 6 日容忍，仍沿用舊 Proxy 回應，使刷新後的最後一筆日期停留在初次開啟日（例如僅看到 2025/10/20）。
+- **Fix**:
+  - `js/worker.js` 依市場設定月度快取逾期門檻（台股 18 小時、美股 12 小時），缺口觸及請求結束日且快取逾期時會強制加入 `cacheBust` 重新抓取，並更新 `lastForcedReloadAt` 防止重複觸發。
+  - 月度診斷加入 `staleReload` 與 `staleRevalidations`，便於測試卡片呈現快取刷新紀錄。
+- **Diagnostics**: 待於可連線 Proxy 的環境保持頁面開啟超過 24 小時後再回測，確認月末資料會觸發 `cacheBust` 並補齊最新交易日。
+- **Testing**: `npm run typecheck`（驗證 JSDoc/.d.ts 仍通過）。
