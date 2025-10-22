@@ -3147,6 +3147,267 @@ function initDeveloperAreaToggle() {
     });
 }
 
+function initStrategyRegistryTester() {
+    const container = document.getElementById('strategyRegistryTesterContainer');
+    if (!container) {
+        return;
+    }
+
+    const verifyBtn = document.getElementById('strategyRegistryVerifyBtn');
+    const sampleBtn = document.getElementById('strategyRegistrySampleBtn');
+    const statusEl = document.getElementById('strategyRegistryTesterStatus');
+    const summaryEl = document.getElementById('strategyRegistryTesterSummary');
+    const logEl = document.getElementById('strategyRegistryTesterLog');
+
+    const toneStyles = {
+        info: {
+            color: 'var(--foreground)',
+            background: 'rgba(15, 23, 42, 0.04)',
+            border: 'var(--border)',
+        },
+        success: {
+            color: 'var(--emerald-600, #047857)',
+            background: 'rgba(16, 185, 129, 0.16)',
+            border: 'rgba(16, 185, 129, 0.35)',
+        },
+        warning: {
+            color: 'var(--amber-700, #b45309)',
+            background: 'rgba(251, 191, 36, 0.2)',
+            border: 'rgba(217, 119, 6, 0.35)',
+        },
+        error: {
+            color: 'var(--rose-700, #b91c1c)',
+            background: 'rgba(248, 113, 113, 0.2)',
+            border: 'rgba(220, 38, 38, 0.35)',
+        },
+    };
+
+    const registryVersion = 'LB-PLUGIN-REGISTRY-20250915A';
+    const runnerVersion = 'LB-BACKTEST-RUNNER-20250915A';
+    let lastManifest = [];
+    let lastLogEntries = [];
+
+    const applyTone = (element, tone) => {
+        if (!element) {
+            return;
+        }
+        const palette = toneStyles[tone] || toneStyles.info;
+        element.style.color = palette.color;
+        element.style.backgroundColor = palette.background;
+        element.style.borderColor = palette.border;
+        element.classList.remove('hidden');
+    };
+
+    const updateStatus = (message, tone = 'info') => {
+        if (!statusEl) {
+            return;
+        }
+        statusEl.textContent = message;
+        applyTone(statusEl, tone);
+    };
+
+    const updateSummaryLines = (lines) => {
+        if (!summaryEl) {
+            return;
+        }
+        if (!Array.isArray(lines) || lines.length === 0) {
+            summaryEl.innerHTML = '';
+            return;
+        }
+        summaryEl.innerHTML = lines
+            .filter(Boolean)
+            .map((line) => `<div>${typeof testerEscapeHtml === 'function' ? testerEscapeHtml(line) : line}</div>`)
+            .join('');
+    };
+
+    const renderLog = (entries) => {
+        if (!logEl) {
+            return;
+        }
+        if (!Array.isArray(entries) || entries.length === 0) {
+            logEl.innerHTML = '';
+            logEl.classList.add('hidden');
+            return;
+        }
+        logEl.innerHTML = '';
+        logEl.classList.remove('hidden');
+        entries.forEach((entry) => {
+            const item = document.createElement('li');
+            const palette = toneStyles[entry.tone] || toneStyles.info;
+            item.style.color = palette.color;
+            item.style.borderLeft = `3px solid ${palette.border}`;
+            item.style.paddingLeft = '6px';
+            const label = entry.label ? `${entry.label}：` : '';
+            item.textContent = `${label}${entry.message}`;
+            logEl.appendChild(item);
+        });
+    };
+
+    const ensureRegistry = () => {
+        const registry = window.StrategyPluginRegistry;
+        if (!registry || typeof registry.listStrategies !== 'function') {
+            throw new Error('StrategyPluginRegistry 尚未載入');
+        }
+        return registry;
+    };
+
+    const verifyStrategies = () => {
+        let manifest = [];
+        let registry;
+        try {
+            registry = ensureRegistry();
+            manifest = registry.listStrategies({ includeLazy: true }) || [];
+        } catch (error) {
+            updateStatus(`讀取策略清單失敗：${error.message || error}`, 'error');
+            updateSummaryLines([
+                `Manifest 版本：${registryVersion}`,
+                `BacktestRunner 版本：${runnerVersion}`,
+            ]);
+            renderLog([]);
+            return;
+        }
+
+        lastManifest = manifest;
+        const logEntries = [];
+        let successCount = 0;
+        let warningCount = 0;
+        let failureCount = 0;
+        manifest.forEach((meta) => {
+            const id = typeof meta?.id === 'string' ? meta.id : '(未知 ID)';
+            try {
+                const plugin = registry.getStrategyById(id);
+                if (plugin && typeof plugin.run === 'function') {
+                    successCount += 1;
+                    logEntries.push({ tone: 'success', label: id, message: '載入成功' });
+                } else {
+                    warningCount += 1;
+                    logEntries.push({ tone: 'warning', label: id, message: '已載入但缺少 run(context, params)' });
+                }
+            } catch (error) {
+                failureCount += 1;
+                logEntries.push({ tone: 'error', label: id, message: `載入失敗：${error.message || error}` });
+            }
+        });
+
+        const statusTone = failureCount > 0 ? 'error' : warningCount > 0 ? 'warning' : 'success';
+        const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+        updateStatus(`策略清單 ${manifest.length} 項，成功 ${successCount} ・ 警告 ${warningCount} ・ 失敗 ${failureCount}（${timestamp}）`, statusTone);
+        updateSummaryLines([
+            `Manifest 版本：${registryVersion}`,
+            `BacktestRunner 版本：${runnerVersion}`,
+            failureCount > 0 ? '請檢查載入失敗的策略以排除路徑或合約異常。' : '懶載入測試完成，可抽樣回測比對結果。',
+        ]);
+        lastLogEntries = logEntries;
+        renderLog(lastLogEntries);
+    };
+
+    const runSampleBacktest = () => {
+        let registry;
+        try {
+            registry = ensureRegistry();
+        } catch (error) {
+            updateStatus(error.message || String(error), 'error');
+            return;
+        }
+
+        if (!Array.isArray(lastManifest) || lastManifest.length === 0) {
+            try {
+                lastManifest = registry.listStrategies({ includeLazy: true }) || [];
+            } catch (error) {
+                updateStatus(`讀取策略清單失敗：${error.message || error}`,'error');
+                return;
+            }
+        }
+
+        if (!lastManifest.length) {
+            updateStatus('策略清單為空，請先執行「檢查策略載入」。', 'warning');
+            return;
+        }
+
+        const candidate = lastManifest[Math.floor(Math.random() * lastManifest.length)];
+        const id = typeof candidate?.id === 'string' ? candidate.id : '';
+        if (!id) {
+            updateStatus('抽樣策略的 ID 無效。', 'error');
+            return;
+        }
+
+        try {
+            const plugin = registry.getStrategyById(id);
+            if (!plugin || typeof plugin.run !== 'function') {
+                updateStatus(`策略 ${id} 已載入但缺少 run(context, params)。`, 'warning');
+            } else {
+                updateStatus(`策略 ${id} 懶載入成功，已準備抽樣回測。`, 'success');
+            }
+        } catch (error) {
+            updateStatus(`策略 ${id} 載入失敗：${error.message || error}`, 'error');
+            return;
+        }
+
+        const summaryLines = [
+            `抽樣策略：${id}`,
+            `Manifest 版本：${registryVersion}`,
+            `BacktestRunner 版本：${runnerVersion}`,
+        ];
+
+        let applied = false;
+        if (window.BacktestRunner && typeof window.BacktestRunner.applyOptions === 'function') {
+            try {
+                window.BacktestRunner.applyOptions({ entryStrategyId: id });
+                applied = true;
+            } catch (error) {
+                console.warn('[Strategy Registry Tester] applyOptions failed:', error);
+                summaryLines.push(`自動套用策略失敗：${error.message || error}`);
+            }
+        }
+        if (applied) {
+            summaryLines.push('已套用至「多頭進場」欄位，參數可依需求調整。');
+        } else {
+            summaryLines.push('未能自動套用策略，請手動於表單選取。');
+        }
+
+        let triggeredRun = false;
+        if (window.BacktestRunner && typeof window.BacktestRunner.run === 'function') {
+            try {
+                window.BacktestRunner.run();
+                triggeredRun = true;
+            } catch (error) {
+                console.warn('[Strategy Registry Tester] run() failed:', error);
+                summaryLines.push(`自動執行回測失敗：${error.message || error}`);
+            }
+        }
+        if (triggeredRun) {
+            summaryLines.push('已自動觸發回測，請於結果面板比對舊流程。');
+        } else {
+            summaryLines.push('請手動點擊「執行回測」並比對舊流程結果。');
+        }
+
+        updateSummaryLines(summaryLines);
+
+        const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+        lastLogEntries = [
+            { tone: 'info', label: timestamp, message: `抽樣策略 ${id} 已送往回測。` },
+            ...lastLogEntries,
+        ].slice(0, 30);
+        renderLog(lastLogEntries);
+    };
+
+    verifyBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        verifyStrategies();
+    });
+
+    sampleBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        runSampleBacktest();
+    });
+
+    updateSummaryLines([
+        `Manifest 版本：${registryVersion}`,
+        `BacktestRunner 版本：${runnerVersion}`,
+        '點擊「檢查策略載入」可確認懶載入狀態，「抽樣回測」將自動套用並觸發一次回測。',
+    ]);
+}
+
 function getLoadingTextElement() {
     return document.getElementById('loadingText');
 }
@@ -4390,6 +4651,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
         initBatchDebugLogPanel();
+        initStrategyRegistryTester();
 
         // 初始化頁籤功能
         initTabs();

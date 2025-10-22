@@ -1,4 +1,4 @@
-// Patch Tag: LB-PLUGIN-REGISTRY-20250712A
+// Patch Tag: LB-PLUGIN-REGISTRY-20250915A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   if (!globalScope || !globalScope.StrategyPluginRegistry) {
@@ -10,16 +10,86 @@
     return;
   }
 
+  const manifestBaseUrl = (() => {
+    try {
+      if (typeof document !== 'undefined') {
+        const currentScript = document.currentScript;
+        if (currentScript && currentScript.src) {
+          return new URL('./', currentScript.src).toString();
+        }
+        if (document.baseURI) {
+          return new URL('./', document.baseURI).toString();
+        }
+      }
+      if (globalScope.location && typeof globalScope.location.href === 'string') {
+        return new URL('./', globalScope.location.href).toString();
+      }
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[StrategyPluginManifest] 無法解析基底路徑', error);
+      }
+    }
+    return '';
+  })();
+
+  function resolveScriptUrl(scriptPath) {
+    if (typeof scriptPath !== 'string' || !scriptPath.trim()) {
+      return null;
+    }
+    const trimmed = scriptPath.trim();
+    try {
+      if (/^(?:https?:)?\/\//i.test(trimmed) || trimmed.startsWith('data:')) {
+        return trimmed;
+      }
+      if (manifestBaseUrl) {
+        return new URL(trimmed, manifestBaseUrl).toString();
+      }
+      if (globalScope.location && typeof globalScope.location.href === 'string') {
+        return new URL(trimmed, globalScope.location.href).toString();
+      }
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[StrategyPluginManifest] 載入路徑解析失敗', scriptPath, error);
+      }
+    }
+    return trimmed;
+  }
+
+  function loadScriptInWindow(resolvedUrl, originalPath) {
+    const url = resolvedUrl || originalPath;
+    try {
+      const request = new XMLHttpRequest();
+      request.open('GET', url, false);
+      request.send(null);
+      if (request.status >= 200 && request.status < 300) {
+        const source = request.responseText;
+        const executor = new Function(`${source}\n//# sourceURL=${url}`);
+        executor.call(globalScope);
+        return true;
+      }
+      throw new Error(`HTTP ${request.status}`);
+    } catch (error) {
+      throw new Error(`[StrategyPluginManifest] 無法於此環境載入 ${originalPath}: ${error.message}`);
+    }
+  }
+
   function createScriptLoader(scriptPath) {
+    const resolvedUrl = resolveScriptUrl(scriptPath);
     let loaded = false;
     return function load() {
       if (loaded) {
         return;
       }
       if (typeof importScripts === 'function') {
-        importScripts(scriptPath);
+        importScripts(resolvedUrl || scriptPath);
         loaded = true;
         return;
+      }
+      if (typeof XMLHttpRequest === 'function') {
+        if (loadScriptInWindow(resolvedUrl, scriptPath)) {
+          loaded = true;
+          return;
+        }
       }
       throw new Error(`[StrategyPluginManifest] 無法於此環境載入 ${scriptPath}`);
     };

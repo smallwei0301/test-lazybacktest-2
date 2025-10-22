@@ -10955,3 +10955,176 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('[Market Switch] 市場切換功能已初始化');
     }, 100);
 });
+
+(function (root) {
+    const globalScope = root || (typeof window !== 'undefined' ? window : this);
+    if (!globalScope) {
+        return;
+    }
+
+    const RUNNER_VERSION = 'LB-BACKTEST-RUNNER-20250915A';
+    if (globalScope.BacktestRunner && typeof globalScope.BacktestRunner === 'object') {
+        const currentVersion = globalScope.BacktestRunner.__version__;
+        if (typeof currentVersion === 'string' && currentVersion >= RUNNER_VERSION) {
+            return;
+        }
+    }
+
+    function capitaliseParamKey(key) {
+        if (typeof key !== 'string' || !key) {
+            return '';
+        }
+        return key.charAt(0).toUpperCase() + key.slice(1);
+    }
+
+    function dispatchInputEvents(element) {
+        if (!element) {
+            return;
+        }
+        try {
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (_) {}
+        try {
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (_) {}
+    }
+
+    function setInputValue(id, value) {
+        if (typeof document === 'undefined') {
+            return false;
+        }
+        const element = document.getElementById(id);
+        if (!element) {
+            return false;
+        }
+        if (value !== undefined) {
+            element.value = value;
+        }
+        dispatchInputEvents(element);
+        return true;
+    }
+
+    function applyParamOverridesForType(type, overrides) {
+        if (!overrides || typeof overrides !== 'object') {
+            return;
+        }
+        Object.keys(overrides).forEach((paramKey) => {
+            const override = overrides[paramKey];
+            let elementId = null;
+            let value = override;
+            if (override && typeof override === 'object' && 'elementId' in override) {
+                elementId = String(override.elementId || '').trim() || null;
+                value = override.value;
+            }
+            if (!elementId) {
+                elementId = `${type}${capitaliseParamKey(paramKey)}`;
+            }
+            setInputValue(elementId, value);
+        });
+    }
+
+    function applyStrategySelection(type, strategyId) {
+        if (typeof document === 'undefined') {
+            return false;
+        }
+        if (typeof strategyId !== 'string' || !strategyId.trim()) {
+            return false;
+        }
+        const select = document.getElementById(`${type}Strategy`);
+        if (!select) {
+            return false;
+        }
+        const normalised = strategyId.trim();
+        const hasOption = Array.from(select.options || []).some((option) => option.value === normalised);
+        if (!hasOption) {
+            return false;
+        }
+        if (select.value !== normalised) {
+            select.value = normalised;
+        }
+        try {
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (_) {}
+        if (typeof globalScope.updateStrategyParams === 'function') {
+            try {
+                globalScope.updateStrategyParams(type);
+            } catch (error) {
+                console.warn(`[BacktestRunner] 更新 ${type} 參數面板失敗`, error);
+            }
+        }
+        return true;
+    }
+
+    function applyOptions(options) {
+        if (!options || typeof options !== 'object') {
+            return false;
+        }
+        if (typeof document === 'undefined') {
+            return false;
+        }
+
+        if (typeof options.stockNo === 'string') {
+            setInputValue('stockNo', options.stockNo);
+        }
+        if (typeof options.startDate === 'string') {
+            setInputValue('startDate', options.startDate);
+        }
+        if (typeof options.endDate === 'string') {
+            setInputValue('endDate', options.endDate);
+        }
+
+        if (options.enableShortSelling !== undefined) {
+            const checkbox = document.getElementById('enableShortSelling');
+            if (checkbox) {
+                checkbox.checked = Boolean(options.enableShortSelling);
+                dispatchInputEvents(checkbox);
+            }
+        }
+
+        if (typeof options.entryStrategyId === 'string') {
+            applyStrategySelection('entry', options.entryStrategyId);
+        }
+        if (typeof options.exitStrategyId === 'string') {
+            applyStrategySelection('exit', options.exitStrategyId);
+        }
+        if (typeof options.shortEntryStrategyId === 'string') {
+            applyStrategySelection('shortEntry', options.shortEntryStrategyId);
+        }
+        if (typeof options.shortExitStrategyId === 'string') {
+            applyStrategySelection('shortExit', options.shortExitStrategyId);
+        }
+
+        if (options.paramOverrides && typeof options.paramOverrides === 'object') {
+            Object.keys(options.paramOverrides).forEach((type) => {
+                applyParamOverridesForType(type, options.paramOverrides[type]);
+            });
+        }
+        return true;
+    }
+
+    function run(options) {
+        if (options) {
+            applyOptions(options);
+        }
+        if (typeof globalScope.runBacktestInternal === 'function') {
+            return globalScope.runBacktestInternal();
+        }
+        if (typeof globalScope.runBacktest === 'function') {
+            return globalScope.runBacktest();
+        }
+        throw new Error('回測函式尚未載入完成');
+    }
+
+    const api = Object.freeze({
+        run,
+        applyOptions,
+        __version__: RUNNER_VERSION,
+    });
+
+    Object.defineProperty(globalScope, 'BacktestRunner', {
+        value: api,
+        configurable: true,
+        writable: false,
+        enumerable: true,
+    });
+})(typeof window !== 'undefined' ? window : this);
