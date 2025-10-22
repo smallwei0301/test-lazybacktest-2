@@ -1469,6 +1469,12 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2026-07-30 — Patch LB-DATA-VOLUME-20260730A
+- **Issue recap**: 還原股價 API 回傳的成交量含有千分位逗號，Worker 轉為數字時回傳 `NaN` 進而記錄為 0，造成整段資料被診斷為「volume×1217」無效欄位，使用者無法進入回測。
+- **Fix**: 版本碼 `LB-DATA-VOLUME-20260730A` 更新 `fetchAdjustedPriceRange` 的數值正規化函式，移除中英文逗號與空白字元後再轉換為數字，確保成交量維持原始規模並通過診斷。
+- **Diagnostics**: 於資料暖身測試卡檢查 `firstValidVolumeOnOrAfterRequestedStart` 與 `invalidRowsInRange`，確認 volume 不再全數為 0；同時確認 Worker log 的 `datasetDiagnostics.invalidRowsInRange.reasons` 不再出現 volume 全域統計。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2026-07-30 — Patch LB-UI-TABTONE-20260730A
 - **Issue recap**: 右側摘要分頁的標籤在切換時會一起縮小，策略摘要卡片文案亦帶有遊戲化語氣，與目標族群預期的專業體驗不符。
 - **Fix**:
