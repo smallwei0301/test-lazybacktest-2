@@ -1506,3 +1506,11 @@ NODE`
 - **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 實際環境回測確認 console 無錯誤）。
 
 
+
+## 2026-08-09 — Patch LB-DATA-VOLUME-20260809A
+- **Issue recap**: 回測診斷卡在 00631L 等標的顯示「無效欄位統計 volume×1217」，追查後發現 Netlify Blob 與 Proxy 回傳的成交量欄位帶有千分位逗號，Worker 以 `Number()` 直接轉換導致回傳 `NaN`，最終被歸零並標記為無效資料。
+- **Fix**:
+  - `js/worker.js` 的 `fetchAdjustedPriceRange` 將 `toNumber` 更新為移除千分位逗號並忽略空字串，確保成交量能被正確解析。
+  - `js/worker.js` 的 `normalizeProxyRow` 在處理物件格式資料時加入相同的逗號清理邏輯，避免月度快取回灌時再次將成交量歸零。
+- **Diagnostics**: 請於具備 Proxy 的環境執行 00631L 與其他成交量較大的台股回測，確認「無效欄位統計」不再出現 `volume×` 大量計數，並留意 console 是否仍有資料解析警示。
+- **Testing**: 尚未執行（容器無法連線 Proxy，需於 Netlify 環境實際跑回測並檢查 console 無錯誤）。
