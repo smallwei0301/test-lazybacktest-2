@@ -1477,3 +1477,11 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-20250714B
+- **Issue recap**: 敏感度摘要改用年化報酬後仍沿用總報酬制的漂移門檻，平均漂移 20%/40% 及方向 10/15pp 的判準過於寬鬆，導致策略對參數偏移的風險被低估。
+- **Fix**:
+  - `js/backtest.js` 新增年化漂移與方向偏移的門檻常數，將平均漂移顏色分類、摘要卡片文案、提示氣泡與方向建議全面改為 6%/12% 與 6pp/9pp 的年化標準。
+  - 調整敏感度建議句、方向解讀提示與頂部說明，改寫為年化語彙並更新 QuantConnect/Portfolio123 的參考基準。
+- **Diagnostics**: 待可連線 Proxy 的環境以高波動策略（如 KD+ATR）與低波動策略（如 MA20/60）執行擾動測試，確認平均漂移 5% 與 14% 案例分別落在綠/紅區並觸發對應建議。
+- **Testing**: 未執行（容器無法連線 Proxy，需於實機擾動測試驗證 console 無錯誤）。

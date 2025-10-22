@@ -14,6 +14,7 @@
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-SENSITIVITY-ANNUAL-20250714B
 
 // 確保 zoom 插件正確註冊
 document.addEventListener('DOMContentLoaded', function() {
@@ -1479,12 +1480,12 @@ function buildSensitivityScoreAdvice(result) {
     }
 
     if (averageDrift !== null) {
-        if (averageDrift <= 20) {
-            segments.push('平均漂移守在 ±20pp，穩得像練功掛網');
-        } else if (averageDrift <= 40) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
+        if (averageDrift <= SENSITIVITY_ANNUAL_DRIFT_SAFE_THRESHOLD) {
+            segments.push(`平均年化漂移守在 ±${SENSITIVITY_ANNUAL_DRIFT_SAFE_THRESHOLD}pp，穩得像練功掛網`);
+        } else if (averageDrift <= SENSITIVITY_ANNUAL_DRIFT_WARN_THRESHOLD) {
+            segments.push(`平均年化漂移約 ${averageDrift.toFixed(1)}pp，建議延長樣本或調整倉位分散風險免得被團滅`);
         } else {
-            segments.push(`平均漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
+            segments.push(`平均年化漂移衝到 ${averageDrift.toFixed(1)}pp，快強化風控或縮小部位，不然下一波就滅團`);
         }
     }
 
@@ -1495,14 +1496,16 @@ function buildSensitivityScoreAdvice(result) {
         const dominantMagnitude = dominantDirection === '調高' ? positiveDrift : negativeDrift;
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
-            if (dominantMagnitude > 15) {
-                segments.push(`${dominantDirection}方向平均偏移超過 15pp，該方向參數等於被掛上 Debuff，快排程調整`);
-            } else if (dominantMagnitude > 10) {
-                segments.push(`${dominantDirection}方向平均偏移落在 10～15pp，建議再做滾動驗證避免下個版本翻車`);
-            } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= 10 && dominantMagnitude <= 10) {
-                segments.push('調高與調低方向平均偏移皆在 10pp 內，穩到可以邊刷副本邊調參');
+            if (dominantMagnitude > SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD) {
+                segments.push(`${dominantDirection}方向平均年化偏移超過 ${SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD}pp，該方向參數等於被掛上 Debuff，快排程調整`);
+            } else if (dominantMagnitude > SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD) {
+                segments.push(`${dominantDirection}方向平均年化偏移落在 ${SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD}～${SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD}pp，建議再做滾動驗證避免下個版本翻車`);
+            } else if (Number.isFinite(oppositeMagnitude)
+                && oppositeMagnitude <= SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD
+                && dominantMagnitude <= SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD) {
+                segments.push(`調高與調低方向平均年化偏移皆在 ${SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD}pp 內，穩到可以邊刷副本邊調參`);
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
+                segments.push(`${dominantDirection}方向平均年化偏移約 ${dominantMagnitude.toFixed(1)}pp，持續觀察即可維持例行保養`);
             }
         }
     }
@@ -1597,6 +1600,12 @@ const TREND_TARGET_TREND_MIN = 0.38;
 const TREND_TARGET_TREND_MAX = 0.86;
 const TREND_PROMOTION_BASE = 0.68;
 const TREND_PROMOTION_GAIN = 0.28;
+
+const SENSITIVITY_ANNUAL_DRIFT_SAFE_THRESHOLD = 6;
+const SENSITIVITY_ANNUAL_DRIFT_WARN_THRESHOLD = 12;
+const SENSITIVITY_ANNUAL_MAX_DRIFT_SAFE_THRESHOLD = 12;
+const SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD = 6;
+const SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD = 9;
 
 const TREND_STYLE_MAP = {
     bullHighVol: {
@@ -6424,7 +6433,7 @@ function displayBacktestResult(result) {
                 ? sensitivityData
                 : null;
         const tooltipContent =
-            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的報酬漂移通常低於 30%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
+            '參考 QuantConnect、Portfolio123 等國外回測平臺的 Parameter Sensitivity 規範：<br>1. 穩定度分數 ≥ 70：±10% 調整下的年化報酬漂移通常低於 12%，可視為穩健。<br>2. 40 ~ 69：建議再進行樣本延伸或優化驗證。<br>3. < 40：代表策略對參數高度敏感，常見於過擬合案例。<br><br>PP（百分點）代表回報率絕對差值：調整後報酬 − 基準報酬。';
         const headerHtml = `
         <div class="flex items-center mb-6">
             <h4 class="text-lg font-semibold" style="color: var(--foreground);">敏感度分析</h4>
@@ -6476,8 +6485,8 @@ function displayBacktestResult(result) {
         const driftClass = (value) => {
             if (!Number.isFinite(value)) return 'text-muted-foreground';
             const abs = Math.abs(value);
-            if (abs <= 20) return 'text-emerald-600';
-            if (abs <= 40) return 'text-amber-500';
+            if (abs <= SENSITIVITY_ANNUAL_DRIFT_SAFE_THRESHOLD) return 'text-emerald-600';
+            if (abs <= SENSITIVITY_ANNUAL_DRIFT_WARN_THRESHOLD) return 'text-amber-500';
             return 'text-rose-600';
         };
         const baselineMetrics = {
@@ -6776,8 +6785,8 @@ function displayBacktestResult(result) {
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
         let directionSafeTooltip = null;
         const directionAdvice = (() => {
-            const safeThreshold = 10;
-            const warnThreshold = 15;
+            const safeThreshold = SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD;
+            const warnThreshold = SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD;
             const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
             const negativeAbs = Number.isFinite(overallNegative) ? Math.abs(overallNegative) : null;
             if (positiveAbs === null && negativeAbs === null) {
@@ -6790,13 +6799,13 @@ function displayBacktestResult(result) {
             if (dominantAbs !== null && dominantAbs <= safeThreshold && (dominantDirection === '調高'
                 ? (negativeAbs === null || negativeAbs <= safeThreshold)
                 : (positiveAbs === null || positiveAbs <= safeThreshold))) {
-                directionSafeTooltip = '兩側平均偏移都在 ±10pp 內，方向調整相對安全。';
-                return '兩側偏移都不大，照現在的節奏繼續跑即可。';
+                directionSafeTooltip = `兩側年化偏移都在 ±${safeThreshold}pp 內，方向調整相對安全。`;
+                return '兩側年化偏移都不大，照現在的節奏繼續跑即可。';
             }
             if (dominantAbs !== null && dominantAbs > warnThreshold) {
-                return `${dominantDirection}側平均偏移超過 15pp，請優先針對該方向調整風控或做批量優化。`;
+                return `${dominantDirection}側年化偏移超過 ${warnThreshold}pp，請優先針對該方向調整風控或做批量優化。`;
             }
-            return `${dominantDirection}側平均偏移落在 10～15pp，建議多補樣本再做方向驗證。`;
+            return `${dominantDirection}側年化偏移落在 ${safeThreshold}～${warnThreshold}pp，建議多補樣本再做方向驗證。`;
         })();
         const summarySentence = (() => {
             const stabilityScore = Number.isFinite(overallScore) ? overallScore : null;
@@ -6805,13 +6814,18 @@ function displayBacktestResult(result) {
             if (stabilityScore === null && driftAbs === null && maxAbs === null) {
                 return '樣本不足，先補完擾動測試再回來看結論。';
             }
-            if (stabilityScore !== null && stabilityScore >= 75 && (driftAbs === null || driftAbs <= 18) && (maxAbs === null || maxAbs <= 30)) {
-                return '整體偏移小又穩，維持原參數觀察即可。';
+            if (
+                stabilityScore !== null
+                && stabilityScore >= 75
+                && (driftAbs === null || driftAbs <= SENSITIVITY_ANNUAL_DRIFT_SAFE_THRESHOLD)
+                && (maxAbs === null || maxAbs <= SENSITIVITY_ANNUAL_MAX_DRIFT_SAFE_THRESHOLD)
+            ) {
+                return '整體年化偏移小又穩，維持原參數觀察即可。';
             }
             if (stabilityScore !== null && stabilityScore >= 55) {
-                return '漂移開始放大，搭配分段風控或拉長觀察期會更安心。';
+                return '年化漂移開始放大，搭配分段風控或拉長觀察期會更安心。';
             }
-            return '漂移明顯偏大，先縮小部位並重新檢視參數設定。';
+            return '年化漂移明顯偏大，先縮小部位並重新檢視參數設定。';
         })();
         const directionTooltipHtml = directionSafeTooltip
             ? `<span class="tooltip"><span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span><span class="tooltiptext tooltiptext--sensitivity">${directionSafeTooltip}</span></span>`
@@ -6837,7 +6851,7 @@ function displayBacktestResult(result) {
                             <p class="text-sm font-medium" style="color: var(--muted-foreground);">平均漂移幅度</p>
                             <span class="tooltip">
                                 <span class="info-icon inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full cursor-help" style="background-color: var(--primary); color: var(--primary-foreground);">?</span>
-                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移 = 各擾動樣本的年化報酬差異絕對值平均。<br><strong>&le; 20%</strong>：偏移小，策略較穩健。<br><strong>20%～40%</strong>：建議延長樣本或用批量優化比對不同視窗。<br><strong>&gt; 40%</strong>：對參數相當敏感，需特別留意過擬合。</span>
+                                <span class="tooltiptext tooltiptext--sensitivity">平均漂移 = 各擾動樣本的年化報酬差異絕對值平均。<br><strong>&le; 6%</strong>：偏移小，策略較穩健。<br><strong>6%～12%</strong>：建議延長樣本或用批量優化比對不同視窗。<br><strong>&gt; 12%</strong>：對參數相當敏感，需特別留意過擬合。</span>
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${driftClass(overallDrift)}">${formatPercentMagnitude(overallDrift, 1)}</p>
@@ -6878,7 +6892,7 @@ function displayBacktestResult(result) {
                             <li><strong>擾動網格</strong>：同時觀察比例（±5%、±10%、±20%）與整數步階調整，快速找出最敏感的方向與幅度。</li>
                             <li><strong>漂移幅度</strong>：所有擾動樣本的報酬偏移絕對值平均，越小代表策略對參數較不敏感。</li>
                             <li><strong>最大偏移</strong>：所有樣本中偏離最大的情境，可視為「最糟／最佳」的幅度參考。</li>
-                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均 PP，雙側落在 ±10pp 內屬於常見穩健區間，超過 15pp 則建議針對該方向再驗證。</li>
+                            <li><strong>偏移方向</strong>：比較調高（▲）與調低（▼）的平均年化 PP，雙側落在 ±${SENSITIVITY_ANNUAL_DIRECTION_SAFE_THRESHOLD}pp 內屬於常見穩健區間，超過 ${SENSITIVITY_ANNUAL_DIRECTION_WARN_THRESHOLD}pp 則建議針對該方向再驗證。</li>
                             <li><strong>穩定度分數</strong>：以 100 分為滿分，計算式為 100 − 平均漂移（%） − Sharpe 下滑懲罰（平均下滑 × 100，上限 40 分）。≥ 70 為穩健；40～69 建議延長樣本；< 40 需謹慎。</li>
                             <li><strong>Sharpe Δ</strong>：調整後 Sharpe 與基準 Sharpe 的差值；若下調幅度超過 0.10，代表風險調整報酬明顯惡化，建議強化風控或調整參數。</li>
                         </ul>
