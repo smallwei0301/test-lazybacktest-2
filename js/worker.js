@@ -14,6 +14,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250717A
 importScripts('shared-lookback.js');
 importScripts('config.js');
 
@@ -424,7 +425,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
@@ -10427,6 +10428,79 @@ function runStrategy(data, params, options = {}) {
   }
 }
 
+const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
+  driftStable: 6,
+  driftCaution: 12,
+  directionSafe: 6,
+  directionWatch: 10,
+  directionRisk: 12,
+  summaryMaxComfort: 12,
+  summaryMaxWatch: 18,
+});
+
+const SENSITIVITY_SCORE_LIMITS = Object.freeze({
+  stablePenaltyCap: 12,
+  cautionPenaltyCap: 30,
+  watchPenaltyCap: 45,
+  hardPenaltyCap: 60,
+  severeSlope: 1.5,
+});
+
+function computeSensitivityDriftPenalty(averageDrift) {
+  if (!Number.isFinite(averageDrift)) {
+    return 0;
+  }
+  const drift = Math.max(0, averageDrift);
+  const {
+    driftStable,
+    driftCaution,
+    summaryMaxWatch,
+  } = ANNUALIZED_SENSITIVITY_THRESHOLDS;
+  const stableLimit = Math.max(driftStable, 0.0001);
+  const cautionLimit = Math.max(driftCaution, stableLimit);
+  const watchLimit = Math.max(summaryMaxWatch || cautionLimit, cautionLimit);
+
+  if (drift <= stableLimit) {
+    const ratio = drift / stableLimit;
+    return ratio * SENSITIVITY_SCORE_LIMITS.stablePenaltyCap;
+  }
+
+  if (drift <= cautionLimit) {
+    const span = Math.max(cautionLimit - stableLimit, 0.0001);
+    const ratio = (drift - stableLimit) / span;
+    return (
+      SENSITIVITY_SCORE_LIMITS.stablePenaltyCap +
+      ratio *
+        (SENSITIVITY_SCORE_LIMITS.cautionPenaltyCap -
+          SENSITIVITY_SCORE_LIMITS.stablePenaltyCap)
+    );
+  }
+
+  if (watchLimit > cautionLimit && drift <= watchLimit) {
+    const span = Math.max(watchLimit - cautionLimit, 0.0001);
+    const ratio = (drift - cautionLimit) / span;
+    return (
+      SENSITIVITY_SCORE_LIMITS.cautionPenaltyCap +
+      ratio *
+        (SENSITIVITY_SCORE_LIMITS.watchPenaltyCap -
+          SENSITIVITY_SCORE_LIMITS.cautionPenaltyCap)
+    );
+  }
+
+  const anchor = watchLimit > cautionLimit ? watchLimit : cautionLimit;
+  const basePenalty =
+    watchLimit > cautionLimit
+      ? SENSITIVITY_SCORE_LIMITS.watchPenaltyCap
+      : SENSITIVITY_SCORE_LIMITS.cautionPenaltyCap;
+  const extra = Math.max(0, drift - anchor);
+  const severePenalty = extra * SENSITIVITY_SCORE_LIMITS.severeSlope;
+
+  return Math.min(
+    SENSITIVITY_SCORE_LIMITS.hardPenaltyCap,
+    basePenalty + severePenalty,
+  );
+}
+
 function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
   if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
     return {
@@ -10435,13 +10509,11 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
       sharpePenalty: null,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
+  const driftPenalty = computeSensitivityDriftPenalty(averageDrift);
+  const sharpeDropMagnitude = Number.isFinite(averageSharpeDrop)
+    ? Math.max(0, averageSharpeDrop)
     : 0;
-  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
-    ? Math.max(0, averageSharpeDrop) * 100
-    : 0;
-  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
+  const sharpePenalty = Math.min(40, sharpeDropMagnitude * 100);
   const baseScore = 100 - driftPenalty - sharpePenalty;
   const score = Math.max(0, Math.min(100, baseScore));
   return {
