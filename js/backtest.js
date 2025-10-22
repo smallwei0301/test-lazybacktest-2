@@ -3678,6 +3678,8 @@ function persistSessionDataCacheEntry(cacheKey, cacheEntry, options = {}) {
             fetchRange: cacheEntry.fetchRange || null,
             fetchDiagnostics: cacheEntry.fetchDiagnostics || null,
             coverageFingerprint: cacheEntry.coverageFingerprint || null,
+            rangeAvailability: cacheEntry.rangeAvailability || null,
+            lastAvailableDate: cacheEntry.lastAvailableDate || null,
         },
     };
     try {
@@ -4069,6 +4071,8 @@ function rebuildCacheEntryFromSessionPayload(payload, context = {}) {
         priceSource: meta.priceSource || null,
         fetchRange: meta.fetchRange || null,
         fetchDiagnostics: replayDiagnostics,
+        rangeAvailability: meta.rangeAvailability || null,
+        lastAvailableDate: meta.lastAvailableDate || null,
     };
 }
 
@@ -4097,6 +4101,12 @@ function loadYearDatasetForRange(context, startISO, endISO) {
         return null;
     }
     const fetchedAt = Math.max(...slices.map((slice) => Number(slice.cachedAt) || 0));
+    const availabilityRange = coverage.length > 0
+        ? {
+            start: coverage[0].start || null,
+            end: coverage[coverage.length - 1].end || null,
+        }
+        : null;
     return {
         data: combined,
         coverage,
@@ -4107,6 +4117,8 @@ function loadYearDatasetForRange(context, startISO, endISO) {
         market: context.market || null,
         dataSource: '瀏覽器年度快取',
         dataSources: ['瀏覽器年度快取'],
+        rangeAvailability: availabilityRange,
+        lastAvailableDate: availabilityRange?.end || null,
     };
 }
 
@@ -4177,6 +4189,8 @@ function hydrateDatasetFromStorage(cacheKey, curSettings) {
                 requestedRange: { start: curSettings.dataStartDate || curSettings.startDate, end: curSettings.endDate },
                 coverage: yearDataset.coverage,
             }),
+            rangeAvailability: yearDataset.rangeAvailability || null,
+            lastAvailableDate: yearDataset.lastAvailableDate || null,
         };
         applyCacheStartMetadata(cacheKey, entry, curSettings.effectiveStartDate || curSettings.startDate, {
             toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -4261,6 +4275,12 @@ function materializeSupersetCacheEntry(cacheKey, curSettings) {
     );
     if (sliceRows.length === 0) return null;
     const coverage = computeCoverageFromRows(sliceRows);
+    const availabilityRange = coverage.length > 0
+        ? {
+            start: coverage[0].start || null,
+            end: coverage[coverage.length - 1].end || null,
+        }
+        : null;
     if (!coverageCoversRange(coverage, targetRange)) return null;
     const coverageFingerprint = computeCoverageFingerprint(coverage);
     const sourceLabels = Array.isArray(candidate.entry.dataSources)
@@ -4313,6 +4333,8 @@ function materializeSupersetCacheEntry(cacheKey, curSettings) {
                 coverage,
             },
         ),
+        rangeAvailability: availabilityRange,
+        lastAvailableDate: availabilityRange?.end || null,
     };
     applyCacheStartMetadata(cacheKey, supersetEntry, supersetEntry.effectiveStartDate, {
         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -4789,12 +4811,13 @@ function runBacktestInternal() {
                      const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
+                    const mergedCoverage = computeCoverageFromRows(mergedData);
+                    const availabilityRange = Array.isArray(mergedCoverage) && mergedCoverage.length > 0
+                        ? {
+                            start: mergedCoverage[0].start || null,
+                            end: mergedCoverage[mergedCoverage.length - 1].end || null,
+                        }
+                        : null;
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -4843,6 +4866,8 @@ function runBacktestInternal() {
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                         coverage: mergedCoverage,
                         coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
+                        rangeAvailability: availabilityRange,
+                        lastAvailableDate: availabilityRange?.end || null,
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
@@ -4863,6 +4888,8 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
                         fetchDiagnostics: cacheDiagnostics,
                         lastRemoteFetchDiagnostics: rawFetchDiagnostics,
+                        rangeAvailability: availabilityRange,
+                        lastAvailableDate: availabilityRange?.end || null,
                     };
                      applyCacheStartMetadata(cacheKey, cacheEntry, rawEffectiveStart || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -4952,6 +4979,8 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: updatedDiagnostics,
                         lastRemoteFetchDiagnostics: rawFetchDiagnostics,
+                        rangeAvailability: cachedEntry.rangeAvailability || null,
+                        lastAvailableDate: cachedEntry.rangeAvailability?.end || cachedEntry.lastAvailableDate || null,
                         coverageFingerprint: computeCoverageFingerprint(updatedCoverage),
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
@@ -8199,10 +8228,13 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         return existingEntry || null;
     }
 
-    const mergedCoverage = mergeIsoCoverage(
-        existingEntry?.coverage || [],
-        fetchedRange && fetchedRange.start && fetchedRange.end ? { start: fetchedRange.start, end: fetchedRange.end } : null,
-    );
+    const mergedCoverage = computeCoverageFromRows(mergedData);
+    const availabilityRange = Array.isArray(mergedCoverage) && mergedCoverage.length > 0
+        ? {
+            start: mergedCoverage[0].start || null,
+            end: mergedCoverage[mergedCoverage.length - 1].end || null,
+        }
+        : null;
     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
     if (dataSource) sourceSet.add(dataSource);
     const sourceArray = Array.from(sourceSet);
@@ -8251,6 +8283,8 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         lookbackDays,
         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
         fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+        rangeAvailability: availabilityRange,
+        lastAvailableDate: availabilityRange?.end || null,
     };
 
     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
