@@ -151,6 +151,14 @@
     additionalProperties: true,
   };
 
+  const maSingleSchema = {
+    type: 'object',
+    properties: {
+      period: { type: 'integer', minimum: 1, maximum: 365, default: 20 },
+    },
+    additionalProperties: true,
+  };
+
   const bollingerSchema = {
     type: 'object',
     properties: {
@@ -168,35 +176,111 @@
     additionalProperties: true,
   };
 
+  const macdSchema = {
+    type: 'object',
+    properties: {
+      shortPeriod: { type: 'integer', minimum: 1, maximum: 365, default: 12 },
+      longPeriod: { type: 'integer', minimum: 1, maximum: 365, default: 26 },
+      signalPeriod: { type: 'integer', minimum: 1, maximum: 365, default: 9 },
+    },
+    additionalProperties: true,
+  };
+
+  const volumeSpikeSchema = {
+    type: 'object',
+    properties: {
+      multiplier: { type: 'number', minimum: 0, maximum: 20, default: 2 },
+      period: { type: 'integer', minimum: 1, maximum: 365, default: 20 },
+    },
+    additionalProperties: true,
+  };
+
+  const pricePeriodSchema = {
+    type: 'object',
+    properties: {
+      period: { type: 'integer', minimum: 1, maximum: 365, default: 20 },
+    },
+    additionalProperties: true,
+  };
+
+  function williamsSchema(defaultThreshold) {
+    return {
+      type: 'object',
+      properties: {
+        period: { type: 'integer', minimum: 1, maximum: 365, default: 14 },
+        threshold: { type: 'number', minimum: -100, maximum: 0, default: defaultThreshold },
+      },
+      additionalProperties: true,
+    };
+  }
+
+  const turtleBreakoutSchema = {
+    type: 'object',
+    properties: {
+      breakoutPeriod: { type: 'integer', minimum: 1, maximum: 365, default: 20 },
+    },
+    additionalProperties: true,
+  };
+
+  const turtleStopLossSchema = {
+    type: 'object',
+    properties: {
+      stopLossPeriod: { type: 'integer', minimum: 1, maximum: 365, default: 10 },
+    },
+    additionalProperties: true,
+  };
+
   const loaders = {
     rsi: createScriptLoader('strategy-plugins/rsi.js'),
     kd: createScriptLoader('strategy-plugins/kd.js'),
     ma: createScriptLoader('strategy-plugins/ma-cross.js'),
     bollinger: createScriptLoader('strategy-plugins/bollinger.js'),
     trailing: createScriptLoader('strategy-plugins/atr-stop.js'),
+    macd: createScriptLoader('strategy-plugins/macd.js'),
+    extended: createScriptLoader('strategy-plugins/extended.js'),
   };
 
   const definitions = [
-    { id: 'rsi_oversold', label: 'RSI 超賣 (多頭進場)', paramsSchema: rsiSchema(30), loader: loaders.rsi },
-    { id: 'rsi_overbought', label: 'RSI 超買 (多頭出場)', paramsSchema: rsiSchema(70), loader: loaders.rsi },
-    { id: 'short_rsi_overbought', label: 'RSI 超買 (做空進場)', paramsSchema: rsiSchema(70), loader: loaders.rsi },
-    { id: 'cover_rsi_oversold', label: 'RSI 超賣 (空單回補)', paramsSchema: rsiSchema(30), loader: loaders.rsi },
-    { id: 'k_d_cross', label: 'KD 黃金交叉 (多頭)', paramsSchema: kdSchema('thresholdX', 30), loader: loaders.kd },
-    { id: 'k_d_cross_exit', label: 'KD 死亡交叉 (多頭出場)', paramsSchema: kdSchema('thresholdY', 70), loader: loaders.kd },
-    { id: 'short_k_d_cross', label: 'KD 死亡交叉 (做空)', paramsSchema: kdSchema('thresholdY', 70), loader: loaders.kd },
-    { id: 'cover_k_d_cross', label: 'KD 黃金交叉 (空單回補)', paramsSchema: kdSchema('thresholdX', 30), loader: loaders.kd },
-    { id: 'bollinger_breakout', label: '布林通道突破 (多頭進場)', paramsSchema: bollingerSchema, loader: loaders.bollinger },
-    { id: 'bollinger_reversal', label: '布林通道反轉 (多頭出場)', paramsSchema: bollingerSchema, loader: loaders.bollinger },
+    { id: 'rsi_oversold', label: 'RSI超賣', paramsSchema: rsiSchema(30), loader: loaders.rsi },
+    { id: 'rsi_overbought', label: 'RSI超買', paramsSchema: rsiSchema(70), loader: loaders.rsi },
+    { id: 'short_rsi_overbought', label: 'RSI超買 (做空)', paramsSchema: rsiSchema(70), loader: loaders.rsi },
+    { id: 'cover_rsi_oversold', label: 'RSI超賣 (回補)', paramsSchema: rsiSchema(30), loader: loaders.rsi },
+    { id: 'k_d_cross', label: 'KD黃金交叉 (D<X)', paramsSchema: kdSchema('thresholdX', 30), loader: loaders.kd },
+    { id: 'k_d_cross_exit', label: 'KD死亡交叉 (D>Y)', paramsSchema: kdSchema('thresholdY', 70), loader: loaders.kd },
+    { id: 'short_k_d_cross', label: 'KD死亡交叉 (D>Y) (做空)', paramsSchema: kdSchema('thresholdY', 70), loader: loaders.kd },
+    { id: 'cover_k_d_cross', label: 'KD黃金交叉 (D<X) (回補)', paramsSchema: kdSchema('thresholdX', 30), loader: loaders.kd },
+    { id: 'bollinger_breakout', label: '布林通道突破', paramsSchema: bollingerSchema, loader: loaders.bollinger },
+    { id: 'bollinger_reversal', label: '布林通道反轉', paramsSchema: bollingerSchema, loader: loaders.bollinger },
     { id: 'short_bollinger_reversal', label: '布林通道反轉 (做空)', paramsSchema: bollingerSchema, loader: loaders.bollinger },
-    { id: 'cover_bollinger_breakout', label: '布林通道突破 (空單回補)', paramsSchema: bollingerSchema, loader: loaders.bollinger },
-    { id: 'ma_cross', label: '均線交叉 (多頭)', paramsSchema: maSchema, loader: loaders.ma },
-    { id: 'ema_cross', label: 'EMA 交叉 (多頭)', paramsSchema: maSchema, loader: loaders.ma },
-    { id: 'short_ma_cross', label: '均線交叉 (做空)', paramsSchema: maSchema, loader: loaders.ma },
-    { id: 'short_ema_cross', label: 'EMA 交叉 (做空)', paramsSchema: maSchema, loader: loaders.ma },
-    { id: 'cover_ma_cross', label: '均線交叉 (空單回補)', paramsSchema: maSchema, loader: loaders.ma },
-    { id: 'cover_ema_cross', label: 'EMA 交叉 (空單回補)', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'cover_bollinger_breakout', label: '布林通道突破 (回補)', paramsSchema: bollingerSchema, loader: loaders.bollinger },
+    { id: 'ma_cross', label: '均線黃金交叉', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'ema_cross', label: 'EMA交叉 (多頭)', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'short_ma_cross', label: '均線死亡交叉 (做空)', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'short_ema_cross', label: 'EMA交叉 (做空)', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'cover_ma_cross', label: '均線黃金交叉 (回補)', paramsSchema: maSchema, loader: loaders.ma },
+    { id: 'cover_ema_cross', label: 'EMA交叉 (回補)', paramsSchema: maSchema, loader: loaders.ma },
     { id: 'trailing_stop', label: '移動停損 (%)', paramsSchema: trailingSchema, loader: loaders.trailing },
-    { id: 'cover_trailing_stop', label: '移動停損 (%) (空單)', paramsSchema: trailingSchema, loader: loaders.trailing },
+    { id: 'cover_trailing_stop', label: '移動停損 (%) (空單停損)', paramsSchema: trailingSchema, loader: loaders.trailing },
+    { id: 'macd_cross', label: 'MACD黃金交叉 (DI版)', paramsSchema: macdSchema, loader: loaders.macd },
+    { id: 'short_macd_cross', label: 'MACD死亡交叉 (DI版) (做空)', paramsSchema: macdSchema, loader: loaders.macd },
+    { id: 'cover_macd_cross', label: 'MACD黃金交叉 (DI版) (回補)', paramsSchema: macdSchema, loader: loaders.macd },
+    { id: 'ma_above', label: '價格突破均線', paramsSchema: maSingleSchema, loader: loaders.extended },
+    { id: 'ma_below', label: '價格跌破均線', paramsSchema: maSingleSchema, loader: loaders.extended },
+    { id: 'short_ma_below', label: '價格跌破均線 (做空)', paramsSchema: maSingleSchema, loader: loaders.extended },
+    { id: 'cover_ma_above', label: '價格突破均線 (回補)', paramsSchema: maSingleSchema, loader: loaders.extended },
+    { id: 'volume_spike', label: '成交量暴增', paramsSchema: volumeSpikeSchema, loader: loaders.extended },
+    { id: 'price_breakout', label: '價格突破前高', paramsSchema: pricePeriodSchema, loader: loaders.extended },
+    { id: 'price_breakdown', label: '價格跌破前低', paramsSchema: pricePeriodSchema, loader: loaders.extended },
+    { id: 'short_price_breakdown', label: '價格跌破前低 (做空)', paramsSchema: pricePeriodSchema, loader: loaders.extended },
+    { id: 'cover_price_breakout', label: '價格突破前高 (回補)', paramsSchema: pricePeriodSchema, loader: loaders.extended },
+    { id: 'williams_oversold', label: '威廉指標超賣', paramsSchema: williamsSchema(-80), loader: loaders.extended },
+    { id: 'williams_overbought', label: '威廉指標超買', paramsSchema: williamsSchema(-20), loader: loaders.extended },
+    { id: 'short_williams_overbought', label: '威廉指標超買 (做空)', paramsSchema: williamsSchema(-20), loader: loaders.extended },
+    { id: 'cover_williams_oversold', label: '威廉指標超賣 (回補)', paramsSchema: williamsSchema(-80), loader: loaders.extended },
+    { id: 'turtle_breakout', label: '海龜突破 (僅進場)', paramsSchema: turtleBreakoutSchema, loader: loaders.extended },
+    { id: 'turtle_stop_loss', label: '海龜停損 (N日低)', paramsSchema: turtleStopLossSchema, loader: loaders.extended },
+    { id: 'short_turtle_stop_loss', label: '海龜N日低 (做空)', paramsSchema: turtleStopLossSchema, loader: loaders.extended },
+    { id: 'cover_turtle_breakout', label: '海龜N日高 (回補)', paramsSchema: turtleBreakoutSchema, loader: loaders.extended },
   ];
 
   definitions.forEach((definition) => {
