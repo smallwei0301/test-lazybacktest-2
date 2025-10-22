@@ -402,6 +402,7 @@ async function ensureTF() {
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
 // Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-SENSITIVITY-ANNUAL-REWEIGHT-20250718A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -424,10 +425,27 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-ANNUAL-REWEIGHT-20250718A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
+const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
+  driftStable: 6,
+  driftCaution: 12,
+  directionSafe: 6,
+  directionWatch: 10,
+  directionRisk: 12,
+  summaryMaxComfort: 12,
+  summaryMaxWatch: 18,
+  scoreStableFloor: 80,
+  scoreCautionFloor: 55,
+});
+const SENSITIVITY_DRIFT_SCORING = Object.freeze({
+  safePenaltyCeiling: 10,
+  cautionPenaltySpan: 30,
+  riskPenaltySlope: 40,
+  maxPenalty: 90,
+});
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
 
 function aiPostProgress(id, message) {
@@ -10427,27 +10445,139 @@ function runStrategy(data, params, options = {}) {
   }
 }
 
+function assessAnnualizedDriftPenalty(averageDrift) {
+  const hasDrift = Number.isFinite(averageDrift);
+  if (!hasDrift) {
+    return {
+      hasDrift: false,
+      drift: null,
+      penalty: 0,
+      band: 'unknown',
+      normalized: null,
+      reason: 'missing',
+    };
+  }
+
+  const drift = Math.max(0, averageDrift);
+  const stable = ANNUALIZED_SENSITIVITY_THRESHOLDS.driftStable;
+  const caution = ANNUALIZED_SENSITIVITY_THRESHOLDS.driftCaution;
+  const {
+    safePenaltyCeiling,
+    cautionPenaltySpan,
+    riskPenaltySlope,
+    maxPenalty,
+  } = SENSITIVITY_DRIFT_SCORING;
+
+  const validThresholds =
+    Number.isFinite(stable) &&
+    stable > 0 &&
+    Number.isFinite(caution) &&
+    caution > stable;
+
+  if (!validThresholds) {
+    const penalty = Math.min(maxPenalty, drift);
+    return {
+      hasDrift: true,
+      drift,
+      penalty,
+      band: 'legacy',
+      normalized: null,
+      reason: 'fallback',
+    };
+  }
+
+  if (drift <= stable) {
+    const normalized = stable > 0 ? drift / stable : 0;
+    const penalty = Math.min(maxPenalty, normalized * safePenaltyCeiling);
+    return {
+      hasDrift: true,
+      drift,
+      penalty,
+      band: 'stable',
+      normalized,
+      reason: 'within_stable',
+    };
+  }
+
+  if (drift <= caution) {
+    const span = Math.max(1e-6, caution - stable);
+    const normalized = (drift - stable) / span;
+    const penalty = Math.min(
+      maxPenalty,
+      safePenaltyCeiling + normalized * cautionPenaltySpan,
+    );
+    return {
+      hasDrift: true,
+      drift,
+      penalty,
+      band: 'caution',
+      normalized,
+      reason: 'within_caution',
+      excessOverStable: drift - stable,
+    };
+  }
+
+  const excess = drift - caution;
+  const severity = Math.log10(1 + excess);
+  const penalty = Math.min(
+    maxPenalty,
+    safePenaltyCeiling + cautionPenaltySpan + severity * riskPenaltySlope,
+  );
+  return {
+    hasDrift: true,
+    drift,
+    penalty,
+    band: 'risk',
+    normalized: null,
+    reason: 'risk_excess',
+    excessOverCaution: excess,
+    severity,
+  };
+}
+
+function computeSharpePenaltyDetails(averageSharpeDrop) {
+  if (!Number.isFinite(averageSharpeDrop)) {
+    return {
+      penalty: 0,
+      averageDrop: null,
+      hasSharpe: false,
+      applied: false,
+    };
+  }
+  const drop = Math.max(0, averageSharpeDrop);
+  const penalty = Math.min(40, drop * 100);
+  return {
+    penalty,
+    averageDrop: drop,
+    hasSharpe: true,
+    applied: penalty > 0,
+  };
+}
+
 function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
-  if (!Number.isFinite(averageDrift) && !Number.isFinite(averageSharpeDrop)) {
+  const driftAssessment = assessAnnualizedDriftPenalty(averageDrift);
+  const sharpeDetails = computeSharpePenaltyDetails(averageSharpeDrop);
+
+  if (!driftAssessment.hasDrift && !sharpeDetails.hasSharpe) {
     return {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      driftPenaltyDetails: driftAssessment,
+      sharpePenaltyDetails: sharpeDetails,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
-  const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
-    ? Math.max(0, averageSharpeDrop) * 100
-    : 0;
-  const sharpePenalty = Math.min(40, sharpePenaltyRaw);
-  const baseScore = 100 - driftPenalty - sharpePenalty;
+
+  const baseScore =
+    100 - driftAssessment.penalty - sharpeDetails.penalty;
   const score = Math.max(0, Math.min(100, baseScore));
+
   return {
     score,
-    driftPenalty,
-    sharpePenalty,
+    driftPenalty: driftAssessment.penalty,
+    sharpePenalty: sharpeDetails.penalty,
+    driftPenaltyDetails: driftAssessment,
+    sharpePenaltyDetails: sharpeDetails,
   };
 }
 
@@ -10545,6 +10675,8 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         version: SENSITIVITY_SCORE_VERSION,
         driftPenalty: stabilityComponents.driftPenalty,
         sharpePenalty: stabilityComponents.sharpePenalty,
+        driftPenaltyDetails: stabilityComponents.driftPenaltyDetails,
+        sharpePenaltyDetails: stabilityComponents.sharpePenaltyDetails,
       },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
@@ -10671,6 +10803,8 @@ function buildSensitivityGroup({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: groupStabilityComponents.driftPenalty,
       sharpePenalty: groupStabilityComponents.sharpePenalty,
+      driftPenaltyDetails: groupStabilityComponents.driftPenaltyDetails,
+      sharpePenaltyDetails: groupStabilityComponents.sharpePenaltyDetails,
     },
     parameters,
   };
@@ -10853,6 +10987,8 @@ function evaluateSensitivityParameter({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: stabilityComponents.driftPenalty,
       sharpePenalty: stabilityComponents.sharpePenalty,
+      driftPenaltyDetails: stabilityComponents.driftPenaltyDetails,
+      sharpePenaltyDetails: stabilityComponents.sharpePenaltyDetails,
     },
   };
 }

@@ -1,4 +1,11 @@
 
+## 2026-07-30 — Patch LB-SENSITIVITY-ANNUAL-20250714A
+- **Scope**: 摘要敏感度年化報酬呈現與文案調整。
+- **Updates**:
+  - `js/backtest.js` 改以年化報酬差異計算敏感度摘要的 PP 與方向指標，缺值時回退至原本的總體報酬率，tooltip 改寫為「年化報酬」。
+  - `js/backtest.js` 更新敏感度四大卡片的摘要句、方向提醒與漂移說明，改為專業且口語化的文案，並同步年化語意。
+- **Testing**: 容器環境無法連線 Proxy 與啟動瀏覽器，待實機回測確認敏感度卡片顯示與 tooltip。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
@@ -882,7 +889,13 @@ NODE`
 - **Issue recap**: 使用者反映敏感度卡僅顯示 ±10% 場景且未說明方向指標門檻，穩定度分數未考量 Sharpe Δ，摘要卡文案也與下方動態網格脫節。
 - **Fix**: Worker 引入 `LB-SENSITIVITY-METRIC-20250729A`，彙整多點擾動的平均漂移、Sharpe 下滑並以「100 − 漂移 − Sharpe 懲罰」計算穩定度分數；前端更新敏感度摘要卡為動態解說句、補上方向偏移判讀與穩定度 tooltip 說明，並在提示卡補充 ±10pp／15pp 判準。
 - **Diagnostics**: 透過 `console.log(result.parameterSensitivity.summary)` 確認回傳 `averageSharpeDrop`、`stabilityComponents`（含扣分明細）與方向偏移，前端則檢視 tooltip 與摘要句確實引用新數據，方向提示會依偏移絕對值改變建議文案。
-- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。 
+- **Testing**: 受限於容器無法連線 Proxy，以 `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/worker.js','js/backtest.js'].forEach(p=>new vm.Script(fs.readFileSync(p,'utf8'),{filename:p}));console.log('scripts compile');NODE` 驗證語法，部署至 Netlify 預覽後再以實際策略回測檢查 console。
+
+# 2025-07-30 — Patch LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
+- **Issue recap**: 敏感度摘要改用年化報酬後，漂移與方向建議仍沿用總報酬門檻，導致 ±20pp／40pp 判準過寬，無法準確反映年化報酬的細微變動風險。
+- **Fix**: 導入 `ANNUALIZED_SENSITIVITY_THRESHOLDS` 統一管理年化漂移與方向門檻，將色碼、摘要建議、tooltip 與方向文案調整為「≤6pp 穩健、6～12pp 觀察、>12pp 警示」等級，並同步更新偏移方向與摘要句的提醒。
+- **Diagnostics**: 以 `console.log(result.parameterSensitivity.summary)` 檢視平均漂移、最大偏移與方向偏移數據，確認新門檻會驅動卡片色碼與建議文字變化；同時檢查 tooltip 文字與方向提示是否呈現新數值區間。
+- **Testing**: 受限於容器無法連線 Proxy，僅進行靜態程式檢查；待實際回測時再驗證敏感度卡片渲染與瀏覽器 console 無錯誤。
 
 ## 2025-10-05 — Patch LB-TREND-SENSITIVITY-20251005A
 - **Issue recap**: 新增 1→1000 靈敏度後，高檔滑桿仍以嚴格門檻回傳盤整為主，1000 時盤整覆蓋反而超過 40%，未能達成「靈敏度越高趨勢段越多」的預期行為。
@@ -1469,4 +1482,12 @@ NODE`
 - **Diagnostics**: 待於可連線 Proxy 的環境實際跑嚴格/寬鬆模式各一次，確認逐窗表格的色彩標示與卡片建議符合門檻條件，並驗證 `γ₄>5` 及樣本不足場景的訊息。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+
+
+## 2026-07-29 — Patch LB-SENSITIVITY-ANNUAL-REWEIGHT-20250718A
+- **Issue recap**: 敏感度總分仍沿用舊版「扣分 30 以內為正常」的線性公式，與年化漂移 6/12pp 的新門檻落差過大，導致穩定度標示失真。
+- **Fix**:
+  - `js/worker.js` 將年化漂移扣分改為分段權重（穩定／觀察／警戒），補上 Sharpe 懲罰與漂移區間診斷並更新敏感度計分版本碼。
+  - `js/backtest.js` 重新定義穩定度分數門檻（≥80 穩健、55～79 觀察），更新摘要卡與 tooltip 說明，顯示漂移扣分所屬區段與樣本提醒。
+- **Testing**: `node - <<'NODE' const fs=require('fs'); const vm=require('vm'); ['js/backtest.js','js/worker.js'].forEach((file)=>{ const code=fs.readFileSync(file,'utf8'); new vm.Script(code,{ filename: file }); }); console.log('scripts compile'); NODE`
 
