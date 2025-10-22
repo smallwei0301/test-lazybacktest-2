@@ -1463,3 +1463,12 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+
+## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20260220A
+- **Issue recap**: Worker 啟動即同步載入 TensorFlow.js 主程式與 WASM 後端，即使本次回測未觸發 AI 訓練也會額外下載 1MB 以上資源，拖慢首屏載入與互動時間。
+- **Fix**:
+  - `js/worker.js` 新增 `ensureTF`，在首次接到 ANN/LSTM 訓練訊息時才載入 TFJS 主程式與 WASM 後端並初始化目標後端與亂數種子。
+  - `js/worker.js` 的 ANN 與 LSTM 訓練入口在執行前先 `await ensureTF()`，確保僅在需要 AI 功能時才載入相關依賴，同時保留原有後端降級與錯誤處理。
+- **Diagnostics**: 以程式碼檢查 Worker 消息入口與 TF 初始化路徑，確認只有 `ai-train-ann` 與 `ai-train-lstm` 會觸發 `ensureTF`，其餘回測功能維持原狀。
+- **Testing**: 受限於容器無法執行瀏覽器 Worker 環境與回測流程，尚未進行實際 ANN/LSTM 訓練驗證；請於可操作前端的環境啟動回測並檢查瀏覽器 console 無錯誤。
+

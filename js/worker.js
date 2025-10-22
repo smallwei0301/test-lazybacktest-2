@@ -1,4 +1,5 @@
 
+// Patch Tag: LB-AI-TF-LAZYLOAD-20260220A — 延後載入 TensorFlow.js 以降低首屏負擔。
 // Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
 // Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
 // Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
@@ -336,42 +337,64 @@ function clampProbability(value) {
 }
 
 let tfBackendReadyPromise = Promise.resolve();
+let tfReady = typeof tf !== 'undefined';
+let tfLoadPromise = null;
 
-try {
-  if (typeof tf === 'undefined') {
-    importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist/tf.min.js`);
+async function ensureTF() {
+  if (tfReady && typeof tf !== 'undefined') {
+    return tfBackendReadyPromise;
   }
-  if (typeof tf !== 'undefined' && typeof tf?.setBackend === 'function') {
-    try {
-      importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/tf-backend-wasm.min.js`);
-    } catch (wasmError) {
-      console.warn('[Worker][AI] 無法載入 TFJS WASM 後端：', wasmError);
-    }
-    if (tf?.wasm?.setWasmPaths) {
-      tf.wasm.setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`);
-    }
-    if (typeof tf?.util?.seedrandom === 'function') {
-      tf.util.seedrandom(ANN_DEFAULT_SEED);
-    }
-    tfBackendReadyPromise = (async () => {
+  if (!tfLoadPromise) {
+    tfLoadPromise = (async () => {
       try {
-        if (tf.getBackend() !== TF_BACKEND_TARGET) {
-          await tf.setBackend(TF_BACKEND_TARGET);
+        if (typeof tf === 'undefined') {
+          importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist/tf.min.js`);
         }
-      } catch (backendError) {
-        console.warn(`[Worker][AI] 無法設定 ${TF_BACKEND_TARGET} 後端，退回 CPU：`, backendError);
+        if (typeof tf === 'undefined' || typeof tf?.setBackend !== 'function') {
+          throw new Error('TensorFlow.js 載入失敗');
+        }
         try {
-          await tf.setBackend('cpu');
-        } catch (cpuError) {
-          console.warn('[Worker][AI] 無法切換至 CPU 後端：', cpuError);
+          importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/tf-backend-wasm.min.js`);
+        } catch (wasmError) {
+          console.warn('[Worker][AI] 無法載入 TFJS WASM 後端：', wasmError);
         }
+        if (tf?.wasm?.setWasmPaths) {
+          tf.wasm.setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`);
+        }
+        if (typeof tf?.util?.seedrandom === 'function') {
+          tf.util.seedrandom(ANN_DEFAULT_SEED);
+        }
+        tfBackendReadyPromise = (async () => {
+          try {
+            if (tf.getBackend() !== TF_BACKEND_TARGET) {
+              await tf.setBackend(TF_BACKEND_TARGET);
+            }
+          } catch (backendError) {
+            console.warn(`[Worker][AI] 無法設定 ${TF_BACKEND_TARGET} 後端，退回 CPU：`, backendError);
+            try {
+              await tf.setBackend('cpu');
+            } catch (cpuError) {
+              console.warn('[Worker][AI] 無法切換至 CPU 後端：', cpuError);
+            }
+          }
+          await tf.ready();
+          return tf.getBackend();
+        })();
+        await tfBackendReadyPromise;
+        tfReady = true;
+      } catch (error) {
+        tfReady = false;
+        console.warn('[Worker][AI] 無法初始化 TensorFlow.js：', error);
+        tfBackendReadyPromise = Promise.reject(error);
+        tfBackendReadyPromise.catch(() => {});
+        throw error;
       }
-      await tf.ready();
-      return tf.getBackend();
     })();
+    tfLoadPromise.catch(() => {
+      tfLoadPromise = null;
+    });
   }
-} catch (error) {
-  console.warn('[Worker][AI] 無法初始化 TensorFlow.js：', error);
+  return tfLoadPromise;
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -543,6 +566,7 @@ async function handleAITrainLSTMMessage(message) {
   const seedToUse = overrideSeed || hyperSeed || LSTM_DEFAULT_SEED;
 
   try {
+    await ensureTF();
     await tfBackendReadyPromise;
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
@@ -1599,6 +1623,7 @@ async function handleAITrainANNMessage(message) {
   const seedToUse = Number.isFinite(overrideSeed) ? overrideSeed : ANN_DEFAULT_SEED;
 
   try {
+    await ensureTF();
     await tfBackendReadyPromise;
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
