@@ -1,4 +1,11 @@
 
+## 2026-07-30 — Patch LB-DATA-VOLUME-20250624A
+- **Scope**: 台股／ETF 成交量診斷誤報修正。
+- **Updates**:
+  - `js/worker.js` 新增 `normalizeVolumeValue()`，依來源自動判斷是否需要千股換算，避免月度快取回傳千股單位時被捨去為 0。
+  - `fetchAdjustedPriceRange()` 與 `normalizeProxyRow()` 改採新函式處理成交量，確保資料診斷與指標計算能讀到正確的正值。
+- **Testing**: 容器環境無法連線 Proxy／瀏覽器，待實機回測確認「資料暖身診斷」不再出現 `volume×1217`。
+
 ## 2026-07-29 — Patch LB-AI-TF-LAZYLOAD-20250704A
 - **Scope**: Web Worker TensorFlow.js 載入與初始成本治理。
 - **Updates**:
