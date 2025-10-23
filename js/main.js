@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-PLUGIN-VERIFIER-20260816A
 
 // 全局變量
 let stockChart = null;
@@ -467,7 +468,83 @@ const strategyRegistryVerificationState = {
     lastRunAt: null,
     sampleRunning: false,
     sampleStatus: null,
+    sampleSelectionSummary: '',
 };
+
+const strategyRegistrySampleCandidates = {
+    longEntry: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross' },
+        { strategyId: 'ma_above', configKey: 'ma_above' },
+        { strategyId: 'rsi_oversold', configKey: 'rsi_oversold' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross' },
+        { strategyId: 'bollinger_breakout', configKey: 'bollinger_breakout' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross' },
+        { strategyId: 'volume_spike', configKey: 'volume_spike' },
+        { strategyId: 'price_breakout', configKey: 'price_breakout' },
+        { strategyId: 'williams_oversold', configKey: 'williams_oversold' },
+        { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
+    ],
+    longExit: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_below', configKey: 'ma_below' },
+        { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
+        { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
+        { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
+        { strategyId: 'trailing_stop', configKey: 'trailing_stop' },
+        { strategyId: 'fixed_stop_loss', configKey: 'fixed_stop_loss' },
+    ],
+    shortEntry: [
+        { strategyId: 'short_ma_cross', configKey: 'short_ma_cross' },
+        { strategyId: 'short_ma_below', configKey: 'short_ma_below' },
+        { strategyId: 'short_rsi_overbought', configKey: 'short_rsi_overbought' },
+        { strategyId: 'short_macd_cross', configKey: 'short_macd_cross' },
+        { strategyId: 'short_bollinger_reversal', configKey: 'short_bollinger_reversal' },
+        { strategyId: 'short_k_d_cross', configKey: 'short_k_d_cross' },
+        { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
+        { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
+        { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
+    ],
+    shortExit: [
+        { strategyId: 'cover_ma_cross', configKey: 'cover_ma_cross' },
+        { strategyId: 'cover_ma_above', configKey: 'cover_ma_above' },
+        { strategyId: 'cover_rsi_oversold', configKey: 'cover_rsi_oversold' },
+        { strategyId: 'cover_macd_cross', configKey: 'cover_macd_cross' },
+        { strategyId: 'cover_bollinger_breakout', configKey: 'cover_bollinger_breakout' },
+        { strategyId: 'cover_k_d_cross', configKey: 'cover_k_d_cross' },
+        { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
+        { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
+        { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
+        { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
+        { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
+    ],
+};
+
+const STRATEGY_OPTION_ROLE_CONFIGS = [
+    { type: 'entry', selectId: 'entryStrategy', label: '做多進場' },
+    { type: 'exit', selectId: 'exitStrategy', label: '做多出場' },
+    { type: 'shortEntry', selectId: 'shortEntryStrategy', label: '做空進場' },
+    { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
+];
+
+function pickRandomStrategyCandidate(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return null;
+    }
+    const index = Math.floor(Math.random() * list.length);
+    return list[index];
+}
+
+function cloneDefaultStrategyParams(configKey) {
+    const descriptor = strategyDescriptions?.[configKey];
+    if (!descriptor || !descriptor.defaultParams) {
+        return {};
+    }
+    return JSON.parse(JSON.stringify(descriptor.defaultParams));
+}
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -3134,6 +3211,162 @@ function strategyRegistryEscapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function resolveStrategyDisplayLabel(strategyId) {
+    if (!strategyId) {
+        return '未命名策略';
+    }
+    try {
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions && strategyDescriptions[strategyId]?.name) {
+            return strategyDescriptions[strategyId].name;
+        }
+    } catch (error) {
+        // ignore lookup errors
+    }
+    const registry = window.StrategyPluginRegistry;
+    if (registry) {
+        try {
+            if (typeof registry.getStrategyMetaById === 'function') {
+                const meta = registry.getStrategyMetaById(strategyId);
+                if (meta?.label) return meta.label;
+            }
+            if (typeof registry.listStrategies === 'function') {
+                const candidates = registry.listStrategies({ includeLazy: true }) || [];
+                const meta = candidates.find((entry) => entry?.id === strategyId);
+                if (meta?.label) return meta.label;
+            }
+        } catch (registryError) {
+            // ignore registry errors
+        }
+    }
+    return strategyId;
+}
+
+function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
+    if (configKey && typeof strategyDescriptions === 'object' && strategyDescriptions?.[configKey]?.name) {
+        return strategyDescriptions[configKey].name;
+    }
+    if (fallbackId && typeof strategyDescriptions === 'object' && strategyDescriptions?.[fallbackId]?.name) {
+        return strategyDescriptions[fallbackId].name;
+    }
+    if (configKey) {
+        return resolveStrategyDisplayLabel(configKey);
+    }
+    return resolveStrategyDisplayLabel(fallbackId);
+}
+
+function resolveStrategyComparisonAliases(strategyId, roleType) {
+    const aliases = [];
+    if (!strategyId) return aliases;
+    if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
+        const exitKey = `${strategyId}_exit`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
+            aliases.push(exitKey);
+        }
+    } else if (roleType === 'shortEntry' && !strategyId.startsWith('short_')) {
+        const shortKey = `short_${strategyId}`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[shortKey]) {
+            aliases.push(shortKey);
+        }
+    } else if (roleType === 'shortExit' && !strategyId.startsWith('cover_')) {
+        const coverKey = `cover_${strategyId}`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[coverKey]) {
+            aliases.push(coverKey);
+        }
+    }
+    return aliases;
+}
+
+function collectStrategyOptionCatalog() {
+    const roles = STRATEGY_OPTION_ROLE_CONFIGS.map((config) => ({
+        type: config.type,
+        selectId: config.selectId,
+        label: config.label,
+        options: [],
+    }));
+    const uniqueIds = new Set();
+    const expandedIds = new Set();
+    const labelIndex = new Map();
+    let totalOptions = 0;
+
+    roles.forEach((role) => {
+        const select = document.getElementById(role.selectId);
+        if (!select || !select.options) {
+            return;
+        }
+        Array.from(select.options).forEach((option) => {
+            const value = option.value;
+            if (!value) return;
+            const optionLabel = option.textContent ? option.textContent.trim() : value;
+            role.options.push({ id: value, label: optionLabel });
+            uniqueIds.add(value);
+            expandedIds.add(value);
+            const aliases = resolveStrategyComparisonAliases(value, role.type);
+            aliases.forEach((alias) => expandedIds.add(alias));
+            if (!labelIndex.has(value)) {
+                labelIndex.set(value, new Map());
+            }
+            labelIndex.get(value).set(role.type, optionLabel);
+            totalOptions += 1;
+        });
+    });
+
+    return { roles, uniqueIds, expandedIds, totalOptions, labelIndex };
+}
+
+function findStrategyOptionLabel(labelIndex, strategyId, preferredRoleType) {
+    if (!strategyId || !labelIndex || typeof labelIndex.get !== 'function') {
+        return null;
+    }
+    const roleMap = labelIndex.get(strategyId);
+    if (!roleMap) {
+        return null;
+    }
+    if (preferredRoleType && typeof roleMap.get === 'function' && roleMap.has(preferredRoleType)) {
+        return roleMap.get(preferredRoleType);
+    }
+    if (typeof roleMap.values === 'function') {
+        const iterator = roleMap.values();
+        const first = iterator.next();
+        if (first && !first.done) {
+            return first.value;
+        }
+    }
+    return null;
+}
+
+function buildStrategySelectionSummary(selection) {
+    if (!selection || typeof selection !== 'object') {
+        return '';
+    }
+    const parts = [];
+    const { longEntry, longExit, shortEntry, shortExit, enableShorting } = selection;
+    if (longEntry) {
+        parts.push(`做多進場：${resolveStrategyLabelFromConfigKey(longEntry.configKey, longEntry.strategyId)}`);
+    } else {
+        parts.push('做多進場：沿用目前設定');
+    }
+    if (longExit) {
+        parts.push(`做多出場：${resolveStrategyLabelFromConfigKey(longExit.configKey, longExit.strategyId)}`);
+    } else {
+        parts.push('做多出場：沿用目前設定');
+    }
+    if (enableShorting) {
+        if (shortEntry) {
+            parts.push(`做空進場：${resolveStrategyLabelFromConfigKey(shortEntry.configKey, shortEntry.strategyId)}`);
+        } else {
+            parts.push('做空進場：沿用目前設定');
+        }
+        if (shortExit) {
+            parts.push(`回補出場：${resolveStrategyLabelFromConfigKey(shortExit.configKey, shortExit.strategyId)}`);
+        } else {
+            parts.push('回補出場：沿用目前設定');
+        }
+    } else {
+        parts.push('做空：未啟用');
+    }
+    return parts.join('／');
+}
+
 function renderStrategyRegistrySampleStatus() {
     const statusEl = document.getElementById('strategyRegistrySampleStatus');
     if (!statusEl) return;
@@ -3197,10 +3430,67 @@ function renderStrategyRegistryVerification() {
     parts.push(`成功 ${successCount}`);
     if (warningCount > 0) parts.push(`提醒 ${warningCount}`);
     if (errorCount > 0) parts.push(`失敗 ${errorCount}`);
+
+    const catalog = collectStrategyOptionCatalog();
+    const registryIds = results
+        .map((entry) => entry.id)
+        .filter((id) => typeof id === 'string' && id.length > 0);
+    const registrySet = new Set(registryIds);
+    const unmatchedRegistryIds = Array.from(new Set(registryIds.filter((id) => !catalog.uniqueIds.has(id))));
+    const missingInRegistry = Array.from(catalog.expandedIds).filter((id) => !registrySet.has(id));
+
+    const roleSummaryText = catalog.roles
+        .map((role) => `${role.label} ${role.options.length}`)
+        .join('／');
+    const strategySummary = catalog.totalOptions > 0
+        ? `策略選單 ${roleSummaryText}（共 ${catalog.totalOptions} 項，唯一策略 ${catalog.expandedIds.size} 項）`
+        : '策略選單資訊未取得';
+
+    const differenceParts = [];
+    if (unmatchedRegistryIds.length > 0) {
+        const formatted = unmatchedRegistryIds.map((id) => {
+            const registeredLabel = resolveStrategyDisplayLabel(id);
+            let canonicalId = id;
+            let preferredRoleType = null;
+            if (id.endsWith('_exit')) {
+                canonicalId = id.replace(/_exit$/, '');
+                preferredRoleType = 'exit';
+            } else if (id.startsWith('short_')) {
+                preferredRoleType = 'shortEntry';
+            } else if (id.startsWith('cover_')) {
+                preferredRoleType = 'shortExit';
+            }
+            let optionLabel = null;
+            if (canonicalId !== id && catalog.uniqueIds.has(canonicalId)) {
+                optionLabel = findStrategyOptionLabel(catalog.labelIndex, canonicalId, preferredRoleType)
+                    || resolveStrategyDisplayLabel(canonicalId);
+                const labelSuffix = optionLabel ? `（${optionLabel}）` : '';
+                return `${registeredLabel}（註冊ID：${id}）↔ 選單值 ${canonicalId}${labelSuffix}`;
+            }
+            optionLabel = findStrategyOptionLabel(catalog.labelIndex, id, preferredRoleType);
+            if (optionLabel) {
+                return `${registeredLabel}（註冊ID：${id}）↔ 選單標籤「${optionLabel}」`;
+            }
+            return `${registeredLabel}（註冊ID：${id}）`;
+        });
+        differenceParts.push(`註冊多出：${formatted.join('、')}`);
+    }
+    if (missingInRegistry.length > 0) {
+        const formattedMissing = missingInRegistry.map((id) => {
+            const label = findStrategyOptionLabel(catalog.labelIndex, id, null) || resolveStrategyDisplayLabel(id);
+            return `${label}（${id}）`;
+        });
+        differenceParts.push(`選單未註冊：${formattedMissing.join('、')}`);
+    }
+    const differenceText = differenceParts.length > 0
+        ? `；差異：${differenceParts.join('；')}`
+        : '；註冊與選單項目一致。';
+
     let summaryText = `驗證完成：${parts.join('／')}`;
     if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
         summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
     }
+    summaryText += `；${strategySummary}${differenceText}`;
     summaryEl.textContent = summaryText;
     summaryEl.style.color = 'var(--foreground)';
 
@@ -3277,6 +3567,7 @@ function runStrategyRegistryVerification() {
             }
             results.push(entry);
         });
+        results.sort((a, b) => a.label.localeCompare(b.label || '', 'zh-Hant'));
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
     } catch (error) {
@@ -3291,6 +3582,7 @@ function runStrategyRegistryVerification() {
 function runStrategyRegistrySample() {
     if (strategyRegistryVerificationState.sampleRunning) return;
     if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        strategyRegistryVerificationState.sampleSelectionSummary = '';
         strategyRegistryVerificationState.sampleStatus = {
             message: 'BacktestRunner 尚未載入，請重新整理或稍後重試。',
             tone: 'error',
@@ -3307,6 +3599,7 @@ function runStrategyRegistrySample() {
         }
     }
     if (!params || typeof params !== 'object') {
+        strategyRegistryVerificationState.sampleSelectionSummary = '';
         strategyRegistryVerificationState.sampleStatus = {
             message: '無法取得目前回測參數，請先在主畫面設定後再試。',
             tone: 'error',
@@ -3315,10 +3608,62 @@ function runStrategyRegistrySample() {
         return;
     }
     strategyRegistryVerificationState.sampleRunning = true;
-    strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    strategyRegistryVerificationState.sampleSelectionSummary = '';
+
+    const sampleParams = {
+        ...params,
+        entryParams: { ...params.entryParams },
+        exitParams: { ...params.exitParams },
+        shortEntryParams: { ...params.shortEntryParams },
+        shortExitParams: { ...params.shortExitParams },
+    };
+
+    const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+    const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+    if (longEntryCandidate) {
+        sampleParams.entryStrategy = longEntryCandidate.strategyId;
+        sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+    }
+    if (longExitCandidate) {
+        sampleParams.exitStrategy = longExitCandidate.strategyId;
+        sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+    }
+
+    const enableShorting = Math.random() < 0.75;
+    sampleParams.enableShorting = enableShorting;
+    if (enableShorting) {
+        const shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+        const shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+        if (shortEntryCandidate) {
+            sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+            sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+        }
+        if (shortExitCandidate) {
+            sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+            sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+        }
+    } else {
+        sampleParams.shortEntryStrategy = null;
+        sampleParams.shortExitStrategy = null;
+        sampleParams.shortEntryParams = {};
+        sampleParams.shortExitParams = {};
+    }
+
+    const selectionSummary = buildStrategySelectionSummary({
+        longEntry: longEntryCandidate,
+        longExit: longExitCandidate,
+        shortEntry: enableShorting ? shortEntryCandidate : null,
+        shortExit: enableShorting ? shortExitCandidate : null,
+        enableShorting,
+    });
+    strategyRegistryVerificationState.sampleSelectionSummary = selectionSummary;
+    const runningMessage = selectionSummary
+        ? `抽樣回測執行中…（策略：${selectionSummary}）`
+        : '抽樣回測執行中…';
+    strategyRegistryVerificationState.sampleStatus = { message: runningMessage, tone: 'info' };
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
+    window.BacktestRunner.run(sampleParams)
         .then((result) => {
             const tradeCount = Array.isArray(result?.data?.trades)
                 ? result.data.trades.length
@@ -3335,15 +3680,17 @@ function runStrategyRegistrySample() {
             if (Number.isFinite(coverage)) {
                 parts.push(`涵蓋 ${coverage} 日資料`);
             }
-            const summary = parts.length > 0 ? parts.join('，') : '完成，可於主畫面檢視詳細結果。';
+            const summary = parts.length > 0 ? parts.join('，') : '可於主畫面檢視詳細結果。';
+            const selectionSuffix = selectionSummary ? `；策略：${selectionSummary}` : '';
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測完成：${summary}`,
+                message: `抽樣回測完成：${summary}${selectionSuffix}`,
                 tone: 'success',
             };
         })
         .catch((error) => {
+            const selectionSuffix = selectionSummary ? `；策略：${selectionSummary}` : '';
             strategyRegistryVerificationState.sampleStatus = {
-                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}`,
+                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}${selectionSuffix}`,
                 tone: 'error',
             };
         })
