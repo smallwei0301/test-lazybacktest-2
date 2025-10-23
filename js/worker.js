@@ -13,6 +13,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-ANN-VIX-20260802A — 附加美股 ANN 的 VIX 指數外部特徵。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 importScripts('shared-lookback.js');
@@ -27,8 +28,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANN-VIX-20260802A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260802A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -87,7 +88,7 @@ function normaliseRuleResultFromLegacy(pluginId, role, candidate, index) {
   };
 }
 
-const ANN_FEATURE_NAMES = [
+const ANN_BASE_FEATURE_NAMES = [
   'SMA30',
   'WMA15',
   'EMA12',
@@ -101,6 +102,10 @@ const ANN_FEATURE_NAMES = [
   'CCI20',
   'WilliamsR14',
 ];
+
+const ANN_OPTIONAL_FEATURES = Object.freeze({
+  VIX_CLOSE: 'VIXClose',
+});
 
 function normalizeClassificationMode(mode) {
   return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
@@ -1296,7 +1301,12 @@ function annWilliamsR(high, low, close, period = 14) {
   });
 }
 
-function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS, classificationOverride = CLASSIFICATION_MODES.MULTICLASS) {
+function annPrepareDataset(
+  rows,
+  volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS,
+  classificationOverride = CLASSIFICATION_MODES.MULTICLASS,
+  externalFeatures = null,
+) {
   const classificationMode = normalizeClassificationMode(classificationOverride);
   const parsed = Array.isArray(rows)
     ? rows
@@ -1315,11 +1325,19 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
         .sort((a, b) => a.date.localeCompare(b.date))
     : [];
 
+  const optionalFeatureNamesRaw = Array.isArray(externalFeatures?.featureNames)
+    ? externalFeatures.featureNames
+    : [];
+  const optionalFeatureNames = optionalFeatureNamesRaw
+    .map((name) => (typeof name === 'string' ? name.trim() : ''))
+    .filter((name, index, arr) => name.length > 0 && arr.indexOf(name) === index);
+  const featureNames = ANN_BASE_FEATURE_NAMES.concat(optionalFeatureNames);
+
   const close = parsed.map((row) => row.close);
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
 
-  const indicatorStats = ANN_FEATURE_NAMES.map((name) => ({
+  const indicatorStats = featureNames.map((name) => ({
     name,
     totalSamples: 0,
     finiteSamples: 0,
@@ -1329,6 +1347,24 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
   const classDistribution = classificationMode === CLASSIFICATION_MODES.BINARY
     ? { up: 0, down: 0 }
     : { surge: 0, flat: 0, drop: 0 };
+
+  const externalFeatureState = {};
+  const externalFeatureCoverage = {};
+  optionalFeatureNames.forEach((name) => {
+    let map = null;
+    const series = externalFeatures?.series?.[name];
+    if (series instanceof Map) {
+      map = series;
+    } else if (series && typeof series === 'object') {
+      try {
+        map = new Map(Object.entries(series));
+      } catch (error) {
+        console.warn('[Worker][AI] 無法將外部特徵序列轉換為 Map：', name, error);
+      }
+    }
+    externalFeatureState[name] = { map: map instanceof Map ? map : null, lastValue: null };
+    externalFeatureCoverage[name] = { total: 0, finite: 0 };
+  });
 
   const ma = annSma(close, 30);
   const wma = annWma(close, 15);
@@ -1364,6 +1400,26 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
       cci[i],
       wr[i],
     ];
+    optionalFeatureNames.forEach((name) => {
+      const state = externalFeatureState[name];
+      let value = null;
+      if (state && state.map instanceof Map) {
+        const raw = state.map.get(parsed[i].date);
+        const numeric = Number(raw);
+        if (Number.isFinite(numeric)) {
+          state.lastValue = numeric;
+          value = numeric;
+        } else if (Number.isFinite(state.lastValue)) {
+          value = state.lastValue;
+        }
+      }
+      features.push(Number.isFinite(value) ? value : null);
+      const coverage = externalFeatureCoverage[name];
+      if (coverage) {
+        coverage.total += 1;
+        if (Number.isFinite(value)) coverage.finite += 1;
+      }
+    });
     for (let f = 0; f < features.length; f += 1) {
       const stat = indicatorStats[f];
       if (!stat) continue;
@@ -1475,6 +1531,36 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     coverage: stat.totalSamples > 0 ? stat.finiteSamples / stat.totalSamples : 0,
   }));
 
+  const externalFeatureDiagnostics = {};
+  optionalFeatureNames.forEach((name) => {
+    const coverage = externalFeatureCoverage[name] || { total: 0, finite: 0 };
+    const baseDiagnostics = {
+      totalSamples: coverage.total,
+      finiteSamples: coverage.finite,
+      missingSamples: Math.max(coverage.total - coverage.finite, 0),
+      coverage: coverage.total > 0 ? coverage.finite / coverage.total : 0,
+    };
+    const provided = externalFeatures?.diagnostics?.[name];
+    if (provided && typeof provided === 'object') {
+      Object.keys(provided).forEach((key) => {
+        if (key === 'totalSamples' || key === 'finiteSamples' || key === 'missingSamples' || key === 'coverage') {
+          return;
+        }
+        baseDiagnostics[key] = provided[key];
+      });
+    }
+    externalFeatureDiagnostics[name] = baseDiagnostics;
+  });
+  if (externalFeatures?.diagnostics && typeof externalFeatures.diagnostics === 'object') {
+    Object.keys(externalFeatures.diagnostics).forEach((name) => {
+      if (externalFeatureDiagnostics[name]) return;
+      const provided = externalFeatures.diagnostics[name];
+      if (provided && typeof provided === 'object') {
+        externalFeatureDiagnostics[name] = { ...provided };
+      }
+    });
+  }
+
   return {
     X,
     y,
@@ -1489,7 +1575,86 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     indicatorDiagnostics,
     classDistribution,
     totalParsedRows: parsed.length,
+    featureNames,
+    externalFeatureDiagnostics,
   };
+}
+
+function shouldAttachVixFeature(context) {
+  if (!context || typeof context !== 'object') return false;
+  const marketRaw = context.market || context.marketType || '';
+  const market = typeof marketRaw === 'string' ? marketRaw.trim().toUpperCase() : '';
+  if (market === 'US' || market === 'NASDAQ' || market === 'NYSE' || market === 'AMEX') {
+    return true;
+  }
+  const stockRaw = context.stockNo || '';
+  const stockNo = typeof stockRaw === 'string' ? stockRaw.trim().toUpperCase() : '';
+  if (!stockNo) return false;
+  if (stockNo.endsWith('.US')) return true;
+  return false;
+}
+
+function resolveDatasetDateRange(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  let start = null;
+  let end = null;
+  for (let i = 0; i < rows.length; i += 1) {
+    const date = rows[i]?.date;
+    if (typeof date !== 'string' || !date) continue;
+    if (!start || date < start) start = date;
+    if (!end || date > end) end = date;
+  }
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+async function annFetchVixSeries(rows, context) {
+  const diagnostics = {
+    status: 'skipped',
+    feature: ANN_OPTIONAL_FEATURES.VIX_CLOSE,
+  };
+  const range = resolveDatasetDateRange(rows);
+  if (!range) {
+    diagnostics.status = 'no-range';
+    return { map: null, diagnostics };
+  }
+  diagnostics.fetchRange = { ...range };
+  try {
+    const result = await fetchStockData(
+      '^VIX',
+      range.start,
+      range.end,
+      'INDEX',
+      { adjusted: false, splitAdjustment: false, effectiveStartDate: range.start },
+    );
+    const dataRows = Array.isArray(result?.data) ? result.data : [];
+    const seriesMap = new Map();
+    for (let i = 0; i < dataRows.length; i += 1) {
+      const row = dataRows[i];
+      if (!row || typeof row.date !== 'string') continue;
+      const close = annResolveClose(row);
+      if (Number.isFinite(close)) {
+        seriesMap.set(row.date, close);
+      }
+    }
+    diagnostics.dataSource = result?.dataSource || null;
+    diagnostics.coverage = {
+      available: seriesMap.size,
+      requested: dataRows.length,
+    };
+    diagnostics.status = seriesMap.size > 0 ? 'ok' : 'empty';
+    if (seriesMap.size > 0) {
+      const sortedDates = Array.from(seriesMap.keys()).sort();
+      diagnostics.firstDate = sortedDates[0] || null;
+      diagnostics.lastDate = sortedDates[sortedDates.length - 1] || null;
+      return { map: seriesMap, diagnostics };
+    }
+    return { map: null, diagnostics };
+  } catch (error) {
+    diagnostics.status = 'error';
+    diagnostics.error = error instanceof Error ? error.message : String(error || '未知錯誤');
+    return { map: null, diagnostics };
+  }
 }
 
 function annStandardize(X) {
@@ -1662,6 +1827,7 @@ async function handleAITrainANNMessage(message) {
   const payload = message?.payload || {};
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const options = payload.options || {};
+  const context = payload.context || {};
   const overrides = payload.overrides || {};
   const overrideSeedRaw = Number.isFinite(overrides?.seed) ? overrides.seed : null;
   const overrideSeed = Number.isFinite(overrideSeedRaw) ? Math.max(1, Math.round(overrideSeedRaw)) : null;
@@ -1679,7 +1845,34 @@ async function handleAITrainANNMessage(message) {
       throw new Error('資料不足（至少 60 根 K 線）');
     }
 
-    const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode);
+    let externalFeatureBundle = null;
+    const externalDiagnostics = {};
+    if (shouldAttachVixFeature(context)) {
+      try {
+        const { map: vixMap, diagnostics } = await annFetchVixSeries(rows, context);
+        if (diagnostics) {
+          externalDiagnostics[ANN_OPTIONAL_FEATURES.VIX_CLOSE] = diagnostics;
+        }
+        if (vixMap && vixMap.size > 0) {
+          externalFeatureBundle = {
+            featureNames: [ANN_OPTIONAL_FEATURES.VIX_CLOSE],
+            series: { [ANN_OPTIONAL_FEATURES.VIX_CLOSE]: vixMap },
+            diagnostics: { ...externalDiagnostics },
+          };
+        } else if (Object.keys(externalDiagnostics).length > 0) {
+          externalFeatureBundle = { featureNames: [], series: {}, diagnostics: { ...externalDiagnostics } };
+        }
+      } catch (vixError) {
+        externalDiagnostics[ANN_OPTIONAL_FEATURES.VIX_CLOSE] = {
+          status: 'error',
+          feature: ANN_OPTIONAL_FEATURES.VIX_CLOSE,
+          error: vixError instanceof Error ? vixError.message : String(vixError || '未知錯誤'),
+        };
+        externalFeatureBundle = { featureNames: [], series: {}, diagnostics: { ...externalDiagnostics } };
+        console.warn('[Worker][AI] 取得 VIX 特徵失敗：', vixError);
+      }
+    }
+    const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode, externalFeatureBundle);
     const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
@@ -1989,6 +2182,14 @@ async function handleAITrainANNMessage(message) {
           ? prepared.indicatorDiagnostics.map((entry) => ({ ...entry }))
           : [],
       };
+      if (Array.isArray(prepared.featureNames)) {
+        datasetDiagnostics.featureOrder = prepared.featureNames.slice();
+      }
+      if (prepared.externalFeatureDiagnostics && typeof prepared.externalFeatureDiagnostics === 'object') {
+        datasetDiagnostics.externalFeatureDiagnostics = JSON.parse(JSON.stringify(prepared.externalFeatureDiagnostics));
+      } else if (externalFeatureBundle?.diagnostics && typeof externalFeatureBundle.diagnostics === 'object') {
+        datasetDiagnostics.externalFeatureDiagnostics = JSON.parse(JSON.stringify(externalFeatureBundle.diagnostics));
+      }
       const performanceDiagnostics = {
         totalPredictions: actualLabels.length,
         positivePredictions,
@@ -2091,6 +2292,13 @@ async function handleAITrainANNMessage(message) {
 
       const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
       const layerDiagnostics = await annCollectLayerDiagnostics(model);
+      const featureOrder = Array.isArray(datasetDiagnostics.featureOrder)
+        ? datasetDiagnostics.featureOrder.slice()
+        : ANN_BASE_FEATURE_NAMES.slice();
+      predictionsPayload.featureOrder = featureOrder.slice();
+      if (datasetDiagnostics.externalFeatureDiagnostics) {
+        predictionsPayload.externalFeatureDiagnostics = JSON.parse(JSON.stringify(datasetDiagnostics.externalFeatureDiagnostics));
+      }
       const diagnostics = {
         version: ANN_DIAGNOSTIC_VERSION,
         timestamp: Date.now(),
@@ -2107,6 +2315,9 @@ async function handleAITrainANNMessage(message) {
         volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
+      if (datasetDiagnostics.externalFeatureDiagnostics) {
+        diagnostics.externalFeatureDiagnostics = JSON.parse(JSON.stringify(datasetDiagnostics.externalFeatureDiagnostics));
+      }
       const runMeta = {
         version: ANN_REPRO_VERSION,
         patch: ANN_REPRO_PATCH,
@@ -2122,7 +2333,7 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
         std,
-        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14'],
+        featureOrder,
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
@@ -2132,6 +2343,9 @@ async function handleAITrainANNMessage(message) {
         diagnosticsVersion: ANN_DIAGNOSTIC_VERSION,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
       };
+      if (datasetDiagnostics.externalFeatureDiagnostics) {
+        runMeta.externalFeatureDiagnostics = JSON.parse(JSON.stringify(datasetDiagnostics.externalFeatureDiagnostics));
+      }
       workerLastMeta = runMeta;
       try {
         self.postMessage({ type: ANN_META_MESSAGE, payload: runMeta });

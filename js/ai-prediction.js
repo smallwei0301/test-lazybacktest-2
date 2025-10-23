@@ -327,6 +327,60 @@
         return window.lazybacktestAIBridge;
     };
 
+    const normalizeBacktestContext = (source) => {
+        if (!source || typeof source !== 'object') return null;
+        const stockNo = typeof source.stockNo === 'string' ? source.stockNo : null;
+        const market = typeof source.market === 'string'
+            ? source.market
+            : (typeof source.marketType === 'string' ? source.marketType : null);
+        const marketType = typeof source.marketType === 'string' ? source.marketType : market;
+        const startDate = typeof source.startDate === 'string' ? source.startDate : null;
+        const endDate = typeof source.endDate === 'string' ? source.endDate : null;
+        const effectiveStartDate = typeof source.effectiveStartDate === 'string'
+            ? source.effectiveStartDate
+            : (typeof startDate === 'string' ? startDate : null);
+        const dataStartDate = typeof source.dataStartDate === 'string'
+            ? source.dataStartDate
+            : (typeof startDate === 'string' ? startDate : null);
+        return {
+            stockNo,
+            market,
+            marketType,
+            startDate,
+            endDate,
+            effectiveStartDate,
+            dataStartDate,
+        };
+    };
+
+    const resolveBacktestContext = () => {
+        const bridge = ensureBridge();
+        if (bridge && typeof bridge.getLastBacktestSettings === 'function') {
+            try {
+                const snapshot = bridge.getLastBacktestSettings();
+                const normalized = normalizeBacktestContext(snapshot);
+                if (normalized) {
+                    return normalized;
+                }
+            } catch (error) {
+                console.warn('[AI Prediction] 取得回測設定失敗：', error);
+            }
+        }
+        if (typeof lastFetchSettings !== 'undefined' && lastFetchSettings) {
+            const normalized = normalizeBacktestContext(lastFetchSettings);
+            if (normalized) {
+                return normalized;
+            }
+        }
+        if (typeof window !== 'undefined' && window.lastFetchSettings) {
+            const normalized = normalizeBacktestContext(window.lastFetchSettings);
+            if (normalized) {
+                return normalized;
+            }
+        }
+        return null;
+    };
+
     const loadStoredSeeds = () => {
         if (typeof window === 'undefined' || !window.localStorage) return [];
         try {
@@ -2889,6 +2943,10 @@
                 classificationMode,
             },
         };
+        const backtestContext = resolveBacktestContext();
+        if (backtestContext) {
+            taskPayload.context = backtestContext;
+        }
         if (Number.isFinite(requestedSeed)) {
             taskPayload.overrides = { seed: requestedSeed };
         }
