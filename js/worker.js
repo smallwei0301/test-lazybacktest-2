@@ -10,6 +10,7 @@
 // Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
 // Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
+// Patch Tag: LB-AI-VIX-FEATURE-20260915A — 美股 ANN 訓練同步抓取 ^VIX 指數作為額外特徵。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
@@ -27,8 +28,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260915A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260915A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -100,6 +101,7 @@ const ANN_FEATURE_NAMES = [
   'MACDhist',
   'CCI20',
   'WilliamsR14',
+  'VIXClose',
 ];
 
 function normalizeClassificationMode(mode) {
@@ -1296,7 +1298,12 @@ function annWilliamsR(high, low, close, period = 14) {
   });
 }
 
-function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS, classificationOverride = CLASSIFICATION_MODES.MULTICLASS) {
+function annPrepareDataset(
+  rows,
+  volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS,
+  classificationOverride = CLASSIFICATION_MODES.MULTICLASS,
+  supplementary = {},
+) {
   const classificationMode = normalizeClassificationMode(classificationOverride);
   const parsed = Array.isArray(rows)
     ? rows
@@ -1318,6 +1325,64 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
   const close = parsed.map((row) => row.close);
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
+
+  const vixRows = Array.isArray(supplementary?.vixRows) ? supplementary.vixRows : [];
+  const vixMap = new Map();
+  for (let i = 0; i < vixRows.length; i += 1) {
+    const entry = vixRows[i];
+    if (!entry || typeof entry.date !== 'string') continue;
+    const closeValue = annResolveClose(entry);
+    if (Number.isFinite(closeValue)) {
+      vixMap.set(entry.date, closeValue);
+    }
+  }
+  const vixSeries = new Array(parsed.length).fill(NaN);
+  let lastVix = NaN;
+  let firstFiniteVixIndex = -1;
+  let vixMatched = 0;
+  for (let i = 0; i < parsed.length; i += 1) {
+    const entry = parsed[i];
+    const direct = vixMap.get(entry.date);
+    let value = Number(direct);
+    if (Number.isFinite(value)) {
+      lastVix = value;
+      if (firstFiniteVixIndex === -1) {
+        firstFiniteVixIndex = i;
+      }
+      vixMatched += 1;
+    } else if (Number.isFinite(lastVix)) {
+      value = lastVix;
+    }
+    if (!Number.isFinite(value)) {
+      value = NaN;
+    }
+    vixSeries[i] = value;
+  }
+  if (firstFiniteVixIndex > 0 && Number.isFinite(vixSeries[firstFiniteVixIndex])) {
+    const fillValue = vixSeries[firstFiniteVixIndex];
+    for (let i = 0; i < firstFiniteVixIndex; i += 1) {
+      vixSeries[i] = fillValue;
+    }
+  }
+  if (vixMatched === 0 && parsed.length > 0) {
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      if (!Number.isFinite(vixSeries[i])) {
+        vixSeries[i] = 0;
+      }
+    }
+  } else {
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      if (!Number.isFinite(vixSeries[i]) && Number.isFinite(lastVix)) {
+        vixSeries[i] = lastVix;
+      }
+    }
+  }
+  const vixDiagnostics = {
+    totalSamples: parsed.length,
+    matchedSamples: vixMatched,
+    coverage: parsed.length > 0 ? vixMatched / parsed.length : 0,
+    lastKnownValue: Number.isFinite(lastVix) ? lastVix : null,
+  };
 
   const indicatorStats = ANN_FEATURE_NAMES.map((name) => ({
     name,
@@ -1363,6 +1428,7 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
       mac.hist[i],
       cci[i],
       wr[i],
+      vixSeries[i],
     ];
     for (let f = 0; f < features.length; f += 1) {
       const stat = indicatorStats[f];
@@ -1489,6 +1555,9 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     indicatorDiagnostics,
     classDistribution,
     totalParsedRows: parsed.length,
+    supplementaryDiagnostics: {
+      vix: vixDiagnostics,
+    },
   };
 }
 
@@ -1679,7 +1748,50 @@ async function handleAITrainANNMessage(message) {
       throw new Error('資料不足（至少 60 根 K 線）');
     }
 
-    const prepared = annPrepareDataset(rows, options.volatility, options.classificationMode);
+    let vixRows = [];
+    const normalizedMarket = typeof options.marketType === 'string'
+      ? options.marketType.toUpperCase()
+      : null;
+    const shouldAttachVix = normalizedMarket === 'US'
+      || normalizedMarket === 'NASDAQ'
+      || normalizedMarket === 'NYSE';
+    if (shouldAttachVix) {
+      const dateCandidates = Array.isArray(rows)
+        ? rows
+            .filter((row) => row && typeof row.date === 'string')
+            .map((row) => row.date)
+            .sort((a, b) => a.localeCompare(b))
+        : [];
+      if (dateCandidates.length > 0) {
+        const vixStart = dateCandidates[0];
+        const vixEnd = dateCandidates[dateCandidates.length - 1];
+        try {
+          annPostProgress(id, '載入 VIX 波動度指標...');
+        } catch (progressError) {
+          console.warn('[Worker][AI] VIX 進度更新失敗：', progressError);
+        }
+        try {
+          const vixResult = await fetchStockData('^VIX', vixStart, vixEnd, 'INDEX', {
+            adjustedPrice: false,
+            splitAdjustment: false,
+            effectiveStartDate: vixStart,
+            lookbackDays: Number.isFinite(options.lookback) ? options.lookback : null,
+          });
+          if (Array.isArray(vixResult?.data)) {
+            vixRows = vixResult.data;
+          }
+        } catch (vixError) {
+          console.warn('[Worker][AI] 無法載入 ^VIX 資料：', vixError);
+        }
+      }
+    }
+
+    const prepared = annPrepareDataset(
+      rows,
+      options.volatility,
+      options.classificationMode,
+      { vixRows },
+    );
     const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
@@ -1988,6 +2100,9 @@ async function handleAITrainANNMessage(message) {
         indicatorDiagnostics: Array.isArray(prepared.indicatorDiagnostics)
           ? prepared.indicatorDiagnostics.map((entry) => ({ ...entry }))
           : [],
+        supplementaryDiagnostics: prepared.supplementaryDiagnostics
+          ? { ...prepared.supplementaryDiagnostics }
+          : null,
       };
       const performanceDiagnostics = {
         totalPredictions: actualLabels.length,
@@ -2096,6 +2211,7 @@ async function handleAITrainANNMessage(message) {
         timestamp: Date.now(),
         dataset: datasetDiagnostics,
         indicatorDiagnostics: datasetDiagnostics.indicatorDiagnostics,
+        supplementaryDiagnostics: datasetDiagnostics.supplementaryDiagnostics,
         layerDiagnostics,
         performance: {
           ...performanceDiagnostics,
@@ -2122,7 +2238,7 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
         std,
-        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14'],
+        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14', 'VIXClose'],
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
@@ -2131,6 +2247,9 @@ async function handleAITrainANNMessage(message) {
         datasetDiagnostics,
         diagnosticsVersion: ANN_DIAGNOSTIC_VERSION,
         classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
+        supplementaryDiagnostics: datasetDiagnostics.supplementaryDiagnostics
+          ? { ...datasetDiagnostics.supplementaryDiagnostics }
+          : null,
       };
       workerLastMeta = runMeta;
       try {

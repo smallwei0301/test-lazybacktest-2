@@ -1,3 +1,11 @@
+## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
+- **Scope**: ANN 美股波動度特徵整合。
+- **Updates**:
+  - `js/backtest.js` 更新 AI 橋接層回報市場資訊，供 ANN 判斷是否啟用 VIX 特徵。
+  - `js/ai-prediction.js` 傳遞當前市場到 ANN 任務並更新版本代碼。
+  - `js/worker.js` 抓取 ^VIX 並將波動度加入 ANN 特徵與診斷輸出，更新重現版本資訊。
+- **Testing**: 容器環境無法連線 Netlify Proxy 或啟動瀏覽器，未實際回測；待部署後於 Netlify 實測 ANN＋美股案例確認 console 無錯誤。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
