@@ -1,3 +1,17 @@
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
+- **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
+- **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
+- **Testing**: `npm run typecheck`（容器環境執行，確認策略 ID 正規化表與載入流程未觸發型別錯誤）。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915A
+- **Scope**: 出場策略 ID 正規化與手動驗證工具。
+- **Updates**:
+  - `index.html` 做多/回補選單改用註冊 ID，並於開發者區域新增四項手動驗證按鈕（預設參數檢查、抽樣回測摘要、舊版策略載入、批量/滾動映射）。
+  - `js/config.js` 建立策略 ID 遷移表與全域正規化工具，供主流程、儲存載入與批量優化共用。
+  - `js/main.js`、`js/backtest.js` 調整策略參數擷取、儲存/載入與績效摘要邏輯，將舊 ID 自動轉換為註冊 ID 並更新預設檔名。
+  - `js/batch-optimization.js` 重新整理策略映射表，確保新舊 ID 均指向對應的註冊 ID。
+- **Testing**: `npm run typecheck`；手動驗證工具待部署環境逐項執行確認。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
@@ -1610,3 +1624,17 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-09-16 — Patch LB-EXIT-DEATHCROSS-20260916A
+- **Issue recap**: 策略選單改用註冊 ID 後，均線／MACD／KD 等死亡交叉出場策略在回測中不再觸發賣出訊號，導致長單無法平倉並影響滾動測試、批量優化等流程。
+- **Fix**:
+  - `js/worker.js` 的出場判斷改為同時接受 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等新 ID，並針對 KD 插件保留舊 ID 時的向後相容處理。
+- **Diagnostics**: 需於可連線 Proxy 的環境實際執行單次回測、滾動測試、參數優化與批量優化，檢查含死亡交叉的策略在結果中會輸出正常的出場訊號與成交記錄。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-EXIT-MAP-20260917A
+- **Issue recap**: 批量優化在套用結果時，出場策略選單仍使用舊的選項值（例如 `ma_cross`），導致新註冊 ID（如 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit`）無法對應到實際選單並拋出錯誤。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `EXIT_STRATEGY_SELECT_MAP` 改為將舊 ID 映射到對應的新註冊 ID，並讓新 ID 直接回填自身，確保批量優化載入結果時能找到正確的出場策略選項。
+- **Diagnostics**: 待可連線環境執行批量優化與滾動測試，確認含死亡交叉出場策略的結果可以順利套用到 UI 選單，且 console 不再出現缺少映射的錯誤訊息。
+- **Testing**: 待本地執行 `npm run typecheck` 驗證靜態檢查維持通過。
