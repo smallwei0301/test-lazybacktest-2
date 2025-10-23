@@ -1,3 +1,17 @@
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
+- **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
+- **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
+- **Testing**: `npm run typecheck`（容器環境執行，確認策略 ID 正規化表與載入流程未觸發型別錯誤）。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915A
+- **Scope**: 出場策略 ID 正規化與手動驗證工具。
+- **Updates**:
+  - `index.html` 做多/回補選單改用註冊 ID，並於開發者區域新增四項手動驗證按鈕（預設參數檢查、抽樣回測摘要、舊版策略載入、批量/滾動映射）。
+  - `js/config.js` 建立策略 ID 遷移表與全域正規化工具，供主流程、儲存載入與批量優化共用。
+  - `js/main.js`、`js/backtest.js` 調整策略參數擷取、儲存/載入與績效摘要邏輯，將舊 ID 自動轉換為註冊 ID 並更新預設檔名。
+  - `js/batch-optimization.js` 重新整理策略映射表，確保新舊 ID 均指向對應的註冊 ID。
+- **Testing**: `npm run typecheck`；手動驗證工具待部署環境逐項執行確認。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
