@@ -187,6 +187,59 @@
     const FRACTION_MIN_PERCENT = 1;
     const FRACTION_MAX_PERCENT = 100;
     const DAY_MS = 24 * 60 * 60 * 1000;
+    const VIX_SYMBOL = '^VIX';
+    const VIX_FEATURE_NAME = 'VIXClose';
+    const VIX_FETCH_BUFFER_DAYS = 7;
+    const US_MARKET_KEYS = new Set(['US', 'USA', 'NASDAQ', 'NYSE', 'AMEX', 'ARCA', 'BATS', 'USOTC', 'OTC']);
+    const vixSeriesCache = new Map();
+
+    const normalizeMarketKey = (market) => {
+        if (typeof market !== 'string') return '';
+        return market.trim().toUpperCase();
+    };
+
+    const isUsMarketKey = (market) => {
+        const normalized = normalizeMarketKey(market);
+        if (!normalized) return false;
+        if (US_MARKET_KEYS.has(normalized)) return true;
+        if (normalized.endsWith('.US')) return true;
+        if (normalized.startsWith('US')) return true;
+        return false;
+    };
+
+    const parseISODateStrict = (value) => {
+        if (typeof value !== 'string' || !value) return null;
+        const date = new Date(`${value}T00:00:00Z`);
+        if (Number.isNaN(date.getTime())) return null;
+        return date;
+    };
+
+    const formatISODateUTC = (date) => {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const shiftDateByDays = (date, offsetDays) => {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+        const shifted = new Date(date.getTime());
+        shifted.setUTCDate(shifted.getUTCDate() + offsetDays);
+        return shifted;
+    };
+
+    const resolveVixCloseValue = (record) => {
+        if (!record || typeof record !== 'object') return NaN;
+        const candidates = [record.close, record.adjClose, record.adjustedClose, record.value];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const value = Number(candidates[i]);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+        return NaN;
+    };
 
     const normalizeTradeRule = (rule) => (TRADE_RULE_MAP[rule] ? rule : DEFAULT_TRADE_RULE);
     const getTradeRuleConfig = (rule) => TRADE_RULE_MAP[normalizeTradeRule(rule)];
@@ -325,6 +378,187 @@
             window.lazybacktestAIBridge = {};
         }
         return window.lazybacktestAIBridge;
+    };
+
+    const getLastFetchSettings = () => {
+        const bridge = ensureBridge();
+        if (!bridge || typeof bridge.getLatestFetchSettings !== 'function') return null;
+        try {
+            const settings = bridge.getLatestFetchSettings();
+            if (settings && typeof settings === 'object') {
+                return { ...settings };
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 讀取最新回測設定失敗：', error);
+        }
+        return null;
+    };
+
+    const getActiveMarketKey = () => {
+        const settings = getLastFetchSettings();
+        if (settings) {
+            const candidate = settings.market || settings.marketType;
+            if (candidate) {
+                return normalizeMarketKey(candidate);
+            }
+        }
+        const bridge = ensureBridge();
+        if (bridge && typeof bridge.getActiveMarket === 'function') {
+            try {
+                const market = bridge.getActiveMarket();
+                if (market) {
+                    return normalizeMarketKey(market);
+                }
+            } catch (error) {
+                console.warn('[AI Prediction] 取得橋接市場資訊失敗：', error);
+            }
+        }
+        return '';
+    };
+
+    const computeDatasetDateBounds = (rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        const dateSet = new Set();
+        rows.forEach((row) => {
+            if (row && typeof row.date === 'string' && row.date) {
+                dateSet.add(row.date);
+            }
+        });
+        if (dateSet.size === 0) return null;
+        const sortedDates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+        return {
+            start: sortedDates[0],
+            end: sortedDates[sortedDates.length - 1],
+            dates: sortedDates,
+        };
+    };
+
+    const fetchVixSeries = async (startISO, endISO) => {
+        const cacheKey = `${startISO || 'NA'}|${endISO || 'NA'}`;
+        if (vixSeriesCache.has(cacheKey)) {
+            return vixSeriesCache.get(cacheKey);
+        }
+        const resolver = (async () => {
+            try {
+                const params = new URLSearchParams({ stockNo: VIX_SYMBOL });
+                if (startISO) params.set('start', startISO);
+                if (endISO) params.set('end', endISO);
+                const response = await fetch(`/.netlify/functions/index-proxy?${params.toString()}`, {
+                    headers: { Accept: 'application/json' },
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                return payload;
+            } catch (error) {
+                console.warn(`[AI Prediction] 無法取得 ^VIX 指數資料（${startISO || 'N/A'} ~ ${endISO || 'N/A'}）：`, error);
+                return null;
+            }
+        })();
+        vixSeriesCache.set(cacheKey, resolver);
+        const result = await resolver;
+        if (result === null) {
+            vixSeriesCache.delete(cacheKey);
+        }
+        return result;
+    };
+
+    const alignVixSeriesToRows = (rows, vixRecords, sortedDates) => {
+        if (!Array.isArray(rows) || rows.length === 0) {
+            return { rows: Array.isArray(rows) ? rows.slice() : [], coverage: 0, attached: false, coverageCount: 0, totalCount: 0 };
+        }
+        const sanitizedVix = Array.isArray(vixRecords)
+            ? vixRecords
+                .map((entry) => ({
+                    date: typeof entry?.date === 'string' ? entry.date : null,
+                    value: resolveVixCloseValue(entry),
+                }))
+                .filter((entry) => entry.date && Number.isFinite(entry.value))
+                .sort((a, b) => a.date.localeCompare(b.date))
+            : [];
+        if (sanitizedVix.length === 0 || !Array.isArray(sortedDates) || sortedDates.length === 0) {
+            return { rows: rows.map((row) => ({ ...row })), coverage: 0, attached: false, coverageCount: 0, totalCount: rows.length };
+        }
+        let vixIndex = 0;
+        let lastValue = null;
+        const alignedValues = new Map();
+        for (let i = 0; i < sortedDates.length; i += 1) {
+            const date = sortedDates[i];
+            while (vixIndex < sanitizedVix.length && sanitizedVix[vixIndex].date <= date) {
+                const candidate = sanitizedVix[vixIndex].value;
+                if (Number.isFinite(candidate)) {
+                    lastValue = candidate;
+                }
+                vixIndex += 1;
+            }
+            if (Number.isFinite(lastValue)) {
+                alignedValues.set(date, lastValue);
+            }
+        }
+        const firstAvailable = sanitizedVix.find((entry) => entry.date >= sortedDates[0] && Number.isFinite(entry.value));
+        if (firstAvailable) {
+            for (let i = 0; i < sortedDates.length; i += 1) {
+                const date = sortedDates[i];
+                if (date < firstAvailable.date && !alignedValues.has(date)) {
+                    alignedValues.set(date, firstAvailable.value);
+                }
+            }
+        }
+        let coverageCount = 0;
+        const enrichedRows = rows.map((row) => {
+            if (!row || typeof row !== 'object' || typeof row.date !== 'string') {
+                return row;
+            }
+            const value = alignedValues.get(row.date);
+            if (Number.isFinite(value)) {
+                coverageCount += 1;
+                return { ...row, vixClose: value };
+            }
+            return { ...row };
+        });
+        const coverage = rows.length > 0 ? coverageCount / rows.length : 0;
+        return {
+            rows: enrichedRows,
+            coverage,
+            attached: coverageCount > 0,
+            coverageCount,
+            totalCount: rows.length,
+        };
+    };
+
+    const prepareAnnRowsWithVix = async (rows) => {
+        const originalRows = Array.isArray(rows) ? rows : [];
+        if (originalRows.length === 0) {
+            return { rows: originalRows, attached: false };
+        }
+        const marketKey = getActiveMarketKey();
+        if (!isUsMarketKey(marketKey)) {
+            return { rows: originalRows, attached: false };
+        }
+        const bounds = computeDatasetDateBounds(originalRows);
+        if (!bounds) {
+            return { rows: originalRows, attached: false };
+        }
+        const startDate = parseISODateStrict(bounds.start);
+        const endDate = parseISODateStrict(bounds.end);
+        if (!startDate || !endDate) {
+            return { rows: originalRows, attached: false };
+        }
+        const fetchStartDate = shiftDateByDays(startDate, -VIX_FETCH_BUFFER_DAYS) || startDate;
+        const fetchStartISO = formatISODateUTC(fetchStartDate) || bounds.start;
+        const fetchEndISO = formatISODateUTC(endDate) || bounds.end;
+        const payload = await fetchVixSeries(fetchStartISO, fetchEndISO);
+        if (!payload || !Array.isArray(payload.data)) {
+            return { rows: originalRows, attached: false, warning: '無法取得 VIX 指數資料' };
+        }
+        const alignment = alignVixSeriesToRows(originalRows, payload.data, bounds.dates);
+        return {
+            ...alignment,
+            featureName: VIX_FEATURE_NAME,
+            start: bounds.start,
+            end: bounds.end,
+        };
     };
 
     const loadStoredSeeds = () => {
@@ -2876,9 +3110,25 @@
         modelState.volatilityThresholds = resolvedVolatility;
         const classificationMode = normalizeClassificationMode(modelState.classification);
 
+        const vixPreparation = await prepareAnnRowsWithVix(rows);
+        const rowsForTraining = Array.isArray(vixPreparation?.rows) ? vixPreparation.rows : rows;
+        if (vixPreparation?.attached) {
+            const coveragePercent = Number.isFinite(vixPreparation.coverage)
+                ? (vixPreparation.coverage * 100).toFixed(1)
+                : null;
+            const coverageDetail = Number.isFinite(vixPreparation.coverageCount) && Number.isFinite(vixPreparation.totalCount)
+                ? `${vixPreparation.coverageCount}/${vixPreparation.totalCount}`
+                : '—';
+            console.log(
+                `[AI Prediction][ANNS] 已附加 ${VIX_SYMBOL} 特徵，覆蓋率 ${coveragePercent !== null ? `${coveragePercent}%` : '—'}（${coverageDetail}）。`,
+            );
+        } else if (vixPreparation?.warning) {
+            console.warn(`[AI Prediction][ANNS] ${vixPreparation.warning}`);
+        }
+
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
         const taskPayload = {
-            rows,
+            rows: rowsForTraining,
             options: {
                 epochs: hyperparameters.epochs,
                 batchSize: hyperparameters.batchSize,

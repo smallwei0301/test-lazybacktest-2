@@ -1,3 +1,11 @@
+## 2026-09-15 — Patch LB-AI-ANNS-VIX-20260915A / LB-AI-ANN-DIAG-20260915A
+- **Scope**: 美股 ANN 預測整合 VIX 特徵與診斷。
+- **Updates**:
+  - `js/backtest.js` 於 AI Bridge 暴露最新回測設定與市場代碼，供前端判斷是否需載入美股指標。
+  - `js/ai-prediction.js` 偵測美股市場時呼叫 `index-proxy` 取得 ^VIX 資料，沿日期對齊並緩存覆蓋率後附加至 ANN 訓練資料。
+  - `js/worker.js` 新增 VIX 特徵欄位、動態 `featureOrder` 與版本碼，並更新 ANN 診斷輸出以揭露新特徵覆蓋率。
+- **Testing**: 容器環境無法連線 Netlify Proxy／執行實際 ANN 訓練；後續需於 Netlify 實機回測美股標的確認 ^VIX 特徵覆蓋與訓練流程。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
