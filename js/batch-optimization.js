@@ -1,17 +1,26 @@
 // --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-OPT-20260718G
+// Patch Tag: LB-BATCH-EXITSELECT-20260916A
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
-    'ma_cross_exit': 'ma_cross',
-    'ema_cross_exit': 'ema_cross',
-    'k_d_cross_exit': 'k_d_cross',
-    'macd_cross_exit': 'macd_cross',
-    'rsi_overbought_exit': 'rsi_overbought',
-    'williams_overbought_exit': 'williams_overbought',
-    'ma_below_exit': 'ma_below',
-    'rsi_reversal_exit': 'rsi_reversal',
-    'williams_reversal_exit': 'williams_reversal',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
+    'ema_cross_exit': 'ema_cross_exit',
+    'ema_cross': 'ema_cross_exit',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
+    'rsi_overbought_exit': 'rsi_overbought_exit',
+    'rsi_overbought': 'rsi_overbought_exit',
+    'williams_overbought_exit': 'williams_overbought_exit',
+    'williams_overbought': 'williams_overbought_exit',
+    'ma_below_exit': 'ma_below_exit',
+    'ma_below': 'ma_below_exit',
+    'rsi_reversal_exit': 'rsi_reversal_exit',
+    'rsi_reversal': 'rsi_reversal_exit',
+    'williams_reversal_exit': 'williams_reversal_exit',
+    'williams_reversal': 'williams_reversal_exit',
 
     // 做空入場策略映射
     'short_ma_cross': 'short_ma_cross',
@@ -48,7 +57,7 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718H';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-EXITSELECT-20260916A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -1382,17 +1391,17 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
 }
 
 const EXIT_STRATEGY_SELECT_MAP = {
-    'ma_cross': 'ma_cross',
-    'ma_cross_exit': 'ma_cross',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
     'ma_below': 'ma_below',
     'ma_below_exit': 'ma_below',
     'rsi_overbought': 'rsi_overbought',
     'rsi_overbought_exit': 'rsi_overbought',
-    'macd_cross': 'macd_cross',
-    'macd_cross_exit': 'macd_cross',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
     'bollinger_reversal': 'bollinger_reversal',
-    'k_d_cross': 'k_d_cross',
-    'k_d_cross_exit': 'k_d_cross',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
     'volume_spike': 'volume_spike',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
@@ -2271,11 +2280,55 @@ function isBetterMetric(a, b, metric) {
 }
 
 // 取得 result 的目標指標值，若無則回傳 NaN
+function coerceMetricNumber(value) {
+    if (value === null || value === undefined) return NaN;
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : NaN;
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return NaN;
+        const normalized = trimmed.endsWith('%') ? trimmed.slice(0, -1) : trimmed;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : NaN;
+    }
+    return NaN;
+}
+
 function getMetricFromResult(result, metric) {
     if (!result) return NaN;
-    const val = result[metric];
-    if (val === undefined || val === null || isNaN(val)) return NaN;
-    return val;
+    const candidates = [];
+    if (metric) {
+        candidates.push(result[metric]);
+        if (result.metrics && typeof result.metrics === 'object') {
+            candidates.push(result.metrics[metric]);
+            candidates.push(result.metrics.metric);
+            candidates.push(result.metrics.value);
+        }
+    }
+    candidates.push(result.metric, result.metricValue, result.value);
+    if (metric === 'annualizedReturn') {
+        candidates.push(result.annualizedReturn, result.annualizedReturnPct, result.annualizedReturnPercent);
+    }
+    if (metric === 'returnRate') {
+        candidates.push(result.returnRate, result.totalReturn);
+    }
+    if (metric === 'maxDrawdown') {
+        candidates.push(result.maxDrawdown);
+    }
+    if (metric === 'sharpeRatio') {
+        candidates.push(result.sharpeRatio);
+    }
+    if (metric === 'sortinoRatio') {
+        candidates.push(result.sortinoRatio);
+    }
+    for (const candidate of candidates) {
+        const numeric = coerceMetricNumber(candidate);
+        if (!Number.isNaN(numeric)) {
+            return numeric;
+        }
+    }
+    return NaN;
 }
 
 // 用來深度比較參數物件是否相等（簡單 JSON 比較）

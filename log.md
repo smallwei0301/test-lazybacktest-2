@@ -1,3 +1,17 @@
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
+- **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
+- **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
+- **Testing**: `npm run typecheck`（容器環境執行，確認策略 ID 正規化表與載入流程未觸發型別錯誤）。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915A
+- **Scope**: 出場策略 ID 正規化與手動驗證工具。
+- **Updates**:
+  - `index.html` 做多/回補選單改用註冊 ID，並於開發者區域新增四項手動驗證按鈕（預設參數檢查、抽樣回測摘要、舊版策略載入、批量/滾動映射）。
+  - `js/config.js` 建立策略 ID 遷移表與全域正規化工具，供主流程、儲存載入與批量優化共用。
+  - `js/main.js`、`js/backtest.js` 調整策略參數擷取、儲存/載入與績效摘要邏輯，將舊 ID 自動轉換為註冊 ID 並更新預設檔名。
+  - `js/batch-optimization.js` 重新整理策略映射表，確保新舊 ID 均指向對應的註冊 ID。
+- **Testing**: `npm run typecheck`；手動驗證工具待部署環境逐項執行確認。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
@@ -1610,3 +1624,25 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-09-16 — Patch LB-EXIT-DEATHCROSS-20260916A
+- **Issue recap**: 策略選單改用註冊 ID 後，均線／MACD／KD 等死亡交叉出場策略在回測中不再觸發賣出訊號，導致長單無法平倉並影響滾動測試、批量優化等流程。
+- **Fix**:
+  - `js/worker.js` 的出場判斷改為同時接受 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等新 ID，並針對 KD 插件保留舊 ID 時的向後相容處理。
+- **Diagnostics**: 需於可連線 Proxy 的環境實際執行單次回測、滾動測試、參數優化與批量優化，檢查含死亡交叉的策略在結果中會輸出正常的出場訊號與成交記錄。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-EXITSELECT-20260916A
+- **Issue recap**: 批量優化載入包含新死亡交叉 ID（如 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit`）的結果時，因對照表仍回填舊選單值而找不到對應選項，導致流程中斷。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `EXIT_STRATEGY_SELECT_MAP` 改為直接回傳新註冊 ID，保留舊 ID → 新 ID 的相容映射，並同步更新批量偵錯版本碼。
+- **Diagnostics**: 待於可連線 Proxy 的環境匯入含新死亡交叉策略的批量優化結果，確認選單能成功填入並持續到回測、滾動測試與批量報告流程。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-18 — Patch LB-BATCH-DEATHCROSS-20260918A
+- **Issue recap**: 批量優化在使用死亡交叉類出場策略時，目標指標落為 0 或 `NaN`，同時儲存策略時多單進場 ID 被錯誤正規化為出場 ID，導致載入後參數與顯示名稱錯置。
+- **Fix**:
+  - `js/backtest.js` 與 `js/config.js` 更新 `normaliseStrategyIdAny`，接受角色提示並保留多單進場原始 ID，避免出場遷移表覆蓋進場設定；同時讓策略名稱顯示函式依角色解析，確保開發者卡與結果摘要維持正確中文名稱。
+  - `js/batch-optimization.js` 新增數值正規化流程 `coerceMetricNumber`，擴充 `getMetricFromResult` 的候選來源，能解析 `%` 字串與嵌套欄位，修正死亡交叉優化結果缺值時無法評分的情況。
+- **Diagnostics**: 需於可連線 Proxy 的環境執行批量優化，驗證 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等策略可輸出非零目標值，並測試儲存／載入策略後選單顯示仍對齊多單進場設定。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。

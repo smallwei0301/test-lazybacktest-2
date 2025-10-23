@@ -47,6 +47,87 @@ const strategyDescriptions = {
     'cover_fixed_stop_loss': { name: '(由風險管理控制)', desc: '全局停損/停利設定優先。', defaultParams: {}, optimizeTargets: [] },
 };
 
+const STRATEGY_ID_ROLE_MIGRATIONS = Object.freeze({
+    exit: {
+        ma_cross: 'ma_cross_exit',
+        macd_cross: 'macd_cross_exit',
+        k_d_cross: 'k_d_cross_exit',
+    },
+    shortEntry: {
+        ma_cross: 'short_ma_cross',
+        ma_below: 'short_ma_below',
+        rsi_overbought: 'short_rsi_overbought',
+        macd_cross: 'short_macd_cross',
+        bollinger_reversal: 'short_bollinger_reversal',
+        k_d_cross: 'short_k_d_cross',
+        price_breakdown: 'short_price_breakdown',
+        williams_overbought: 'short_williams_overbought',
+        turtle_stop_loss: 'short_turtle_stop_loss',
+    },
+    shortExit: {
+        ma_cross: 'cover_ma_cross',
+        ma_above: 'cover_ma_above',
+        rsi_oversold: 'cover_rsi_oversold',
+        macd_cross: 'cover_macd_cross',
+        bollinger_breakout: 'cover_bollinger_breakout',
+        k_d_cross: 'cover_k_d_cross',
+        price_breakout: 'cover_price_breakout',
+        williams_oversold: 'cover_williams_oversold',
+        turtle_breakout: 'cover_turtle_breakout',
+        trailing_stop: 'cover_trailing_stop',
+        fixed_stop_loss: 'cover_fixed_stop_loss',
+    },
+});
+
+const LazyStrategyId = (typeof window !== 'undefined' && window.LazyStrategyId)
+    ? { ...window.LazyStrategyId }
+    : {};
+
+LazyStrategyId.map = { ...(LazyStrategyId.map || {}), ...STRATEGY_ID_ROLE_MIGRATIONS };
+
+LazyStrategyId.normalise = function normaliseStrategyId(role, strategyId) {
+    if (!strategyId) return strategyId;
+    const roleKey = role && typeof role === 'string' ? role : null;
+    if (roleKey && LazyStrategyId.map?.[roleKey]?.[strategyId]) {
+        return LazyStrategyId.map[roleKey][strategyId];
+    }
+    if (roleKey === 'exit' && ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(strategyId)) {
+        return `${strategyId}_exit`;
+    }
+    if (roleKey === 'shortEntry' && !strategyId.startsWith('short_')) {
+        return `short_${strategyId}`;
+    }
+    if (roleKey === 'shortExit' && !strategyId.startsWith('cover_')) {
+        return `cover_${strategyId}`;
+    }
+    return strategyId;
+};
+
+LazyStrategyId.normaliseAny = function normaliseStrategyIdAny(strategyId, roleHint) {
+    if (!strategyId) return strategyId;
+    const hint = typeof roleHint === 'string' && roleHint.trim().length > 0 ? roleHint : null;
+    if (hint) {
+        return LazyStrategyId.normalise(hint, strategyId);
+    }
+    if (strategyDescriptions?.[strategyId]) {
+        return strategyId;
+    }
+    const roles = Array.isArray(Object.keys(STRATEGY_ID_ROLE_MIGRATIONS))
+        ? Object.keys(STRATEGY_ID_ROLE_MIGRATIONS)
+        : ['exit', 'shortEntry', 'shortExit'];
+    for (const role of roles) {
+        const migrated = LazyStrategyId.normalise(role, strategyId);
+        if (migrated !== strategyId) {
+            return migrated;
+        }
+    }
+    return strategyId;
+};
+
+if (typeof window !== 'undefined') {
+    window.LazyStrategyId = LazyStrategyId;
+}
+
 const longEntryToCoverMap = {
     'ma_cross': 'cover_ma_cross', 'ma_above': 'cover_ma_above', 'rsi_oversold': 'cover_rsi_oversold',
     'macd_cross': 'cover_macd_cross', 'bollinger_breakout': 'cover_bollinger_breakout',
