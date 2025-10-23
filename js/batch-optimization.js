@@ -1,71 +1,140 @@
 // --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-OPT-20260718G
+// Patch Tag: LB-BATCH-MAPPER-20260917B
 
-const BATCH_STRATEGY_NAME_OVERRIDES = {
-    // 出場策略映射
-    'ma_cross_exit': 'ma_cross',
-    'ema_cross_exit': 'ema_cross',
-    'k_d_cross_exit': 'k_d_cross',
-    'macd_cross_exit': 'macd_cross',
-    'rsi_overbought_exit': 'rsi_overbought',
-    'williams_overbought_exit': 'williams_overbought',
-    'ma_below_exit': 'ma_below',
-    'rsi_reversal_exit': 'rsi_reversal',
-    'williams_reversal_exit': 'williams_reversal',
+let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
+    ? window.LazyBatchStrategyMapper
+    : (typeof globalThis !== 'undefined' && globalThis.LazyBatchStrategyMapper ? globalThis.LazyBatchStrategyMapper : null);
 
-    // 做空入場策略映射
-    'short_ma_cross': 'short_ma_cross',
-    'short_ema_cross': 'short_ema_cross',
-    'short_k_d_cross': 'short_k_d_cross',
-    'short_macd_cross': 'short_macd_cross',
-    'short_rsi_overbought': 'short_rsi_overbought',
-    'short_williams_overbought': 'short_williams_overbought',
-    'short_ma_below': 'short_ma_below',
-    'short_rsi_reversal': 'short_rsi_reversal',
-    'short_williams_reversal': 'short_williams_reversal',
+const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchContext)
+    ? window.LazyBatchContext
+    : (typeof globalThis !== 'undefined' && globalThis.LazyBatchContext ? globalThis.LazyBatchContext : null);
 
-    // 回補策略映射
-    'cover_ma_cross': 'cover_ma_cross',
-    'cover_ema_cross': 'cover_ema_cross',
-    'cover_k_d_cross': 'cover_k_d_cross',
-    'cover_macd_cross': 'cover_macd_cross',
-    'cover_rsi_oversold': 'cover_rsi_oversold',
-    'cover_williams_oversold': 'cover_williams_oversold',
-    'cover_ma_above': 'cover_ma_above',
-    'cover_rsi_reversal': 'cover_rsi_reversal',
-    'cover_williams_reversal': 'cover_williams_reversal'
-};
+const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
-const BATCH_STRATEGY_NAME_MAP = (() => {
-    const map = new Map(Object.entries(BATCH_STRATEGY_NAME_OVERRIDES));
-    if (typeof strategyDescriptions === 'object' && strategyDescriptions) {
-        Object.keys(strategyDescriptions).forEach((key) => {
-            if (!map.has(key)) {
-                map.set(key, key);
-            }
-        });
-    }
-    return map;
-})();
-
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718H';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
 
-function hydrateStrategyNameMap() {
-    if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
-        return;
+function normaliseBatchStrategyId(role, strategyId) {
+    if (!strategyId) {
+        return strategyId;
     }
 
-    Object.keys(strategyDescriptions).forEach((key) => {
-        if (!BATCH_STRATEGY_NAME_MAP.has(key)) {
-            BATCH_STRATEGY_NAME_MAP.set(key, key);
+    if (BatchStrategyMapper && typeof BatchStrategyMapper.canonicalize === 'function') {
+        const mapped = BatchStrategyMapper.canonicalize(strategyId, role);
+        if (mapped) {
+            return mapped;
         }
-    });
+    }
+
+    let normalized = strategyId;
+
+    if (typeof resolveStrategyLookupKey === 'function') {
+        const resolved = resolveStrategyLookupKey(strategyId, role);
+        if (resolved) {
+            normalized = resolved;
+        }
+    } else if (role && typeof normaliseStrategyIdForRole === 'function') {
+        const migrated = normaliseStrategyIdForRole(role, strategyId);
+        if (migrated) {
+            normalized = migrated;
+        }
+    } else if (role && role !== 'entry' && typeof normaliseStrategyIdAny === 'function') {
+        const fallback = normaliseStrategyIdAny(strategyId);
+        if (fallback) {
+            normalized = fallback;
+        }
+    }
+
+    if (role === 'entry' && normalized && normalized.endsWith('_exit')) {
+        const base = normalized.replace(/_exit$/, '');
+        if (strategyDescriptions?.[base]) {
+            normalized = base;
+        }
+    }
+
+    if (role === 'shortEntry' && normalized && !normalized.startsWith('short_')) {
+        const shortCandidate = `short_${normalized.startsWith('cover_') ? normalized.slice('cover_'.length) : normalized}`;
+        if (strategyDescriptions?.[shortCandidate]) {
+            normalized = shortCandidate;
+        }
+    }
+
+    if (role === 'shortExit' && normalized && !normalized.startsWith('cover_')) {
+        const coverCandidate = `cover_${normalized.startsWith('short_') ? normalized.slice('short_'.length) : normalized}`;
+        if (strategyDescriptions?.[coverCandidate]) {
+            normalized = coverCandidate;
+        }
+    }
+
+    return normalized;
 }
 
-function getWorkerStrategyName(batchStrategyName) {
+function normaliseBatchCombination(combination) {
+    if (!combination || typeof combination !== 'object') {
+        return combination;
+    }
+
+    const normalized = {
+        ...combination,
+        buyStrategy: normaliseBatchStrategyId('entry', combination.buyStrategy),
+        sellStrategy: normaliseBatchStrategyId('exit', combination.sellStrategy),
+    };
+
+    if (combination.entryStrategy) {
+        normalized.entryStrategy = normaliseBatchStrategyId('entry', combination.entryStrategy);
+    }
+    if (combination.exitStrategy) {
+        const exitKey = normaliseBatchStrategyId('exit', combination.exitStrategy);
+        normalized.exitStrategy = exitKey;
+        if (!normalized.sellStrategy) {
+            normalized.sellStrategy = exitKey;
+        }
+    }
+
+    if (combination.shortEntryStrategy) {
+        normalized.shortEntryStrategy = normaliseBatchStrategyId('shortEntry', combination.shortEntryStrategy);
+    }
+    if (combination.shortExitStrategy) {
+        const coverKey = normaliseBatchStrategyId('shortExit', combination.shortExitStrategy);
+        normalized.shortExitStrategy = coverKey;
+    }
+
+    return normalized;
+}
+
+function normaliseBatchResult(result) {
+    if (!result || typeof result !== 'object') {
+        return result;
+    }
+
+    const normalized = { ...result };
+
+    if (result.buyStrategy) {
+        normalized.buyStrategy = normaliseBatchStrategyId('entry', result.buyStrategy);
+    }
+    if (result.sellStrategy) {
+        normalized.sellStrategy = normaliseBatchStrategyId('exit', result.sellStrategy);
+    }
+    if (result.entryStrategy) {
+        normalized.entryStrategy = normaliseBatchStrategyId('entry', result.entryStrategy);
+        if (!normalized.buyStrategy) {
+            normalized.buyStrategy = normalized.entryStrategy;
+        }
+    }
+    if (result.exitStrategy) {
+        const exitKey = normaliseBatchStrategyId('exit', result.exitStrategy);
+        normalized.exitStrategy = exitKey;
+        if (!normalized.sellStrategy) {
+            normalized.sellStrategy = exitKey;
+        }
+    }
+
+    return normalized;
+}
+
+function getWorkerStrategyName(batchStrategyName, roleHint) {
     if (batchStrategyName === 'none') {
         return null;
     }
@@ -74,7 +143,7 @@ function getWorkerStrategyName(batchStrategyName) {
         const message = '[Batch Optimization] Strategy name is required for worker mapping';
         console.error(message);
         if (batchDebugSession) {
-            recordBatchDebug('strategy-name-missing', { requested: batchStrategyName }, {
+            recordBatchDebug('strategy-name-missing', { requested: batchStrategyName, role: roleHint || null }, {
                 level: 'error',
                 consoleLevel: 'error'
             });
@@ -85,15 +154,45 @@ function getWorkerStrategyName(batchStrategyName) {
         throw new Error(message);
     }
 
-    if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
-        hydrateStrategyNameMap();
+    const checkKnown = (id) => {
+        if (!id) return false;
+        if (BatchStrategyMapper && typeof BatchStrategyMapper.isKnownStrategy === 'function') {
+            return BatchStrategyMapper.isKnownStrategy(id);
+        }
+        return Boolean(strategyDescriptions?.[id]);
+    };
+
+    let mappingDetail = null;
+    let workerStrategy = null;
+
+    if (BatchStrategyMapper) {
+        if (typeof BatchStrategyMapper.describeMapping === 'function') {
+            mappingDetail = BatchStrategyMapper.describeMapping(batchStrategyName, roleHint);
+            workerStrategy = mappingDetail?.canonical || null;
+        } else if (typeof BatchStrategyMapper.getWorkerId === 'function') {
+            workerStrategy = BatchStrategyMapper.getWorkerId(batchStrategyName, roleHint);
+        }
     }
 
-    if (!BATCH_STRATEGY_NAME_MAP.has(batchStrategyName)) {
+    if (!workerStrategy) {
+        workerStrategy = normaliseBatchStrategyId(roleHint, batchStrategyName);
+    }
+
+    if (!workerStrategy) {
+        workerStrategy = batchStrategyName;
+    }
+
+    if (!checkKnown(workerStrategy)) {
+        if (checkKnown(batchStrategyName)) {
+            workerStrategy = batchStrategyName;
+        }
+    }
+
+    if (!checkKnown(workerStrategy)) {
         const message = `[Batch Optimization] Missing worker strategy mapping for "${batchStrategyName}"`;
         console.error(message);
         if (batchDebugSession) {
-            recordBatchDebug('strategy-mapping-missing', { strategy: batchStrategyName }, {
+            recordBatchDebug('strategy-mapping-missing', { strategy: batchStrategyName, role: roleHint || null }, {
                 level: 'error',
                 consoleLevel: 'error'
             });
@@ -104,14 +203,23 @@ function getWorkerStrategyName(batchStrategyName) {
         throw new Error(message);
     }
 
-    return BATCH_STRATEGY_NAME_MAP.get(batchStrategyName);
+    if (workerStrategy !== batchStrategyName && batchDebugSession) {
+        recordBatchDebug('strategy-mapper-normalised', {
+            requested: batchStrategyName,
+            mapped: workerStrategy,
+            role: roleHint || null,
+            mappingDetail: mappingDetail || null,
+        }, { console: false });
+    }
+
+    return workerStrategy;
 }
 
-function resolveWorkerStrategyName(strategyName) {
+function resolveWorkerStrategyName(strategyName, roleHint) {
     if (!strategyName) {
         return null;
     }
-    return getWorkerStrategyName(strategyName);
+    return getWorkerStrategyName(strategyName, roleHint);
 }
 
 // 全局變量
@@ -750,6 +858,75 @@ function getBatchDebugSnapshot() {
     return clonePlainObject(batchDebugSession);
 }
 
+function hydrateStrategyNameMap() {
+    const hasStrategyDescriptions = typeof strategyDescriptions === 'object' && strategyDescriptions;
+
+    if (!hasStrategyDescriptions) {
+        if (batchDebugSession) {
+            recordBatchDebug('strategy-map-hydrate-skip', { reason: 'missing-strategy-descriptions' }, {
+                phase: 'init',
+                level: 'warn',
+                consoleLevel: 'warn'
+            });
+        }
+        return;
+    }
+
+    if (!BatchStrategyMapper || typeof BatchStrategyMapper.isKnownStrategy !== 'function') {
+        const knownIds = Object.keys(strategyDescriptions);
+        const knownSet = new Set(knownIds);
+        const fallbackMapper = {
+            canonicalize: (strategyId) => strategyId,
+            getWorkerId: (strategyId) => strategyId,
+            describeMapping: (strategyId, role) => ({
+                original: strategyId,
+                canonical: strategyId,
+                role: role || null,
+                known: knownSet.has(strategyId)
+            }),
+            isKnownStrategy: (strategyId) => knownSet.has(strategyId)
+        };
+
+        if (typeof window !== 'undefined') {
+            window.LazyBatchStrategyMapper = fallbackMapper;
+        } else if (typeof globalThis !== 'undefined') {
+            globalThis.LazyBatchStrategyMapper = fallbackMapper;
+        }
+
+        BatchStrategyMapper = fallbackMapper;
+
+        if (batchDebugSession) {
+            recordBatchDebug('strategy-map-hydrate-fallback', {
+                knownCount: knownIds.length
+            }, {
+                phase: 'init',
+                level: 'warn',
+                consoleLevel: 'warn'
+            });
+        }
+        return;
+    }
+
+    const missingIds = [];
+    for (const key of Object.keys(strategyDescriptions)) {
+        if (!BatchStrategyMapper.isKnownStrategy(key)) {
+            missingIds.push(key);
+        }
+    }
+
+    if (batchDebugSession) {
+        recordBatchDebug('strategy-map-hydrated', {
+            knownCount: Object.keys(strategyDescriptions).length,
+            missingCount: missingIds.length,
+            missingSamples: missingIds.slice(0, 5)
+        }, {
+            phase: 'init',
+            level: missingIds.length ? 'warn' : 'info',
+            consoleLevel: missingIds.length ? 'warn' : 'log'
+        });
+    }
+}
+
 function downloadBatchDebugLog(filenamePrefix = 'batch-debug-log') {
     if (!batchDebugSession) {
         console.warn('[Batch Debug] No session available for export');
@@ -1382,17 +1559,17 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
 }
 
 const EXIT_STRATEGY_SELECT_MAP = {
-    'ma_cross': 'ma_cross',
-    'ma_cross_exit': 'ma_cross',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
     'ma_below': 'ma_below',
     'ma_below_exit': 'ma_below',
     'rsi_overbought': 'rsi_overbought',
     'rsi_overbought_exit': 'rsi_overbought',
-    'macd_cross': 'macd_cross',
-    'macd_cross_exit': 'macd_cross',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
     'bollinger_reversal': 'bollinger_reversal',
-    'k_d_cross': 'k_d_cross',
-    'k_d_cross_exit': 'k_d_cross',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
     'volume_spike': 'volume_spike',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
@@ -2492,7 +2669,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
 
             // 設定當前策略的參數
             if (strategyType === 'entry') {
-                const workerEntryStrategy = resolveWorkerStrategyName(strategy);
+                const workerEntryStrategy = resolveWorkerStrategyName(strategy, 'entry');
                 if (workerEntryStrategy) {
                     baseParams.entryStrategy = workerEntryStrategy;
                 }
@@ -2500,13 +2677,13 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 // 包含完整的出場參數
                 if (baseCombo && baseCombo.sellParams) {
                     baseParams.exitParams = { ...baseCombo.sellParams };
-                    const workerExitStrategy = resolveWorkerStrategyName(baseCombo.sellStrategy);
+                    const workerExitStrategy = resolveWorkerStrategyName(baseCombo.sellStrategy, 'exit');
                     if (workerExitStrategy) {
                         baseParams.exitStrategy = workerExitStrategy;
                     }
                 }
             } else {
-                const workerExitStrategy = resolveWorkerStrategyName(strategy);
+                const workerExitStrategy = resolveWorkerStrategyName(strategy, 'exit');
                 if (workerExitStrategy) {
                     baseParams.exitStrategy = workerExitStrategy;
                 }
@@ -2514,7 +2691,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 // 包含完整的進場參數
                 if (baseCombo && baseCombo.buyParams) {
                     baseParams.entryParams = { ...baseCombo.buyParams };
-                    const workerEntryStrategy = resolveWorkerStrategyName(baseCombo.buyStrategy);
+                    const workerEntryStrategy = resolveWorkerStrategyName(baseCombo.buyStrategy, 'entry');
                     if (workerEntryStrategy) {
                         baseParams.entryStrategy = workerEntryStrategy;
                     }
@@ -2534,7 +2711,11 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 strategyType,
                 targetMetric,
                 Math.max(1, parseInt(trials, 10) || 1),
-                { cachedDataOverride: options?.cachedDataOverride }
+                {
+                    cachedDataOverride: options?.cachedDataOverride,
+                    strategyId: strategy,
+                    baseCombo,
+                }
             );
             
             if (bestParam.value !== undefined) {
@@ -2880,7 +3061,8 @@ async function processStrategyCombinations(combinations, config) {
             break;
         }
 
-        const combination = combinations[i];
+        const originalCombination = combinations[i];
+        const combination = normaliseBatchCombination(originalCombination);
 
         // 更新進度顯示，包含當前組合資訊
         const combinationInfo = {
@@ -2924,12 +3106,13 @@ async function processStrategyCombinations(combinations, config) {
 
                 console.log(`[Batch Debug] Strategy preserved: ${combination.buyStrategy} -> ${combination.sellStrategy}`);
                 console.log(`[Batch Debug] Final result sellStrategy:`, combinedResult.sellStrategy);
-                results.push(combinedResult);
+                const normalizedResult = normaliseBatchResult(combinedResult);
+                results.push(normalizedResult);
 
                 recordBatchDebug('combination-complete', {
                     index: i + 1,
                     combination: summarizeCombination(combination),
-                    result: summarizeResult(combinedResult)
+                    result: summarizeResult(normalizedResult)
                 }, { phase: 'backtest', console: false });
             } else {
                 recordBatchDebug('combination-no-result', {
@@ -2955,7 +3138,7 @@ async function processStrategyCombinations(combinations, config) {
     }
 
     // 將結果添加到全局結果中
-    batchOptimizationResults.push(...results);
+    batchOptimizationResults.push(...results.map(normaliseBatchResult));
 
     if (results.length === 0) {
         recordBatchDebug('combination-batch-empty', {
@@ -2975,6 +3158,7 @@ async function processStrategyCombinations(combinations, config) {
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
+        combination = normaliseBatchCombination(combination);
         let datasetMeta = {};
         try {
             // 使用現有的回測邏輯
@@ -2994,11 +3178,11 @@ async function executeBacktestForCombination(combination, options = {}) {
             }
 
             // 更新策略設定（使用 worker 能理解的策略名稱）
-            const workerEntryStrategy = resolveWorkerStrategyName(combination.buyStrategy);
+            const workerEntryStrategy = resolveWorkerStrategyName(combination.buyStrategy, 'entry');
             if (workerEntryStrategy) {
                 params.entryStrategy = workerEntryStrategy;
             }
-            const workerExitStrategy = resolveWorkerStrategyName(combination.sellStrategy);
+            const workerExitStrategy = resolveWorkerStrategyName(combination.sellStrategy, 'exit');
             if (workerExitStrategy) {
                 params.exitStrategy = workerExitStrategy;
             } else if (!combination.sellStrategy) {
@@ -3006,6 +3190,35 @@ async function executeBacktestForCombination(combination, options = {}) {
             }
             params.entryParams = combination.buyParams ? { ...combination.buyParams } : {};
             params.exitParams = combination.sellParams ? { ...combination.sellParams } : {};
+
+            if (combination.shortEntryStrategy) {
+                const workerShortEntry = resolveWorkerStrategyName(combination.shortEntryStrategy, 'shortEntry');
+                if (workerShortEntry) {
+                    params.shortEntryStrategy = workerShortEntry;
+                    params.enableShorting = true;
+                }
+            } else {
+                delete params.shortEntryStrategy;
+            }
+            if (combination.shortExitStrategy) {
+                const workerShortExit = resolveWorkerStrategyName(combination.shortExitStrategy, 'shortExit');
+                if (workerShortExit) {
+                    params.shortExitStrategy = workerShortExit;
+                    params.enableShorting = true;
+                }
+            } else {
+                delete params.shortExitStrategy;
+            }
+            if (combination.shortEntryParams) {
+                params.shortEntryParams = { ...combination.shortEntryParams };
+            } else {
+                delete params.shortEntryParams;
+            }
+            if (combination.shortExitParams) {
+                params.shortExitParams = { ...combination.shortExitParams };
+            } else {
+                delete params.shortExitParams;
+            }
 
             // 如果有風險管理參數，則應用到全局設定中
             if (combination.riskManagement) {
@@ -3187,11 +3400,11 @@ async function executeBacktestForCombination(combination, options = {}) {
 }
 
 // 優化策略參數
-async function optimizeStrategyParameters(strategy, strategyType, targetMetric, trials = 100) {
+async function optimizeStrategyParameters(strategy, strategyType, targetMetric, trials = 100, baseCombo = null, options = {}) {
     return new Promise((resolve) => {
         try {
             const strategyInfo = strategyDescriptions[strategy];
-            
+
             // 檢查是否為風險管理控制策略
             const isRiskManagementStrategy = strategy === 'fixed_stop_loss' || strategy === 'cover_fixed_stop_loss';
             
@@ -3243,7 +3456,7 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
                 strategyInfo.optimizeTargets.map(t => t.name));
             
             // 對所有可優化參數進行順序優化
-            optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials)
+            optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, 'forward', baseCombo, options)
                 .then(resolve)
                 .catch(error => {
                     console.error('[Batch Optimization] Strategy parameters optimization error:', error);
@@ -3261,67 +3474,69 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
 // 優化多個策略參數
 // 修復：正確初始化 baseParams，確保包含當前組合的完整參數
 // 這是批量優化無法找到最佳參數的關鍵問題：之前使用默認參數而非組合參數
-async function optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, order = 'forward', baseCombo = null) {
+async function optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials, order = 'forward', baseCombo = null, options = {}) {
     console.log(`[Batch Optimization] Starting simplified multi-parameter optimization for ${strategy}...`);
-    
+
     try {
         const optimizeTargets = strategyInfo.optimizeTargets;
-        
-        // 修復：使用完整的組合參數作為基礎，而非預設參數
-        // 這確保優化時的 baseParams 與用戶手動操作時一致
-        const baseParams = getBacktestParams();
-        
+
+        const comboContext = baseCombo ? clonePlainObject(baseCombo) : null;
+
+        const baseParamsSource = options.baseParamsOverride
+            ? options.baseParamsOverride
+            : getBacktestParams();
+        const baseParams = prepareBaseParamsForOptimization(baseParamsSource);
+
         // 每個參數使用使用者指定的優化次數
         const trialsPerParam = Math.max(1, parseInt(trials, 10) || 1);
         console.log(`[Batch Optimization] Optimizing ${optimizeTargets.length} parameters with ${trialsPerParam} trials each`);
-        
-        // 修復：設定策略參數時，使用組合中的實際參數而非預設參數
+
+        const shouldUseBaseBuy = comboContext && comboContext.buyStrategy === strategy && comboContext.buyParams;
+        const shouldUseBaseSell = comboContext && comboContext.sellStrategy === strategy && comboContext.sellParams;
+
         if (strategyType === 'entry') {
-            const workerEntryStrategy = resolveWorkerStrategyName(strategy);
+            const workerEntryStrategy = resolveWorkerStrategyName(strategy, 'entry');
             if (workerEntryStrategy) {
                 baseParams.entryStrategy = workerEntryStrategy;
             }
-            // 使用組合中的進場參數作為起始點（如果有的話）
-            if (baseCombo && baseCombo.buyParams) {
-                baseParams.entryParams = { ...baseCombo.buyParams };
-            } else {
-                baseParams.entryParams = { ...strategyInfo.defaultParams };
-            }
-            // 確保包含當前組合的出場參數
-            if (baseCombo && baseCombo.sellParams) {
-                baseParams.exitParams = { ...baseCombo.sellParams };
-                const workerExitStrategy = resolveWorkerStrategyName(baseCombo.sellStrategy);
+            baseParams.entryParams = shouldUseBaseBuy
+                ? { ...comboContext.buyParams }
+                : { ...strategyInfo.defaultParams };
+
+            if (comboContext && comboContext.sellStrategy) {
+                baseParams.exitParams = { ...(comboContext.sellParams || {}) };
+                const workerExitStrategy = resolveWorkerStrategyName(comboContext.sellStrategy, 'exit');
                 if (workerExitStrategy) {
                     baseParams.exitStrategy = workerExitStrategy;
                 }
             }
         } else {
-            const workerExitStrategy = resolveWorkerStrategyName(strategy);
+            const workerExitStrategy = resolveWorkerStrategyName(strategy, 'exit');
             if (workerExitStrategy) {
                 baseParams.exitStrategy = workerExitStrategy;
             }
-            // 使用組合中的出場參數作為起始點（如果有的話）
-            if (baseCombo && baseCombo.sellParams) {
-                baseParams.exitParams = { ...baseCombo.sellParams };
-            } else {
-                baseParams.exitParams = { ...strategyInfo.defaultParams };
-            }
-            // 確保包含當前組合的進場參數
-            if (baseCombo && baseCombo.buyParams) {
-                baseParams.entryParams = { ...baseCombo.buyParams };
-                const workerEntryStrategy = resolveWorkerStrategyName(baseCombo.buyStrategy);
+            baseParams.exitParams = shouldUseBaseSell
+                ? { ...comboContext.sellParams }
+                : { ...strategyInfo.defaultParams };
+
+            if (comboContext && comboContext.buyStrategy) {
+                baseParams.entryParams = { ...(comboContext.buyParams || {}) };
+                const workerEntryStrategy = resolveWorkerStrategyName(comboContext.buyStrategy, 'entry');
                 if (workerEntryStrategy) {
                     baseParams.entryStrategy = workerEntryStrategy;
                 }
             }
         }
-        
-        // 包含風險管理參數
-        if (baseCombo && baseCombo.riskManagement) {
-            baseParams.stopLoss = baseCombo.riskManagement.stopLoss || 0;
-            baseParams.takeProfit = baseCombo.riskManagement.takeProfit || 0;
+
+        if (comboContext && comboContext.riskManagement) {
+            if (comboContext.riskManagement.stopLoss !== undefined) {
+                baseParams.stopLoss = comboContext.riskManagement.stopLoss;
+            }
+            if (comboContext.riskManagement.takeProfit !== undefined) {
+                baseParams.takeProfit = comboContext.riskManagement.takeProfit;
+            }
         }
-        
+
         console.log(`[Batch Optimization] Initial baseParams for ${strategy}:`, {
             entryStrategy: baseParams.entryStrategy,
             exitStrategy: baseParams.exitStrategy,
@@ -3330,10 +3545,10 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             stopLoss: baseParams.stopLoss,
             takeProfit: baseParams.takeProfit
         });
-        
-        let optimizedParams = strategyType === 'entry' ? 
-            { ...baseParams.entryParams } : 
-            { ...baseParams.exitParams };
+
+        let optimizedParams = strategyType === 'entry'
+            ? { ...baseParams.entryParams }
+            : { ...baseParams.exitParams };
         
         // 修復：使用固定的參數優化順序，避免 reverse 導致的不穩定性
         // 按照參數在 optimizeTargets 中的自然順序進行優化
@@ -3357,11 +3572,16 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
             
             // 優化當前參數
             const bestParam = await optimizeSingleStrategyParameter(
-                baseParams, 
-                optimizeTarget, 
-                strategyType, 
-                targetMetric, 
-                trialsPerParam
+                baseParams,
+                optimizeTarget,
+                strategyType,
+                targetMetric,
+                trialsPerParam,
+                {
+                    cachedDataOverride: options.cachedDataOverride,
+                    strategyId: strategy,
+                    baseCombo: comboContext,
+                }
             );
             
             if (bestParam.value !== undefined) {
@@ -3384,6 +3604,8 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
 
 // 優化單一策略參數
 async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials, options = {}) {
+    const strategyId = options?.strategyId || null;
+    const baseCombo = options?.baseCombo || null;
     return new Promise((resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
@@ -3414,6 +3636,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                         strategyType,
                         optimizeTarget: optimizeTarget.name,
                         trials,
+                        strategyId,
                         paramsPreview: params ? { entryStrategy: params.entryStrategy, exitStrategy: params.exitStrategy } : null
                     }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
                     resolve({ value: undefined, metric: -Infinity });
@@ -3456,15 +3679,29 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                     optimizeTarget: optimizeTarget.name,
                     selectedValue: best.paramValue,
                     metric: best.metricVal,
-                    targetMetric
+                    targetMetric,
+                    strategyId
                 }, { phase: 'optimize', console: false });
+
+                if (strategyId && DEATH_CROSS_STRATEGIES.has(strategyId) && (!Number.isFinite(best.metricVal) || Math.abs(best.metricVal) < 1e-8)) {
+                    recordBatchDebug('deathcross-zero-metric', {
+                        strategyType,
+                        strategyId,
+                        optimizeTarget: optimizeTarget.name,
+                        metric: best.metricVal,
+                        trials,
+                        paramValue: best.paramValue,
+                        baseCombo: baseCombo ? summarizeCombination(baseCombo) : null,
+                    }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+                }
                 resolve({ value: best.paramValue, metric: best.metricVal });
             } else if (type === 'error') {
                 console.error(`[Batch Optimization] ${optimizeTarget.name} optimization error:`, e.data.data?.message);
                 recordBatchDebug('param-optimization-error', {
                     strategyType,
                     optimizeTarget: optimizeTarget.name,
-                    message: e.data.data?.message
+                    message: e.data.data?.message,
+                    strategyId
                 }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
                 optimizeWorker.terminate();
                 resolve({ value: undefined, metric: -Infinity });
@@ -3477,7 +3714,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                 strategyType,
                 optimizeTarget: optimizeTarget.name,
                 message: error?.message || String(error),
-                stack: error?.stack || null
+                stack: error?.stack || null,
+                strategyId
             }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
             optimizeWorker.terminate();
             resolve({ value: undefined, metric: -Infinity });
@@ -4879,11 +5117,11 @@ async function runCEMRefinement(task) {
 
 function buildRefinementBaseTemplate(candidate) {
     const baseParams = getBacktestParams();
-    const workerEntryStrategy = resolveWorkerStrategyName(candidate.buyStrategy);
+    const workerEntryStrategy = resolveWorkerStrategyName(candidate.buyStrategy, 'entry');
     if (workerEntryStrategy) {
         baseParams.entryStrategy = workerEntryStrategy;
     }
-    const workerExitStrategy = resolveWorkerStrategyName(candidate.sellStrategy);
+    const workerExitStrategy = resolveWorkerStrategyName(candidate.sellStrategy, 'exit');
     if (workerExitStrategy) {
         baseParams.exitStrategy = workerExitStrategy;
     }
@@ -5319,8 +5557,8 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
         const baseParams = getBacktestParams();
         console.log('[Cross Optimization] Base params obtained:', baseParams);
 
-        const workerEntryStrategy = resolveWorkerStrategyName(entryStrategy);
-        const workerExitStrategy = resolveWorkerStrategyName(exitStrategy);
+        const workerEntryStrategy = resolveWorkerStrategyName(entryStrategy, 'entry');
+        const workerExitStrategy = resolveWorkerStrategyName(exitStrategy, 'exit');
         if (!workerEntryStrategy || !workerExitStrategy) {
             const message = '[Cross Optimization] 無法解析進出場策略映射，已停止交叉優化';
             console.error(message, { entryStrategy, exitStrategy });
@@ -5400,8 +5638,9 @@ async function performCrossOptimization(entryStrategy, entryParams, exitStrategy
             result.buyParams = baseParams.entryParams;
             result.sellParams = baseParams.exitParams;
             
-            console.log('[Cross Optimization] Final result with metadata:', result);
-            return result;
+            const normalized = normaliseBatchResult(result);
+            console.log('[Cross Optimization] Final result with metadata:', normalized);
+            return normalized;
         } else {
             console.log('[Cross Optimization] Invalid or null result from backtest');
             return null;
@@ -5985,28 +6224,94 @@ function switchTab(tabName) {
 async function optimizeAllStrategies(buyStrategies, sellStrategies, config) {
     const optimizedBuy = {};
     const optimizedSell = {};
-    
+
     const totalStrategies = buyStrategies.length + sellStrategies.length;
     let completedStrategies = 0;
-    
+
+    const paramsSnapshot = getBacktestParams();
+    const baseComboSeed = BatchStrategyContext && typeof BatchStrategyContext.deriveBaseComboFromParams === 'function'
+        ? BatchStrategyContext.deriveBaseComboFromParams(paramsSnapshot, { includeRisk: true, includeShort: true })
+        : {
+            buyStrategy: paramsSnapshot?.entryStrategy || paramsSnapshot?.buyStrategy || null,
+            sellStrategy: paramsSnapshot?.exitStrategy || paramsSnapshot?.sellStrategy || null,
+            buyParams: clonePlainObject(paramsSnapshot?.entryParams),
+            sellParams: clonePlainObject(paramsSnapshot?.exitParams),
+            riskManagement: (Number.isFinite(paramsSnapshot?.stopLoss) || Number.isFinite(paramsSnapshot?.takeProfit))
+                ? {
+                    stopLoss: Number.isFinite(paramsSnapshot?.stopLoss) ? paramsSnapshot.stopLoss : undefined,
+                    takeProfit: Number.isFinite(paramsSnapshot?.takeProfit) ? paramsSnapshot.takeProfit : undefined,
+                }
+                : null,
+        };
+
+    const normalizedBaseCombo = baseComboSeed ? normaliseBatchCombination(baseComboSeed) : null;
+    const baseParamsOverride = prepareBaseParamsForOptimization(paramsSnapshot);
+
+    const buildContextForStrategy = (strategy, role) => {
+        if (BatchStrategyContext && typeof BatchStrategyContext.buildStrategyOptimizationContext === 'function') {
+            const context = BatchStrategyContext.buildStrategyOptimizationContext(strategy, role, {
+                baseCombo: normalizedBaseCombo,
+                strategyDescriptions,
+                normaliseStrategyId: (roleKey, strategyId) => normaliseBatchStrategyId(roleKey, strategyId),
+            });
+            return normaliseBatchCombination(context || {});
+        }
+
+        const fallbackBase = normalizedBaseCombo ? cloneCombinationInput(normalizedBaseCombo) : {
+            buyStrategy: null,
+            sellStrategy: null,
+            buyParams: {},
+            sellParams: {},
+        };
+        if (normalizedBaseCombo?.riskManagement) {
+            fallbackBase.riskManagement = clonePlainObject(normalizedBaseCombo.riskManagement);
+        }
+
+        if (role === 'entry') {
+            fallbackBase.buyStrategy = normaliseBatchStrategyId('entry', strategy);
+            fallbackBase.buyParams = clonePlainObject(strategyDescriptions[strategy]?.defaultParams || {});
+        } else if (role === 'exit') {
+            fallbackBase.sellStrategy = normaliseBatchStrategyId('exit', strategy);
+            fallbackBase.sellParams = clonePlainObject(strategyDescriptions[strategy]?.defaultParams || {});
+        }
+
+        return normaliseBatchCombination(fallbackBase);
+    };
+
     // 優化進場策略
     for (const strategy of buyStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
             `優化進場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
-        
-        optimizedBuy[strategy] = await optimizeStrategyParameters(strategy, 'entry', config.targetMetric, config.parameterTrials);
+
+        const context = buildContextForStrategy(strategy, 'entry');
+        optimizedBuy[strategy] = await optimizeStrategyParameters(
+            strategy,
+            'entry',
+            config.targetMetric,
+            config.parameterTrials,
+            context,
+            { baseParamsOverride }
+        );
         completedStrategies++;
     }
-    
+
     // 優化出場策略
     for (const strategy of sellStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
             `優化出場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
-        
-        optimizedSell[strategy] = await optimizeStrategyParameters(strategy, 'exit', config.targetMetric, config.parameterTrials);
+
+        const context = buildContextForStrategy(strategy, 'exit');
+        optimizedSell[strategy] = await optimizeStrategyParameters(
+            strategy,
+            'exit',
+            config.targetMetric,
+            config.parameterTrials,
+            context,
+            { baseParamsOverride }
+        );
         completedStrategies++;
     }
-    
+
     return {
         buy: optimizedBuy,
         sell: optimizedSell
@@ -6033,7 +6338,7 @@ function generateOptimizedStrategyCombinations(optimizedBuyStrategies, optimized
                 console.log(`[Batch Optimization] Risk management parameters for ${sellStrategy}:`, sellParams);
             }
             
-            combinations.push(combination);
+            combinations.push(normaliseBatchCombination(combination));
         }
     }
     
@@ -6062,7 +6367,7 @@ function generateStrategyCombinations(buyStrategies, sellStrategies) {
                 combination.sellParams = {}; // 風險管理策略本身不使用 exitParams
             }
 
-            combinations.push(combination);
+            combinations.push(normaliseBatchCombination(combination));
         }
     }
 
@@ -6968,37 +7273,38 @@ function updateCrossOptimizationProgress(currentTask = null) {
 // 添加交叉優化結果到總結果中，並進行去重處理
 function addCrossOptimizationResults(newResults) {
     newResults.forEach(newResult => {
+        const normalizedResult = normaliseBatchResult(newResult);
         // 查找是否有相同的買入策略、賣出策略和年化報酬率的結果
-        const existingIndex = batchOptimizationResults.findIndex(existing => 
-            existing.buyStrategy === newResult.buyStrategy &&
-            existing.sellStrategy === newResult.sellStrategy &&
-            Math.abs(existing.annualizedReturn - newResult.annualizedReturn) < 0.0001 // 允許微小差異
+        const existingIndex = batchOptimizationResults.findIndex(existing =>
+            existing.buyStrategy === normalizedResult.buyStrategy &&
+            existing.sellStrategy === normalizedResult.sellStrategy &&
+            Math.abs(existing.annualizedReturn - normalizedResult.annualizedReturn) < 0.0001 // 允許微小差異
         );
-        
+
         if (existingIndex !== -1) {
             // 找到重複結果，合併優化類型標籤
             const existing = batchOptimizationResults[existingIndex];
-            
+
             // 合併優化類型標籤
             const existingTypes = existing.optimizationTypes || [existing.optimizationType || '基礎'];
-            const newType = newResult.optimizationType || '基礎';
-            
+            const newType = normalizedResult.optimizationType || '基礎';
+
             if (!existingTypes.includes(newType)) {
                 existingTypes.push(newType);
             }
-            
+
             // 更新現有結果
             existing.optimizationTypes = existingTypes;
             existing.isDuplicate = true;
-            
-            console.log(`[Cross Optimization] 合併重複結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 優化類型: ${existingTypes.join(', ')}`);
+
+            console.log(`[Cross Optimization] 合併重複結果: ${normalizedResult.buyStrategy} + ${normalizedResult.sellStrategy}, 優化類型: ${existingTypes.join(', ')}`);
         } else {
             // 沒有重複，直接添加新結果
-            if (newResult.optimizationType) {
-                newResult.optimizationTypes = [newResult.optimizationType];
+            if (normalizedResult.optimizationType) {
+                normalizedResult.optimizationTypes = [normalizedResult.optimizationType];
             }
-            batchOptimizationResults.push(newResult);
-            console.log(`[Cross Optimization] 添加新結果: ${newResult.buyStrategy} + ${newResult.sellStrategy}, 類型: ${newResult.optimizationType}`);
+            batchOptimizationResults.push(normalizedResult);
+            console.log(`[Cross Optimization] 添加新結果: ${normalizedResult.buyStrategy} + ${normalizedResult.sellStrategy}, 類型: ${normalizedResult.optimizationType}`);
         }
     });
 }
