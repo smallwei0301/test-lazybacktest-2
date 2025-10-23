@@ -8621,6 +8621,7 @@ function runStrategy(data, params, options = {}) {
         let exitRuleResult = null;
         switch (exitStrategy) {
           case "ma_cross":
+          case "ma_cross_exit":
           case "ema_cross":
             {
               const pluginResult = callStrategyPlugin(
@@ -8703,6 +8704,7 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "macd_cross":
+          case "macd_cross_exit":
             const difX = indicators.macdExit[i],
               deaX = indicators.macdSignalExit[i],
               difPX = indicators.macdExit[i - 1],
@@ -8760,9 +8762,12 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "k_d_cross":
+          case "k_d_cross_exit":
             {
+              const pluginId =
+                exitStrategy === "k_d_cross" ? "k_d_cross_exit" : exitStrategy;
               const pluginResult = callStrategyPlugin(
-                'k_d_cross_exit',
+                pluginId,
                 'longExit',
                 i,
                 exitParams,
