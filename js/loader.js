@@ -72,14 +72,32 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const targetSelectElement = document.getElementById(`${targetType}Strategy`);
             const targetStrategyKey = targetSelectElement ? targetSelectElement.value : null;
-            let targetInternalKey = targetStrategyKey;
+            const normalizedTargetKey = typeof normalizeStrategyId === 'function'
+                ? normalizeStrategyId(targetType, targetStrategyKey)
+                : targetStrategyKey;
+            let targetInternalKey = normalizedTargetKey && strategyDescriptions[normalizedTargetKey]
+                ? normalizedTargetKey
+                : targetStrategyKey;
 
-            if (targetType === 'shortEntry') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_below', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `short_${targetStrategyKey}`;
-            } else if (targetType === 'shortExit') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_above', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `cover_${targetStrategyKey}`;
-            } else if (targetType === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(targetStrategyKey)) {
-                targetInternalKey = `${targetStrategyKey}_exit`;
+            if (!strategyDescriptions[targetInternalKey] && targetStrategyKey) {
+                if (normalizedTargetKey && strategyDescriptions[normalizedTargetKey]) {
+                    targetInternalKey = normalizedTargetKey;
+                } else if (targetType === 'shortEntry') {
+                    const legacyShortKey = `short_${targetStrategyKey}`;
+                    if (strategyDescriptions[legacyShortKey]) {
+                        targetInternalKey = legacyShortKey;
+                    }
+                } else if (targetType === 'shortExit') {
+                    const legacyCoverKey = `cover_${targetStrategyKey}`;
+                    if (strategyDescriptions[legacyCoverKey]) {
+                        targetInternalKey = legacyCoverKey;
+                    }
+                } else if (targetType === 'exit') {
+                    const legacyExitKey = `${targetStrategyKey}_exit`;
+                    if (strategyDescriptions[legacyExitKey]) {
+                        targetInternalKey = legacyExitKey;
+                    }
+                }
             }
             console.log(`[Param Copy] Attempting to copy from ${sourceType} to ${targetType} (InternalKey: ${targetInternalKey})`);
 

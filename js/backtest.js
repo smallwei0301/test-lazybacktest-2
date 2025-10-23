@@ -6345,7 +6345,7 @@ function displayBacktestResult(result) {
         return;
     }
     updateStrategyStatusCard(result);
-    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(exitKeyRaw)) ? `${exitKeyRaw}_exit` : exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitInternalKey] || { name: result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { shortEntryDesc = strategyDescriptions[result.shortEntryStrategy] || { name: result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[result.shortExitStrategy] || { name: result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
+    const entryKey = result.entryStrategy; const exitKeyRaw = result.exitStrategy; const exitStrategyKey = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('exit', exitKeyRaw) : exitKeyRaw) || exitKeyRaw; const entryDesc = strategyDescriptions[entryKey] || { name: result.entryStrategy || 'N/A', desc: 'N/A' }; const exitDesc = strategyDescriptions[exitStrategyKey] || { name: exitStrategyKey || result.exitStrategy || 'N/A', desc: 'N/A' }; let shortEntryDesc = null, shortExitDesc = null; if (result.enableShorting && result.shortEntryStrategy && result.shortExitStrategy) { const shortEntryKey = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('shortEntry', result.shortEntryStrategy) : result.shortEntryStrategy) || result.shortEntryStrategy; const shortExitKey = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('shortExit', result.shortExitStrategy) : result.shortExitStrategy) || result.shortExitStrategy; shortEntryDesc = strategyDescriptions[shortEntryKey] || { name: shortEntryKey || result.shortEntryStrategy, desc: 'N/A' }; shortExitDesc = strategyDescriptions[shortExitKey] || { name: shortExitKey || result.shortExitStrategy, desc: 'N/A' }; } const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const totalProfit = result.totalProfit ?? 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
             <div class="summary-metrics-grid summary-metrics-grid--performance">
@@ -8669,21 +8669,32 @@ function updateStrategyParams(type) {
     }
     
     const strategyKey = strategySelect.value;
-    let internalKey = strategyKey;
-    
-    if (type === 'exit') {
-        if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(strategyKey)) {
-            internalKey = `${strategyKey}_exit`;
-        }
-    } else if (type === 'shortEntry') {
-        internalKey = strategyKey;
-        if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(strategyKey)) {
-            internalKey = `short_${strategyKey}`;
-        }
-    } else if (type === 'shortExit') {
-        internalKey = strategyKey;
-        if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(strategyKey)) {
-            internalKey = `cover_${strategyKey}`;
+    const normalizedKey = typeof normalizeStrategyId === 'function'
+        ? normalizeStrategyId(type, strategyKey)
+        : strategyKey;
+
+    let internalKey = normalizedKey && strategyDescriptions[normalizedKey]
+        ? normalizedKey
+        : strategyKey;
+
+    if (!strategyDescriptions[internalKey]) {
+        if (normalizedKey && strategyDescriptions[normalizedKey]) {
+            internalKey = normalizedKey;
+        } else if (type === 'exit' && strategyKey) {
+            const legacyExitKey = `${strategyKey}_exit`;
+            if (strategyDescriptions[legacyExitKey]) {
+                internalKey = legacyExitKey;
+            }
+        } else if (type === 'shortEntry' && strategyKey) {
+            const legacyShortKey = `short_${strategyKey}`;
+            if (strategyDescriptions[legacyShortKey]) {
+                internalKey = legacyShortKey;
+            }
+        } else if (type === 'shortExit' && strategyKey) {
+            const legacyCoverKey = `cover_${strategyKey}`;
+            if (strategyDescriptions[legacyCoverKey]) {
+                internalKey = legacyCoverKey;
+            }
         }
     }
     
@@ -8854,7 +8865,7 @@ function resetSettings() {
     document.querySelector('input[name="tradeTiming"][value="close"]').checked = true;
     document.getElementById("entryStrategy").value = "ma_cross";
     updateStrategyParams('entry');
-    document.getElementById("exitStrategy").value = "ma_cross";
+    document.getElementById("exitStrategy").value = "ma_cross_exit";
     updateStrategyParams('exit');
     const shortCheckbox = document.getElementById("enableShortSelling");
     const shortArea = document.getElementById("short-strategy-area");
@@ -9389,20 +9400,67 @@ function resolveStrategyComparisonTrendLabel(labelKey) {
     return labelKey;
 }
 
-function getSavedStrategies() { const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY); try { const parsed = strategies ? JSON.parse(strategies) : {}; // 清理損壞的數據
+const STRATEGY_ROLE_PROPERTY_MAP = [
+    { prop: 'exitStrategy', role: 'exit' },
+    { prop: 'shortEntryStrategy', role: 'shortEntry' },
+    { prop: 'shortExitStrategy', role: 'shortExit' },
+];
+
+function normalizeSavedStrategySettings(settings) {
+    if (!settings || typeof settings !== 'object') {
+        return { settings: settings || {}, mutated: false };
+    }
+
+    const normalized = { ...settings };
+    let mutated = false;
+
+    STRATEGY_ROLE_PROPERTY_MAP.forEach(({ prop, role }) => {
+        const current = normalized[prop];
+        const mapped = typeof normalizeStrategyId === 'function'
+            ? normalizeStrategyId(role, current)
+            : current;
+        if (mapped && mapped !== current) {
+            normalized[prop] = mapped;
+            mutated = true;
+        }
+    });
+
+    return { settings: normalized, mutated };
+}
+
+function getSavedStrategies() {
+    const strategies = localStorage.getItem(SAVED_STRATEGIES_KEY);
+    try {
+        const parsed = strategies ? JSON.parse(strategies) : {};
         const cleaned = {};
+        let requiresRewrite = false;
+
         for (const [name, data] of Object.entries(parsed)) {
             if (data && typeof data === 'object' && data.settings) {
-                cleaned[name] = data;
+                const { settings: normalizedSettings, mutated } = normalizeSavedStrategySettings(data.settings);
+                cleaned[name] = {
+                    ...data,
+                    settings: normalizedSettings,
+                };
+                if (mutated) {
+                    requiresRewrite = true;
+                }
             } else {
                 console.warn(`[Storage] Removing corrupted strategy: ${name}`, data);
+                requiresRewrite = true;
             }
         }
-        // 如果有損壞數據被清理，更新 localStorage
-        if (Object.keys(cleaned).length !== Object.keys(parsed).length) {
+
+        if (requiresRewrite || Object.keys(cleaned).length !== Object.keys(parsed).length) {
             localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(cleaned));
         }
-        return cleaned; } catch (e) { console.error("讀取策略時解析JSON錯誤:", e); return {}; } }
+
+        return cleaned;
+    } catch (e) {
+        console.error("讀取策略時解析JSON錯誤:", e);
+        return {};
+    }
+}
 function saveStrategyToLocalStorage(name, settings, metrics) { 
     try { 
         const strategies = getSavedStrategies(); 
@@ -9478,7 +9536,10 @@ function saveStrategy() {
     // 生成預設策略名稱（使用中文名稱）
     const stockNo = document.getElementById('stockNo').value.trim().toUpperCase() || '2330';
     const entryStrategy = document.getElementById('entryStrategy').value;
-    const exitStrategy = document.getElementById('exitStrategy').value;
+    const rawExitStrategy = document.getElementById('exitStrategy').value;
+    const exitStrategy = typeof normalizeStrategyId === 'function'
+        ? normalizeStrategyId('exit', rawExitStrategy)
+        : rawExitStrategy;
     const enableShorting = document.getElementById('enableShortSelling').checked;
     const startDate = document.getElementById('startDate').value;
     const endDate = document.getElementById('endDate').value;
@@ -9498,20 +9559,31 @@ function saveStrategy() {
     const entryStrategyName = strategyDescriptions[entryStrategy]?.name || entryStrategy;
     
     // 出場策略需要特殊處理以獲取正確的中文名稱
-    let exitStrategyName;
-    if (['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(exitStrategy)) {
-        const exitStrategyKey = exitStrategy + '_exit';
-        exitStrategyName = strategyDescriptions[exitStrategyKey]?.name || exitStrategy;
-    } else {
-        exitStrategyName = strategyDescriptions[exitStrategy]?.name || exitStrategy;
-    }
+    const exitStrategyName = strategyDescriptions[exitStrategy]?.name
+        || strategyDescriptions[rawExitStrategy]?.name
+        || exitStrategy
+        || rawExitStrategy;
     
     let defaultName = `${stockNo}_${entryStrategyName}_${exitStrategyName}`;
     if (enableShorting) {
-        const shortEntryStrategy = document.getElementById('shortEntryStrategy').value;
-        const shortExitStrategy = document.getElementById('shortExitStrategy').value;
-        const shortEntryStrategyName = strategyDescriptions[shortEntryStrategy]?.name || shortEntryStrategy;
-        const shortExitStrategyName = strategyDescriptions[shortExitStrategy]?.name || shortExitStrategy;
+        const rawShortEntryStrategy = document.getElementById('shortEntryStrategy').value;
+        const rawShortExitStrategy = document.getElementById('shortExitStrategy').value;
+        const shortEntryStrategy = typeof normalizeStrategyId === 'function'
+            ? normalizeStrategyId('shortEntry', rawShortEntryStrategy)
+            : rawShortEntryStrategy;
+        const shortExitStrategy = typeof normalizeStrategyId === 'function'
+            ? normalizeStrategyId('shortExit', rawShortExitStrategy)
+            : rawShortExitStrategy;
+        settings.shortEntryStrategy = shortEntryStrategy;
+        settings.shortExitStrategy = shortExitStrategy;
+        const shortEntryStrategyName = strategyDescriptions[shortEntryStrategy]?.name
+            || strategyDescriptions[rawShortEntryStrategy]?.name
+            || shortEntryStrategy
+            || rawShortEntryStrategy;
+        const shortExitStrategyName = strategyDescriptions[shortExitStrategy]?.name
+            || strategyDescriptions[rawShortExitStrategy]?.name
+            || shortExitStrategy
+            || rawShortExitStrategy;
         defaultName = `${stockNo}_${entryStrategyName}_${exitStrategyName}_${shortEntryStrategyName}_${shortExitStrategyName}`;
     }
     
@@ -9547,7 +9619,7 @@ function saveStrategy() {
         showSuccess(`策略 "${trimmedName}" 已儲存！`); 
     }
 }
-function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
+function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } let settings = strategyData.settings || {}; const normalizationResult = normalizeSavedStrategySettings(settings); settings = normalizationResult.settings; if (normalizationResult.mutated) { strategyData.settings = settings; strategies[strategyName] = strategyData; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); } console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
         if (window.lazybacktestStagedEntry) {
             if (Array.isArray(settings.entryStages) && settings.entryStages.length > 0 && typeof window.lazybacktestStagedEntry.setValues === 'function') {
                 window.lazybacktestStagedEntry.setValues(settings.entryStages);
@@ -9565,7 +9637,9 @@ function loadStrategy() { const selectElement = document.getElementById('loadStr
             }
         }
         const exitModeSelect = document.getElementById('exitStagingMode');
-        if (exitModeSelect) exitModeSelect.value = settings.exitStagingMode || 'signal_repeat'; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } document.getElementById('exitStrategy').value = settings.exitStrategy || 'ma_cross'; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = (['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(settings.exitStrategy)) ? `${settings.exitStrategy}_exit` : settings.exitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { document.getElementById('shortEntryStrategy').value = settings.shortEntryStrategy || 'short_ma_cross'; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = `short_${settings.shortEntryStrategy}`; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } document.getElementById('shortExitStrategy').value = settings.shortExitStrategy || 'cover_ma_cross'; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = `cover_${settings.shortExitStrategy}`; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`策略 "${strategyName}" 已載入！`); 
+        if (exitModeSelect) exitModeSelect.value = settings.exitStagingMode || 'signal_repeat'; document.getElementById('stopLoss').value = settings.stopLoss ?? 0; document.getElementById('takeProfit').value = settings.takeProfit ?? 0; const positionBasisInput = document.querySelector(`input[name="positionBasis"][value="${settings.positionBasis || 'initialCapital'}"]`); if (positionBasisInput) positionBasisInput.checked = true; document.getElementById('entryStrategy').value = settings.entryStrategy || 'ma_cross'; updateStrategyParams('entry'); if(settings.entryParams) { for (const pName in settings.entryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; if (settings.entryStrategy === 'k_d_cross' && pName === 'thresholdX') finalIdSfx = 'KdThresholdX'; else if ((settings.entryStrategy === 'macd_cross') && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`entry${finalIdSfx}`); if (inputElement) inputElement.value = settings.entryParams[pName]; else console.warn(`[Load] Entry Param Input not found: entry${finalIdSfx}`); } } const resolvedExitStrategy = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('exit', settings.exitStrategy) : settings.exitStrategy) || 'ma_cross_exit';
+        settings.exitStrategy = resolvedExitStrategy;
+        document.getElementById('exitStrategy').value = resolvedExitStrategy; updateStrategyParams('exit'); if(settings.exitParams) { for (const pName in settings.exitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const exitInternalKey = resolvedExitStrategy; if (exitInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') finalIdSfx = 'KdThresholdY'; else if (exitInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'StopLossPeriod'; else if (exitInternalKey === 'macd_cross_exit' && pName === 'signalPeriod') finalIdSfx = 'SignalPeriod'; const inputElement = document.getElementById(`exit${finalIdSfx}`); if (inputElement) inputElement.value = settings.exitParams[pName]; else console.warn(`[Load] Exit Param Input not found: exit${finalIdSfx}`); } } const shortCheckbox = document.getElementById('enableShortSelling'); const shortArea = document.getElementById('short-strategy-area'); shortCheckbox.checked = settings.enableShorting || false; shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none'; if (settings.enableShorting) { const resolvedShortEntryStrategy = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('shortEntry', settings.shortEntryStrategy) : settings.shortEntryStrategy) || 'short_ma_cross'; document.getElementById('shortEntryStrategy').value = resolvedShortEntryStrategy; updateStrategyParams('shortEntry'); if(settings.shortEntryParams) { for (const pName in settings.shortEntryParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortEntryInternalKey = resolvedShortEntryStrategy; if (shortEntryInternalKey === 'short_k_d_cross' && pName === 'thresholdY') finalIdSfx = 'ShortKdThresholdY'; else if (shortEntryInternalKey === 'short_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'ShortSignalPeriod'; else if (shortEntryInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') finalIdSfx = 'ShortStopLossPeriod'; const inputElement = document.getElementById(`shortEntry${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortEntryParams[pName]; else console.warn(`[Load] Short Entry Param Input not found: shortEntry${finalIdSfx}`); } } const resolvedShortExitStrategy = (typeof normalizeStrategyId === 'function' ? normalizeStrategyId('shortExit', settings.shortExitStrategy) : settings.shortExitStrategy) || 'cover_ma_cross'; document.getElementById('shortExitStrategy').value = resolvedShortExitStrategy; updateStrategyParams('shortExit'); if(settings.shortExitParams) { for (const pName in settings.shortExitParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); let finalIdSfx = idSfx; const shortExitInternalKey = resolvedShortExitStrategy; if (shortExitInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') finalIdSfx = 'CoverKdThresholdX'; else if (shortExitInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') finalIdSfx = 'CoverSignalPeriod'; else if (shortExitInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') finalIdSfx = 'CoverBreakoutPeriod'; else if (shortExitInternalKey === 'cover_trailing_stop' && pName === 'percentage') finalIdSfx = 'CoverTrailingStopPercentage'; const inputElement = document.getElementById(`shortExit${finalIdSfx}`); if (inputElement) inputElement.value = settings.shortExitParams[pName]; else console.warn(`[Load] Short Exit Param Input not found: shortExit${finalIdSfx}`); } } } else { document.getElementById('shortEntryStrategy').value = 'short_ma_cross'; updateStrategyParams('shortEntry'); document.getElementById('shortExitStrategy').value = 'cover_ma_cross'; updateStrategyParams('shortExit'); } showSuccess(`策略 "${strategyName}" 已載入！`); 
     
     // 顯示確認對話框並自動執行回測
     if (confirm(`策略參數已載入完成！\n\n是否立即執行回測以查看策略表現？`)) {
