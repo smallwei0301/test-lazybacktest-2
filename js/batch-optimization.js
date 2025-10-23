@@ -1,17 +1,26 @@
 // --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-OPT-20260718G
+// Patch Tag: LB-BATCH-EXITSELECT-20260916A
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
-    'ma_cross_exit': 'ma_cross',
-    'ema_cross_exit': 'ema_cross',
-    'k_d_cross_exit': 'k_d_cross',
-    'macd_cross_exit': 'macd_cross',
-    'rsi_overbought_exit': 'rsi_overbought',
-    'williams_overbought_exit': 'williams_overbought',
-    'ma_below_exit': 'ma_below',
-    'rsi_reversal_exit': 'rsi_reversal',
-    'williams_reversal_exit': 'williams_reversal',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
+    'ema_cross_exit': 'ema_cross_exit',
+    'ema_cross': 'ema_cross_exit',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
+    'rsi_overbought_exit': 'rsi_overbought_exit',
+    'rsi_overbought': 'rsi_overbought_exit',
+    'williams_overbought_exit': 'williams_overbought_exit',
+    'williams_overbought': 'williams_overbought_exit',
+    'ma_below_exit': 'ma_below_exit',
+    'ma_below': 'ma_below_exit',
+    'rsi_reversal_exit': 'rsi_reversal_exit',
+    'rsi_reversal': 'rsi_reversal_exit',
+    'williams_reversal_exit': 'williams_reversal_exit',
+    'williams_reversal': 'williams_reversal_exit',
 
     // 做空入場策略映射
     'short_ma_cross': 'short_ma_cross',
@@ -48,10 +57,62 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-OPT-20260718H';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-EXITSELECT-20260916A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
+
+function normaliseBatchStrategyId(role, strategyId) {
+    if (!strategyId) {
+        return strategyId;
+    }
+    if (!role || role === 'entry') {
+        return strategyId;
+    }
+    const lazy = (typeof window !== 'undefined' && window.LazyStrategyId) ? window.LazyStrategyId : null;
+    if (lazy) {
+        if (typeof lazy.normalise === 'function') {
+            const normalized = lazy.normalise(role, strategyId);
+            if (normalized && normalized !== strategyId) {
+                return normalized;
+            }
+        }
+        const table = lazy.map?.[role];
+        if (table && table[strategyId]) {
+            return table[strategyId];
+        }
+    }
+    if (role === 'exit' && ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(strategyId)) {
+        const candidate = `${strategyId}_exit`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions && strategyDescriptions[candidate]) {
+            return candidate;
+        }
+    }
+    if (role === 'shortEntry' && !strategyId.startsWith('short_')) {
+        return `short_${strategyId}`;
+    }
+    if (role === 'shortExit' && !strategyId.startsWith('cover_')) {
+        return `cover_${strategyId}`;
+    }
+    return strategyId;
+}
+
+function normaliseBatchStrategyList(role, strategies) {
+    if (!Array.isArray(strategies)) {
+        return [];
+    }
+    const seen = new Set();
+    const result = [];
+    strategies.forEach((rawId) => {
+        if (!rawId) return;
+        const normalized = normaliseBatchStrategyId(role, rawId) || rawId;
+        if (!seen.has(normalized)) {
+            seen.add(normalized);
+            result.push(normalized);
+        }
+    });
+    return result;
+}
 
 function hydrateStrategyNameMap() {
     if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
@@ -1382,17 +1443,17 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
 }
 
 const EXIT_STRATEGY_SELECT_MAP = {
-    'ma_cross': 'ma_cross',
-    'ma_cross_exit': 'ma_cross',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
     'ma_below': 'ma_below',
     'ma_below_exit': 'ma_below',
     'rsi_overbought': 'rsi_overbought',
     'rsi_overbought_exit': 'rsi_overbought',
-    'macd_cross': 'macd_cross',
-    'macd_cross_exit': 'macd_cross',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
     'bollinger_reversal': 'bollinger_reversal',
-    'k_d_cross': 'k_d_cross',
-    'k_d_cross_exit': 'k_d_cross',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
     'volume_spike': 'volume_spike',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
@@ -1803,9 +1864,13 @@ function startBatchOptimization() {
             ...config
         };
 
-        const selectedStrategies = {
+        const selectedStrategiesRaw = {
             buy: getSelectedStrategies('batch-buy-strategies'),
             sell: getSelectedStrategies('batch-sell-strategies')
+        };
+        const selectedStrategies = {
+            buy: normaliseBatchStrategyList('entry', selectedStrategiesRaw.buy),
+            sell: normaliseBatchStrategyList('exit', selectedStrategiesRaw.sell)
         };
 
         const baseParamsSnapshot = typeof getBacktestParams === 'function'
@@ -1816,6 +1881,7 @@ function startBatchOptimization() {
             phase: 'init',
             configSnapshot: clonePlainObject(config),
             selectedStrategies,
+            selectedStrategiesRaw,
             baseParams: baseParamsSnapshot,
             cachedDataLength: Array.isArray(cachedStockData) ? cachedStockData.length : 0
         });
@@ -1823,6 +1889,7 @@ function startBatchOptimization() {
         recordBatchDebug('batch-start', {
             config: clonePlainObject(config),
             selectedStrategies,
+            selectedStrategiesRaw,
             baseParams: baseParamsSnapshot
         }, { phase: 'init', consoleLevel: 'log' });
 
@@ -1852,29 +1919,32 @@ function startBatchOptimization() {
 // 驗證批量優化策略設定
 function validateBatchStrategies() {
     console.log('[Batch Optimization] Validating strategies...');
-    
-    const buyStrategies = getSelectedStrategies('batch-buy-strategies');
-    const sellStrategies = getSelectedStrategies('batch-sell-strategies');
-    
+
+    const buyStrategiesRaw = getSelectedStrategies('batch-buy-strategies');
+    const sellStrategiesRaw = getSelectedStrategies('batch-sell-strategies');
+
+    const buyStrategies = normaliseBatchStrategyList('entry', buyStrategiesRaw);
+    const sellStrategies = normaliseBatchStrategyList('exit', sellStrategiesRaw);
+
     console.log('[Batch Optimization] Buy strategies:', buyStrategies);
     console.log('[Batch Optimization] Sell strategies:', sellStrategies);
-    
+
     if (buyStrategies.length === 0) {
         showError('請至少選擇一個進場策略');
         return false;
     }
-    
+
     if (sellStrategies.length === 0) {
         showError('請至少選擇一個出場策略');
         return false;
     }
-    
+
     // 檢查選擇的策略是否為 null 或無效
-    const invalidBuyStrategies = buyStrategies.filter(strategy => 
+    const invalidBuyStrategies = buyStrategies.filter(strategy =>
         !strategy || strategy === 'null' || !strategyDescriptions[strategy]
     );
-    
-    const invalidSellStrategies = sellStrategies.filter(strategy => 
+
+    const invalidSellStrategies = sellStrategies.filter(strategy =>
         !strategy || strategy === 'null' || !strategyDescriptions[strategy]
     );
     
@@ -2179,12 +2249,17 @@ async function executeBatchOptimization(config) {
 
     try {
         // 步驟1：取得策略列表
-        let buyStrategies = getSelectedStrategies('batch-buy-strategies');
-        let sellStrategies = getSelectedStrategies('batch-sell-strategies');
+        const buyStrategiesRaw = getSelectedStrategies('batch-buy-strategies');
+        const sellStrategiesRaw = getSelectedStrategies('batch-sell-strategies');
+
+        let buyStrategies = normaliseBatchStrategyList('entry', buyStrategiesRaw);
+        let sellStrategies = normaliseBatchStrategyList('exit', sellStrategiesRaw);
 
         console.log('[Batch Optimization] Retrieved strategies - Buy:', buyStrategies, 'Sell:', sellStrategies);
 
         recordBatchDebug('strategies-resolved', {
+            buyStrategiesRaw: Array.isArray(buyStrategiesRaw) ? [...buyStrategiesRaw] : [],
+            sellStrategiesRaw: Array.isArray(sellStrategiesRaw) ? [...sellStrategiesRaw] : [],
             buyStrategies: [...buyStrategies],
             sellStrategies: [...sellStrategies]
         }, { phase: 'prepare', consoleLevel: 'log' });
@@ -3190,17 +3265,18 @@ async function executeBacktestForCombination(combination, options = {}) {
 async function optimizeStrategyParameters(strategy, strategyType, targetMetric, trials = 100) {
     return new Promise((resolve) => {
         try {
-            const strategyInfo = strategyDescriptions[strategy];
-            
+            const normalizedStrategy = normaliseBatchStrategyId(strategyType, strategy) || strategy;
+            const strategyInfo = strategyDescriptions[normalizedStrategy] || strategyDescriptions[strategy];
+
             // 檢查是否為風險管理控制策略
-            const isRiskManagementStrategy = strategy === 'fixed_stop_loss' || strategy === 'cover_fixed_stop_loss';
-            
+            const isRiskManagementStrategy = normalizedStrategy === 'fixed_stop_loss' || normalizedStrategy === 'cover_fixed_stop_loss';
+
             if (isRiskManagementStrategy) {
-                console.log(`[Batch Optimization] Optimizing risk management parameters for ${strategy} (${targetMetric})`);
-                
+                console.log(`[Batch Optimization] Optimizing risk management parameters for ${normalizedStrategy} (${targetMetric})`);
+
                 // 對於風險管理策略，優化停損和停利參數
                 const params = getBacktestParams();
-                
+
                 // 修復：使用與單次風險管理優化相同的參數範圍和步長
                 // 確保批量優化和單次優化的搜索空間一致
                 const globalStopLossConfig = globalOptimizeTargets.stopLoss;
@@ -3219,7 +3295,7 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
                 ];
                 
                 console.log(`[Batch Optimization] Risk management optimization ranges (consistent with single optimization):`, riskOptimizeTargets);
-                
+
                 // 順序優化兩個參數：先優化停損，再基於最佳停損值優化停利
                 optimizeRiskManagementParameters(params, riskOptimizeTargets, targetMetric, trials)
                     .then(resolve)
@@ -3237,23 +3313,23 @@ async function optimizeStrategyParameters(strategy, strategyType, targetMetric, 
                 resolve(strategyInfo?.defaultParams || {});
                 return;
             }
-            
-            console.log(`[Batch Optimization] Optimizing ${strategy} parameters for ${targetMetric}`);
-            console.log(`[Batch Optimization] Found ${strategyInfo.optimizeTargets.length} parameters to optimize:`, 
+
+            console.log(`[Batch Optimization] Optimizing ${normalizedStrategy} parameters for ${targetMetric}`);
+            console.log(`[Batch Optimization] Found ${strategyInfo.optimizeTargets.length} parameters to optimize:`,
                 strategyInfo.optimizeTargets.map(t => t.name));
-            
+
             // 對所有可優化參數進行順序優化
-            optimizeMultipleStrategyParameters(strategy, strategyType, strategyInfo, targetMetric, trials)
+            optimizeMultipleStrategyParameters(normalizedStrategy, strategyType, strategyInfo, targetMetric, trials)
                 .then(resolve)
                 .catch(error => {
                     console.error('[Batch Optimization] Strategy parameters optimization error:', error);
                     resolve(strategyInfo?.defaultParams || {});
                 });
-                
+
             return;
         } catch (error) {
             console.error('[Batch Optimization] Error in optimizeStrategyParameters:', error);
-            resolve(strategyDescriptions[strategy]?.defaultParams || {});
+            resolve(strategyDescriptions[normalizedStrategy]?.defaultParams || strategyDescriptions[strategy]?.defaultParams || {});
         }
     });
 }
@@ -5985,28 +6061,34 @@ function switchTab(tabName) {
 async function optimizeAllStrategies(buyStrategies, sellStrategies, config) {
     const optimizedBuy = {};
     const optimizedSell = {};
-    
+
     const totalStrategies = buyStrategies.length + sellStrategies.length;
     let completedStrategies = 0;
-    
+
     // 優化進場策略
     for (const strategy of buyStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
-            `優化進場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
-        
-        optimizedBuy[strategy] = await optimizeStrategyParameters(strategy, 'entry', config.targetMetric, config.parameterTrials);
+        const normalized = normaliseBatchStrategyId('entry', strategy) || strategy;
+        const label = strategyDescriptions[normalized]?.name || strategyDescriptions[strategy]?.name || normalized;
+
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
+            `優化進場策略: ${label}...`);
+
+        optimizedBuy[normalized] = await optimizeStrategyParameters(normalized, 'entry', config.targetMetric, config.parameterTrials);
         completedStrategies++;
     }
-    
+
     // 優化出場策略
     for (const strategy of sellStrategies) {
-        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20, 
-            `優化出場策略: ${strategyDescriptions[strategy]?.name || strategy}...`);
-        
-        optimizedSell[strategy] = await optimizeStrategyParameters(strategy, 'exit', config.targetMetric, config.parameterTrials);
+        const normalized = normaliseBatchStrategyId('exit', strategy) || strategy;
+        const label = strategyDescriptions[normalized]?.name || strategyDescriptions[strategy]?.name || normalized;
+
+        updateBatchProgress(5 + (completedStrategies / totalStrategies) * 20,
+            `優化出場策略: ${label}...`);
+
+        optimizedSell[normalized] = await optimizeStrategyParameters(normalized, 'exit', config.targetMetric, config.parameterTrials);
         completedStrategies++;
     }
-    
+
     return {
         buy: optimizedBuy,
         sell: optimizedSell
@@ -6016,23 +6098,26 @@ async function optimizeAllStrategies(buyStrategies, sellStrategies, config) {
 // 生成優化後的策略組合
 function generateOptimizedStrategyCombinations(optimizedBuyStrategies, optimizedSellStrategies) {
     const combinations = [];
-    
+
     for (const [buyStrategy, buyParams] of Object.entries(optimizedBuyStrategies)) {
         for (const [sellStrategy, sellParams] of Object.entries(optimizedSellStrategies)) {
+            const normalizedBuy = normaliseBatchStrategyId('entry', buyStrategy) || buyStrategy;
+            const normalizedSell = normaliseBatchStrategyId('exit', sellStrategy) || sellStrategy;
+
             const combination = {
-                buyStrategy: buyStrategy,
-                sellStrategy: sellStrategy,
+                buyStrategy: normalizedBuy,
+                sellStrategy: normalizedSell,
                 buyParams: buyParams,
                 sellParams: sellParams
             };
-            
+
             // 檢查是否為風險管理策略，如果是則將參數加入到風險管理設定中
-            if ((sellStrategy === 'fixed_stop_loss' || sellStrategy === 'cover_fixed_stop_loss') && sellParams) {
+            if ((normalizedSell === 'fixed_stop_loss' || normalizedSell === 'cover_fixed_stop_loss') && sellParams) {
                 combination.riskManagement = sellParams;
                 combination.sellParams = {}; // 風險管理策略本身沒有策略參數
-                console.log(`[Batch Optimization] Risk management parameters for ${sellStrategy}:`, sellParams);
+                console.log(`[Batch Optimization] Risk management parameters for ${normalizedSell}:`, sellParams);
             }
-            
+
             combinations.push(combination);
         }
     }
@@ -6045,19 +6130,21 @@ function generateStrategyCombinations(buyStrategies, sellStrategies) {
     const combinations = [];
 
     for (const buyStrategy of buyStrategies) {
-        const buyParams = getDefaultStrategyParams(buyStrategy) || {};
+        const normalizedBuy = normaliseBatchStrategyId('entry', buyStrategy) || buyStrategy;
+        const buyParams = getDefaultStrategyParams(normalizedBuy) || {};
 
         for (const sellStrategy of sellStrategies) {
-            const sellParams = getDefaultStrategyParams(sellStrategy) || {};
+            const normalizedSell = normaliseBatchStrategyId('exit', sellStrategy) || sellStrategy;
+            const sellParams = getDefaultStrategyParams(normalizedSell) || {};
             const combination = {
-                buyStrategy: buyStrategy,
-                sellStrategy: sellStrategy,
+                buyStrategy: normalizedBuy,
+                sellStrategy: normalizedSell,
                 buyParams: { ...buyParams },
                 sellParams: { ...sellParams }
             };
 
             // 處理風險管理策略（如 fixed_stop_loss, cover_fixed_stop_loss）
-            if ((sellStrategy === 'fixed_stop_loss' || sellStrategy === 'cover_fixed_stop_loss') && sellParams && Object.keys(sellParams).length > 0) {
+            if ((normalizedSell === 'fixed_stop_loss' || normalizedSell === 'cover_fixed_stop_loss') && sellParams && Object.keys(sellParams).length > 0) {
                 combination.riskManagement = { ...sellParams };
                 combination.sellParams = {}; // 風險管理策略本身不使用 exitParams
             }
@@ -6142,9 +6229,18 @@ function cloneCombinationInput(combination) {
         return null;
     }
 
+    const normalizedBuy = normaliseBatchStrategyId('entry', combination.buyStrategy) || combination.buyStrategy || null;
+    const normalizedSell = normaliseBatchStrategyId('exit', combination.sellStrategy) || combination.sellStrategy || null;
+    const normalizedShortEntry = combination.shortEntryStrategy
+        ? normaliseBatchStrategyId('shortEntry', combination.shortEntryStrategy)
+        : null;
+    const normalizedShortExit = combination.shortExitStrategy
+        ? normaliseBatchStrategyId('shortExit', combination.shortExitStrategy)
+        : null;
+
     const clone = {
-        buyStrategy: combination.buyStrategy || null,
-        sellStrategy: combination.sellStrategy || null,
+        buyStrategy: normalizedBuy,
+        sellStrategy: normalizedSell,
         buyParams: clonePlainObject(combination.buyParams || {}),
         sellParams: clonePlainObject(combination.sellParams || {}),
     };
@@ -6152,11 +6248,11 @@ function cloneCombinationInput(combination) {
     if (combination.riskManagement) {
         clone.riskManagement = clonePlainObject(combination.riskManagement);
     }
-    if (combination.shortEntryStrategy) {
-        clone.shortEntryStrategy = combination.shortEntryStrategy;
+    if (normalizedShortEntry) {
+        clone.shortEntryStrategy = normalizedShortEntry;
     }
-    if (combination.shortExitStrategy) {
-        clone.shortExitStrategy = combination.shortExitStrategy;
+    if (normalizedShortExit) {
+        clone.shortExitStrategy = normalizedShortExit;
     }
     if (combination.shortEntryParams) {
         clone.shortEntryParams = clonePlainObject(combination.shortEntryParams);
