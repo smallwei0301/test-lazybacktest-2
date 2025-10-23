@@ -1655,3 +1655,13 @@ NODE`
   - `index.html` 引入新的共用工具腳本，`package.json` 加入 `npm test` 指令，並在 `tests/batch-context.test.js` 建立單元測試驗證上下文推導行為。
 - **Diagnostics**: 建議於本地執行批量優化流程，觀察開發者日誌是否輸出 `deathcross-zero-metric` 事件，以判斷是否仍有資料不足的案例；同時確認死亡交叉類策略能產出非零目標值。
 - **Testing**: `npm test`、`npm run typecheck`
+
+## 2026-09-17 — Patch LB-BATCH-MAPPER-20260917A
+- **Issue recap**: 批量優化在死亡交叉出場策略上仍出現目標值為 0，追查後發現映射表會把做多進場誤轉成死亡交叉 ID，且無統一的策略映射工具，導致未來新增策略時需要手動擴充多份對照表。
+- **Fix**:
+  - 新增 `js/lib/batch-strategy-mapper.js` 共用模組，依角色自動正規化策略 ID，並支援 `_exit`、`short_`、`cover_` 等別名回復至對應註冊 ID。
+  - `js/batch-optimization.js` 透過新模組取得 Worker 策略名稱，移除舊版覆寫表，並將多空進出場與回補策略一起正規化；同時擴充交叉優化與工作流程的短線欄位、偵錯日誌與策略映射記錄。
+  - `index.html` 引入新模組腳本，`package.json` 更新 `npm test` 串聯兩組單元測試，並新增 `tests/batch-mapper.test.js` 以 TDD 驗證策略映射行為。
+- **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
+- **Testing**: `npm test`、`npm run typecheck`
+
