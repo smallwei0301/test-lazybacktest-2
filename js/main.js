@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-PLUGIN-VERIFIER-20260820B
 
 // 全局變量
 let stockChart = null;
@@ -467,7 +468,261 @@ const strategyRegistryVerificationState = {
     lastRunAt: null,
     sampleRunning: false,
     sampleStatus: null,
+    sampleSelection: null,
 };
+
+const strategyRegistrySampleCandidates = {
+    longEntry: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross' },
+        { strategyId: 'ma_above', configKey: 'ma_above' },
+        { strategyId: 'rsi_oversold', configKey: 'rsi_oversold' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross' },
+        { strategyId: 'bollinger_breakout', configKey: 'bollinger_breakout' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross' },
+        { strategyId: 'volume_spike', configKey: 'volume_spike' },
+        { strategyId: 'price_breakout', configKey: 'price_breakout' },
+        { strategyId: 'williams_oversold', configKey: 'williams_oversold' },
+        { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
+    ],
+    longExit: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_below', configKey: 'ma_below' },
+        { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
+        { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
+        { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
+        { strategyId: 'trailing_stop', configKey: 'trailing_stop' },
+        { strategyId: 'fixed_stop_loss', configKey: 'fixed_stop_loss' },
+    ],
+    shortEntry: [
+        { strategyId: 'short_ma_cross', configKey: 'short_ma_cross' },
+        { strategyId: 'short_ma_below', configKey: 'short_ma_below' },
+        { strategyId: 'short_rsi_overbought', configKey: 'short_rsi_overbought' },
+        { strategyId: 'short_macd_cross', configKey: 'short_macd_cross' },
+        { strategyId: 'short_bollinger_reversal', configKey: 'short_bollinger_reversal' },
+        { strategyId: 'short_k_d_cross', configKey: 'short_k_d_cross' },
+        { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
+        { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
+        { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
+    ],
+    shortExit: [
+        { strategyId: 'cover_ma_cross', configKey: 'cover_ma_cross' },
+        { strategyId: 'cover_ma_above', configKey: 'cover_ma_above' },
+        { strategyId: 'cover_rsi_oversold', configKey: 'cover_rsi_oversold' },
+        { strategyId: 'cover_macd_cross', configKey: 'cover_macd_cross' },
+        { strategyId: 'cover_bollinger_breakout', configKey: 'cover_bollinger_breakout' },
+        { strategyId: 'cover_k_d_cross', configKey: 'cover_k_d_cross' },
+        { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
+        { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
+        { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
+        { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
+        { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
+    ],
+};
+
+const STRATEGY_REGISTRY_FOOTNOTE_DEFAULT =
+    '驗證流程會列出清單中的策略與載入狀態；抽樣回測將隨機挑選多空策略組合與預設參數進行驗證。';
+
+function normaliseStrategyKeyForRole(role, rawKey) {
+    if (!rawKey || typeof rawKey !== 'string') {
+        return rawKey || '';
+    }
+    if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) {
+        return rawKey;
+    }
+    if (Object.prototype.hasOwnProperty.call(strategyDescriptions, rawKey)) {
+        return rawKey;
+    }
+    if (role === 'exit') {
+        const exitCandidate = `${rawKey}_exit`;
+        if (Object.prototype.hasOwnProperty.call(strategyDescriptions, exitCandidate)) {
+            return exitCandidate;
+        }
+    }
+    if (role === 'shortEntry' && !rawKey.startsWith('short_')) {
+        const shortCandidate = `short_${rawKey}`;
+        if (Object.prototype.hasOwnProperty.call(strategyDescriptions, shortCandidate)) {
+            return shortCandidate;
+        }
+    }
+    if (role === 'shortExit' && !rawKey.startsWith('cover_')) {
+        const coverCandidate = `cover_${rawKey}`;
+        if (Object.prototype.hasOwnProperty.call(strategyDescriptions, coverCandidate)) {
+            return coverCandidate;
+        }
+    }
+    return rawKey;
+}
+
+function getStrategyDisplayName(strategyKey) {
+    if (!strategyKey) return '未設定';
+    if (typeof strategyDescriptions === 'object' && strategyDescriptions) {
+        const desc = strategyDescriptions[strategyKey];
+        if (desc && typeof desc.name === 'string') {
+            return desc.name;
+        }
+    }
+    return strategyKey;
+}
+
+function collectStrategyOptionUniverse() {
+    const selectConfigs = [
+        { id: 'entryStrategy', role: 'entry', label: '做多進場' },
+        { id: 'exitStrategy', role: 'exit', label: '做多出場' },
+        { id: 'shortEntryStrategy', role: 'shortEntry', label: '做空進場' },
+        { id: 'shortExitStrategy', role: 'shortExit', label: '回補出場' },
+    ];
+    const allStrategyIds = new Set();
+    const groups = [];
+    selectConfigs.forEach((config) => {
+        const selectEl = document.getElementById(config.id);
+        if (!selectEl || !selectEl.options) {
+            return;
+        }
+        const optionValues = Array.from(selectEl.options)
+            .map((option) => option?.value)
+            .filter((value) => typeof value === 'string' && value.trim().length > 0);
+        const mappedIds = optionValues.map((value) => normaliseStrategyKeyForRole(config.role, value));
+        mappedIds.forEach((id) => {
+            if (typeof id === 'string' && id) {
+                allStrategyIds.add(id);
+            }
+        });
+        groups.push({
+            label: config.label,
+            count: mappedIds.length,
+        });
+    });
+    return { allStrategyIds, groups };
+}
+
+function describeStrategyGroupCounts(groups) {
+    if (!Array.isArray(groups) || groups.length === 0) {
+        return '';
+    }
+    return groups
+        .map((group) => `${group.label} ${group.count}`)
+        .join('／');
+}
+
+function formatStrategyIdList(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return '';
+    }
+    return ids
+        .map((id) => {
+            const label = getStrategyDisplayName(id);
+            return label && label !== id ? `${label} (${id})` : id;
+        })
+        .join('、');
+}
+
+function describeStrategyDifferences(registryIds, strategyIds) {
+    const missingInRegistry = [];
+    const missingInUi = [];
+    strategyIds.forEach((id) => {
+        if (!registryIds.has(id)) {
+            missingInRegistry.push(id);
+        }
+    });
+    registryIds.forEach((id) => {
+        if (!strategyIds.has(id)) {
+            missingInUi.push(id);
+        }
+    });
+    return { missingInRegistry, missingInUi };
+}
+
+function buildStrategyDifferenceFootnote(groups, differences) {
+    const parts = [];
+    const groupText = describeStrategyGroupCounts(groups);
+    if (groupText) {
+        parts.push(`策略面板：${groupText}`);
+    }
+    if (differences) {
+        const { missingInRegistry, missingInUi } = differences;
+        if (missingInRegistry.length === 0 && missingInUi.length === 0) {
+            parts.push('註冊與策略清單已對齊。');
+        } else {
+            if (missingInRegistry.length > 0) {
+                parts.push(`註冊缺少：${formatStrategyIdList(missingInRegistry)}。`);
+            }
+            if (missingInUi.length > 0) {
+                parts.push(`清單未使用：${formatStrategyIdList(missingInUi)}。`);
+            }
+        }
+    }
+    parts.push('抽樣回測將隨機挑選多空策略組合與預設參數進行驗證。');
+    return parts.join(' ');
+}
+
+function describeStrategyCandidate(role, candidate) {
+    if (!candidate || typeof candidate !== 'object') {
+        return null;
+    }
+    const sourceKey = typeof candidate.configKey === 'string' && candidate.configKey
+        ? candidate.configKey
+        : (typeof candidate.strategyId === 'string' ? candidate.strategyId : '');
+    if (!sourceKey) {
+        return null;
+    }
+    const normalised = normaliseStrategyKeyForRole(role, sourceKey);
+    return {
+        id: normalised,
+        label: getStrategyDisplayName(normalised),
+    };
+}
+
+function buildSampleSelectionSummary(selection) {
+    if (!selection) return null;
+    const entry = describeStrategyCandidate('entry', selection.longEntry);
+    const exit = describeStrategyCandidate('exit', selection.longExit);
+    const shortEntry = selection.enableShorting
+        ? describeStrategyCandidate('shortEntry', selection.shortEntry)
+        : null;
+    const shortExit = selection.enableShorting
+        ? describeStrategyCandidate('shortExit', selection.shortExit)
+        : null;
+    return {
+        enableShorting: Boolean(selection.enableShorting),
+        entry,
+        exit,
+        shortEntry,
+        shortExit,
+    };
+}
+
+function formatSampleSelection(selection) {
+    if (!selection) return '';
+    const entryLabel = selection.entry?.label || '—';
+    const exitLabel = selection.exit?.label || '—';
+    let shortPart = '做空：未啟用';
+    if (selection.enableShorting) {
+        const shortEntryLabel = selection.shortEntry?.label || '—';
+        const shortExitLabel = selection.shortExit?.label || '—';
+        shortPart = `做空進場：${shortEntryLabel}／回補出場：${shortExitLabel}`;
+    }
+    return `做多進場：${entryLabel}／做多出場：${exitLabel}／${shortPart}`;
+}
+
+function pickRandomStrategyCandidate(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return null;
+    }
+    const index = Math.floor(Math.random() * list.length);
+    return list[index];
+}
+
+function cloneDefaultStrategyParams(configKey) {
+    const descriptor = strategyDescriptions?.[configKey];
+    if (!descriptor || !descriptor.defaultParams) {
+        return {};
+    }
+    return JSON.parse(JSON.stringify(descriptor.defaultParams));
+}
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -3138,18 +3393,27 @@ function renderStrategyRegistrySampleStatus() {
     const statusEl = document.getElementById('strategyRegistrySampleStatus');
     if (!statusEl) return;
     const defaultMessage = '抽樣回測結果將顯示於此。';
+    const selectionText = formatSampleSelection(strategyRegistryVerificationState.sampleSelection);
     if (strategyRegistryVerificationState.sampleRunning) {
-        statusEl.textContent = '抽樣回測執行中…';
+        const runningMessage = selectionText
+            ? `抽樣回測執行中…｜策略：${selectionText}`
+            : '抽樣回測執行中…';
+        statusEl.textContent = runningMessage;
         statusEl.style.color = 'var(--foreground)';
         return;
     }
     const status = strategyRegistryVerificationState.sampleStatus;
     if (!status) {
-        statusEl.textContent = defaultMessage;
+        statusEl.textContent = selectionText
+            ? `${defaultMessage}｜策略：${selectionText}`
+            : defaultMessage;
         statusEl.style.color = 'var(--muted-foreground)';
         return;
     }
-    statusEl.textContent = status.message || defaultMessage;
+    const baseMessage = status.message || defaultMessage;
+    statusEl.textContent = selectionText
+        ? `${baseMessage}｜策略：${selectionText}`
+        : baseMessage;
     let toneColor = 'var(--muted-foreground)';
     if (status.tone === 'success') toneColor = 'var(--emerald-600, #059669)';
     else if (status.tone === 'error') toneColor = 'var(--rose-600, #dc2626)';
@@ -3160,6 +3424,7 @@ function renderStrategyRegistrySampleStatus() {
 function renderStrategyRegistryVerification() {
     const summaryEl = document.getElementById('strategyRegistryVerifierSummary');
     const listEl = document.getElementById('strategyRegistryVerifierList');
+    const footnoteEl = document.getElementById('strategyRegistryVerifierFootnote');
     if (!summaryEl || !listEl) return;
 
     if (strategyRegistryVerificationState.running) {
@@ -3167,6 +3432,9 @@ function renderStrategyRegistryVerification() {
         summaryEl.style.color = 'var(--muted-foreground)';
         listEl.classList.add('hidden');
         listEl.innerHTML = '';
+        if (footnoteEl) {
+            footnoteEl.textContent = STRATEGY_REGISTRY_FOOTNOTE_DEFAULT;
+        }
         return;
     }
 
@@ -3175,6 +3443,9 @@ function renderStrategyRegistryVerification() {
         summaryEl.style.color = 'var(--rose-600, #dc2626)';
         listEl.classList.add('hidden');
         listEl.innerHTML = '';
+        if (footnoteEl) {
+            footnoteEl.textContent = STRATEGY_REGISTRY_FOOTNOTE_DEFAULT;
+        }
         return;
     }
 
@@ -3187,22 +3458,38 @@ function renderStrategyRegistryVerification() {
         summaryEl.style.color = 'var(--muted-foreground)';
         listEl.classList.add('hidden');
         listEl.innerHTML = '';
+        if (footnoteEl) {
+            footnoteEl.textContent = STRATEGY_REGISTRY_FOOTNOTE_DEFAULT;
+        }
         return;
     }
 
     const successCount = results.filter((entry) => entry.status === 'ok').length;
     const warningCount = results.filter((entry) => entry.status === 'warning').length;
     const errorCount = results.filter((entry) => entry.status === 'error').length;
+    const registryIds = new Set(results.map((entry) => entry.id).filter((id) => typeof id === 'string' && id));
+    const { allStrategyIds, groups } = collectStrategyOptionUniverse();
+    const strategyCount = allStrategyIds.size;
+    const differences = describeStrategyDifferences(registryIds, allStrategyIds);
     const parts = [`總數 ${results.length}`];
     parts.push(`成功 ${successCount}`);
     if (warningCount > 0) parts.push(`提醒 ${warningCount}`);
     if (errorCount > 0) parts.push(`失敗 ${errorCount}`);
+    if (strategyCount > 0) {
+        parts.push(`策略 ${strategyCount}`);
+    } else {
+        parts.push('策略 0');
+    }
     let summaryText = `驗證完成：${parts.join('／')}`;
     if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
         summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
     }
     summaryEl.textContent = summaryText;
     summaryEl.style.color = 'var(--foreground)';
+
+    if (footnoteEl) {
+        footnoteEl.textContent = buildStrategyDifferenceFootnote(groups, differences);
+    }
 
     const statusLabelMap = { ok: '成功', warning: '提醒', error: '失敗' };
     const statusColorMap = {
@@ -3277,6 +3564,7 @@ function runStrategyRegistryVerification() {
             }
             results.push(entry);
         });
+        results.sort((a, b) => a.label.localeCompare(b.label || '', 'zh-Hant'));
         strategyRegistryVerificationState.results = results;
         strategyRegistryVerificationState.lastRunAt = new Date();
     } catch (error) {
@@ -3295,6 +3583,7 @@ function runStrategyRegistrySample() {
             message: 'BacktestRunner 尚未載入，請重新整理或稍後重試。',
             tone: 'error',
         };
+        strategyRegistryVerificationState.sampleSelection = null;
         renderStrategyRegistrySampleStatus();
         return;
     }
@@ -3311,14 +3600,65 @@ function runStrategyRegistrySample() {
             message: '無法取得目前回測參數，請先在主畫面設定後再試。',
             tone: 'error',
         };
+        strategyRegistryVerificationState.sampleSelection = null;
         renderStrategyRegistrySampleStatus();
         return;
     }
     strategyRegistryVerificationState.sampleRunning = true;
     strategyRegistryVerificationState.sampleStatus = { message: '抽樣回測執行中…', tone: 'info' };
+    strategyRegistryVerificationState.sampleSelection = null;
+
+    const sampleParams = {
+        ...params,
+        entryParams: { ...params.entryParams },
+        exitParams: { ...params.exitParams },
+        shortEntryParams: { ...params.shortEntryParams },
+        shortExitParams: { ...params.shortExitParams },
+    };
+
+    const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+    const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+    if (longEntryCandidate) {
+        sampleParams.entryStrategy = longEntryCandidate.strategyId;
+        sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+    }
+    if (longExitCandidate) {
+        sampleParams.exitStrategy = longExitCandidate.strategyId;
+        sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+    }
+
+    const enableShorting = Math.random() < 0.75;
+    sampleParams.enableShorting = enableShorting;
+    let shortEntryCandidate = null;
+    let shortExitCandidate = null;
+    if (enableShorting) {
+        shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+        shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+        if (shortEntryCandidate) {
+            sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+            sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+        }
+        if (shortExitCandidate) {
+            sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+            sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+        }
+    } else {
+        sampleParams.shortEntryStrategy = null;
+        sampleParams.shortExitStrategy = null;
+        sampleParams.shortEntryParams = {};
+        sampleParams.shortExitParams = {};
+    }
+
+    strategyRegistryVerificationState.sampleSelection = buildSampleSelectionSummary({
+        enableShorting,
+        longEntry: longEntryCandidate,
+        longExit: longExitCandidate,
+        shortEntry: shortEntryCandidate,
+        shortExit: shortExitCandidate,
+    });
     renderStrategyRegistrySampleStatus();
 
-    window.BacktestRunner.run(params)
+    window.BacktestRunner.run(sampleParams)
         .then((result) => {
             const tradeCount = Array.isArray(result?.data?.trades)
                 ? result.data.trades.length
