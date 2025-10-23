@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             console.log(`[Param Copy] Attempting to copy from ${sourceType} to ${targetType} (InternalKey: ${targetInternalKey})`);
 
+            const internalKey = targetInternalKey;
             for (const pName in sourceParams) {
                 const sourceValue = sourceParams[pName];
                 let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1);
