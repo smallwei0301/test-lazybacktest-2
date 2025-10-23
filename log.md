@@ -1592,3 +1592,20 @@ NODE`
   - 月度診斷加入 `staleReload` 與 `staleRevalidations`，便於測試卡片呈現快取刷新紀錄。
 - **Diagnostics**: 待於可連線 Proxy 的環境保持頁面開啟超過 24 小時後再回測，確認月末資料會觸發 `cacheBust` 並補齊最新交易日。
 - **Testing**: `npm run typecheck`（驗證 JSDoc/.d.ts 仍通過）。
+
+## 2026-08-13 — Patch LB-PLUGIN-VERIFIER-20260813A
+- **Issue recap**: 開發者卡的策略註冊驗證僅涵蓋 20 項策略且標籤與選單名稱不一致，抽樣回測也固定使用 RSI 多空組合，無法覆蓋成交量暴增、海龜交易等策略。
+- **Fix**:
+  - 新增 `ma-threshold`, `macd`, `price`, `williams`, `turtle`, `volume`, `risk-managed` 等插件腳本，並調整既有插件標籤，讓所有多空進出場策略皆對應到與 UI 相同的名稱與參數。
+  - `js/strategy-plugin-manifest.js` 擴充載入器與策略清單，納入 40 項策略並依名稱排序顯示，`js/worker.js` 補上 `volume` 序列供插件使用。
+  - `index.html` 開發者卡驗證清單改為可捲動區域且更新抽樣說明，`js/main.js` 將驗證結果按名稱排序並於抽樣回測隨機挑選多空策略與預設參數。
+  - `log.md` 記錄本次變更與版本碼 `LB-PLUGIN-VERIFIER-20260813A`。
+- **Diagnostics**: 靜態檢查策略註冊清單排序與開發者卡樣式，確認抽樣回測會更換策略組合；受限於環境無法實際回測，待部署環境驗證所有策略載入與 console 狀態。
+
+## 2026-08-14 — Patch LB-PLUGIN-VERIFIER-20260814A
+- **Issue recap**: 驗證卡僅顯示註冊結果總數，無法對照實際策略清單；抽樣回測進度也沒有揭露選中的策略組合，難以交叉檢查缺漏。
+- **Fix**:
+  - `js/main.js` 擴充驗證流程，統計做多進出場與做空回補策略數量、比對 `strategyDescriptions`，並在清單中補上缺漏或額外項目提示。
+  - 驗證摘要改為顯示策略總量（含各類別數量）及缺少／額外策略名稱，確保註冊狀態與目前選單對齊。
+  - 抽樣回測在啟動與完成時皆揭露策略組合，成功／失敗訊息同步帶出組合名稱，便於對照測試結果。
+- **Diagnostics**: 請於頁面啟動「驗證清單」與「抽樣回測」，確認摘要會列出策略總量與差異、抽樣訊息會顯示策略組合；待能連線 Proxy 後再實際跑回測以驗證 console 無錯誤。

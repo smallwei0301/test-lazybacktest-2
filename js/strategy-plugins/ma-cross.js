@@ -110,7 +110,7 @@
 
   registerCrossPlugin({
     id: 'ma_cross',
-    label: '均線交叉 (多頭)',
+    label: '均線黃金交叉',
     roleMap: {
       longEntry: {
         shortKey: 'maShort',
@@ -131,7 +131,7 @@
 
   registerCrossPlugin({
     id: 'ema_cross',
-    label: 'EMA 交叉 (多頭)',
+    label: 'EMA交叉 (多頭)',
     roleMap: {
       longEntry: {
         shortKey: 'maShort',
@@ -152,7 +152,7 @@
 
   registerCrossPlugin({
     id: 'short_ma_cross',
-    label: '均線交叉 (做空)',
+    label: '均線死亡交叉 (做空)',
     roleMap: {
       shortEntry: {
         shortKey: 'maShortShortEntry',
@@ -166,7 +166,7 @@
 
   registerCrossPlugin({
     id: 'short_ema_cross',
-    label: 'EMA 交叉 (做空)',
+    label: 'EMA交叉 (做空)',
     roleMap: {
       shortEntry: {
         shortKey: 'maShortShortEntry',
@@ -180,7 +180,7 @@
 
   registerCrossPlugin({
     id: 'cover_ma_cross',
-    label: '均線交叉 (空單回補)',
+    label: '均線黃金交叉 (回補)',
     roleMap: {
       shortExit: {
         shortKey: 'maShortCover',
@@ -194,7 +194,7 @@
 
   registerCrossPlugin({
     id: 'cover_ema_cross',
-    label: 'EMA 交叉 (空單回補)',
+    label: 'EMA交叉 (回補)',
     roleMap: {
       shortExit: {
         shortKey: 'maShortCover',
@@ -202,6 +202,20 @@
         comparator: ({ shortNow, shortPrev, longNow, longPrev }) =>
           shortNow > longNow && shortPrev <= longPrev,
         resultField: 'cover',
+      },
+    },
+  });
+
+  registerCrossPlugin({
+    id: 'ma_cross_exit',
+    label: '均線死亡交叉',
+    roleMap: {
+      longExit: {
+        shortKey: 'maShortExit',
+        longKey: 'maLongExit',
+        comparator: ({ shortNow, shortPrev, longNow, longPrev }) =>
+          shortNow < longNow && shortPrev >= longPrev,
+        resultField: 'exit',
       },
     },
   });
