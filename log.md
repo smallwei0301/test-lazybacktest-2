@@ -1,3 +1,26 @@
+## 2026-09-18 — Patch LB-BATCH-CATALOG-20260918A
+- **Scope**: 批量優化策略清單補齊與選項除錯。
+- **Updates**:
+  - `index.html` 載入 `batch-strategy-catalog` 共用模組，確保批量優化初始化前完成策略目錄建置。
+  - `js/lib/batch-strategy-catalog.js` 新增策略目錄水庫，依策略註冊表濾出可用的多空進出場清單並回傳缺漏項目。
+  - `js/batch-optimization.js` 導入目錄 hydration 與快取，修正 `hydrateStrategyNameMap` 缺失造成清單空白，並將結果寫入批量除錯日誌與對外 API。
+  - `tests/batch-catalog.test.js` 建立水庫單元測試，確認僅回傳已註冊策略且記錄缺漏項。
+- **Testing**: `npm test`、`npm run typecheck`。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
+- **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
+- **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
+- **Testing**: `npm run typecheck`（容器環境執行，確認策略 ID 正規化表與載入流程未觸發型別錯誤）。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915A
+- **Scope**: 出場策略 ID 正規化與手動驗證工具。
+- **Updates**:
+  - `index.html` 做多/回補選單改用註冊 ID，並於開發者區域新增四項手動驗證按鈕（預設參數檢查、抽樣回測摘要、舊版策略載入、批量/滾動映射）。
+  - `js/config.js` 建立策略 ID 遷移表與全域正規化工具，供主流程、儲存載入與批量優化共用。
+  - `js/main.js`、`js/backtest.js` 調整策略參數擷取、儲存/載入與績效摘要邏輯，將舊 ID 自動轉換為註冊 ID 並更新預設檔名。
+  - `js/batch-optimization.js` 重新整理策略映射表，確保新舊 ID 均指向對應的註冊 ID。
+- **Testing**: `npm run typecheck`；手動驗證工具待部署環境逐項執行確認。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
@@ -1610,3 +1633,44 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-09-16 — Patch LB-EXIT-DEATHCROSS-20260916A
+- **Issue recap**: 策略選單改用註冊 ID 後，均線／MACD／KD 等死亡交叉出場策略在回測中不再觸發賣出訊號，導致長單無法平倉並影響滾動測試、批量優化等流程。
+- **Fix**:
+  - `js/worker.js` 的出場判斷改為同時接受 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等新 ID，並針對 KD 插件保留舊 ID 時的向後相容處理。
+- **Diagnostics**: 需於可連線 Proxy 的環境實際執行單次回測、滾動測試、參數優化與批量優化，檢查含死亡交叉的策略在結果中會輸出正常的出場訊號與成交記錄。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-EXITSELECT-20260916A
+- **Issue recap**: 批量優化載入包含新死亡交叉 ID（如 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit`）的結果時，因對照表仍回填舊選單值而找不到對應選項，導致流程中斷。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `EXIT_STRATEGY_SELECT_MAP` 改為直接回傳新註冊 ID，保留舊 ID → 新 ID 的相容映射，並同步更新批量偵錯版本碼。
+- **Diagnostics**: 待於可連線 Proxy 的環境匯入含新死亡交叉策略的批量優化結果，確認選單能成功填入並持續到回測、滾動測試與批量報告流程。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-DEATHCROSS-20260916B
+- **Issue recap**: 儲存策略時多單進場會被誤轉成死亡交叉 ID，舊版批量優化結果也因仍使用舊出場 ID，導致新流程只得到目標值 0 無法產出最佳參數。
+- **Fix**:
+  - `js/backtest.js` 調整策略 ID 正規化，保存設定與績效摘要時先以角色提示比對描述，避免多單進場被誤轉換成出場 ID，同時讓顯示名稱能對應舊資料與新註冊表。
+  - `js/batch-optimization.js` 新增批量策略 ID 正規化工具，處理舊結果與組合時自動轉換成新死亡交叉 ID，並統一交叉優化、局部微調輸出使用正規化後的策略鍵，偵錯版本更新為 `LB-BATCH-DEATHCROSS-20260916B`。
+- **Diagnostics**: 建議於本地匯入含 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 的批量結果並重新啟動優化，確認最佳參數與目標值不再為 0；另建立一組僅含多單進場的儲存策略，重新載入後檢查選單 value 與參數是否維持原始 ID 與預設值。
+- **Testing**: `npm run typecheck`
+
+## 2026-09-17 — Patch LB-BATCH-DEATHCROSS-20260916C
+- **Issue recap**: 批量優化在面對死亡交叉類別的出場策略時仍出現目標值為 0 的案例，缺乏診斷訊息可追蹤上下文。
+- **Fix**:
+  - `js/lib/batch-strategy-context.js` 建立共用的策略上下文工具，讓批量優化與 Node 測試可以共享「進場／出場／風險設定」的推導邏輯。
+  - `js/batch-optimization.js` 在全域參數準備、逐策略優化與單參數 worker 任務中導入新的上下文，確保死亡交叉策略會帶著既有的進場設定參與優化，並新增 `deathcross-zero-metric` 調試事件持續追蹤零目標值情況；偵錯版本提升為 `LB-BATCH-DEATHCROSS-20260916C`。
+  - `index.html` 引入新的共用工具腳本，`package.json` 加入 `npm test` 指令，並在 `tests/batch-context.test.js` 建立單元測試驗證上下文推導行為。
+- **Diagnostics**: 建議於本地執行批量優化流程，觀察開發者日誌是否輸出 `deathcross-zero-metric` 事件，以判斷是否仍有資料不足的案例；同時確認死亡交叉類策略能產出非零目標值。
+- **Testing**: `npm test`、`npm run typecheck`
+
+## 2026-09-17 — Patch LB-BATCH-MAPPER-20260917A
+- **Issue recap**: 批量優化在死亡交叉出場策略上仍出現目標值為 0，追查後發現映射表會把做多進場誤轉成死亡交叉 ID，且無統一的策略映射工具，導致未來新增策略時需要手動擴充多份對照表。
+- **Fix**:
+  - 新增 `js/lib/batch-strategy-mapper.js` 共用模組，依角色自動正規化策略 ID，並支援 `_exit`、`short_`、`cover_` 等別名回復至對應註冊 ID。
+  - `js/batch-optimization.js` 透過新模組取得 Worker 策略名稱，移除舊版覆寫表，並將多空進出場與回補策略一起正規化；同時擴充交叉優化與工作流程的短線欄位、偵錯日誌與策略映射記錄。
+  - `index.html` 引入新模組腳本，`package.json` 更新 `npm test` 串聯兩組單元測試，並新增 `tests/batch-mapper.test.js` 以 TDD 驗證策略映射行為。
+- **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
+- **Testing**: `npm test`、`npm run typecheck`
+
