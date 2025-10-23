@@ -711,6 +711,62 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="manualVerificationContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="clipboard-check" class="lucide w-4 h-4"></i>
+                                                    手動驗證工具
+                                                </div>
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <button
+                                                        id="manualVerifyExitDefaultsBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        檢查出場預設
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifySampleBacktestBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        抽樣回測摘要
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifyLegacyLoadBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        載入舊版策略
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifyBatchFlowBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        批量/滾動檢查
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div
+                                                    id="manualVerificationStatus"
+                                                    class="px-3 py-2 text-[11px]"
+                                                    style="color: var(--muted-foreground);"
+                                                >
+                                                    尚未執行手動驗證。
+                                                </div>
+                                                <div
+                                                    id="manualVerificationLog"
+                                                    class="px-3 py-2 text-[11px] space-y-2 hidden border-t"
+                                                    style="border-color: var(--border); color: var(--foreground); max-height: 240px; overflow-y: auto; overscroll-behavior: contain;"
+                                                ></div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
                                             <div class="flex items-center justify-between">
                                                 <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
@@ -1132,12 +1188,12 @@
                                                     class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                     style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                 >
-                                                    <option value="ma_cross">均線死亡交叉</option>
+                                                    <option value="ma_cross_exit">均線死亡交叉</option>
                                                     <option value="ma_below">價格跌破均線</option>
                                                     <option value="rsi_overbought">RSI超買</option>
-                                                    <option value="macd_cross">MACD死亡交叉 (DI版)</option>
+                                                    <option value="macd_cross_exit">MACD死亡交叉 (DI版)</option>
                                                     <option value="bollinger_reversal">布林通道反轉</option>
-                                                    <option value="k_d_cross">KD死亡交叉 (D&gt;Y)</option>
+                                                    <option value="k_d_cross_exit">KD死亡交叉 (D&gt;Y)</option>
                                                     <option value="volume_spike">成交量暴增</option>
                                                     <option value="price_breakdown">價格跌破前低</option>
                                                     <option value="williams_overbought">威廉指標超買</option>
@@ -2751,6 +2807,7 @@
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/lib/batch-strategy-context.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
