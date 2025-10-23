@@ -4,7 +4,8 @@
   "private": true,
   "description": "LazyBacktest with Netlify Functions proxy",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/**/*.mjs\""
   },
   "dependencies": {
     "@netlify/blobs": "^6.0.0",
