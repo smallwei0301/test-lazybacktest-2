@@ -56,12 +56,74 @@ const longEntryToCoverMap = {
 };
 
 const longExitToShortMap = {
-    'ma_cross': 'short_ma_cross', 'ma_below': 'short_ma_below', 'rsi_overbought': 'short_rsi_overbought',
-    'macd_cross': 'short_macd_cross', 'bollinger_reversal': 'short_bollinger_reversal',
-    'k_d_cross': 'short_k_d_cross', 'price_breakdown': 'short_price_breakdown',
+    'ma_cross_exit': 'short_ma_cross', 'ma_cross': 'short_ma_cross',
+    'ma_below': 'short_ma_below',
+    'rsi_overbought': 'short_rsi_overbought',
+    'macd_cross_exit': 'short_macd_cross', 'macd_cross': 'short_macd_cross',
+    'bollinger_reversal': 'short_bollinger_reversal',
+    'k_d_cross_exit': 'short_k_d_cross', 'k_d_cross': 'short_k_d_cross',
+    'price_breakdown': 'short_price_breakdown',
     'williams_overbought': 'short_williams_overbought',
-    'turtle_stop_loss': 'short_turtle_stop_loss', 'trailing_stop': null, 'fixed_stop_loss': null
+    'turtle_stop_loss': 'short_turtle_stop_loss',
+    'trailing_stop': null,
+    'fixed_stop_loss': null
 };
+
+const LEGACY_STRATEGY_ID_COMPAT_MAP = {
+    exit: {
+        ma_cross: 'ma_cross_exit',
+        macd_cross: 'macd_cross_exit',
+        k_d_cross: 'k_d_cross_exit',
+        ema_cross: 'ema_cross_exit',
+    },
+    shortEntry: {
+        ma_cross: 'short_ma_cross',
+        ma_below: 'short_ma_below',
+        rsi_overbought: 'short_rsi_overbought',
+        macd_cross: 'short_macd_cross',
+        bollinger_reversal: 'short_bollinger_reversal',
+        k_d_cross: 'short_k_d_cross',
+        price_breakdown: 'short_price_breakdown',
+        williams_overbought: 'short_williams_overbought',
+        turtle_stop_loss: 'short_turtle_stop_loss',
+    },
+    shortExit: {
+        ma_cross: 'cover_ma_cross',
+        ma_above: 'cover_ma_above',
+        rsi_oversold: 'cover_rsi_oversold',
+        macd_cross: 'cover_macd_cross',
+        bollinger_breakout: 'cover_bollinger_breakout',
+        k_d_cross: 'cover_k_d_cross',
+        price_breakout: 'cover_price_breakout',
+        williams_oversold: 'cover_williams_oversold',
+        turtle_breakout: 'cover_turtle_breakout',
+        trailing_stop: 'cover_trailing_stop',
+    },
+};
+
+function normalizeStrategyId(roleType, strategyId) {
+    if (!strategyId) {
+        return strategyId;
+    }
+    const mapping = LEGACY_STRATEGY_ID_COMPAT_MAP?.[roleType];
+    if (mapping && mapping[strategyId]) {
+        return mapping[strategyId];
+    }
+    return strategyId;
+}
+
+function resolveLegacyStrategyIdAliases(roleType, strategyId) {
+    const normalized = normalizeStrategyId(roleType, strategyId);
+    if (!strategyId || normalized === strategyId) {
+        return [];
+    }
+    return [normalized];
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestNormalizeStrategyId = normalizeStrategyId;
+    window.lazybacktestLegacyStrategyAliases = resolveLegacyStrategyIdAliases;
+}
 
 const globalOptimizeTargets = {
     stopLoss: { label: '停損 (%)', range: { from: 1, to: 30, step: 0.5 } },

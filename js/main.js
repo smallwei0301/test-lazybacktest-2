@@ -485,12 +485,12 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
     ],
     longExit: [
-        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_cross_exit', configKey: 'ma_cross_exit' },
         { strategyId: 'ma_below', configKey: 'ma_below' },
         { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
-        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
-        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -3256,23 +3256,25 @@ function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
 
 function resolveStrategyComparisonAliases(strategyId, roleType) {
     const aliases = [];
-    if (!strategyId) return aliases;
-    if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
-        const exitKey = `${strategyId}_exit`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
-            aliases.push(exitKey);
-        }
-    } else if (roleType === 'shortEntry' && !strategyId.startsWith('short_')) {
-        const shortKey = `short_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[shortKey]) {
-            aliases.push(shortKey);
-        }
-    } else if (roleType === 'shortExit' && !strategyId.startsWith('cover_')) {
-        const coverKey = `cover_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[coverKey]) {
-            aliases.push(coverKey);
+    if (!strategyId) {
+        return aliases;
+    }
+
+    const legacyResolver = typeof window !== 'undefined' && typeof window.lazybacktestLegacyStrategyAliases === 'function'
+        ? window.lazybacktestLegacyStrategyAliases
+        : null;
+
+    if (legacyResolver) {
+        const compatAliases = legacyResolver(roleType, strategyId);
+        if (Array.isArray(compatAliases)) {
+            compatAliases.forEach((alias) => {
+                if (alias && alias !== strategyId) {
+                    aliases.push(alias);
+                }
+            });
         }
     }
+
     return aliases;
 }
 
@@ -4458,7 +4460,70 @@ function createProgressAnimator() {
         },
     };
 }
-function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
+const STRATEGY_PARAM_INPUT_SUFFIX_OVERRIDES = {
+    k_d_cross: { thresholdX: 'KdThresholdX' },
+    k_d_cross_exit: { thresholdY: 'KdThresholdY' },
+    turtle_stop_loss: { stopLossPeriod: 'StopLossPeriod' },
+    macd_cross: { signalPeriod: 'SignalPeriod' },
+    macd_cross_exit: { signalPeriod: 'SignalPeriod' },
+    short_k_d_cross: { thresholdY: 'ShortKdThresholdY' },
+    cover_k_d_cross: { thresholdX: 'CoverKdThresholdX' },
+    short_macd_cross: { signalPeriod: 'ShortSignalPeriod' },
+    cover_macd_cross: { signalPeriod: 'CoverSignalPeriod' },
+    short_turtle_stop_loss: { stopLossPeriod: 'ShortStopLossPeriod' },
+    cover_turtle_breakout: { breakoutPeriod: 'CoverBreakoutPeriod' },
+    cover_trailing_stop: { percentage: 'CoverTrailingStopPercentage' },
+};
+
+function resolveStrategyParamInputSuffix(strategyKey, paramName) {
+    const overrides = STRATEGY_PARAM_INPUT_SUFFIX_OVERRIDES[strategyKey];
+    if (overrides && overrides[paramName]) {
+        return overrides[paramName];
+    }
+    return paramName.charAt(0).toUpperCase() + paramName.slice(1);
+}
+
+function resolveStrategyDescriptorForType(type, selectedId) {
+    const normalizedId = typeof normalizeStrategyId === 'function'
+        ? normalizeStrategyId(type, selectedId)
+        : selectedId;
+    if (normalizedId && strategyDescriptions?.[normalizedId]) {
+        return { key: normalizedId, descriptor: strategyDescriptions[normalizedId] };
+    }
+    if (selectedId && strategyDescriptions?.[selectedId]) {
+        return { key: selectedId, descriptor: strategyDescriptions[selectedId] };
+    }
+    return { key: normalizedId || selectedId, descriptor: null };
+}
+
+function getStrategyParams(type) {
+    const strategySelectId = `${type}Strategy`;
+    const strategySelect = document.getElementById(strategySelectId);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
+        return {};
+    }
+
+    const selectedId = strategySelect.value;
+    const { key: effectiveKey, descriptor } = resolveStrategyDescriptorForType(type, selectedId);
+    if (!descriptor?.defaultParams) {
+        return {};
+    }
+
+    const params = {};
+    for (const paramName in descriptor.defaultParams) {
+        const suffix = resolveStrategyParamInputSuffix(effectiveKey, paramName);
+        const input = document.getElementById(`${type}${suffix}`);
+        if (input) {
+            params[paramName] = input.type === 'number'
+                ? (parseFloat(input.value) || descriptor.defaultParams[paramName])
+                : input.value;
+        } else {
+            params[paramName] = descriptor.defaultParams[paramName];
+        }
+    }
+    return params;
+}
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -4488,7 +4553,10 @@ function getBacktestParams() {
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
-    const exitStrategy = document.getElementById('exitStrategy')?.value;
+    const rawExitStrategy = document.getElementById('exitStrategy')?.value;
+    const exitStrategy = typeof normalizeStrategyId === 'function'
+        ? normalizeStrategyId('exit', rawExitStrategy)
+        : rawExitStrategy;
     const entryParams = getStrategyParams('entry');
     const exitParams = getStrategyParams('exit');
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
@@ -4498,8 +4566,14 @@ function getBacktestParams() {
     let shortEntryParams = {};
     let shortExitParams = {};
     if (enableShorting) {
-        shortEntryStrategy = document.getElementById('shortEntryStrategy')?.value;
-        shortExitStrategy = document.getElementById('shortExitStrategy')?.value;
+        const rawShortEntry = document.getElementById('shortEntryStrategy')?.value;
+        const rawShortExit = document.getElementById('shortExitStrategy')?.value;
+        shortEntryStrategy = typeof normalizeStrategyId === 'function'
+            ? normalizeStrategyId('shortEntry', rawShortEntry)
+            : rawShortEntry;
+        shortExitStrategy = typeof normalizeStrategyId === 'function'
+            ? normalizeStrategyId('shortExit', rawShortExit)
+            : rawShortExit;
         shortEntryParams = getStrategyParams('shortEntry');
         shortExitParams = getStrategyParams('shortExit');
     }

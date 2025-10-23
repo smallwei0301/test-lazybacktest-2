@@ -1,3 +1,13 @@
+## 2026-09-16 — Patch LB-STRATEGY-ID-20260916A
+- **Scope**: 策略 ID 正規化與相容載入。
+- **Updates**:
+  - `index.html` 將做多出場選項改用註冊 ID（`ma_cross_exit` 等）。
+  - `js/main.js`／`js/loader.js` 調整策略參數讀取、候選清單與複製流程，支援 `normalizeStrategyId` 後備映射。
+  - `js/backtest.js` 儲存與載入流程導入舊 ID → 新 ID 轉換，更新摘要命名與預設值，並重構 `updateStrategyParams`。
+  - `js/config.js` 新增舊 ID 對映表、擴充 `longExitToShortMap`，供各模組共用。
+  - `js/batch-optimization.js` 批量優化名稱映射加入新出場 ID → 自身的條目並保留舊值 fallback。
+- **Testing**: `npm run typecheck`。
+
 ## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
 - **Scope**: ANN 美股波動度特徵整合。
 - **Updates**:

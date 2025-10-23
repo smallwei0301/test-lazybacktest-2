@@ -3,10 +3,13 @@
 
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
-    'ma_cross_exit': 'ma_cross',
+    'ma_cross_exit': 'ma_cross_exit',
+    'ma_cross': 'ma_cross_exit',
+    'k_d_cross_exit': 'k_d_cross_exit',
+    'k_d_cross': 'k_d_cross_exit',
+    'macd_cross_exit': 'macd_cross_exit',
+    'macd_cross': 'macd_cross_exit',
     'ema_cross_exit': 'ema_cross',
-    'k_d_cross_exit': 'k_d_cross',
-    'macd_cross_exit': 'macd_cross',
     'rsi_overbought_exit': 'rsi_overbought',
     'williams_overbought_exit': 'williams_overbought',
     'ma_below_exit': 'ma_below',
