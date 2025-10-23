@@ -1,3 +1,18 @@
+## 2026-08-14 — Patch LB-PLUGIN-VERIFIER-20260813C
+- **Scope**: 開發者卡策略統計補強與差異提示排序。
+- **Updates**:
+  - `js/main.js` 驗證摘要新增四大策略選單總數與分項統計，並在註冊差異清單中同步顯示顯示項目數與排序後的缺漏名稱。
+  - `log.md` 紀錄本次補丁資訊，延續策略驗證同步調整流程。
+- **Testing**: 容器內執行 `npm run typecheck`。
+
+## 2026-08-14 — Patch LB-PLUGIN-VERIFIER-20260813B
+- **Scope**: 策略驗證計數與抽樣顯示同步調整。
+- **Updates**:
+  - `js/config.js` 建立共用的策略識別工具，統一進出場、做空與回補策略的鍵值正規化並更新映射表。
+  - `index.html`、`js/main.js` 調整出場選單使用新策略 ID，驗證摘要新增策略總數與差異清單，抽樣回測顯示實際抽選的多空組合。
+  - `js/backtest.js`、`js/loader.js` 套用共用工具，載入/儲存舊版策略設定與參數複製時自動轉換 legacy ID，維持與現行清單一致。
+- **Testing**: 容器內執行 `npm run typecheck`；待 Netlify 實機確認開發者卡片的驗證摘要與抽樣訊息。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
@@ -1592,3 +1607,12 @@ NODE`
   - 月度診斷加入 `staleReload` 與 `staleRevalidations`，便於測試卡片呈現快取刷新紀錄。
 - **Diagnostics**: 待於可連線 Proxy 的環境保持頁面開啟超過 24 小時後再回測，確認月末資料會觸發 `cacheBust` 並補齊最新交易日。
 - **Testing**: `npm run typecheck`（驗證 JSDoc/.d.ts 仍通過）。
+
+## 2026-08-13 — Patch LB-PLUGIN-VERIFIER-20260813A
+- **Issue recap**: 開發者卡的策略註冊驗證僅涵蓋 20 項策略且標籤與選單名稱不一致，抽樣回測也固定使用 RSI 多空組合，無法覆蓋成交量暴增、海龜交易等策略。
+- **Fix**:
+  - 新增 `ma-threshold`, `macd`, `price`, `williams`, `turtle`, `volume`, `risk-managed` 等插件腳本，並調整既有插件標籤，讓所有多空進出場策略皆對應到與 UI 相同的名稱與參數。
+  - `js/strategy-plugin-manifest.js` 擴充載入器與策略清單，納入 40 項策略並依名稱排序顯示，`js/worker.js` 補上 `volume` 序列供插件使用。
+  - `index.html` 開發者卡驗證清單改為可捲動區域且更新抽樣說明，`js/main.js` 將驗證結果按名稱排序並於抽樣回測隨機挑選多空策略與預設參數。
+  - `log.md` 記錄本次變更與版本碼 `LB-PLUGIN-VERIFIER-20260813A`。
+- **Diagnostics**: 靜態檢查策略註冊清單排序與開發者卡樣式，確認抽樣回測會更換策略組合；受限於環境無法實際回測，待部署環境驗證所有策略載入與 console 狀態。

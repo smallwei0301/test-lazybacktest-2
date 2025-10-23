@@ -693,7 +693,7 @@
                                                 <div
                                                     id="strategyRegistryVerifierList"
                                                     class="px-3 py-2 space-y-2 hidden"
-                                                    style="color: var(--foreground); border-top: 1px solid var(--border);"
+                                                    style="color: var(--foreground); border-top: 1px solid var(--border); max-height: 240px; overflow-y: auto; overscroll-behavior: contain;"
                                                 ></div>
                                                 <div
                                                     id="strategyRegistrySampleStatus"
@@ -707,7 +707,7 @@
                                                     class="px-3 py-2 text-[10px] border-t"
                                                     style="border-color: var(--border); color: var(--muted-foreground);"
                                                 >
-                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測使用 RSI 多空預設組合供快速比對。
+                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測將隨機挑選多空策略組合與預設參數進行驗證。
                                                 </div>
                                             </div>
                                         </div>
@@ -1132,12 +1132,12 @@
                                                     class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                     style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                 >
-                                                    <option value="ma_cross">均線死亡交叉</option>
+                                                    <option value="ma_cross_exit">均線死亡交叉</option>
                                                     <option value="ma_below">價格跌破均線</option>
                                                     <option value="rsi_overbought">RSI超買</option>
-                                                    <option value="macd_cross">MACD死亡交叉 (DI版)</option>
+                                                    <option value="macd_cross_exit">MACD死亡交叉 (DI版)</option>
                                                     <option value="bollinger_reversal">布林通道反轉</option>
-                                                    <option value="k_d_cross">KD死亡交叉 (D&gt;Y)</option>
+                                                    <option value="k_d_cross_exit">KD死亡交叉 (D&gt;Y)</option>
                                                     <option value="volume_spike">成交量暴增</option>
                                                     <option value="price_breakdown">價格跌破前低</option>
                                                     <option value="williams_overbought">威廉指標超買</option>
