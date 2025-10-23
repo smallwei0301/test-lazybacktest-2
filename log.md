@@ -1618,3 +1618,15 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-08-20 — Patch LB-STRATEGY-ID-NORMALIZE-20260820A
+- **Issue recap**: 做多出場與空方策略選單仍以舊 ID 呈現，造成策略註冊驗證多出項目，舊版儲存檔載入後亦無法對齊註冊 ID。
+- **Fix**: 調整選單與參數擷取流程全面使用註冊 ID，新增舊→新 ID 轉換表並在載入儲存策略時自動正規化，批次優化映射與績效摘要同步讀取新 ID。
+- **Diagnostics**: 檢視策略選單彙整、抽樣驗證摘要與策略名稱解析結果，確認不再顯示 `_exit` 差異並能對照正規化 ID。
+- **Testing**: `node tests/strategy-id-normalization.test.js`; `npm run typecheck`
+
+## 2026-08-20 — Patch LB-STRATEGY-ID-NORMALIZE-20260820B
+- **Issue recap**: `saveStrategy` 仍殘留重複的 `exitStrategyName` 宣告，導致腳本在瀏覽器載入時產生重新宣告錯誤。
+- **Fix**: 移除多餘的 `let exitStrategyName;`，保留註冊 ID 對應邏輯，避免 `Identifier has already been declared` 例外。
+- **Diagnostics**: 靜態檢查 `saveStrategy` 區段，確認僅保留單一常數宣告並持續採用新 ID 轉換流程。
+- **Testing**: `node tests/strategy-id-normalization.test.js`; `npm run typecheck`

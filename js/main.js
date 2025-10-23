@@ -471,6 +471,52 @@ const strategyRegistryVerificationState = {
     sampleSelectionSummary: '',
 };
 
+const STRATEGY_ROLE_LEGACY_ID_MAP = {
+    exit: {
+        'ma_cross': 'ma_cross_exit',
+        'macd_cross': 'macd_cross_exit',
+        'k_d_cross': 'k_d_cross_exit',
+        'ema_cross': 'ema_cross_exit',
+    },
+    shortEntry: {
+        'ma_cross': 'short_ma_cross',
+        'ma_below': 'short_ma_below',
+        'ema_cross': 'short_ema_cross',
+        'rsi_overbought': 'short_rsi_overbought',
+        'macd_cross': 'short_macd_cross',
+        'bollinger_reversal': 'short_bollinger_reversal',
+        'k_d_cross': 'short_k_d_cross',
+        'price_breakdown': 'short_price_breakdown',
+        'williams_overbought': 'short_williams_overbought',
+        'turtle_stop_loss': 'short_turtle_stop_loss',
+    },
+    shortExit: {
+        'ma_cross': 'cover_ma_cross',
+        'ma_above': 'cover_ma_above',
+        'ema_cross': 'cover_ema_cross',
+        'rsi_oversold': 'cover_rsi_oversold',
+        'macd_cross': 'cover_macd_cross',
+        'bollinger_breakout': 'cover_bollinger_breakout',
+        'k_d_cross': 'cover_k_d_cross',
+        'price_breakout': 'cover_price_breakout',
+        'williams_oversold': 'cover_williams_oversold',
+        'turtle_breakout': 'cover_turtle_breakout',
+        'trailing_stop': 'cover_trailing_stop',
+        'fixed_stop_loss': 'cover_fixed_stop_loss',
+    },
+};
+
+function normaliseStrategyIdForRole(roleType, rawId) {
+    if (!rawId) {
+        return rawId;
+    }
+    const roleMap = STRATEGY_ROLE_LEGACY_ID_MAP[roleType];
+    if (roleMap && Object.prototype.hasOwnProperty.call(roleMap, rawId)) {
+        return roleMap[rawId];
+    }
+    return rawId;
+}
+
 const strategyRegistrySampleCandidates = {
     longEntry: [
         { strategyId: 'ma_cross', configKey: 'ma_cross' },
@@ -485,12 +531,12 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
     ],
     longExit: [
-        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_cross_exit', configKey: 'ma_cross_exit' },
         { strategyId: 'ma_below', configKey: 'ma_below' },
         { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
-        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
-        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -3257,22 +3303,14 @@ function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
 function resolveStrategyComparisonAliases(strategyId, roleType) {
     const aliases = [];
     if (!strategyId) return aliases;
-    if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
-        const exitKey = `${strategyId}_exit`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
-            aliases.push(exitKey);
-        }
-    } else if (roleType === 'shortEntry' && !strategyId.startsWith('short_')) {
-        const shortKey = `short_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[shortKey]) {
-            aliases.push(shortKey);
-        }
-    } else if (roleType === 'shortExit' && !strategyId.startsWith('cover_')) {
-        const coverKey = `cover_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[coverKey]) {
-            aliases.push(coverKey);
+
+    if (roleType === 'exit' || roleType === 'shortEntry' || roleType === 'shortExit') {
+        const normalised = normaliseStrategyIdForRole(roleType, strategyId);
+        if (normalised && normalised !== strategyId && typeof strategyDescriptions === 'object' && strategyDescriptions?.[normalised]) {
+            aliases.push(normalised);
         }
     }
+
     return aliases;
 }
 
@@ -4458,7 +4496,53 @@ function createProgressAnimator() {
         },
     };
 }
-function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
+function getStrategyParams(type) {
+    const strategySelectId = `${type}Strategy`;
+    const strategySelect = document.getElementById(strategySelectId);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
+        return {};
+    }
+
+    const rawKey = strategySelect.value;
+    const normalisedKey = normaliseStrategyIdForRole(type, rawKey);
+    const lookupKey = (strategyDescriptions && strategyDescriptions[normalisedKey]) ? normalisedKey : rawKey;
+    const cfg = strategyDescriptions?.[lookupKey];
+    if (!cfg?.defaultParams) {
+        return {};
+    }
+
+    const params = {};
+    for (const paramName in cfg.defaultParams) {
+        if (!Object.prototype.hasOwnProperty.call(cfg.defaultParams, paramName)) {
+            continue;
+        }
+        let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
+        if (lookupKey === 'k_d_cross' && paramName === 'thresholdX') idSuffix = 'KdThresholdX';
+        else if (lookupKey === 'k_d_cross_exit' && paramName === 'thresholdY') idSuffix = 'KdThresholdY';
+        else if (lookupKey === 'turtle_stop_loss' && paramName === 'stopLossPeriod') idSuffix = 'StopLossPeriod';
+        else if ((lookupKey === 'macd_cross' || lookupKey === 'macd_cross_exit') && paramName === 'signalPeriod') idSuffix = 'SignalPeriod';
+        else if (lookupKey === 'short_k_d_cross' && paramName === 'thresholdY') idSuffix = 'ShortKdThresholdY';
+        else if (lookupKey === 'cover_k_d_cross' && paramName === 'thresholdX') idSuffix = 'CoverKdThresholdX';
+        else if (lookupKey === 'short_macd_cross' && paramName === 'signalPeriod') idSuffix = 'ShortSignalPeriod';
+        else if (lookupKey === 'cover_macd_cross' && paramName === 'signalPeriod') idSuffix = 'CoverSignalPeriod';
+        else if (lookupKey === 'short_turtle_stop_loss' && paramName === 'stopLossPeriod') idSuffix = 'ShortStopLossPeriod';
+        else if (lookupKey === 'cover_turtle_breakout' && paramName === 'breakoutPeriod') idSuffix = 'CoverBreakoutPeriod';
+        else if (lookupKey === 'cover_trailing_stop' && paramName === 'percentage') idSuffix = 'CoverTrailingStopPercentage';
+
+        const inputId = `${type}${idSuffix}`;
+        const input = document.getElementById(inputId);
+        if (input) {
+            params[paramName] = (input.type === 'number')
+                ? (parseFloat(input.value) || cfg.defaultParams[paramName])
+                : input.value;
+        } else {
+            params[paramName] = cfg.defaultParams[paramName];
+        }
+    }
+
+    return params;
+}
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -4487,8 +4571,8 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
-    const entryStrategy = document.getElementById('entryStrategy')?.value;
-    const exitStrategy = document.getElementById('exitStrategy')?.value;
+    const entryStrategy = normaliseStrategyIdForRole('entry', document.getElementById('entryStrategy')?.value);
+    const exitStrategy = normaliseStrategyIdForRole('exit', document.getElementById('exitStrategy')?.value);
     const entryParams = getStrategyParams('entry');
     const exitParams = getStrategyParams('exit');
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
@@ -4498,8 +4582,8 @@ function getBacktestParams() {
     let shortEntryParams = {};
     let shortExitParams = {};
     if (enableShorting) {
-        shortEntryStrategy = document.getElementById('shortEntryStrategy')?.value;
-        shortExitStrategy = document.getElementById('shortExitStrategy')?.value;
+        shortEntryStrategy = normaliseStrategyIdForRole('shortEntry', document.getElementById('shortEntryStrategy')?.value);
+        shortExitStrategy = normaliseStrategyIdForRole('shortExit', document.getElementById('shortExitStrategy')?.value);
         shortEntryParams = getStrategyParams('shortEntry');
         shortExitParams = getStrategyParams('shortExit');
     }
