@@ -1,3 +1,10 @@
+## 2026-09-20 — Patch LB-STRATEGY-ID-20250625B
+- **Scope**: 策略 ID 遷移載入兼容性與自動測試補強。
+- **Updates**:
+  - `js/backtest.js` 的 `loadStrategy` 強制正規化多空出場 ID，載入舊存檔時同步回寫新 ID 並修正參數欄位定位。
+  - 新增 `tests/strategy-load-compat.test.js`，模擬 DOM 與 localStorage 驗證舊/新策略設定皆能正確轉換與顯示。
+- **Testing**: `node tests/strategy-id-utils.test.js`; `node tests/strategy-load-compat.test.js`; `npm run typecheck`.
+
 ## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
 - **Scope**: ANN 美股波動度特徵整合。
 - **Updates**:
@@ -1618,3 +1625,13 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-08-20 — Patch LB-STRATEGY-ID-20250625A
+- **Issue recap**: 策略選單與儲存資料仍沿用舊版 ID（例如 `ma_cross`），導致註冊驗證出現差異提示、預設檔名顯示錯誤標籤，舊資料載入時也無法對齊新插件 ID。
+- **Fix**:
+  - 新增 `js/strategy-id-utils.js` 整合舊 ID → 新 ID 對照、別名解析與設定轉換工具，前端主要模組透過共用工具取得正規 ID。
+  - `index.html` 改以註冊 ID  (`ma_cross_exit` 等) 維護做多出場選單並引入策略 ID 工具腳本。
+  - `js/main.js`、`js/backtest.js` 及 `js/batch-optimization.js` 同步改用正規 ID，並為舊資料與批量優化保留 fallback；儲存／載入策略時自動轉換舊 ID，績效摘要與檔名也改以新 ID 查詢名稱。
+  - 建立 `tests/strategy-id-utils.test.js` 自動化檢驗舊／新 ID 轉換與別名結果。
+- **Diagnostics**: 本地 Node 測試確認舊版 `ma_cross`/`ma_cross_exit` 設定載入後皆轉換為新 ID，策略名稱解析與別名符合預期；後續需於可連線 Proxy 的環境實際回測，檢查做多出場訊號與策略註冊驗證摘要是否無差異提示。
+- **Testing**: `node tests/strategy-id-utils.test.js`、`npm run typecheck`。
