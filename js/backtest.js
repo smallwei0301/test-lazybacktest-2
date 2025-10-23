@@ -92,6 +92,30 @@ const ensureAIBridge = () => {
     return window.lazybacktestAIBridge;
 };
 
+const syncAIBridgeBacktestContext = () => {
+    const bridge = ensureAIBridge();
+    if (!bridge) return;
+    const resolver = () => {
+        if (typeof lastFetchSettings !== 'undefined' && lastFetchSettings) {
+            return { ...lastFetchSettings };
+        }
+        if (typeof window !== 'undefined' && window.lastFetchSettings) {
+            try {
+                return { ...window.lastFetchSettings };
+            } catch (error) {
+                console.warn('[AI Bridge] 無法複製 window.lastFetchSettings：', error);
+            }
+        }
+        return null;
+    };
+    bridge.getLastBacktestSettings = resolver;
+    const snapshot = resolver();
+    bridge.lastBacktestSettings = snapshot;
+    if (typeof window !== 'undefined') {
+        window.lastFetchSettings = snapshot;
+    }
+};
+
 function setVisibleStockData(data) {
     visibleStockData = Array.isArray(data) ? data : [];
     const bridge = ensureAIBridge();
@@ -105,6 +129,7 @@ function setVisibleStockData(data) {
             }
         }
     }
+    syncAIBridgeBacktestContext();
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
         try {
             window.dispatchEvent(
@@ -4734,6 +4759,7 @@ function runBacktestInternal() {
             setVisibleStockData(extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate));
             cachedStockData = cachedEntry.data;
             lastFetchSettings = { ...curSettings };
+            syncAIBridgeBacktestContext();
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
             console.log(`[Main] 從快取命中 ${cacheKey}，範圍 ${curSettings.startDate} ~ ${curSettings.endDate}`);
@@ -4887,6 +4913,7 @@ function runBacktestInternal() {
                     setVisibleStockData(extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate));
                     cachedStockData = mergedData;
                      lastFetchSettings = { ...curSettings };
+                     syncAIBridgeBacktestContext();
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
                      console.log(`[Main] Data cached/merged for ${cacheKey}.`);
@@ -4977,6 +5004,7 @@ function runBacktestInternal() {
                     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
                     cachedStockData = updatedEntry.data;
                     lastFetchSettings = { ...curSettings };
+                    syncAIBridgeBacktestContext();
                     refreshPriceInspectorControls();
                     updatePriceDebug(updatedEntry);
                      cachedEntry = updatedEntry;
@@ -7750,6 +7778,7 @@ function runOptimizationInternal(optimizeType) {
                         setVisibleStockData(data.rawDataUsed);
                     }
                     lastFetchSettings={ ...curSettings };
+                    syncAIBridgeBacktestContext();
                     console.log(`[Main] Data cached after ${optimizeType} opt.`);
                 } else if(!useCache&&data&&!data.rawDataUsed) {
                     console.warn("[Main] Opt worker no rawData returned.");
@@ -8261,6 +8290,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
     cachedStockData = updatedEntry.data;
     lastFetchSettings = { ...curSettings };
+    syncAIBridgeBacktestContext();
     refreshPriceInspectorControls();
     updatePriceDebug(updatedEntry);
     return updatedEntry;
@@ -8857,6 +8887,7 @@ function resetSettings() {
     cachedStockData = null;
     cachedDataStore.clear();
     lastFetchSettings = null;
+    syncAIBridgeBacktestContext();
     refreshPriceInspectorControls();
     clearPreviousResults();
     showSuccess("設定已重置");
