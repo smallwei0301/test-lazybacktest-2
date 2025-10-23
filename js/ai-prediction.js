@@ -13,8 +13,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-VIX-FEATURE-20260320A — ANN 引入 VIX 指數特徵並自動對齊美股回測日期。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-VIX-FEATURE-20260320A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -187,6 +188,8 @@
     const FRACTION_MIN_PERCENT = 1;
     const FRACTION_MAX_PERCENT = 100;
     const DAY_MS = 24 * 60 * 60 * 1000;
+    const VIX_INDEX_SYMBOL = '^VIX';
+    const vixSeriesCache = new Map();
 
     const normalizeTradeRule = (rule) => (TRADE_RULE_MAP[rule] ? rule : DEFAULT_TRADE_RULE);
     const getTradeRuleConfig = (rule) => TRADE_RULE_MAP[normalizeTradeRule(rule)];
@@ -1325,6 +1328,184 @@
         if (!elements.status) return;
         elements.status.textContent = message;
         elements.status.style.color = colorMap[type] || colorMap.info;
+    };
+
+    const getLastFetchSettingsSnapshot = () => {
+        if (typeof window === 'undefined') return null;
+        const snapshot = window.lastFetchSettings;
+        if (snapshot && typeof snapshot === 'object') {
+            return { ...snapshot };
+        }
+        return null;
+    };
+
+    const resolveActiveMarketKey = () => {
+        const snapshot = getLastFetchSettingsSnapshot();
+        const candidates = [
+            snapshot?.market,
+            snapshot?.marketType,
+            snapshot?.marketCategory,
+            snapshot?.marketLabel,
+            typeof window !== 'undefined' ? window.currentMarket : null,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const candidate = candidates[i];
+            if (candidate === null || candidate === undefined) continue;
+            const text = candidate.toString().trim();
+            if (!text) continue;
+            return text.toUpperCase();
+        }
+        return '';
+    };
+
+    const isActiveMarketUS = () => {
+        const marketKey = resolveActiveMarketKey();
+        if (!marketKey) return false;
+        if (marketKey === 'US' || marketKey === 'NASDAQ' || marketKey === 'NYSE') {
+            return true;
+        }
+        if (marketKey.includes('US')) {
+            return true;
+        }
+        return false;
+    };
+
+    const normalizeIsoDate = (value) => {
+        if (typeof value !== 'string') return null;
+        const trimmed = value.trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+    };
+
+    const resolveRowDateRange = (rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        const dated = rows
+            .map((row) => (row && typeof row.date === 'string' ? row.date : null))
+            .filter((date) => typeof date === 'string');
+        if (dated.length === 0) return null;
+        const sorted = dated.slice().sort((a, b) => a.localeCompare(b));
+        const startISO = normalizeIsoDate(sorted[0]);
+        const endISO = normalizeIsoDate(sorted[sorted.length - 1]);
+        if (!startISO || !endISO) return null;
+        return { startISO, endISO };
+    };
+
+    const buildVixCacheKey = (startISO, endISO) => `${startISO || 'NA'}|${endISO || 'NA'}`;
+
+    const fetchVixSeries = async (startISO, endISO) => {
+        const cacheKey = buildVixCacheKey(startISO, endISO);
+        if (vixSeriesCache.has(cacheKey)) {
+            return vixSeriesCache.get(cacheKey);
+        }
+        const params = new URLSearchParams({ stockNo: VIX_INDEX_SYMBOL });
+        if (startISO) params.set('start', startISO);
+        if (endISO) params.set('end', endISO);
+        const response = await fetch(`/api/index/?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+            throw new Error(`Index API HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        if (payload && typeof payload === 'object' && payload.error) {
+            throw new Error(String(payload.error));
+        }
+        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        const normalized = rows
+            .map((row) => {
+                const date = typeof row?.date === 'string' ? row.date : null;
+                if (!date) return null;
+                const closeValue = Number(row?.close);
+                return { date, close: Number.isFinite(closeValue) ? closeValue : NaN };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.date.localeCompare(b.date));
+        vixSeriesCache.set(cacheKey, normalized);
+        return normalized;
+    };
+
+    const alignVixSeriesToRows = (rows, series) => {
+        if (!Array.isArray(rows) || rows.length === 0) return rows;
+        if (!Array.isArray(series) || series.length === 0) {
+            return rows.map((row) => ({
+                ...row,
+                vixClose: Number.isFinite(Number(row?.vixClose)) ? Number(row.vixClose) : null,
+            }));
+        }
+        const sortedSeries = series
+            .filter((item) => item && typeof item.date === 'string')
+            .sort((a, b) => a.date.localeCompare(b.date));
+        const datedRows = rows
+            .filter((row) => row && typeof row.date === 'string')
+            .sort((a, b) => a.date.localeCompare(b.date));
+        const mapping = new Map();
+        let pointer = 0;
+        let lastValue = NaN;
+        datedRows.forEach((row) => {
+            const rowDate = row.date;
+            while (pointer < sortedSeries.length) {
+                const candidate = sortedSeries[pointer];
+                if (!candidate || typeof candidate.date !== 'string') {
+                    pointer += 1;
+                    continue;
+                }
+                if (candidate.date > rowDate) {
+                    break;
+                }
+                if (Number.isFinite(candidate.close) && candidate.close > 0) {
+                    lastValue = candidate.close;
+                }
+                pointer += 1;
+            }
+            let value = Number.isFinite(lastValue) ? lastValue : NaN;
+            if (!Number.isFinite(value)) {
+                for (let i = pointer; i < sortedSeries.length; i += 1) {
+                    const candidate = sortedSeries[i];
+                    if (Number.isFinite(candidate?.close) && candidate.close > 0) {
+                        value = candidate.close;
+                        break;
+                    }
+                }
+            }
+            if (Number.isFinite(value)) {
+                mapping.set(rowDate, value);
+                lastValue = value;
+            }
+        });
+        return rows.map((row) => {
+            if (!row || typeof row !== 'object') return row;
+            const date = typeof row.date === 'string' ? row.date : null;
+            const mappedValue = date ? mapping.get(date) : undefined;
+            if (Number.isFinite(mappedValue)) {
+                return { ...row, vixClose: mappedValue };
+            }
+            const existing = Number(row?.vixClose);
+            if (Number.isFinite(existing)) {
+                return { ...row, vixClose: existing };
+            }
+            return { ...row, vixClose: null };
+        });
+    };
+
+    const ensureAnnRowsWithVix = async (rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) return rows;
+        if (!isActiveMarketUS()) return rows;
+        const hasExistingVix = rows.some((row) => Number.isFinite(Number(row?.vixClose)));
+        if (hasExistingVix) return rows;
+        const range = resolveRowDateRange(rows);
+        if (!range) return rows;
+        try {
+            const series = await fetchVixSeries(range.startISO, range.endISO);
+            if (!Array.isArray(series) || series.length === 0) {
+                console.warn('[AI Prediction] VIX 指數資料為空，繼續使用原始特徵。');
+                return rows;
+            }
+            return alignVixSeriesToRows(rows, series);
+        } catch (error) {
+            console.warn('[AI Prediction] 取得 VIX 指數資料失敗:', error);
+            const label = formatModelLabel(MODEL_TYPES.ANNS);
+            showStatus(`[${label}] 無法取得 VIX 指數資料，已以原始特徵繼續。`, 'warning');
+            return rows;
+        }
     };
 
     const resolveAIWorkerUrl = () => {
@@ -3375,6 +3556,10 @@
                 return;
             }
 
+            const datasetRows = normalizedModel === MODEL_TYPES.ANNS
+                ? await ensureAnnRowsWithVix(rows)
+                : rows;
+
             let annRuntimeOptions = {};
             let lstmRuntimeOptions = {};
             if (normalizedModel === MODEL_TYPES.ANNS) {
@@ -3402,9 +3587,9 @@
             }
 
             if (normalizedModel === MODEL_TYPES.LSTM) {
-                await runLstmModel(modelState, rows, hyperparameters, riskOptions, lstmRuntimeOptions);
+                await runLstmModel(modelState, datasetRows, hyperparameters, riskOptions, lstmRuntimeOptions);
             } else {
-                await runAnnModel(modelState, rows, hyperparameters, riskOptions, annRuntimeOptions);
+                await runAnnModel(modelState, datasetRows, hyperparameters, riskOptions, annRuntimeOptions);
             }
         } catch (error) {
             const activeLabel = formatModelLabel(globalState.activeModel);

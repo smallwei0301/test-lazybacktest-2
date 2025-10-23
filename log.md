@@ -1584,3 +1584,11 @@ NODE`
   - 敏感度情境回傳的 `deltaReturn` 及聚合統計全面改採年化百分點差，確保 UI 呈現的 PP、平均漂移與穩定度門檻一致。
 - **Diagnostics**: 待於實際回測環境比對長、短回測區間，確認敏感度卡片顯示的漂移百分點會隨年化報酬變化，並檢視穩定度評分是否與 ±6/±12pp 門檻吻合。
 - **Testing**: 尚未執行（容器無法連線 Proxy，請於 Netlify 實機回測至少 2330 與 0050，確認 console 無錯誤並驗證敏感度卡片數據）。
+
+## 2026-08-15 — Patch LB-AI-VIX-FEATURE-20260320A
+- **Issue recap**: ANN 模型在美股情境僅依靠單一標的價格衍生指標，無法感知市場恐慌度，導致在波動劇烈時預測與風控不穩定；同時 UI 未自動補齊 ^VIX 指數資料，人工轉貼極為不便。
+- **Fix**:
+  - `js/ai-prediction.js` 於執行 ANNS 模型前自 `/api/index/` 代理抓取 ^VIX 指數，快取並對齊回測日期，缺值時以前後有效數據或 0 補齊，並加入版本碼 `LB-AI-VIX-FEATURE-20260320A`。
+  - `js/worker.js` 新增 `annResolveVix`、擴充特徵名稱與指標統計，於 ANN 資料集生成 `VIXClose` 與 `VIXChange` 兩項特徵，同步更新 `ANN_REPRO_PATCH` 與診斷版本為 `LB-AI-ANNS-REPRO-20260320A`／`LB-AI-ANN-DIAG-20260320A`，確保前後端重現資訊一致。
+- **Diagnostics**: 待於 Netlify 實際以美股（如 AAPL、MSFT）回測並啟動 ANN 預測，確認資料診斷面板出現新特徵統計、AI 訊息顯示最新版本碼，且 console 無 VIX 抓取錯誤；同時比對預測輸出是否反映 VIX 劇烈變化時的信號調整。
+- **Testing**: `npm run typecheck`（驗證新增 JSDoc 與型別推論未破壞既有檔案）。

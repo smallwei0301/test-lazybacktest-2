@@ -13,6 +13,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
 // Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-VIX-FEATURE-20260320A — ANN 特徵集整合 VIX 指數並針對美股自動對齊日期。
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 importScripts('shared-lookback.js');
@@ -27,8 +28,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260320A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260320A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -100,6 +101,8 @@ const ANN_FEATURE_NAMES = [
   'MACDhist',
   'CCI20',
   'WilliamsR14',
+  'VIXClose',
+  'VIXChange',
 ];
 
 function normalizeClassificationMode(mode) {
@@ -1089,6 +1092,17 @@ function annResolveLow(row, fallback) {
   return fallback;
 }
 
+function annResolveVix(row) {
+  const candidates = [row?.vixClose, row?.vix];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return NaN;
+}
+
 function annSma(values, period) {
   const out = new Array(values.length).fill(null);
   let sum = 0;
@@ -1309,6 +1323,7 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
             open: annResolveOpen(row, close),
             high: annResolveHigh(row, close),
             low: annResolveLow(row, close),
+            vixClose: annResolveVix(row),
           };
         })
         .filter((row) => Number.isFinite(row.close) && row.close > 0 && Number.isFinite(row.high) && Number.isFinite(row.low))
@@ -1318,6 +1333,43 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
   const close = parsed.map((row) => row.close);
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
+  const vixRaw = parsed.map((row) => row.vixClose);
+  const vixSeries = vixRaw.map((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : NaN;
+  });
+  let lastValidVix = NaN;
+  for (let i = 0; i < vixSeries.length; i += 1) {
+    if (Number.isFinite(vixSeries[i]) && vixSeries[i] > 0) {
+      lastValidVix = vixSeries[i];
+    } else if (Number.isFinite(lastValidVix) && lastValidVix > 0) {
+      vixSeries[i] = lastValidVix;
+    }
+  }
+  let nextValidVix = NaN;
+  for (let i = vixSeries.length - 1; i >= 0; i -= 1) {
+    if (Number.isFinite(vixSeries[i]) && vixSeries[i] > 0) {
+      nextValidVix = vixSeries[i];
+    } else if (Number.isFinite(nextValidVix) && nextValidVix > 0) {
+      vixSeries[i] = nextValidVix;
+    }
+  }
+  const hasFiniteVix = vixSeries.some((value) => Number.isFinite(value) && value > 0);
+  if (!hasFiniteVix) {
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      vixSeries[i] = 0;
+    }
+  }
+  for (let i = 0; i < parsed.length; i += 1) {
+    parsed[i].vixClose = Number.isFinite(vixSeries[i]) ? vixSeries[i] : NaN;
+  }
+  const vixChangeSeries = vixSeries.map((value, index) => {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    if (index === 0) return 0;
+    const prev = vixSeries[index - 1];
+    if (!Number.isFinite(prev) || prev <= 0) return 0;
+    return (value - prev) / prev;
+  });
 
   const indicatorStats = ANN_FEATURE_NAMES.map((name) => ({
     name,
@@ -1363,6 +1415,8 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
       mac.hist[i],
       cci[i],
       wr[i],
+      parsed[i].vixClose,
+      vixChangeSeries[i],
     ];
     for (let f = 0; f < features.length; f += 1) {
       const stat = indicatorStats[f];
@@ -2122,7 +2176,7 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
         std,
-        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14'],
+        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14', 'VIXClose', 'VIXChange'],
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
