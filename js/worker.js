@@ -8621,14 +8621,29 @@ function runStrategy(data, params, options = {}) {
         let exitRuleResult = null;
         switch (exitStrategy) {
           case "ma_cross":
+          case "ma_cross_exit":
           case "ema_cross":
+          case "ema_cross_exit":
             {
-              const pluginResult = callStrategyPlugin(
-                exitStrategy,
-                'longExit',
-                i,
-                exitParams,
-              );
+              const pluginCandidates =
+                exitStrategy === "ma_cross_exit"
+                  ? ["ma_cross_exit", "ma_cross"]
+                  : exitStrategy === "ma_cross"
+                    ? ["ma_cross", "ma_cross_exit"]
+                    : exitStrategy === "ema_cross_exit"
+                      ? ["ema_cross_exit", "ema_cross"]
+                      : ["ema_cross", "ema_cross_exit"];
+              let pluginResult = null;
+              for (const candidate of pluginCandidates) {
+                if (!candidate) continue;
+                pluginResult = callStrategyPlugin(
+                  candidate,
+                  'longExit',
+                  i,
+                  exitParams,
+                );
+                if (pluginResult) break;
+              }
               if (pluginResult) {
                 sellSignal = pluginResult.exit === true;
                 exitRuleResult = pluginResult;
@@ -8703,17 +8718,37 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "macd_cross":
+          case "macd_cross_exit":
             const difX = indicators.macdExit[i],
               deaX = indicators.macdSignalExit[i],
               difPX = indicators.macdExit[i - 1],
               deaPX = indicators.macdSignalExit[i - 1];
-            sellSignal =
-              check(difX) &&
-              check(deaX) &&
-              check(difPX) &&
-              check(deaPX) &&
-              difX < deaX &&
-              difPX >= deaPX;
+            {
+              const pluginResult = callStrategyPlugin(
+                'macd_cross_exit',
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitMACDValues && meta.macdValues)
+                  exitMACDValues = meta.macdValues;
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+              }
+            }
+            if (!sellSignal) {
+              sellSignal =
+                check(difX) &&
+                check(deaX) &&
+                check(difPX) &&
+                check(deaPX) &&
+                difX < deaX &&
+                difPX >= deaPX;
+            }
             if (sellSignal)
               exitMACDValues = {
                 difPrev: difPX,
@@ -8760,6 +8795,7 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "k_d_cross":
+          case "k_d_cross_exit":
             {
               const pluginResult = callStrategyPlugin(
                 'k_d_cross_exit',
