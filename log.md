@@ -1673,3 +1673,13 @@ NODE`
 - **Diagnostics**: 請於瀏覽器重新載入批量優化分頁，確認買入／賣出策略清單重新顯示且 console 不再出現 `hydrateStrategyNameMap is not defined` 的錯誤；若建立批量偵錯會話，應能看到 `strategy-map-hydrated` 事件。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-18 — Patch LB-BATCH-ROLEMAP-20260918A
+- **Issue recap**: 批量優化仍回報「缺少策略映射」，原因是策略清單與映射表分散在多份硬編碼陣列，導致死亡交叉等新註冊 ID 無法同步出現在批量選單與 worker 映射。
+- **Fix**:
+  - `js/lib/strategy-role-catalog.js` 建立共用策略角色目錄，會依註冊 ID、角色遷移表與命名規則自動補齊 `*_exit`、`short_`、`cover_` 等策略，並於瀏覽器全域掛載 `LazyStrategyCatalog`。
+  - `js/config.js` 將策略候選列表整理成 `strategyRolePresets`，同步寫入 `window.strategyRegistrySampleCandidates` 供既有流程沿用。
+  - `js/batch-optimization.js` 的策略選單改用 `StrategyRoleCatalog` 產生，並在開發偵錯模式記錄選項數量，避免再度發生列表為空的情況。
+  - `index.html` 載入新的角色目錄腳本，`js/main.js` 改以全域候選列表為優先來源，`package.json` 串連新的單元測試 `tests/strategy-role-catalog.test.js` 以落實 TDD。
+- **Diagnostics**: 於批量優化頁面展開買入／賣出策略清單，確認死亡交叉與其對應出場選項皆在列，並檢視批量偵錯日誌是否出現 `strategy-option-generated` 事件顯示選項數量。
+- **Testing**: `npm test`、`npm run typecheck`
+

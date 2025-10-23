@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-MAPPER-20260917B
+// --- 批量策略優化功能 - v1.2.9 ---
+// Patch Tag: LB-BATCH-ROLEMAP-20260918A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -9,9 +9,13 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
     ? window.LazyBatchContext
     : (typeof globalThis !== 'undefined' && globalThis.LazyBatchContext ? globalThis.LazyBatchContext : null);
 
+let StrategyRoleCatalog = (typeof window !== 'undefined' && window.LazyStrategyCatalog)
+    ? window.LazyStrategyCatalog
+    : (typeof globalThis !== 'undefined' && globalThis.LazyStrategyCatalog ? globalThis.LazyStrategyCatalog : null);
+
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-ROLEMAP-20260918A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -1784,12 +1788,63 @@ function initBatchOptimization() {
     }
 }
 
+function normaliseStrategyRoleKey(role) {
+    if (!role) return 'entry';
+    if (['entry', 'exit', 'shortEntry', 'shortExit'].includes(role)) {
+        return role;
+    }
+    if (role === 'buy') return 'entry';
+    if (role === 'sell') return 'exit';
+    if (role === 'short') return 'shortEntry';
+    if (role === 'cover') return 'shortExit';
+    return 'entry';
+}
+
+function listStrategiesForRole(role) {
+    const normalized = normaliseStrategyRoleKey(role);
+    if (StrategyRoleCatalog && typeof StrategyRoleCatalog.getStrategiesForRole === 'function') {
+        const listed = StrategyRoleCatalog.getStrategiesForRole(normalized);
+        if (Array.isArray(listed) && listed.length > 0) {
+            return Array.from(new Set(listed.filter(Boolean)));
+        }
+    }
+
+    const fallback = [];
+    const guessRole = StrategyRoleCatalog && typeof StrategyRoleCatalog.guessRole === 'function'
+        ? StrategyRoleCatalog.guessRole
+        : (id) => {
+            if (!id || typeof id !== 'string') return 'entry';
+            if (id.startsWith('short_')) return 'shortEntry';
+            if (id.startsWith('cover_')) return 'shortExit';
+            if (id.endsWith('_exit')) return 'exit';
+            if (/_stop_loss$/i.test(id) || /trailing_stop/i.test(id)) return 'exit';
+            if (/overbought/i.test(id) || /breakdown/i.test(id)) return 'exit';
+            if (/below$/i.test(id)) return 'exit';
+            return 'entry';
+        };
+
+    if (typeof strategyDescriptions === 'object' && strategyDescriptions) {
+        Object.keys(strategyDescriptions).forEach((strategyId) => {
+            if (!strategyId) return;
+            if (guessRole(strategyId) === normalized) {
+                fallback.push(strategyId);
+            }
+        });
+    }
+
+    return Array.from(new Set(fallback.filter(Boolean)));
+}
+
 // 生成策略選項
 function generateStrategyOptions() {
     try {
+        if (!StrategyRoleCatalog && typeof window !== 'undefined' && window.LazyStrategyCatalog) {
+            StrategyRoleCatalog = window.LazyStrategyCatalog;
+        }
+
         const buyStrategiesList = document.getElementById('buy-strategies-list');
         const sellStrategiesList = document.getElementById('sell-strategies-list');
-        
+
         if (!buyStrategiesList || !sellStrategiesList) {
             console.error('[Batch Optimization] Strategy lists not found');
             return;
@@ -1800,19 +1855,22 @@ function generateStrategyOptions() {
         sellStrategiesList.innerHTML = '';
         
         // 買入策略 (做多進場)
-        const buyStrategies = [
-            'ma_cross', 'ma_above', 'rsi_oversold', 'macd_cross', 'bollinger_breakout',
-            'k_d_cross', 'volume_spike', 'price_breakout', 'williams_oversold', 
-            'ema_cross', 'turtle_breakout'
-        ];
-        
+        const buyStrategies = listStrategiesForRole('entry');
+
         // 賣出策略 (做多出場)
-        const sellStrategies = [
-            'ma_cross_exit', 'ma_below', 'rsi_overbought', 'macd_cross_exit', 'bollinger_reversal',
-            'k_d_cross_exit', 'volume_spike', 'price_breakdown', 'williams_overbought',
-            'ema_cross_exit', 'turtle_stop_loss', 'trailing_stop', 'fixed_stop_loss'
-        ];
-        
+        const sellStrategies = listStrategiesForRole('exit');
+
+        if (!buyStrategies.length || !sellStrategies.length) {
+            const message = '[Batch Optimization] Strategy role catalog returned empty lists';
+            console.warn(message, { buyCount: buyStrategies.length, sellCount: sellStrategies.length });
+            if (batchDebugSession) {
+                recordBatchDebug('strategy-option-empty', {
+                    entryCount: buyStrategies.length,
+                    exitCount: sellStrategies.length,
+                }, { phase: 'init', level: 'warn', consoleLevel: 'warn' });
+            }
+        }
+
         // 生成買入策略選項
         buyStrategies.forEach(strategy => {
             const strategyInfo = strategyDescriptions[strategy];
@@ -1828,7 +1886,7 @@ function generateStrategyOptions() {
                 buyStrategiesList.appendChild(div);
             }
         });
-        
+
         // 生成賣出策略選項
         sellStrategies.forEach(strategy => {
             const strategyInfo = strategyDescriptions[strategy];
@@ -1844,7 +1902,14 @@ function generateStrategyOptions() {
                 sellStrategiesList.appendChild(div);
             }
         });
-        
+
+        if (batchDebugSession) {
+            recordBatchDebug('strategy-option-generated', {
+                entryCount: buyStrategies.length,
+                exitCount: sellStrategies.length,
+            }, { phase: 'init', console: false });
+        }
+
         console.log('[Batch Optimization] Strategy options generated successfully');
     } catch (error) {
         console.error('[Batch Optimization] Error generating strategy options:', error);
