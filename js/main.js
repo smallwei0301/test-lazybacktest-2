@@ -470,6 +470,13 @@ const strategyRegistryVerificationState = {
     sampleStatus: null,
     sampleSelectionSummary: '',
 };
+const strategyIdUtils = (typeof window !== 'undefined' && window.LB_STRATEGY_ID_UTILS) || {
+    LEGACY_STRATEGY_ID_MAP: { exit: {}, shortEntry: {}, shortExit: {} },
+    normaliseStrategyIdForRole: (id) => id,
+    resolveStrategyAliases: () => [],
+    migrateStrategySettings: (settings) => ({ settings, changed: false }),
+};
+
 
 const strategyRegistrySampleCandidates = {
     longEntry: [
@@ -485,12 +492,12 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
     ],
     longExit: [
-        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_cross_exit', configKey: 'ma_cross_exit' },
         { strategyId: 'ma_below', configKey: 'ma_below' },
         { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
-        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
-        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -3255,25 +3262,12 @@ function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
 }
 
 function resolveStrategyComparisonAliases(strategyId, roleType) {
-    const aliases = [];
-    if (!strategyId) return aliases;
-    if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
-        const exitKey = `${strategyId}_exit`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
-            aliases.push(exitKey);
-        }
-    } else if (roleType === 'shortEntry' && !strategyId.startsWith('short_')) {
-        const shortKey = `short_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[shortKey]) {
-            aliases.push(shortKey);
-        }
-    } else if (roleType === 'shortExit' && !strategyId.startsWith('cover_')) {
-        const coverKey = `cover_${strategyId}`;
-        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[coverKey]) {
-            aliases.push(coverKey);
-        }
+    if (!strategyId) return [];
+    const aliases = strategyIdUtils.resolveStrategyAliases(strategyId, roleType);
+    if (Array.isArray(aliases)) {
+        return aliases;
     }
-    return aliases;
+    return [];
 }
 
 function collectStrategyOptionCatalog() {
@@ -4458,7 +4452,47 @@ function createProgressAnimator() {
         },
     };
 }
-function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
+function getStrategyParams(type) {
+    const strategySelectId = `${type}Strategy`;
+    const strategySelect = document.getElementById(strategySelectId);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
+        return {};
+    }
+    const rawKey = strategySelect.value;
+    const internalKey = strategyIdUtils.normaliseStrategyIdForRole(rawKey, type) || rawKey;
+    const descriptor = strategyDescriptions?.[internalKey] || strategyDescriptions?.[rawKey];
+    if (!descriptor?.defaultParams) {
+        return {};
+    }
+    const params = {};
+    for (const pName in descriptor.defaultParams) {
+        if (!Object.prototype.hasOwnProperty.call(descriptor.defaultParams, pName)) continue;
+        let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1);
+        if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
+        else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
+        else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
+        else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
+        else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY';
+        else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX';
+        else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod';
+        else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod';
+        else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod';
+        else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
+        else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
+        const inputId = `${type}${idSfx}`;
+        const inputEl = document.getElementById(inputId);
+        if (inputEl) {
+            params[pName] = inputEl.type === 'number'
+                ? (parseFloat(inputEl.value) || descriptor.defaultParams[pName])
+                : inputEl.value;
+        } else {
+            params[pName] = descriptor.defaultParams[pName];
+        }
+    }
+    return params;
+}
+
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';

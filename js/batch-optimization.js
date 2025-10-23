@@ -1,6 +1,13 @@
 // --- 批量策略優化功能 - v1.2.8 ---
 // Patch Tag: LB-BATCH-OPT-20260718G
 
+const strategyIdUtils = (typeof window !== 'undefined' && window.LB_STRATEGY_ID_UTILS) || {
+    LEGACY_STRATEGY_ID_MAP: { exit: {}, shortEntry: {}, shortExit: {} },
+    normaliseStrategyIdForRole: (id) => id,
+    resolveStrategyAliases: () => [],
+    migrateStrategySettings: (settings) => ({ settings, changed: false }),
+};
+
 const BATCH_STRATEGY_NAME_OVERRIDES = {
     // 出場策略映射
     'ma_cross_exit': 'ma_cross',
@@ -35,6 +42,21 @@ const BATCH_STRATEGY_NAME_OVERRIDES = {
     'cover_rsi_reversal': 'cover_rsi_reversal',
     'cover_williams_reversal': 'cover_williams_reversal'
 };
+['exit','shortEntry','shortExit'].forEach((role) => {
+    const mapping = strategyIdUtils.LEGACY_STRATEGY_ID_MAP?.[role];
+    if (!mapping) return;
+    Object.entries(mapping).forEach(([legacyId, canonicalId]) => {
+        if (!canonicalId) return;
+        if (canonicalId !== legacyId) {
+            BATCH_STRATEGY_NAME_OVERRIDES[legacyId] = canonicalId;
+        }
+        if (!BATCH_STRATEGY_NAME_OVERRIDES[canonicalId]) {
+            BATCH_STRATEGY_NAME_OVERRIDES[canonicalId] = canonicalId;
+        }
+    });
+});
+
+
 
 const BATCH_STRATEGY_NAME_MAP = (() => {
     const map = new Map(Object.entries(BATCH_STRATEGY_NAME_OVERRIDES));
