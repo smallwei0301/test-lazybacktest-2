@@ -1,3 +1,12 @@
+## 2026-09-16 — Patch LB-STRATEGY-ID-MIGRATION-20260916A
+- **Scope**: 策略 ID 正規化、舊資料轉換與批次優化對齊。
+- **Updates**:
+  - `index.html` 的做多出場、做空進場、回補出場選單改用註冊 ID，並載入 `js/strategy-id-migration.js`。
+  - 新增 `js/strategy-id-migration.js` 提供策略 ID 轉換、別名查詢與設定遷移工具，供前端與自動化測試共用。
+  - `js/main.js`/`js/backtest.js` 導入轉換表，用於預設值、儲存策略讀寫、績效摘要與驗證摘要；`js/batch-optimization.js` 映射表加入新 ID → 自身及舊 ID fallback。
+  - 新增 `tests/strategy-id-migration.test.js` 驗證舊／新策略設定與選單資料的轉換結果。
+- **Testing**: `npm run typecheck`; `node tests/strategy-id-migration.test.js`
+
 ## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
 - **Scope**: ANN 美股波動度特徵整合。
 - **Updates**:
