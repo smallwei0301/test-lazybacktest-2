@@ -1646,3 +1646,12 @@ NODE`
   - `js/batch-optimization.js` 新增批量策略 ID 正規化工具，處理舊結果與組合時自動轉換成新死亡交叉 ID，並統一交叉優化、局部微調輸出使用正規化後的策略鍵，偵錯版本更新為 `LB-BATCH-DEATHCROSS-20260916B`。
 - **Diagnostics**: 建議於本地匯入含 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 的批量結果並重新啟動優化，確認最佳參數與目標值不再為 0；另建立一組僅含多單進場的儲存策略，重新載入後檢查選單 value 與參數是否維持原始 ID 與預設值。
 - **Testing**: `npm run typecheck`
+
+## 2026-09-17 — Patch LB-BATCH-METRIC-20260916C
+- **Issue recap**: 批量優化在死亡交叉出場策略上仍出現最佳目標值為 0，缺乏日誌追蹤實際取得的績效欄位，導致難以判斷是指標遺失還是資料轉換失敗。
+- **Fix**:
+  - 新增 `js/batch-metric-utils.js` 將指標解析集中處理，統一支援直接欄位、`metrics`/`summary.metrics`、`metricLabel` 與 `__finalResult` 的數值並轉為數字。
+  - `js/batch-optimization.js` 導入新工具，於 `getMetricFromResult` 記錄 `metric-fallback`、`metric-missing`、`metric-zero-detected` 偵錯事件，並為死亡交叉組合保留追蹤上下文，確保最終回測結果可以正確取得指標。
+  - `index.html` 新增指標工具腳本載入順序，`package.json` 擴充 `npm test` 便於本地驗證，`log.md` 記錄版本碼 `LB-BATCH-METRIC-20260916C`。
+- **Diagnostics**: 建議於開發者 console 檢查批量優化偵錯面板，確認含死亡交叉策略的組合在 `metric-fallback` 事件會顯示來源、最終 `metric-zero-detected` 不再出現；若仍為 0，可依日誌回溯缺失欄位。
+- **Testing**: `npm test`、`npm run typecheck`

@@ -57,10 +57,16 @@ const BATCH_STRATEGY_NAME_MAP = (() => {
     return map;
 })();
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-DEATHCROSS-20260916B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-METRIC-20260916C';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
+
+const batchMetricUtils = (typeof window !== 'undefined' && window.BatchMetricUtils)
+    ? window.BatchMetricUtils
+    : (typeof BatchMetricUtils !== 'undefined' ? BatchMetricUtils : null);
+
+const DEATH_CROSS_EXIT_IDS = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
 function normaliseBatchStrategyId(role, strategyId) {
     if (!strategyId) {
@@ -2361,11 +2367,88 @@ function isBetterMetric(a, b, metric) {
 }
 
 // 取得 result 的目標指標值，若無則回傳 NaN
-function getMetricFromResult(result, metric) {
-    if (!result) return NaN;
-    const val = result[metric];
-    if (val === undefined || val === null || isNaN(val)) return NaN;
-    return val;
+function getMetricFromResult(result, metric, context = {}) {
+    if (!metric) {
+        return NaN;
+    }
+
+    const phase = context?.phase || 'metrics';
+    const buildDetail = (extra = {}) => {
+        const detail = {
+            metric,
+            stage: context?.stage || null,
+            combination: context?.combinationSummary || null,
+            result: context?.resultSummary || null,
+            attempts: extra.attempts || undefined,
+            source: extra.source || undefined,
+            rawValue: extra.rawValue || undefined,
+            value: extra.value || undefined,
+        };
+        if (!detail.combination && context?.combination) {
+            detail.combination = {
+                buyStrategy: context.combination.buyStrategy || null,
+                sellStrategy: context.combination.sellStrategy || null,
+            };
+        }
+        if (!detail.result && typeof summarizeResult === 'function' && result) {
+            detail.result = summarizeResult(result);
+        }
+        return detail;
+    };
+
+    if (batchMetricUtils && typeof batchMetricUtils.resolveMetric === 'function') {
+        const resolved = batchMetricUtils.resolveMetric(result, metric, {
+            onResolved(detail) {
+                if (detail && detail.source !== 'direct' && typeof recordBatchDebug === 'function') {
+                    recordBatchDebug('metric-fallback', {
+                        ...buildDetail(detail),
+                        attempts: detail.attempts,
+                    }, { phase, console: false });
+                }
+            },
+            onMissing(detail) {
+                if (typeof recordBatchDebug === 'function') {
+                    recordBatchDebug('metric-missing', {
+                        ...buildDetail(detail),
+                        attempts: detail?.attempts || [],
+                        snapshot: detail?.resultSnapshot || null,
+                    }, { phase, level: 'warn', consoleLevel: 'warn' });
+                }
+            }
+        });
+
+        if (Number.isFinite(resolved)) {
+            if (typeof recordBatchDebug === 'function'
+                && context?.combination
+                && DEATH_CROSS_EXIT_IDS.has(context.combination.sellStrategy)
+                && Math.abs(resolved) < 1e-6) {
+                recordBatchDebug('metric-zero-detected', buildDetail({ value: resolved }), { phase, console: false });
+            }
+            return resolved;
+        }
+
+        return resolved;
+    }
+
+    if (!result) {
+        return NaN;
+    }
+
+    const rawValue = result[metric];
+    let parsed = rawValue;
+    if (typeof rawValue === 'string') {
+        parsed = Number.parseFloat(rawValue);
+    }
+    if (Number.isFinite(parsed)) {
+        return parsed;
+    }
+
+    if (typeof recordBatchDebug === 'function') {
+        recordBatchDebug('metric-missing', buildDetail({
+            attempts: [{ source: 'direct', rawValue, parsed }],
+        }), { phase, level: 'warn', consoleLevel: 'warn' });
+    }
+    return NaN;
 }
 
 // 用來深度比較參數物件是否相等（簡單 JSON 比較）
@@ -2495,7 +2578,13 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
 
         // 最終驗證：執行完整回測確認結果
         const finalResult = await executeBacktestForCombination(currentCombo, options);
-        const finalMetric = getMetricFromResult(finalResult, config.targetMetric);
+        const finalMetric = getMetricFromResult(finalResult, config.targetMetric, {
+            phase: 'optimize',
+            stage: 'combo-final',
+            combination: currentCombo,
+            combinationSummary: summarizeCombination(currentCombo),
+            resultSummary: summarizeResult(finalResult),
+        });
         console.log(`[Batch Optimization] Final combination metric (${config.targetMetric}): ${finalMetric.toFixed(4)}`);
 
         currentCombo.__finalResult = finalResult || null;
