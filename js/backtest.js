@@ -121,6 +121,21 @@ function setVisibleStockData(data) {
 
 setVisibleStockData(visibleStockData);
 
+const strategyUtils =
+    (typeof window !== 'undefined' && window.lazybacktestStrategyUtils)
+        ? window.lazybacktestStrategyUtils
+        : {};
+const resolveStrategyConfigKey = typeof strategyUtils.resolveConfigKey === 'function'
+    ? strategyUtils.resolveConfigKey
+    : (type, key) => (key === null || key === undefined ? '' : String(key));
+const resolveStrategyDisplayLabel = typeof strategyUtils.resolveDisplayLabel === 'function'
+    ? strategyUtils.resolveDisplayLabel
+    : (id, fallback) => {
+        if (fallback) return fallback;
+        if (id === null || id === undefined) return '';
+        return String(id);
+    };
+
 function normaliseTextKey(value) {
     if (value === null || value === undefined) return '';
     const text = typeof value === 'string' ? value : String(value);
@@ -8659,24 +8674,8 @@ function updateStrategyParams(type) {
     }
     
     const strategyKey = strategySelect.value;
-    let internalKey = strategyKey;
-    
-    if (type === 'exit') {
-        if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(strategyKey)) {
-            internalKey = `${strategyKey}_exit`;
-        }
-    } else if (type === 'shortEntry') {
-        internalKey = strategyKey;
-        if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(strategyKey)) {
-            internalKey = `short_${strategyKey}`;
-        }
-    } else if (type === 'shortExit') {
-        internalKey = strategyKey;
-        if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(strategyKey)) {
-            internalKey = `cover_${strategyKey}`;
-        }
-    }
-    
+    const internalKey = resolveStrategyConfigKey(type, strategyKey);
+
     const config = strategyDescriptions[internalKey];
     paramsContainer.innerHTML = '';
     
@@ -8844,7 +8843,7 @@ function resetSettings() {
     document.querySelector('input[name="tradeTiming"][value="close"]').checked = true;
     document.getElementById("entryStrategy").value = "ma_cross";
     updateStrategyParams('entry');
-    document.getElementById("exitStrategy").value = "ma_cross";
+    document.getElementById("exitStrategy").value = "ma_cross_exit";
     updateStrategyParams('exit');
     const shortCheckbox = document.getElementById("enableShortSelling");
     const shortArea = document.getElementById("short-strategy-area");
@@ -9485,23 +9484,28 @@ function saveStrategy() {
     }
     
     // 獲取中文策略名稱
-    const entryStrategyName = strategyDescriptions[entryStrategy]?.name || entryStrategy;
-    
-    // 出場策略需要特殊處理以獲取正確的中文名稱
-    let exitStrategyName;
-    if (['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(exitStrategy)) {
-        const exitStrategyKey = exitStrategy + '_exit';
-        exitStrategyName = strategyDescriptions[exitStrategyKey]?.name || exitStrategy;
-    } else {
-        exitStrategyName = strategyDescriptions[exitStrategy]?.name || exitStrategy;
-    }
-    
+    const entryStrategyName = resolveStrategyDisplayLabel(entryStrategy, strategyDescriptions[entryStrategy]?.name || entryStrategy);
+
+    const exitStrategyKey = resolveStrategyConfigKey('exit', exitStrategy);
+    const exitStrategyName = resolveStrategyDisplayLabel(
+        exitStrategyKey,
+        strategyDescriptions[exitStrategyKey]?.name
+            || strategyDescriptions[exitStrategy]?.name
+            || exitStrategy,
+    );
+
     let defaultName = `${stockNo}_${entryStrategyName}_${exitStrategyName}`;
     if (enableShorting) {
         const shortEntryStrategy = document.getElementById('shortEntryStrategy').value;
         const shortExitStrategy = document.getElementById('shortExitStrategy').value;
-        const shortEntryStrategyName = strategyDescriptions[shortEntryStrategy]?.name || shortEntryStrategy;
-        const shortExitStrategyName = strategyDescriptions[shortExitStrategy]?.name || shortExitStrategy;
+        const shortEntryStrategyName = resolveStrategyDisplayLabel(
+            resolveStrategyConfigKey('shortEntry', shortEntryStrategy),
+            strategyDescriptions[shortEntryStrategy]?.name || shortEntryStrategy,
+        );
+        const shortExitStrategyName = resolveStrategyDisplayLabel(
+            resolveStrategyConfigKey('shortExit', shortExitStrategy),
+            strategyDescriptions[shortExitStrategy]?.name || shortExitStrategy,
+        );
         defaultName = `${stockNo}_${entryStrategyName}_${exitStrategyName}_${shortEntryStrategyName}_${shortExitStrategyName}`;
     }
     
@@ -9537,7 +9541,7 @@ function saveStrategy() {
         showSuccess(`策略 "${trimmedName}" 已儲存！`); 
     }
 }
-function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
+function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } const settings = strategyData.settings; const normalisedExitStrategy = resolveStrategyConfigKey('exit', settings.exitStrategy || 'ma_cross_exit'); settings.exitStrategy = normalisedExitStrategy || 'ma_cross_exit'; const normalisedShortEntryStrategy = resolveStrategyConfigKey('shortEntry', settings.shortEntryStrategy); if (normalisedShortEntryStrategy) { settings.shortEntryStrategy = normalisedShortEntryStrategy; } const normalisedShortExitStrategy = resolveStrategyConfigKey('shortExit', settings.shortExitStrategy); if (normalisedShortExitStrategy) { settings.shortExitStrategy = normalisedShortExitStrategy; } console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
         if (window.lazybacktestStagedEntry) {
             if (Array.isArray(settings.entryStages) && settings.entryStages.length > 0 && typeof window.lazybacktestStagedEntry.setValues === 'function') {
                 window.lazybacktestStagedEntry.setValues(settings.entryStages);

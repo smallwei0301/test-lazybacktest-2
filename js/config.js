@@ -56,9 +56,9 @@ const longEntryToCoverMap = {
 };
 
 const longExitToShortMap = {
-    'ma_cross': 'short_ma_cross', 'ma_below': 'short_ma_below', 'rsi_overbought': 'short_rsi_overbought',
-    'macd_cross': 'short_macd_cross', 'bollinger_reversal': 'short_bollinger_reversal',
-    'k_d_cross': 'short_k_d_cross', 'price_breakdown': 'short_price_breakdown',
+    'ma_cross_exit': 'short_ma_cross', 'ma_below': 'short_ma_below', 'rsi_overbought': 'short_rsi_overbought',
+    'macd_cross_exit': 'short_macd_cross', 'bollinger_reversal': 'short_bollinger_reversal',
+    'k_d_cross_exit': 'short_k_d_cross', 'price_breakdown': 'short_price_breakdown',
     'williams_overbought': 'short_williams_overbought',
     'turtle_stop_loss': 'short_turtle_stop_loss', 'trailing_stop': null, 'fixed_stop_loss': null
 };
@@ -67,3 +67,93 @@ const globalOptimizeTargets = {
     stopLoss: { label: '停損 (%)', range: { from: 1, to: 30, step: 0.5 } },
     takeProfit: { label: '停利 (%)', range: { from: 5, to: 100, step: 1 } }
 };
+
+// Patch Tag: LB-PLUGIN-VERIFIER-20260813B
+const STRATEGY_UTIL_VERSION = 'LB-PLUGIN-VERIFIER-20260813B';
+
+(function initLazybacktestStrategyUtils() {
+    const globalScope =
+        typeof window !== 'undefined'
+            ? window
+            : typeof self !== 'undefined'
+                ? self
+                : typeof globalThis !== 'undefined'
+                    ? globalThis
+                    : null;
+    if (!globalScope) {
+        return;
+    }
+
+    const existingUtils =
+        globalScope.lazybacktestStrategyUtils && typeof globalScope.lazybacktestStrategyUtils === 'object'
+            ? { ...globalScope.lazybacktestStrategyUtils }
+            : {};
+
+    function resolveStrategyConfigKey(type, rawKey) {
+        if (rawKey === null || rawKey === undefined) return '';
+        const key = String(rawKey).trim();
+        if (!key) return '';
+        if (strategyDescriptions?.[key]) {
+            return key;
+        }
+
+        const normalisedType = typeof type === 'string' ? type.toLowerCase() : '';
+
+        if (normalisedType === 'exit') {
+            const exitKey = key.endsWith('_exit') ? key : `${key}_exit`;
+            if (strategyDescriptions?.[exitKey]) {
+                return exitKey;
+            }
+        }
+
+        if (normalisedType === 'shortentry') {
+            const shortKey = key.startsWith('short_') ? key : `short_${key}`;
+            if (strategyDescriptions?.[shortKey]) {
+                return shortKey;
+            }
+        }
+
+        if (normalisedType === 'shortexit') {
+            const coverKey = key.startsWith('cover_') ? key : `cover_${key}`;
+            if (strategyDescriptions?.[coverKey]) {
+                return coverKey;
+            }
+        }
+
+        return key;
+    }
+
+    function resolveStrategyDisplayLabel(id, fallback) {
+        if (id === null || id === undefined) {
+            return fallback || '';
+        }
+        const key = String(id).trim();
+        if (!key) {
+            return fallback || '';
+        }
+        const descriptor = strategyDescriptions?.[key];
+        if (descriptor?.name) {
+            return descriptor.name;
+        }
+        try {
+            const registry = globalScope.StrategyPluginRegistry;
+            if (registry && typeof registry.getStrategyMetaById === 'function') {
+                const meta = registry.getStrategyMetaById(key);
+                if (meta?.label) {
+                    return meta.label;
+                }
+            }
+        } catch (error) {
+            if (typeof console !== 'undefined' && console.debug) {
+                console.debug('[StrategyUtils] 無法透過註冊表取得策略名稱', error);
+            }
+        }
+        return fallback || key;
+    }
+
+    existingUtils.resolveConfigKey = resolveStrategyConfigKey;
+    existingUtils.resolveDisplayLabel = resolveStrategyDisplayLabel;
+    existingUtils.version = STRATEGY_UTIL_VERSION;
+
+    globalScope.lazybacktestStrategyUtils = existingUtils;
+})();

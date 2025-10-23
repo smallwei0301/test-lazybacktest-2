@@ -59,6 +59,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const shortCheckbox = document.getElementById('enableShortSelling');
         const shortArea = document.getElementById('short-strategy-area');
 
+        const strategyUtils = (typeof window !== 'undefined' && window.lazybacktestStrategyUtils)
+            ? window.lazybacktestStrategyUtils
+            : {};
+        const resolveStrategyConfigKey = typeof strategyUtils.resolveConfigKey === 'function'
+            ? strategyUtils.resolveConfigKey
+            : (type, key) => (key === null || key === undefined ? '' : String(key));
+
         const copyParams = (sourceType, targetType) => {
             const sourceParams = getStrategyParams(sourceType);
             if (!sourceParams || Object.keys(sourceParams).length === 0) {
@@ -72,15 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const targetSelectElement = document.getElementById(`${targetType}Strategy`);
             const targetStrategyKey = targetSelectElement ? targetSelectElement.value : null;
-            let targetInternalKey = targetStrategyKey;
-
-            if (targetType === 'shortEntry') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_below', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `short_${targetStrategyKey}`;
-            } else if (targetType === 'shortExit') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_above', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `cover_${targetStrategyKey}`;
-            } else if (targetType === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(targetStrategyKey)) {
-                targetInternalKey = `${targetStrategyKey}_exit`;
-            }
+            const targetInternalKey = resolveStrategyConfigKey(targetType, targetStrategyKey);
             console.log(`[Param Copy] Attempting to copy from ${sourceType} to ${targetType} (InternalKey: ${targetInternalKey})`);
 
             for (const pName in sourceParams) {
@@ -91,12 +90,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 else if (targetInternalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod';
                 else if (targetInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod';
                 else if (targetInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod';
-                else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
-                else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
-                else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
-                else if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
-                else if ((internalKey === 'macd_cross_exit' || internalKey === 'macd_cross') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
-                else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
+                else if (targetInternalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
+                else if (targetInternalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
+                else if (targetInternalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
+                else if (targetInternalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
+                else if ((targetInternalKey === 'macd_cross_exit' || targetInternalKey === 'macd_cross') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
+                else if (targetInternalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
 
                 const targetId = `${targetType}${idSfx}`;
                 const targetInput = document.getElementById(targetId);
