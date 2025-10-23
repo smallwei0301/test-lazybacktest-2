@@ -1638,3 +1638,11 @@ NODE`
   - `js/batch-optimization.js` 的 `EXIT_STRATEGY_SELECT_MAP` 改為直接回傳新註冊 ID，保留舊 ID → 新 ID 的相容映射，並同步更新批量偵錯版本碼。
 - **Diagnostics**: 待於可連線 Proxy 的環境匯入含新死亡交叉策略的批量優化結果，確認選單能成功填入並持續到回測、滾動測試與批量報告流程。
 - **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-DEATHCROSS-METRIC-20260917A
+- **Issue recap**: 批量優化在含死亡交叉出場策略時，最佳化流程雖可執行，但最佳參數的目標值被記錄為 0，同時儲存策略時會把進場 `ma_cross` 錯誤正規化為 `ma_cross_exit`，導致載入後進場參數錯置。
+- **Fix**:
+  - `js/batch-optimization.js` 擴充 `getMetricFromResult`，遍歷 `metrics`、`summary` 等巢狀來源並辨識 `metric`/`value` 欄位，確保死亡交叉回測結果能回傳有效年化報酬；若最終指標為 NaN 則輸出警示，避免紀錄為 0。
+  - `js/backtest.js` 的儲存流程改用角色化正規化函式處理進場 ID，避免誤將 `ma_cross`、`macd_cross` 等長單進場策略轉成出場版 ID。
+- **Diagnostics**: 待於實機批量優化中選取 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等策略，確認最佳化摘要會顯示非 0 的年化報酬；另於儲存／載入策略後檢查進場選單仍為原本的黃金交叉策略。
+- **Testing**: `npm run typecheck`。

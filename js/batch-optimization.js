@@ -2281,10 +2281,55 @@ function isBetterMetric(a, b, metric) {
 
 // 取得 result 的目標指標值，若無則回傳 NaN
 function getMetricFromResult(result, metric) {
-    if (!result) return NaN;
-    const val = result[metric];
-    if (val === undefined || val === null || isNaN(val)) return NaN;
-    return val;
+    if (!result || !metric) return NaN;
+
+    const tryResolve = (container) => {
+        if (!container || typeof container !== 'object') {
+            return NaN;
+        }
+        const value = container[metric];
+        if (typeof value === 'number' && !Number.isNaN(value)) {
+            return value;
+        }
+        if (value && typeof value === 'object') {
+            if (typeof value.value === 'number' && !Number.isNaN(value.value)) {
+                return value.value;
+            }
+            if (typeof value.metric === 'number' && !Number.isNaN(value.metric)) {
+                return value.metric;
+            }
+        }
+        return NaN;
+    };
+
+    const direct = tryResolve(result);
+    if (!Number.isNaN(direct)) {
+        return direct;
+    }
+
+    const nestedSources = [
+        result.metrics,
+        result.summary,
+        result.performance,
+        result.snapshot,
+        result.overview,
+        result.bestResult,
+    ];
+
+    for (const candidate of nestedSources) {
+        const resolved = tryResolve(candidate);
+        if (!Number.isNaN(resolved)) {
+            return resolved;
+        }
+    }
+
+    if (typeof result.metric === 'number' && !Number.isNaN(result.metric)) {
+        if (!result.metricLabel || result.metricLabel === metric) {
+            return result.metric;
+        }
+    }
+
+    return NaN;
 }
 
 // 用來深度比較參數物件是否相等（簡單 JSON 比較）
@@ -2415,7 +2460,11 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
         // 最終驗證：執行完整回測確認結果
         const finalResult = await executeBacktestForCombination(currentCombo, options);
         const finalMetric = getMetricFromResult(finalResult, config.targetMetric);
-        console.log(`[Batch Optimization] Final combination metric (${config.targetMetric}): ${finalMetric.toFixed(4)}`);
+        if (Number.isFinite(finalMetric)) {
+            console.log(`[Batch Optimization] Final combination metric (${config.targetMetric}): ${finalMetric.toFixed(4)}`);
+        } else {
+            console.warn(`[Batch Optimization] Final combination metric (${config.targetMetric}) 無法取得有效數值，原始值:`, finalMetric);
+        }
 
         currentCombo.__finalResult = finalResult || null;
         currentCombo.__finalMetric = Number.isFinite(finalMetric) ? finalMetric : null;

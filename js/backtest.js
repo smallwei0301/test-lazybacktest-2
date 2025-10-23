@@ -9576,7 +9576,7 @@ function saveStrategy() {
     const exitSelect = document.getElementById('exitStrategy');
     const entryStrategyRaw = entrySelect?.value || '';
     const exitStrategyRaw = exitSelect?.value || '';
-    const entryStrategy = normaliseStrategyIdAny(entryStrategyRaw) || entryStrategyRaw;
+    const entryStrategy = normaliseStrategyIdForRole('entry', entryStrategyRaw) || entryStrategyRaw;
     const exitStrategy = normaliseStrategyIdForRole('exit', exitStrategyRaw) || exitStrategyRaw;
     const enableShorting = document.getElementById('enableShortSelling').checked;
     const startDate = document.getElementById('startDate').value;
