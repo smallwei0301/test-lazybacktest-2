@@ -1624,3 +1624,10 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-09-17 — Patch LB-EXIT-CROSS-SIGNAL-20260917A
+- **Issue recap**: 出場選單改用註冊 ID 後，`ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 在回測流程中無法比對到舊有的 `switch` 分支，導致實際模擬不會觸發死亡交叉訊號。
+- **Fix**:
+  - `js/worker.js` 將出場訊號判斷分支擴充為同時接受舊版與新版 ID，並補上 `k_d_cross_exit` 的指標欄位映射，確保回測、滾動測試、參數優化與批量優化皆能讀取正確的 KD/MACD 序列。
+- **Diagnostics**: 建議於實機分別以均線、MACD、KD 死亡交叉作為出場策略執行單次回測、滾動測試與批量優化，確認成交記錄內含出場訊號且 console 無錯誤。
+- **Testing**: `npm run typecheck`

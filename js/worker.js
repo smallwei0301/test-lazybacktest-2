@@ -7355,6 +7355,7 @@ const exitIndicatorBuilders = {
 };
 exitIndicatorBuilders.ma_cross_exit = exitIndicatorBuilders.ma_cross;
 exitIndicatorBuilders.macd_cross_exit = exitIndicatorBuilders.macd_cross;
+exitIndicatorBuilders.k_d_cross_exit = exitIndicatorBuilders.k_d_cross;
 
 const shortEntryIndicatorBuilders = {
   short_ma_cross(params, ctx) {
@@ -8621,6 +8622,7 @@ function runStrategy(data, params, options = {}) {
         let exitRuleResult = null;
         switch (exitStrategy) {
           case "ma_cross":
+          case "ma_cross_exit":
           case "ema_cross":
             {
               const pluginResult = callStrategyPlugin(
@@ -8703,6 +8705,7 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "macd_cross":
+          case "macd_cross_exit":
             const difX = indicators.macdExit[i],
               deaX = indicators.macdSignalExit[i],
               difPX = indicators.macdExit[i - 1],
@@ -8760,6 +8763,7 @@ function runStrategy(data, params, options = {}) {
               break;
             }
           case "k_d_cross":
+          case "k_d_cross_exit":
             {
               const pluginResult = callStrategyPlugin(
                 'k_d_cross_exit',
