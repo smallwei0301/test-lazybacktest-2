@@ -485,12 +485,12 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
     ],
     longExit: [
-        { strategyId: 'ma_cross', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_cross_exit', configKey: 'ma_cross_exit' },
         { strategyId: 'ma_below', configKey: 'ma_below' },
         { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
-        { strategyId: 'macd_cross', configKey: 'macd_cross_exit' },
+        { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
-        { strategyId: 'k_d_cross', configKey: 'k_d_cross_exit' },
+        { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -3257,6 +3257,13 @@ function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
 function resolveStrategyComparisonAliases(strategyId, roleType) {
     const aliases = [];
     if (!strategyId) return aliases;
+    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normalise === 'function') {
+        const migrated = window.LazyStrategyId.normalise(roleType, strategyId);
+        if (migrated && migrated !== strategyId) {
+            aliases.push(migrated);
+        }
+        return aliases;
+    }
     if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
         const exitKey = `${strategyId}_exit`;
         if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
@@ -3718,6 +3725,485 @@ function initStrategyRegistryVerification() {
     }
     renderStrategyRegistryVerification();
     renderStrategyRegistrySampleStatus();
+}
+
+const manualVerificationState = {
+    busy: false,
+    logEntries: [],
+};
+
+function setManualVerificationBusy(busy) {
+    manualVerificationState.busy = Boolean(busy);
+    const buttonIds = [
+        'manualVerifyExitDefaultsBtn',
+        'manualVerifySampleBacktestBtn',
+        'manualVerifyLegacyLoadBtn',
+        'manualVerifyBatchFlowBtn',
+    ];
+    buttonIds.forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = manualVerificationState.busy;
+        btn.classList.toggle('opacity-60', manualVerificationState.busy);
+        btn.classList.toggle('cursor-not-allowed', manualVerificationState.busy);
+    });
+}
+
+function updateManualVerificationStatus(message, tone = 'info') {
+    const statusEl = document.getElementById('manualVerificationStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    let color = 'var(--muted-foreground)';
+    if (tone === 'success') {
+        color = 'var(--primary)';
+    } else if (tone === 'error') {
+        color = 'var(--destructive, #b91c1c)';
+    } else if (tone === 'warning') {
+        color = 'var(--warning, #d97706)';
+    }
+    statusEl.style.color = color;
+}
+
+function renderManualVerificationLog() {
+    const logEl = document.getElementById('manualVerificationLog');
+    if (!logEl) return;
+    if (!manualVerificationState.logEntries || manualVerificationState.logEntries.length === 0) {
+        logEl.classList.add('hidden');
+        logEl.innerHTML = '';
+        return;
+    }
+    logEl.classList.remove('hidden');
+    logEl.innerHTML = manualVerificationState.logEntries
+        .map((entry) => {
+            const timestamp = entry.timestamp?.toLocaleString?.('zh-TW', { hour12: false })
+                || entry.timestamp?.toString?.()
+                || '';
+            const lines = Array.isArray(entry.lines) ? entry.lines : [];
+            const body = lines
+                .map((line) => `<li>${line}</li>`)
+                .join('');
+            return `
+                <div class="space-y-1 pb-2 last:pb-0 border-b last:border-b-0" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium">${entry.title}</span>
+                        <span class="text-[10px]" style="color: var(--muted-foreground);">${timestamp}</span>
+                    </div>
+                    <ul class="list-disc pl-5 space-y-1">${body}</ul>
+                </div>
+            `;
+        })
+        .join('');
+}
+
+function appendManualVerificationEntry(title, lines) {
+    const entry = {
+        title,
+        lines: Array.isArray(lines) ? lines : [String(lines ?? '')],
+        timestamp: new Date(),
+    };
+    manualVerificationState.logEntries.unshift(entry);
+    if (manualVerificationState.logEntries.length > 8) {
+        manualVerificationState.logEntries.length = 8;
+    }
+    renderManualVerificationLog();
+}
+
+function compareParamValues(expected, actual) {
+    if (Number.isFinite(expected) && Number.isFinite(actual)) {
+        return Math.abs(expected - actual) <= 1e-6;
+    }
+    return String(expected) === String(actual);
+}
+
+async function runManualVerificationExitDefaults() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查出場／回補預設參數…', 'info');
+
+    const testTargets = [
+        { type: 'exit', selectId: 'exitStrategy', label: '做多出場' },
+        { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
+    ];
+    const restoreMap = {};
+    const lines = [];
+    let hasFailure = false;
+
+    try {
+        for (const target of testTargets) {
+            const select = document.getElementById(target.selectId);
+            if (!select) {
+                lines.push(`❌ ${target.label}：找不到選單 #${target.selectId}`);
+                hasFailure = true;
+                continue;
+            }
+            restoreMap[target.selectId] = select.value;
+            const optionResults = [];
+            const options = Array.from(select.options || []);
+            for (const option of options) {
+                const rawValue = option.value;
+                if (!rawValue) continue;
+                select.value = rawValue;
+                if (typeof updateStrategyParams === 'function') {
+                    updateStrategyParams(target.type);
+                }
+                const normalizedId = normaliseStrategyIdForType(target.type, rawValue);
+                const descriptor = strategyDescriptions?.[normalizedId];
+                if (!descriptor?.defaultParams) {
+                    optionResults.push(`⚠️ ${normalizedId}：缺少預設參數設定`);
+                    continue;
+                }
+                const params = getStrategyParams(target.type);
+                const mismatches = [];
+                Object.entries(descriptor.defaultParams).forEach(([paramName, expected]) => {
+                    if (!compareParamValues(expected, params?.[paramName])) {
+                        mismatches.push(`${paramName}=${params?.[paramName] ?? '未填'} (期望 ${expected})`);
+                    }
+                });
+                if (mismatches.length > 0) {
+                    optionResults.push(`❌ ${normalizedId}：${mismatches.join('，')}`);
+                    hasFailure = true;
+                } else {
+                    optionResults.push(`✅ ${normalizedId} 預設參數一致`);
+                }
+            }
+            if (optionResults.length === 0) {
+                optionResults.push('⚠️ 無可檢查的選項');
+            }
+            lines.push(`${target.label}檢查：`);
+            lines.push(...optionResults);
+        }
+
+        const tone = hasFailure ? 'warning' : 'success';
+        const statusMessage = hasFailure
+            ? '出場／回補預設參數檢查完成（部分項目需留意）。'
+            : '出場／回補預設參數檢查完成。';
+        updateManualVerificationStatus(statusMessage, tone);
+        appendManualVerificationEntry('檢查出場預設', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('檢查出場預設', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        Object.entries(restoreMap).forEach(([selectId, value]) => {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            select.value = value;
+            const type = selectId.replace('Strategy', '');
+            if (typeof updateStrategyParams === 'function') {
+                updateStrategyParams(type);
+            }
+        });
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationSampleSummary() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在執行抽樣回測摘要檢查…', 'info');
+
+    try {
+        const params = getBacktestParams();
+        if (!params || typeof params !== 'object') {
+            throw new Error('無法取得目前回測參數');
+        }
+
+        const sampleParams = {
+            ...params,
+            entryParams: { ...params.entryParams },
+            exitParams: { ...params.exitParams },
+            shortEntryParams: { ...params.shortEntryParams },
+            shortExitParams: { ...params.shortExitParams },
+        };
+
+        const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+        const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+        if (longEntryCandidate) {
+            sampleParams.entryStrategy = longEntryCandidate.strategyId;
+            sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+        }
+        if (longExitCandidate) {
+            sampleParams.exitStrategy = longExitCandidate.strategyId;
+            sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+        }
+
+        const enableShorting = Math.random() < 0.75;
+        sampleParams.enableShorting = enableShorting;
+        let shortEntryCandidate = null;
+        let shortExitCandidate = null;
+        if (enableShorting) {
+            shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+            shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+            if (shortEntryCandidate) {
+                sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+                sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+            } else {
+                sampleParams.shortEntryStrategy = null;
+                sampleParams.shortEntryParams = {};
+            }
+            if (shortExitCandidate) {
+                sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+                sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+            } else {
+                sampleParams.shortExitStrategy = null;
+                sampleParams.shortExitParams = {};
+            }
+        } else {
+            sampleParams.shortEntryStrategy = null;
+            sampleParams.shortExitStrategy = null;
+            sampleParams.shortEntryParams = {};
+            sampleParams.shortExitParams = {};
+        }
+
+        const selectionSummary = buildStrategySelectionSummary({
+            longEntry: longEntryCandidate,
+            longExit: longExitCandidate,
+            shortEntry: enableShorting ? shortEntryCandidate : null,
+            shortExit: enableShorting ? shortExitCandidate : null,
+            enableShorting,
+        }) || '未擷取摘要';
+
+        const summaryLines = [`摘要：${selectionSummary}`];
+        const mismatches = [];
+        const candidates = [
+            { role: '做多進場', candidate: longEntryCandidate },
+            { role: '做多出場', candidate: longExitCandidate },
+            { role: '做空進場', candidate: shortEntryCandidate },
+            { role: '回補出場', candidate: shortExitCandidate },
+        ];
+        candidates.forEach(({ role, candidate }) => {
+            if (!candidate) return;
+            const descriptor = strategyDescriptions?.[candidate.strategyId];
+            const label = resolveStrategyLabelFromConfigKey(candidate.configKey, candidate.strategyId);
+            if (!descriptor) {
+                mismatches.push(`${role}：找不到 ${candidate.strategyId} 的說明`);
+            } else if (descriptor.name !== label) {
+                mismatches.push(`${role}：名稱不符 (${descriptor.name} ≠ ${label})`);
+            }
+            if (candidate.configKey !== candidate.strategyId) {
+                mismatches.push(`${role}：configKey (${candidate.configKey}) 與策略 ID (${candidate.strategyId}) 未同步`);
+            }
+        });
+
+        if (mismatches.length > 0) {
+            summaryLines.push(...mismatches.map((msg) => `❌ ${msg}`));
+        } else {
+            summaryLines.push('✅ 摘要名稱與策略 ID 已對齊');
+        }
+
+        if (window.BacktestRunner && typeof window.BacktestRunner.run === 'function') {
+            try {
+                await window.BacktestRunner.run(sampleParams);
+                summaryLines.push('✅ 抽樣回測執行成功');
+            } catch (runError) {
+                const message = runError && runError.message ? runError.message : String(runError);
+                summaryLines.push(`⚠️ 抽樣回測未完成：${message}`);
+            }
+        } else {
+            summaryLines.push('⚠️ BacktestRunner 未載入，僅檢查摘要對齊');
+        }
+
+        const tone = mismatches.length === 0 ? 'success' : 'warning';
+        updateManualVerificationStatus('抽樣回測摘要檢查完成。', tone);
+        appendManualVerificationEntry('抽樣回測摘要', summaryLines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`抽樣回測摘要檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('抽樣回測摘要', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationLegacyLoad() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在驗證舊版策略載入…', 'info');
+
+    const newStrategyName = `__manual_new_${Date.now()}__`;
+    const legacyStrategyName = `__manual_legacy_${Date.now()}__`;
+    const cleanupNames = [newStrategyName, legacyStrategyName];
+    const lines = [];
+
+    try {
+        const baseSettings = getBacktestParams();
+        if (!baseSettings || typeof baseSettings !== 'object') {
+            throw new Error('無法擷取當前回測設定');
+        }
+
+        const strategies = getSavedStrategies();
+        const metricsVersion = typeof STRATEGY_COMPARISON_VERSION !== 'undefined' ? STRATEGY_COMPARISON_VERSION : 'manual';
+
+        strategies[newStrategyName] = {
+            settings: JSON.parse(JSON.stringify(baseSettings)),
+            metrics: null,
+            metricsVersion,
+        };
+
+        const legacySettings = JSON.parse(JSON.stringify(baseSettings));
+        legacySettings.exitStrategy = 'ma_cross';
+        if (legacySettings.shortExitStrategy) {
+            legacySettings.shortExitStrategy = 'ma_cross';
+        }
+        strategies[legacyStrategyName] = {
+            settings: legacySettings,
+            metrics: null,
+            metricsVersion,
+        };
+
+        localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+        populateSavedStrategiesDropdown();
+
+        const selectElement = document.getElementById('loadStrategySelect');
+        if (!selectElement) {
+            throw new Error('找不到策略載入選單');
+        }
+
+        selectElement.value = legacyStrategyName;
+        loadStrategy();
+
+        const exitSelect = document.getElementById('exitStrategy');
+        const shortExitSelect = document.getElementById('shortExitStrategy');
+        const normalizedExit = exitSelect ? normaliseStrategyIdForType('exit', exitSelect.value) : null;
+        const normalizedShortExit = shortExitSelect ? normaliseStrategyIdForType('shortExit', shortExitSelect.value) : null;
+
+        const paramsAfterLoad = getBacktestParams();
+        const expectedExit = normaliseStrategyIdForType('exit', 'ma_cross');
+        const expectedShortExit = normaliseStrategyIdForType('shortExit', 'ma_cross');
+
+        const exitPass = normalizedExit === expectedExit && paramsAfterLoad.exitStrategy === expectedExit;
+        const shortExitPass = (!paramsAfterLoad.enableShorting)
+            || (normalizedShortExit === expectedShortExit && paramsAfterLoad.shortExitStrategy === expectedShortExit);
+
+        lines.push(exitPass
+            ? `✅ 做多出場載入為 ${normalizedExit}`
+            : `❌ 做多出場載入異常：${normalizedExit} (期望 ${expectedExit})`);
+
+        if (paramsAfterLoad.enableShorting) {
+            lines.push(shortExitPass
+                ? `✅ 回補出場載入為 ${normalizedShortExit}`
+                : `❌ 回補出場載入異常：${normalizedShortExit} (期望 ${expectedShortExit})`);
+        } else {
+            lines.push('⚠️ 當前設定未啟用做空，僅檢查多單出場。');
+        }
+
+        const tone = exitPass && shortExitPass ? 'success' : 'warning';
+        updateManualVerificationStatus('舊版策略載入檢查完成。', tone);
+        appendManualVerificationEntry('載入舊版策略', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`舊版策略載入檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('載入舊版策略', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        try {
+            const strategies = getSavedStrategies();
+            let mutated = false;
+            cleanupNames.forEach((name) => {
+                if (strategies && strategies[name]) {
+                    delete strategies[name];
+                    mutated = true;
+                }
+            });
+            if (mutated) {
+                localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+                populateSavedStrategiesDropdown();
+            }
+        } catch (cleanupError) {
+            console.warn('[Manual Verification] 清除測試策略失敗：', cleanupError);
+        }
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationBatchFlow() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查批量優化／滾動測試映射…', 'info');
+
+    const lines = [];
+    let hasFailure = false;
+
+    try {
+        const resolverAvailable = typeof resolveWorkerStrategyName === 'function';
+        if (!resolverAvailable) {
+            lines.push('⚠️ 找不到批量優化映射函式 resolveWorkerStrategyName。');
+        }
+
+        const batchTests = [
+            { label: '新出場 ID', input: 'ma_cross_exit', expected: 'ma_cross_exit' },
+            { label: '舊出場 ID', input: 'ma_cross', expected: normaliseStrategyIdForType('exit', 'ma_cross') },
+            { label: '新回補 ID', input: 'cover_macd_cross', expected: 'cover_macd_cross' },
+            { label: '做空新 ID', input: 'short_k_d_cross', expected: 'short_k_d_cross' },
+        ];
+
+        if (resolverAvailable) {
+            batchTests.forEach((test) => {
+                const resolved = resolveWorkerStrategyName(test.input);
+                if (resolved === test.expected) {
+                    lines.push(`✅ ${test.label}：${test.input} → ${resolved}`);
+                } else {
+                    hasFailure = true;
+                    lines.push(`❌ ${test.label}：${test.input} → ${resolved} (期望 ${test.expected})`);
+                }
+            });
+        }
+
+        const aliasTests = [
+            { label: '舊做多出場 ID', role: 'exit', input: 'ma_cross', expected: normaliseStrategyIdForType('exit', 'ma_cross') },
+            { label: '舊回補 ID', role: 'shortExit', input: 'ma_cross', expected: normaliseStrategyIdForType('shortExit', 'ma_cross') },
+        ];
+        aliasTests.forEach((test) => {
+            const migrated = normaliseStrategyIdForType(test.role, test.input);
+            if (migrated === test.expected) {
+                lines.push(`✅ ${test.label} 轉為 ${migrated}`);
+            } else {
+                hasFailure = true;
+                lines.push(`❌ ${test.label} 轉換失敗：${migrated} (期望 ${test.expected})`);
+            }
+        });
+
+        const tone = hasFailure ? 'warning' : 'success';
+        updateManualVerificationStatus('批量優化／滾動測試映射檢查完成。', tone);
+        appendManualVerificationEntry('批量／滾動映射', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`批量／滾動檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('批量／滾動映射', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
+function initManualVerificationTools() {
+    const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
+    const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
+    const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
+    const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+        return;
+    }
+
+    if (exitBtn) {
+        exitBtn.addEventListener('click', () => {
+            runManualVerificationExitDefaults();
+        });
+    }
+    if (sampleBtn) {
+        sampleBtn.addEventListener('click', () => {
+            runManualVerificationSampleSummary();
+        });
+    }
+    if (legacyBtn) {
+        legacyBtn.addEventListener('click', () => {
+            runManualVerificationLegacyLoad();
+        });
+    }
+    if (batchBtn) {
+        batchBtn.addEventListener('click', () => {
+            runManualVerificationBatchFlow();
+        });
+    }
 }
 
 function initDeveloperAreaToggle() {
@@ -4458,7 +4944,177 @@ function createProgressAnimator() {
         },
     };
 }
-function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
+function normaliseStrategyIdForType(type, strategyKey) {
+    if (!strategyKey) {
+        return strategyKey;
+    }
+    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normalise === 'function') {
+        return window.LazyStrategyId.normalise(type, strategyKey);
+    }
+    if (type === 'exit' && ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(strategyKey)) {
+        return `${strategyKey}_exit`;
+    }
+    if (type === 'shortEntry' && !strategyKey.startsWith('short_')) {
+        return `short_${strategyKey}`;
+    }
+    if (type === 'shortExit' && !strategyKey.startsWith('cover_')) {
+        return `cover_${strategyKey}`;
+    }
+    return strategyKey;
+}
+
+function ensureSelectUsesNormalizedValue(type, selectElement) {
+    if (!selectElement) {
+        return { rawKey: null, normalizedKey: null };
+    }
+    const rawKey = selectElement.value;
+    const normalizedKey = normaliseStrategyIdForType(type, rawKey);
+    if (normalizedKey && normalizedKey !== rawKey) {
+        const hasOption = Array.from(selectElement.options || []).some((option) => option.value === normalizedKey);
+        if (hasOption) {
+            selectElement.value = normalizedKey;
+        }
+    }
+    return { rawKey, normalizedKey };
+}
+
+function resolveStrategyParamPresentation(type, strategyId, paramName) {
+    let label = paramName;
+    let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
+
+    if (strategyId === 'k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdX') {
+            label = 'D值上限(X)';
+            idSuffix = 'KdThresholdX';
+        }
+    } else if (strategyId === 'k_d_cross_exit') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdY') {
+            label = 'D值下限(Y)';
+            idSuffix = 'KdThresholdY';
+        }
+    } else if (strategyId === 'turtle_stop_loss' && paramName === 'stopLossPeriod') {
+        label = '停損週期';
+        idSuffix = 'StopLossPeriod';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'signalPeriod') {
+        label = 'DEA週期(x)';
+        idSuffix = 'SignalPeriod';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'shortPeriod') {
+        label = 'DI短EMA(n)';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'longPeriod') {
+        label = 'DI長EMA(m)';
+    } else if (strategyId === 'short_k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdY') {
+            label = 'D值下限(Y)';
+            idSuffix = 'ShortKdThresholdY';
+        }
+    } else if (strategyId === 'cover_k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdX') {
+            label = 'D值上限(X)';
+            idSuffix = 'CoverKdThresholdX';
+        }
+    } else if (strategyId === 'short_macd_cross') {
+        if (paramName === 'shortPeriod') {
+            label = 'DI短EMA(n)';
+        } else if (paramName === 'longPeriod') {
+            label = 'DI長EMA(m)';
+        } else if (paramName === 'signalPeriod') {
+            label = 'DEA週期(x)';
+            idSuffix = 'ShortSignalPeriod';
+        }
+    } else if (strategyId === 'cover_macd_cross') {
+        if (paramName === 'shortPeriod') {
+            label = 'DI短EMA(n)';
+        } else if (paramName === 'longPeriod') {
+            label = 'DI長EMA(m)';
+        } else if (paramName === 'signalPeriod') {
+            label = 'DEA週期(x)';
+            idSuffix = 'CoverSignalPeriod';
+        }
+    } else if (strategyId === 'short_turtle_stop_loss' && paramName === 'stopLossPeriod') {
+        label = '觀察週期';
+        idSuffix = 'ShortStopLossPeriod';
+    } else if (strategyId === 'cover_turtle_breakout' && paramName === 'breakoutPeriod') {
+        label = '突破週期';
+        idSuffix = 'CoverBreakoutPeriod';
+    } else if (strategyId === 'cover_trailing_stop' && paramName === 'percentage') {
+        label = '百分比(%)';
+        idSuffix = 'CoverTrailingStopPercentage';
+    } else {
+        const baseKey = strategyId.replace('short_', '').replace('cover_', '').replace('_exit', '');
+        if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
+            if (paramName === 'shortPeriod') {
+                label = '短期SMA';
+            } else if (paramName === 'longPeriod') {
+                label = '長期SMA';
+            }
+        } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
+            if (paramName === 'period') {
+                label = 'SMA週期';
+            }
+        } else if (paramName === 'period') {
+            label = '週期';
+        } else if (paramName === 'threshold') {
+            label = '閾值';
+        } else if (paramName === 'signalPeriod') {
+            label = '信號週期';
+        } else if (paramName === 'deviations') {
+            label = '標準差';
+        } else if (paramName === 'multiplier') {
+            label = '倍數';
+        } else if (paramName === 'breakoutPeriod') {
+            label = '突破週期';
+        }
+    }
+
+    return {
+        label,
+        inputId: `${type}${idSuffix}`,
+    };
+}
+
+function getStrategyParams(type) {
+    const strategySelectId = `${type}Strategy`;
+    const strategySelect = document.getElementById(strategySelectId);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
+        return {};
+    }
+
+    const { normalizedKey } = ensureSelectUsesNormalizedValue(type, strategySelect);
+    const strategyId = normalizedKey || strategySelect.value;
+    const descriptor = strategyDescriptions?.[strategyId];
+    if (!descriptor?.defaultParams) {
+        return {};
+    }
+
+    const params = {};
+    Object.entries(descriptor.defaultParams).forEach(([paramName, defaultValue]) => {
+        const { inputId } = resolveStrategyParamPresentation(type, strategyId, paramName);
+        const input = document.getElementById(inputId);
+        if (!input) {
+            params[paramName] = defaultValue;
+            return;
+        }
+        if (input.type === 'number') {
+            const parsed = input.value === '' ? NaN : Number(input.value);
+            params[paramName] = Number.isFinite(parsed) ? parsed : defaultValue;
+        } else if (input.type === 'checkbox') {
+            params[paramName] = Boolean(input.checked);
+        } else {
+            params[paramName] = input.value !== '' ? input.value : defaultValue;
+        }
+    });
+
+    return params;
+}
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -4488,7 +5144,9 @@ function getBacktestParams() {
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
-    const exitStrategy = document.getElementById('exitStrategy')?.value;
+    const exitSelect = document.getElementById('exitStrategy');
+    const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
+    const exitStrategy = normalizedExit || exitSelect?.value || null;
     const entryParams = getStrategyParams('entry');
     const exitParams = getStrategyParams('exit');
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
@@ -4498,8 +5156,12 @@ function getBacktestParams() {
     let shortEntryParams = {};
     let shortExitParams = {};
     if (enableShorting) {
-        shortEntryStrategy = document.getElementById('shortEntryStrategy')?.value;
-        shortExitStrategy = document.getElementById('shortExitStrategy')?.value;
+        const shortEntrySelect = document.getElementById('shortEntryStrategy');
+        const shortExitSelect = document.getElementById('shortExitStrategy');
+        const { normalizedKey: normalizedShortEntry } = ensureSelectUsesNormalizedValue('shortEntry', shortEntrySelect);
+        const { normalizedKey: normalizedShortExit } = ensureSelectUsesNormalizedValue('shortExit', shortExitSelect);
+        shortEntryStrategy = normalizedShortEntry || shortEntrySelect?.value || null;
+        shortExitStrategy = normalizedShortExit || shortExitSelect?.value || null;
         shortEntryParams = getStrategyParams('shortEntry');
         shortExitParams = getStrategyParams('shortExit');
     }
@@ -4996,6 +5658,7 @@ document.addEventListener('DOMContentLoaded', function() {
         initDeveloperAreaToggle();
         initBatchDebugLogPanel();
         initStrategyRegistryVerification();
+        initManualVerificationTools();
 
         // 初始化頁籤功能
         initTabs();

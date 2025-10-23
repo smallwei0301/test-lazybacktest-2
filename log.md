@@ -1,3 +1,17 @@
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
+- **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
+- **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
+- **Testing**: `npm run typecheck`（容器環境執行，確認策略 ID 正規化表與載入流程未觸發型別錯誤）。
+
+## 2026-09-15 — Patch LB-STRATEGY-ID-20260915A
+- **Scope**: 出場策略 ID 正規化與手動驗證工具。
+- **Updates**:
+  - `index.html` 做多/回補選單改用註冊 ID，並於開發者區域新增四項手動驗證按鈕（預設參數檢查、抽樣回測摘要、舊版策略載入、批量/滾動映射）。
+  - `js/config.js` 建立策略 ID 遷移表與全域正規化工具，供主流程、儲存載入與批量優化共用。
+  - `js/main.js`、`js/backtest.js` 調整策略參數擷取、儲存/載入與績效摘要邏輯，將舊 ID 自動轉換為註冊 ID 並更新預設檔名。
+  - `js/batch-optimization.js` 重新整理策略映射表，確保新舊 ID 均指向對應的註冊 ID。
+- **Testing**: `npm run typecheck`；手動驗證工具待部署環境逐項執行確認。
+
 ## 2026-08-01 — Patch LB-PLUGIN-REGISTRY-20250712B
 - **Scope**: 策略註冊懶載入修復與手動驗證入口。
 - **Updates**:
@@ -1610,3 +1624,34 @@ NODE`
   - 更新抽樣回測流程，於執行期間與完成後顯示本次抽樣的多空進出場策略名稱，便於開發者快速重現回測內容。
 - **Diagnostics**: 於本地手動觸發驗證與抽樣程式，確認摘要會列出策略總數、差異對照，以及抽樣回測狀態訊息包含策略清單。
 - **Testing**: `npm run typecheck`（確保前端腳本維持靜態型別檢查通過）。
+
+## 2026-09-16 — Patch LB-EXIT-DEATHCROSS-20260916A
+- **Issue recap**: 策略選單改用註冊 ID 後，均線／MACD／KD 等死亡交叉出場策略在回測中不再觸發賣出訊號，導致長單無法平倉並影響滾動測試、批量優化等流程。
+- **Fix**:
+  - `js/worker.js` 的出場判斷改為同時接受 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等新 ID，並針對 KD 插件保留舊 ID 時的向後相容處理。
+- **Diagnostics**: 需於可連線 Proxy 的環境實際執行單次回測、滾動測試、參數優化與批量優化，檢查含死亡交叉的策略在結果中會輸出正常的出場訊號與成交記錄。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-EXITSELECT-20260916A
+- **Issue recap**: 批量優化載入包含新死亡交叉 ID（如 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit`）的結果時，因對照表仍回填舊選單值而找不到對應選項，導致流程中斷。
+- **Fix**:
+  - `js/batch-optimization.js` 的 `EXIT_STRATEGY_SELECT_MAP` 改為直接回傳新註冊 ID，保留舊 ID → 新 ID 的相容映射，並同步更新批量偵錯版本碼。
+- **Diagnostics**: 待於可連線 Proxy 的環境匯入含新死亡交叉策略的批量優化結果，確認選單能成功填入並持續到回測、滾動測試與批量報告流程。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-17 — Patch LB-BATCH-DEATHCROSS-20260916B
+- **Issue recap**: 儲存策略時多單進場會被誤轉成死亡交叉 ID，舊版批量優化結果也因仍使用舊出場 ID，導致新流程只得到目標值 0 無法產出最佳參數。
+- **Fix**:
+  - `js/backtest.js` 調整策略 ID 正規化，保存設定與績效摘要時先以角色提示比對描述，避免多單進場被誤轉換成出場 ID，同時讓顯示名稱能對應舊資料與新註冊表。
+  - `js/batch-optimization.js` 新增批量策略 ID 正規化工具，處理舊結果與組合時自動轉換成新死亡交叉 ID，並統一交叉優化、局部微調輸出使用正規化後的策略鍵，偵錯版本更新為 `LB-BATCH-DEATHCROSS-20260916B`。
+- **Diagnostics**: 建議於本地匯入含 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 的批量結果並重新啟動優化，確認最佳參數與目標值不再為 0；另建立一組僅含多單進場的儲存策略，重新載入後檢查選單 value 與參數是否維持原始 ID 與預設值。
+- **Testing**: `npm run typecheck`
+
+## 2026-09-17 — Patch LB-BATCH-DEATHCROSS-20260916C / LB-STRATEGY-ID-ALIAS-20260917A
+- **Issue recap**: 批量優化載入含死亡交叉策略的舊資料時，進場策略仍保留 `_exit` 後綴導致無法產生交易，最佳目標值長期維持 0，且缺乏偵錯日誌可追蹤異常組合。
+- **Fix**:
+  - 新增 `js/strategy-id-alias.js` 與 `LazyStrategyIdHelper`，根據角色自動去除或補齊 `_exit`、`short_`、`cover_` 前後綴，並支援做空／回補策略的互換。
+  - `js/backtest.js`、`js/batch-optimization.js` 接入上述工具後再進行註冊查詢，確保多單進場不會被誤轉換為出場插件，同步在批量流程記錄角色別名的應用。
+  - 批量偵錯版本更新為 `LB-BATCH-DEATHCROSS-20260916C`，並於迭代完成時輸出 `final-metric-suspect` 事件，持續追蹤目標值為 0 或非數值的策略組合。
+- **Diagnostics**: 待可連線環境匯入舊版儲存策略與批量結果，確認多單進場恢復原始 ID，並於批量偵錯日誌看到新的 `strategy-role-alias`、`final-metric-suspect` 訊息能對應到實際的轉換與目標值異常。
+- **Testing**: `node tests/strategy-id-alias.test.js`、`npm run typecheck`
