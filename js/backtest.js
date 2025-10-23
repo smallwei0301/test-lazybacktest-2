@@ -83,6 +83,7 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+let lastFetchSettings = null;
 
 const ensureAIBridge = () => {
     if (typeof window === 'undefined') return null;
@@ -97,6 +98,12 @@ function setVisibleStockData(data) {
     const bridge = ensureAIBridge();
     if (bridge) {
         bridge.getVisibleStockData = () => (Array.isArray(visibleStockData) ? [...visibleStockData] : []);
+        bridge.getLatestFetchSettings = () => (lastFetchSettings ? { ...lastFetchSettings } : null);
+        bridge.getActiveMarket = () => {
+            if (lastFetchSettings?.market) return lastFetchSettings.market;
+            if (lastFetchSettings?.marketType) return lastFetchSettings.marketType;
+            return null;
+        };
         if (typeof bridge.handleVisibleDataUpdate === 'function') {
             try {
                 bridge.handleVisibleDataUpdate(visibleStockData);

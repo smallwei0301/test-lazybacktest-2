@@ -27,8 +27,8 @@ const ANN_DEFAULT_SEED = 1337;
 const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
 const ANN_META_MESSAGE = 'ANN_META';
 const ANN_REPRO_VERSION = 'anns_v1';
-const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260210A';
-const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260210A';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-VIX-20260915A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260915A';
 const LSTM_DEFAULT_SEED = 7331;
 const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
 const LSTM_META_MESSAGE = 'LSTM_META';
@@ -101,6 +101,9 @@ const ANN_FEATURE_NAMES = [
   'CCI20',
   'WilliamsR14',
 ];
+const ANN_MARKET_FEATURES = Object.freeze({
+  US_VIX: 'VIXClose',
+});
 
 function normalizeClassificationMode(mode) {
   return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
@@ -1303,12 +1306,15 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
         .filter((row) => row && typeof row.date === 'string')
         .map((row) => {
           const close = annResolveClose(row);
+          const vixCandidate = Number(row?.vixClose);
+          const vixClose = Number.isFinite(vixCandidate) ? vixCandidate : null;
           return {
             date: row.date,
             close,
             open: annResolveOpen(row, close),
             high: annResolveHigh(row, close),
             low: annResolveLow(row, close),
+            vixClose,
           };
         })
         .filter((row) => Number.isFinite(row.close) && row.close > 0 && Number.isFinite(row.high) && Number.isFinite(row.low))
@@ -1318,8 +1324,45 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
   const close = parsed.map((row) => row.close);
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
+  const vixRaw = parsed.map((row) => {
+    const value = Number(row.vixClose);
+    return Number.isFinite(value) ? value : NaN;
+  });
+  const hasVixFeature = vixRaw.some((value) => Number.isFinite(value));
+  const vixSeries = hasVixFeature ? vixRaw.slice() : null;
+  if (hasVixFeature && vixSeries) {
+    let firstFiniteIndex = -1;
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      if (Number.isFinite(vixSeries[i])) {
+        firstFiniteIndex = i;
+        break;
+      }
+    }
+    if (firstFiniteIndex >= 0) {
+      const firstValue = vixSeries[firstFiniteIndex];
+      for (let i = 0; i < firstFiniteIndex; i += 1) {
+        vixSeries[i] = firstValue;
+      }
+      let lastValue = firstValue;
+      for (let i = firstFiniteIndex; i < vixSeries.length; i += 1) {
+        const current = Number(vixSeries[i]);
+        if (Number.isFinite(current)) {
+          lastValue = current;
+          vixSeries[i] = current;
+        } else if (Number.isFinite(lastValue)) {
+          vixSeries[i] = lastValue;
+        } else {
+          vixSeries[i] = firstValue;
+        }
+      }
+    }
+  }
 
-  const indicatorStats = ANN_FEATURE_NAMES.map((name) => ({
+  const featureNames = hasVixFeature
+    ? [...ANN_FEATURE_NAMES, ANN_MARKET_FEATURES.US_VIX]
+    : [...ANN_FEATURE_NAMES];
+
+  const indicatorStats = featureNames.map((name) => ({
     name,
     totalSamples: 0,
     finiteSamples: 0,
@@ -1364,6 +1407,10 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
       cci[i],
       wr[i],
     ];
+    if (hasVixFeature && Array.isArray(vixSeries)) {
+      const vixValue = Number(vixSeries[i]);
+      features.push(Number.isFinite(vixValue) ? vixValue : NaN);
+    }
     for (let f = 0; f < features.length; f += 1) {
       const stat = indicatorStats[f];
       if (!stat) continue;
@@ -1489,6 +1536,7 @@ function annPrepareDataset(rows, volatilityOverrides = DEFAULT_VOLATILITY_THRESH
     indicatorDiagnostics,
     classDistribution,
     totalParsedRows: parsed.length,
+    featureNames,
   };
 }
 
@@ -1988,7 +2036,13 @@ async function handleAITrainANNMessage(message) {
         indicatorDiagnostics: Array.isArray(prepared.indicatorDiagnostics)
           ? prepared.indicatorDiagnostics.map((entry) => ({ ...entry }))
           : [],
+        featureNames: Array.isArray(prepared.featureNames) && prepared.featureNames.length > 0
+          ? prepared.featureNames.slice()
+          : ANN_FEATURE_NAMES.slice(),
       };
+      const featureOrder = datasetDiagnostics.featureNames && datasetDiagnostics.featureNames.length > 0
+        ? datasetDiagnostics.featureNames.slice()
+        : ANN_FEATURE_NAMES.slice();
       const performanceDiagnostics = {
         totalPredictions: actualLabels.length,
         positivePredictions,
@@ -2122,7 +2176,7 @@ async function handleAITrainANNMessage(message) {
         lookback: Number.isFinite(options.lookback) ? options.lookback : null,
         mean,
         std,
-        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14'],
+        featureOrder,
         totalSamples,
         trainSamples: split.trainCount,
         testSamples: split.Xte.length,
