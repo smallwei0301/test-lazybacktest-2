@@ -13,6 +13,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-ADJ-NETLIFY-20250913A
 
 // 全局變量
 let stockChart = null;
@@ -1164,14 +1165,18 @@ function getDateRangeFromUI() {
 function getTesterSourceConfigs(market, adjusted, splitEnabled) {
     if (adjusted) {
         const netlifyDescription = splitEnabled
-            ? 'TWSE/FinMind 原始 + FinMind 配息 + 股票拆分'
-            : 'TWSE/FinMind 原始 + FinMind 配息';
+            ? 'TWSE/FinMind 原始行情 + FinMind 配息 + 股票拆分'
+            : 'TWSE/FinMind 原始行情 + FinMind 配息';
         return [
-            { id: 'yahoo', label: 'Yahoo 還原價', description: '主來源 (還原股價)' },
             {
                 id: 'netlifyAdjusted',
-                label: 'Netlify 還原備援',
-                description: netlifyDescription,
+                label: 'Netlify 還原服務',
+                description: `主來源：${netlifyDescription}`,
+            },
+            {
+                id: 'yahoo',
+                label: 'Yahoo 還原價',
+                description: '備援：Yahoo Finance 還原價，供人工比對',
             },
         ];
     }
@@ -1305,7 +1310,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             params.set('forceSource', 'yahoo');
             requestUrl = `${endpoint}?${params.toString()}`;
         } else {
-            showTesterResult('error', '還原股價目前僅支援 Yahoo 或 Netlify 備援測試。');
+            showTesterResult('error', '還原股價目前僅支援 Netlify 還原服務或 Yahoo 備援測試。');
             return;
         }
     } else {
@@ -1807,8 +1812,8 @@ function refreshDataSourceTester() {
     } else if (adjusted) {
         messageLines.push(
             splitEnabled
-                ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
-                : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。',
+                ? '還原股價主流程由 Netlify 還原服務整合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分；Yahoo Finance 僅供人工比對或備援。'
+                : '還原股價主流程由 Netlify 還原服務整合 TWSE/FinMind 原始行情與 FinMind 配息；Yahoo Finance 僅供人工比對或備援。',
         );
     } else if (market === 'INDEX') {
         messageLines.push('Yahoo Finance 為唯一資料來源，支援常見指數（例如 ^TWII、^GSPC）。');

@@ -1592,3 +1592,12 @@ NODE`
   - 月度診斷加入 `staleReload` 與 `staleRevalidations`，便於測試卡片呈現快取刷新紀錄。
 - **Diagnostics**: 待於可連線 Proxy 的環境保持頁面開啟超過 24 小時後再回測，確認月末資料會觸發 `cacheBust` 並補齊最新交易日。
 - **Testing**: `npm run typecheck`（驗證 JSDoc/.d.ts 仍通過）。
+
+## 2026-08-12 — Patch LB-ADJ-NETLIFY-20250913A
+- **Issue recap**: 前端資料來源測試仍將 Yahoo Finance 標示為還原主來源，與實際改以 Netlify `/api/adjusted-price` 串接 TWSE/FinMind 原始行情與配息/拆分的流程不符，提示文案也未強調 Yahoo 僅供備援。
+- **Fix**:
+  - `js/main.js` 更新還原股價來源排列與說明，明確將 Netlify 還原服務列為主來源、Yahoo Finance 為備援測試選項。
+  - 調整資料來源測試提示訊息，統一說明主流程結合 TWSE/FinMind 原始行情與 FinMind 配息/拆分，Yahoo 供人工比對或備援。
+  - 修正錯誤訊息字詞，確保提及 Netlify 還原服務與 Yahoo 備援，避免再出現舊版說法。
+- **Diagnostics**: 待於 Netlify 正式環境開啟資料來源測試面板，確認主來源按鈕排序與提示文字皆與調整後一致。
+- **Testing**: 尚未執行（純前端文案調整，待部署後透過瀏覽器驗證按鈕與提示內容）。
