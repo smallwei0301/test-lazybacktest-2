@@ -1665,3 +1665,14 @@ NODE`
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-18 — Patch LB-BATCH-OPTIONS-20260918A
+- **Issue recap**: 批量優化策略選擇清單在新版映射導入後因缺少 `hydrateStrategyNameMap` 定義而整段初始化失敗，造成 UI 選項完全消失，
+  同時也缺乏可重複使用的策略清單工具，無法支援未來的策略積木化。
+- **Fix**:
+  - 新增 `js/lib/batch-strategy-options.js` 將長、短、多、空四種角色的策略清單與名稱封裝成共用 API，並提供除錯版本代碼
+    `LB-BATCH-OPTIONS-20260918A`。
+  - 批量優化初始化改用共用模組輸出策略選項，補上 `hydrateStrategyNameMap` 以及名稱快取，確保死亡交叉 (`ma_cross_exit`、
+    `macd_cross_exit`、`k_d_cross_exit`) 等策略會出現在選單內。
+  - 新增 `tests/batch-options.test.js` 單元測試驗證策略清單涵蓋死亡交叉與過濾未知 ID，並更新 `npm test` 串接三組測試。
+- **Testing**: `npm test`、`npm run typecheck`
+

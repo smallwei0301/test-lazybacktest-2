@@ -5,7 +5,7 @@
   "description": "LazyBacktest with Netlify Functions proxy",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node tests/batch-context.test.js && node tests/batch-mapper.test.js"
+    "test": "node tests/batch-context.test.js && node tests/batch-mapper.test.js && node tests/batch-options.test.js"
   },
   "dependencies": {
     "@netlify/blobs": "^6.0.0",

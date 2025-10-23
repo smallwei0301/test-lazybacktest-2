@@ -9,12 +9,125 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
     ? window.LazyBatchContext
     : (typeof globalThis !== 'undefined' && globalThis.LazyBatchContext ? globalThis.LazyBatchContext : null);
 
+const BatchStrategyOptions = (typeof window !== 'undefined' && window.LazyBatchStrategyOptions)
+    ? window.LazyBatchStrategyOptions
+    : (typeof globalThis !== 'undefined' && globalThis.LazyBatchStrategyOptions ? globalThis.LazyBatchStrategyOptions : null);
+
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
 const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
+
+let batchStrategyNameMap = null;
+
+const DEFAULT_STRATEGY_FALLBACKS = Object.freeze({
+    entry: Object.freeze([
+        'ma_cross',
+        'ma_above',
+        'rsi_oversold',
+        'macd_cross',
+        'bollinger_breakout',
+        'k_d_cross',
+        'volume_spike',
+        'price_breakout',
+        'williams_oversold',
+        'ema_cross',
+        'turtle_breakout',
+    ]),
+    exit: Object.freeze([
+        'ma_cross_exit',
+        'ma_below',
+        'rsi_overbought',
+        'macd_cross_exit',
+        'bollinger_reversal',
+        'k_d_cross_exit',
+        'volume_spike',
+        'price_breakdown',
+        'williams_overbought',
+        'ema_cross_exit',
+        'turtle_stop_loss',
+        'trailing_stop',
+        'fixed_stop_loss',
+    ]),
+    shortEntry: Object.freeze([
+        'short_ma_cross',
+        'short_ma_below',
+        'short_rsi_overbought',
+        'short_macd_cross',
+        'short_bollinger_reversal',
+        'short_k_d_cross',
+        'short_price_breakdown',
+        'short_williams_overbought',
+        'short_turtle_stop_loss',
+    ]),
+    shortExit: Object.freeze([
+        'cover_ma_cross',
+        'cover_ma_above',
+        'cover_rsi_oversold',
+        'cover_macd_cross',
+        'cover_bollinger_breakout',
+        'cover_k_d_cross',
+        'cover_price_breakout',
+        'cover_williams_oversold',
+        'cover_turtle_breakout',
+        'cover_trailing_stop',
+        'cover_fixed_stop_loss',
+    ]),
+});
+
+function getBatchStrategyNameMap() {
+    if (batchStrategyNameMap) {
+        return batchStrategyNameMap;
+    }
+
+    const descriptions = (typeof strategyDescriptions === 'object' && strategyDescriptions)
+        ? strategyDescriptions
+        : {};
+
+    batchStrategyNameMap = {};
+    Object.keys(descriptions).forEach((id) => {
+        batchStrategyNameMap[id] = {
+            name: descriptions[id]?.name || id,
+            description: descriptions[id]?.desc || '',
+        };
+    });
+
+    return batchStrategyNameMap;
+}
+
+function hydrateStrategyNameMap() {
+    return getBatchStrategyNameMap();
+}
+
+function getRoleStrategyOptions(role) {
+    const descriptions = (typeof strategyDescriptions === 'object' && strategyDescriptions)
+        ? strategyDescriptions
+        : {};
+
+    if (BatchStrategyOptions && typeof BatchStrategyOptions.buildRoleOptions === 'function') {
+        const options = BatchStrategyOptions.buildRoleOptions(role, {
+            strategyDescriptions: descriptions,
+            include: DEFAULT_STRATEGY_FALLBACKS?.[role],
+        });
+        if (options && options.length > 0) {
+            return options;
+        }
+    }
+
+    const fallbacks = Array.isArray(DEFAULT_STRATEGY_FALLBACKS?.[role])
+        ? DEFAULT_STRATEGY_FALLBACKS[role]
+        : [];
+
+    return fallbacks
+        .filter((id) => Boolean(descriptions[id]))
+        .map((id) => ({
+            id,
+            name: descriptions[id]?.name || id,
+            description: descriptions[id]?.desc || '',
+        }));
+}
 
 function normaliseBatchStrategyId(role, strategyId) {
     if (!strategyId) {
@@ -1730,50 +1843,31 @@ function generateStrategyOptions() {
         buyStrategiesList.innerHTML = '';
         sellStrategiesList.innerHTML = '';
         
-        // 買入策略 (做多進場)
-        const buyStrategies = [
-            'ma_cross', 'ma_above', 'rsi_oversold', 'macd_cross', 'bollinger_breakout',
-            'k_d_cross', 'volume_spike', 'price_breakout', 'williams_oversold', 
-            'ema_cross', 'turtle_breakout'
-        ];
-        
-        // 賣出策略 (做多出場)
-        const sellStrategies = [
-            'ma_cross_exit', 'ma_below', 'rsi_overbought', 'macd_cross_exit', 'bollinger_reversal',
-            'k_d_cross_exit', 'volume_spike', 'price_breakdown', 'williams_overbought',
-            'ema_cross_exit', 'turtle_stop_loss', 'trailing_stop', 'fixed_stop_loss'
-        ];
-        
-        // 生成買入策略選項
-        buyStrategies.forEach(strategy => {
-            const strategyInfo = strategyDescriptions[strategy];
-            if (strategyInfo) {
-                const div = document.createElement('div');
-                div.className = 'flex items-center';
-                div.innerHTML = `
-                    <input type="checkbox" id="buy-${strategy}" value="${strategy}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
-                    <label for="buy-${strategy}" class="text-sm text-gray-700 cursor-pointer">
-                        ${strategyInfo.name}
-                    </label>
-                `;
-                buyStrategiesList.appendChild(div);
-            }
+        const buyOptions = getRoleStrategyOptions('entry');
+        const sellOptions = getRoleStrategyOptions('exit');
+
+        buyOptions.forEach((option) => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center';
+            div.innerHTML = `
+                <input type="checkbox" id="buy-${option.id}" value="${option.id}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
+                <label for="buy-${option.id}" class="text-sm text-gray-700 cursor-pointer">
+                    ${option.name}
+                </label>
+            `;
+            buyStrategiesList.appendChild(div);
         });
-        
-        // 生成賣出策略選項
-        sellStrategies.forEach(strategy => {
-            const strategyInfo = strategyDescriptions[strategy];
-            if (strategyInfo) {
-                const div = document.createElement('div');
-                div.className = 'flex items-center';
-                div.innerHTML = `
-                    <input type="checkbox" id="sell-${strategy}" value="${strategy}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
-                    <label for="sell-${strategy}" class="text-sm text-gray-700 cursor-pointer">
-                        ${strategyInfo.name}
-                    </label>
-                `;
-                sellStrategiesList.appendChild(div);
-            }
+
+        sellOptions.forEach((option) => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center';
+            div.innerHTML = `
+                <input type="checkbox" id="sell-${option.id}" value="${option.id}" class="h-4 w-4 text-blue-600 border-gray-300 rounded mr-2">
+                <label for="sell-${option.id}" class="text-sm text-gray-700 cursor-pointer">
+                    ${option.name}
+                </label>
+            `;
+            sellStrategiesList.appendChild(div);
         });
         
         console.log('[Batch Optimization] Strategy options generated successfully');
