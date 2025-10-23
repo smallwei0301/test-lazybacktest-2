@@ -1391,17 +1391,17 @@ function diffBatchDebugLogs(snapshotA, snapshotB) {
 }
 
 const EXIT_STRATEGY_SELECT_MAP = {
-    'ma_cross': 'ma_cross',
-    'ma_cross_exit': 'ma_cross',
+    'ma_cross': 'ma_cross_exit',
+    'ma_cross_exit': 'ma_cross_exit',
     'ma_below': 'ma_below',
     'ma_below_exit': 'ma_below',
     'rsi_overbought': 'rsi_overbought',
     'rsi_overbought_exit': 'rsi_overbought',
-    'macd_cross': 'macd_cross',
-    'macd_cross_exit': 'macd_cross',
+    'macd_cross': 'macd_cross_exit',
+    'macd_cross_exit': 'macd_cross_exit',
     'bollinger_reversal': 'bollinger_reversal',
-    'k_d_cross': 'k_d_cross',
-    'k_d_cross_exit': 'k_d_cross',
+    'k_d_cross': 'k_d_cross_exit',
+    'k_d_cross_exit': 'k_d_cross_exit',
     'volume_spike': 'volume_spike',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',

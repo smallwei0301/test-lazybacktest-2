@@ -1631,3 +1631,10 @@ NODE`
   - `js/worker.js` 的出場判斷改為同時接受 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit` 等新 ID，並針對 KD 插件保留舊 ID 時的向後相容處理。
 - **Diagnostics**: 需於可連線 Proxy 的環境實際執行單次回測、滾動測試、參數優化與批量優化，檢查含死亡交叉的策略在結果中會輸出正常的出場訊號與成交記錄。
 - **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查通過。
+
+## 2026-09-16 — Patch LB-BATCH-EXIT-MAP-20260916A
+- **Issue recap**: 批量優化載入死亡交叉類出場策略時，仍使用舊選單值 `ma_cross`、`macd_cross`、`k_d_cross`，導致新版選單缺少對應選項而中斷載入。
+- **Fix**:
+  - `js/batch-optimization.js` 更新出場策略選單映射，統一以註冊 ID（如 `ma_cross_exit`、`macd_cross_exit`、`k_d_cross_exit`）作為預設值，舊 ID 僅保留為回補舊版紀錄時的 fallback。
+- **Diagnostics**: 於開發者卡或批量優化面板載入含死亡交叉出場策略的最佳解、儲存配置，確認選單值與參數面板都能正確顯示且不再彈出缺少選項的錯誤提示。
+- **Testing**: `npm run typecheck`
