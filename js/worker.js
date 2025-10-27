@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('lib/strategy-dsl.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8041,6 +8042,10 @@ function runStrategy(data, params, options = {}) {
     typeof self !== 'undefined' && self.StrategyPluginRegistry
       ? self.StrategyPluginRegistry
       : null;
+  const strategyDSL =
+    typeof self !== 'undefined' && self.LazyStrategyDSL
+      ? self.LazyStrategyDSL
+      : null;
   const pluginCacheStore = new Map();
   const pluginRuntimeInfo = {
     warmupStartIndex: Number.isFinite(
@@ -8059,6 +8064,72 @@ function runStrategy(data, params, options = {}) {
     volume: volumes,
     date: dates,
   };
+
+  const dslEvaluators = {
+    longEntry: null,
+    longExit: null,
+    shortEntry: null,
+    shortExit: null,
+  };
+
+  function normaliseDsl(definition) {
+    if (!definition) {
+      return null;
+    }
+    if (strategyDSL && typeof strategyDSL.normaliseDefinition === 'function') {
+      return strategyDSL.normaliseDefinition(definition);
+    }
+    if (typeof definition === 'string') {
+      try {
+        const parsed = JSON.parse(definition);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (error) {
+        console.error('[StrategyDSL] 解析 DSL 字串失敗', error);
+        return null;
+      }
+    }
+    return typeof definition === 'object' ? definition : null;
+  }
+
+  function compileComposite(definition, roleLabel) {
+    if (!strategyDSL || typeof strategyDSL.buildComposite !== 'function') {
+      return null;
+    }
+    const normalised = normaliseDsl(definition);
+    if (!normalised) {
+      return null;
+    }
+    try {
+      return strategyDSL.buildComposite(normalised, pluginRegistry);
+    } catch (error) {
+      console.error(`[StrategyDSL] 建立 ${roleLabel} 組合失敗`, error);
+      return null;
+    }
+  }
+
+  dslEvaluators.longEntry = compileComposite(params.entryStrategyDsl, 'longEntry');
+  dslEvaluators.longExit = compileComposite(params.exitStrategyDsl, 'longExit');
+  dslEvaluators.shortEntry = compileComposite(params.shortEntryStrategyDsl, 'shortEntry');
+  dslEvaluators.shortExit = compileComposite(params.shortExitStrategyDsl, 'shortExit');
+
+  function evaluateComposite(role, evaluator, index, runtimeExtras) {
+    if (!evaluator || typeof evaluator !== 'function') {
+      return null;
+    }
+    try {
+      return evaluator({
+        role,
+        index,
+        runtimeExtras,
+        runStrategy(strategyId, callRole, callIndex, baseParams, extras) {
+          return callStrategyPlugin(strategyId, callRole, callIndex, baseParams, extras);
+        },
+      });
+    } catch (error) {
+      console.error(`[StrategyDSL] 執行 ${role} 組合失敗`, error);
+      return null;
+    }
+  }
 
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
@@ -8177,6 +8248,72 @@ function runStrategy(data, params, options = {}) {
     20,
     26,
   ];
+  const PERIOD_KEYS = [
+    'shortPeriod',
+    'longPeriod',
+    'period',
+    'breakoutPeriod',
+    'signalPeriod',
+    'stopLossPeriod',
+    'kPeriod',
+    'dPeriod',
+  ];
+
+  function appendDslPeriods(evaluator) {
+    if (!evaluator || typeof evaluator.listStrategyParams !== 'function') {
+      return;
+    }
+    try {
+      const entries = evaluator.listStrategyParams();
+      entries.forEach((entry) => {
+        if (!entry || typeof entry.params !== 'object') {
+          return;
+        }
+        PERIOD_KEYS.forEach((key) => {
+          const raw = entry.params[key];
+          if (Number.isFinite(raw) && raw > 0) {
+            allPeriods.push(Number(raw));
+          }
+        });
+      });
+    } catch (error) {
+      console.error('[StrategyDSL] 擷取週期資訊失敗', error);
+    }
+  }
+
+  appendDslPeriods(dslEvaluators.longEntry);
+  appendDslPeriods(dslEvaluators.longExit);
+
+  function usesStrategyId(evaluator, strategyId) {
+    if (!evaluator || typeof evaluator.usesStrategy !== 'function') {
+      return false;
+    }
+    try {
+      return evaluator.usesStrategy(strategyId);
+    } catch (error) {
+      console.error('[StrategyDSL] 檢查策略使用狀態失敗', error);
+      return false;
+    }
+  }
+
+  function getDslParamsSnapshot(evaluator, strategyId) {
+    if (!evaluator || typeof evaluator.getParamsForStrategy !== 'function') {
+      return null;
+    }
+    try {
+      return evaluator.getParamsForStrategy(strategyId);
+    } catch (error) {
+      console.error('[StrategyDSL] 取得策略參數失敗', error);
+      return null;
+    }
+  }
+
+  function pushCandidate(target, value) {
+    if (Number.isFinite(value) && value > 0) {
+      target.push(Number(value));
+    }
+  }
+
   if (enableShorting) {
     allPeriods = allPeriods.concat([
       shortEntryParams?.shortPeriod,
@@ -8191,6 +8328,8 @@ function runStrategy(data, params, options = {}) {
       shortExitParams?.signalPeriod,
       shortExitParams?.percentage,
     ]);
+    appendDslPeriods(dslEvaluators.shortEntry);
+    appendDslPeriods(dslEvaluators.shortExit);
   }
   const validPeriods = allPeriods.filter(
     (p) => typeof p === "number" && p > 0 && isFinite(p),
@@ -8198,34 +8337,149 @@ function runStrategy(data, params, options = {}) {
   const longestLookback =
     validPeriods.length > 0 ? Math.max(...validPeriods) : 0;
   warmupSummary.longestLookback = longestLookback;
-  const kdNeedLong =
-    entryStrategy === "k_d_cross" || exitStrategy === "k_d_cross_exit"
-      ? entryParams?.period || exitParams?.period || 9
-      : 0;
+  const kdLongCandidates = [];
+  if (entryStrategy === "k_d_cross" || exitStrategy === "k_d_cross_exit") {
+    pushCandidate(kdLongCandidates, entryParams?.period);
+    pushCandidate(kdLongCandidates, exitParams?.period);
+  }
+  if (usesStrategyId(dslEvaluators.longEntry, "k_d_cross")) {
+    const snapshot = getDslParamsSnapshot(dslEvaluators.longEntry, "k_d_cross");
+    pushCandidate(kdLongCandidates, snapshot?.period);
+    pushCandidate(kdLongCandidates, snapshot?.kPeriod);
+    pushCandidate(kdLongCandidates, snapshot?.dPeriod);
+  }
+  if (usesStrategyId(dslEvaluators.longExit, "k_d_cross_exit")) {
+    const snapshot = getDslParamsSnapshot(dslEvaluators.longExit, "k_d_cross_exit");
+    pushCandidate(kdLongCandidates, snapshot?.period);
+    pushCandidate(kdLongCandidates, snapshot?.kPeriod);
+    pushCandidate(kdLongCandidates, snapshot?.dPeriod);
+  }
+  if (
+    kdLongCandidates.length === 0 &&
+    (entryStrategy === "k_d_cross" ||
+      exitStrategy === "k_d_cross_exit" ||
+      usesStrategyId(dslEvaluators.longEntry, "k_d_cross") ||
+      usesStrategyId(dslEvaluators.longExit, "k_d_cross_exit"))
+  ) {
+    kdLongCandidates.push(9);
+  }
+  const kdNeedLong = kdLongCandidates.length > 0 ? Math.max(...kdLongCandidates) : 0;
   warmupSummary.kdNeedLong = kdNeedLong;
-  const kdNeedShort =
+  const kdShortCandidates = [];
+  if (
     enableShorting &&
     (shortEntryStrategy === "short_k_d_cross" ||
       shortExitStrategy === "cover_k_d_cross")
-      ? shortEntryParams?.period || shortExitParams?.period || 9
-      : 0;
+  ) {
+    pushCandidate(kdShortCandidates, shortEntryParams?.period);
+    pushCandidate(kdShortCandidates, shortExitParams?.period);
+  }
+  if (enableShorting && usesStrategyId(dslEvaluators.shortEntry, "short_k_d_cross")) {
+    const snapshot = getDslParamsSnapshot(
+      dslEvaluators.shortEntry,
+      "short_k_d_cross",
+    );
+    pushCandidate(kdShortCandidates, snapshot?.period);
+    pushCandidate(kdShortCandidates, snapshot?.kPeriod);
+    pushCandidate(kdShortCandidates, snapshot?.dPeriod);
+  }
+  if (enableShorting && usesStrategyId(dslEvaluators.shortExit, "cover_k_d_cross")) {
+    const snapshot = getDslParamsSnapshot(
+      dslEvaluators.shortExit,
+      "cover_k_d_cross",
+    );
+    pushCandidate(kdShortCandidates, snapshot?.period);
+    pushCandidate(kdShortCandidates, snapshot?.kPeriod);
+    pushCandidate(kdShortCandidates, snapshot?.dPeriod);
+  }
+  if (
+    kdShortCandidates.length === 0 &&
+    enableShorting &&
+    (shortEntryStrategy === "short_k_d_cross" ||
+      shortExitStrategy === "cover_k_d_cross" ||
+      usesStrategyId(dslEvaluators.shortEntry, "short_k_d_cross") ||
+      usesStrategyId(dslEvaluators.shortExit, "cover_k_d_cross"))
+  ) {
+    kdShortCandidates.push(9);
+  }
+  const kdNeedShort = kdShortCandidates.length > 0 ? Math.max(...kdShortCandidates) : 0;
   warmupSummary.kdNeedShort = kdNeedShort;
-  const macdNeedLong =
-    entryStrategy === "macd_cross" || exitStrategy === "macd_cross_exit"
-      ? (entryParams?.longPeriod || exitParams?.longPeriod || 26) +
-        (entryParams?.signalPeriod || exitParams?.signalPeriod || 9) -
-        1
-      : 0;
+  const macdLongCandidates = [];
+  if (entryStrategy === "macd_cross" || exitStrategy === "macd_cross_exit") {
+    const baseLong = entryParams?.longPeriod || exitParams?.longPeriod;
+    const baseSignal = entryParams?.signalPeriod || exitParams?.signalPeriod;
+    if (Number.isFinite(baseLong) || Number.isFinite(baseSignal)) {
+      const total = (Number(baseLong) || 26) + (Number(baseSignal) || 9) - 1;
+      pushCandidate(macdLongCandidates, total);
+    }
+  }
+  if (usesStrategyId(dslEvaluators.longEntry, "macd_cross")) {
+    const snapshot = getDslParamsSnapshot(dslEvaluators.longEntry, "macd_cross");
+    const total =
+      (Number(snapshot?.longPeriod) || 26) +
+      (Number(snapshot?.signalPeriod) || 9) -
+      1;
+    pushCandidate(macdLongCandidates, total);
+  }
+  if (usesStrategyId(dslEvaluators.longExit, "macd_cross_exit")) {
+    const snapshot = getDslParamsSnapshot(
+      dslEvaluators.longExit,
+      "macd_cross_exit",
+    );
+    const total =
+      (Number(snapshot?.longPeriod) || 26) +
+      (Number(snapshot?.signalPeriod) || 9) -
+      1;
+    pushCandidate(macdLongCandidates, total);
+  }
+  const macdNeedLong = macdLongCandidates.length > 0 ? Math.max(...macdLongCandidates) : 0;
   warmupSummary.macdNeedLong = macdNeedLong;
-  const macdNeedShort =
+  const macdShortCandidates = [];
+  if (
     enableShorting &&
     (shortEntryStrategy === "short_macd_cross" ||
       shortExitStrategy === "cover_macd_cross")
-      ? (shortEntryParams?.longPeriod || shortExitParams?.longPeriod || 26) +
-        (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
-        1
-      : 0;
+  ) {
+    const baseLong = shortEntryParams?.longPeriod || shortExitParams?.longPeriod;
+    const baseSignal =
+      shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod;
+    if (Number.isFinite(baseLong) || Number.isFinite(baseSignal)) {
+      const total = (Number(baseLong) || 26) + (Number(baseSignal) || 9) - 1;
+      pushCandidate(macdShortCandidates, total);
+    }
+  }
+  if (enableShorting && usesStrategyId(dslEvaluators.shortEntry, "short_macd_cross")) {
+    const snapshot = getDslParamsSnapshot(
+      dslEvaluators.shortEntry,
+      "short_macd_cross",
+    );
+    const total =
+      (Number(snapshot?.longPeriod) || 26) +
+      (Number(snapshot?.signalPeriod) || 9) -
+      1;
+    pushCandidate(macdShortCandidates, total);
+  }
+  if (enableShorting && usesStrategyId(dslEvaluators.shortExit, "cover_macd_cross")) {
+    const snapshot = getDslParamsSnapshot(
+      dslEvaluators.shortExit,
+      "cover_macd_cross",
+    );
+    const total =
+      (Number(snapshot?.longPeriod) || 26) +
+      (Number(snapshot?.signalPeriod) || 9) -
+      1;
+    pushCandidate(macdShortCandidates, total);
+  }
+  const macdNeedShort =
+    macdShortCandidates.length > 0 ? Math.max(...macdShortCandidates) : 0;
   warmupSummary.macdNeedShort = macdNeedShort;
+  const longExitUsesTrailing =
+    exitStrategy === "trailing_stop" ||
+    usesStrategyId(dslEvaluators.longExit, "trailing_stop");
+  const shortExitUsesTrailing =
+    enableShorting &&
+    (shortExitStrategy === "cover_trailing_stop" ||
+      usesStrategyId(dslEvaluators.shortExit, "cover_trailing_stop"));
   let startIdx = Math.max(
     1,
     longestLookback,
@@ -8738,7 +8992,33 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        if (longExitUsesTrailing && check(curH) && lastBuyP > 0) {
+          curPeakP = Math.max(curPeakP, curH);
+        }
+        const exitRuntimeExtras =
+          longExitUsesTrailing || exitStrategy === "trailing_stop"
+            ? { currentPrice: curC, referencePrice: curPeakP }
+            : undefined;
+        if (dslEvaluators.longExit) {
+          const compositeResult = evaluateComposite(
+            'longExit',
+            dslEvaluators.longExit,
+            i,
+            exitRuntimeExtras,
+          );
+          if (compositeResult) {
+            exitRuleResult = compositeResult;
+            sellSignal = compositeResult.exit === true;
+            const meta = compositeResult.meta || {};
+            if (!exitIndicatorValues && meta.indicatorValues)
+              exitIndicatorValues = meta.indicatorValues;
+            if (!exitKDValues && meta.kdValues) exitKDValues = meta.kdValues;
+            if (!exitMACDValues && meta.macdValues)
+              exitMACDValues = meta.macdValues;
+          }
+        }
+        if (!exitRuleResult) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9013,6 +9293,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,7 +9556,33 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if (shortExitUsesTrailing && check(curL) && shortShares > 0) {
+          currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+        }
+        const coverRuntimeExtras =
+          shortExitUsesTrailing || shortExitStrategy === "cover_trailing_stop"
+            ? { currentPrice: curC, referencePrice: currentLowSinceShort }
+            : undefined;
+        if (dslEvaluators.shortExit) {
+          const compositeResult = evaluateComposite(
+            'shortExit',
+            dslEvaluators.shortExit,
+            i,
+            coverRuntimeExtras,
+          );
+          if (compositeResult) {
+            shortExitRuleResult = compositeResult;
+            coverSignal = compositeResult.cover === true;
+            const meta = compositeResult.meta || {};
+            if (!coverIndicatorValues && meta.indicatorValues)
+              coverIndicatorValues = meta.indicatorValues;
+            if (!coverKDValues && meta.kdValues) coverKDValues = meta.kdValues;
+            if (!coverMACDValues && meta.macdValues)
+              coverMACDValues = meta.macdValues;
+          }
+        }
+        if (!shortExitRuleResult) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9546,6 +9853,7 @@ function runStrategy(data, params, options = {}) {
             coverSignal = false;
             break;
         }
+        }
         const finalShortExitRule =
           shortExitRuleResult ||
           normaliseRuleResultFromLegacy(
@@ -9658,7 +9966,26 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
+      if (dslEvaluators.longEntry) {
+        const compositeResult = evaluateComposite(
+          'longEntry',
+          dslEvaluators.longEntry,
+          i,
+          undefined,
+        );
+        if (compositeResult) {
+          entryRuleResult = compositeResult;
+          buySignal = compositeResult.enter === true;
+          const meta = compositeResult.meta || {};
+          if (!entryIndicatorValues && meta.indicatorValues)
+            entryIndicatorValues = meta.indicatorValues;
+          if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+          if (!entryMACDValues && meta.macdValues)
+            entryMACDValues = meta.macdValues;
+        }
+      }
+      if (!entryRuleResult) {
+        switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
           const pluginResult = callStrategyPlugin(
@@ -9895,6 +10222,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,7 +10325,27 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (dslEvaluators.shortEntry) {
+        const compositeResult = evaluateComposite(
+          'shortEntry',
+          dslEvaluators.shortEntry,
+          i,
+          undefined,
+        );
+        if (compositeResult) {
+          shortEntryRuleResult = compositeResult;
+          shortSignal = compositeResult.short === true;
+          const meta = compositeResult.meta || {};
+          if (!shortEntryIndicatorValues && meta.indicatorValues)
+            shortEntryIndicatorValues = meta.indicatorValues;
+          if (!shortEntryKDValues && meta.kdValues)
+            shortEntryKDValues = meta.kdValues;
+          if (!shortEntryMACDValues && meta.macdValues)
+            shortEntryMACDValues = meta.macdValues;
+        }
+      }
+      if (!shortEntryRuleResult) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10578,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||

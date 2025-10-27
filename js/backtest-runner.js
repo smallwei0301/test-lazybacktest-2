@@ -252,6 +252,10 @@
     const exitStages = sanitizeStagePercentages(options.exitStages, [100]);
     const entryStagingMode = options.entryStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
     const exitStagingMode = options.exitStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
+    const entryStrategyDsl = options.entryStrategyDsl || null;
+    const exitStrategyDsl = options.exitStrategyDsl || null;
+    const shortEntryStrategyDsl = enableShorting ? options.shortEntryStrategyDsl || null : null;
+    const shortExitStrategyDsl = enableShorting ? options.shortExitStrategyDsl || null : null;
 
     return {
       stockNo,
@@ -275,6 +279,10 @@
       shortExitStrategy,
       shortEntryParams,
       shortExitParams,
+      entryStrategyDsl,
+      exitStrategyDsl,
+      shortEntryStrategyDsl,
+      shortExitStrategyDsl,
       buyFee,
       sellFee,
       positionBasis,
