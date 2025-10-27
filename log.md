@@ -1,3 +1,12 @@
+## 2026-10-10 — Patch LB-STRATEGY-COMPOSER-20261010A
+- **Scope**: 策略 DSL 組合器、主執行緒序列化與 Worker 解析流程。
+- **Updates**:
+  - `js/strategies/composer.js` 新增 `buildComposite`，支援遞迴 AND/OR/NOT 與風險參數繼承。
+  - `index.html`、`js/main.js` 加入策略 DSL 預覽與手動驗證按鈕，並將 UI 參數序列化後送往 Worker。
+  - `js/worker.js` 解析 DSL 並組成複合策略函式，迴圈內優先透過 DSL 產生訊號。
+  - `tests/strategy-composer.test.js` 建立單元測試涵蓋 AND/OR/NOT 組合與停損傳遞；`package.json` 將測試腳本導向新測試。
+- **Testing**: `npm test`（容器環境）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。

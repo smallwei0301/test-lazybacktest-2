@@ -19,6 +19,7 @@
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
+importScripts('strategies/composer.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
@@ -8060,6 +8061,74 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  const strategyComposerApi =
+    typeof self !== 'undefined' &&
+    self.LazyStrategyComposer &&
+    typeof self.LazyStrategyComposer.buildComposite === 'function'
+      ? self.LazyStrategyComposer
+      : null;
+
+  const strategyDslTree =
+    params && typeof params === 'object' ? params.strategyDsl || null : null;
+
+  function createCompositeEvaluators(dsl) {
+    if (!strategyComposerApi || !dsl || typeof dsl !== 'object') {
+      return null;
+    }
+    const evaluators = {};
+    const rolePairs = [
+      ['longEntry', dsl.longEntry || dsl.entry],
+      ['longExit', dsl.longExit || dsl.exit],
+      ['shortEntry', dsl.shortEntry],
+      ['shortExit', dsl.shortExit],
+    ];
+    rolePairs.forEach(([roleKey, node]) => {
+      if (!node) return;
+      try {
+        evaluators[roleKey] = strategyComposerApi.buildComposite(
+          node,
+          pluginRegistry,
+        );
+      } catch (error) {
+        console.error(`[StrategyDSL] 建立 ${roleKey} 組合失敗`, error);
+      }
+    });
+    return evaluators;
+  }
+
+  const compositeEvaluators = createCompositeEvaluators(strategyDslTree);
+
+  function evaluateCompositeRole(role, index) {
+    if (!compositeEvaluators || typeof compositeEvaluators[role] !== 'function') {
+      return null;
+    }
+    const evaluator = compositeEvaluators[role];
+    const context = {
+      role,
+      index,
+      series: pluginSeries,
+      runtime: pluginRuntimeInfo,
+      invokePlugin(pluginId, roleOverride, pluginParams, runtimeExtras) {
+        const effectiveRole = roleOverride || role;
+        const preparedParams =
+          pluginParams && typeof pluginParams === 'object' ? pluginParams : {};
+        return callStrategyPlugin(
+          pluginId,
+          effectiveRole,
+          index,
+          preparedParams,
+          runtimeExtras || null,
+        );
+      },
+    };
+    try {
+      return evaluator(context);
+    } catch (error) {
+      console.error(`[StrategyDSL] 執行 ${role} 組合失敗`, error);
+      return null;
+    }
+  }
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -8738,6 +8807,20 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
+        if (compositeEvaluators && compositeEvaluators.longExit) {
+          const compositeResult = evaluateCompositeRole('longExit', i);
+          if (compositeResult) {
+            exitRuleResult = compositeResult;
+            sellSignal = compositeResult.exit === true;
+            const meta = compositeResult.meta || {};
+            if (!exitIndicatorValues && meta.indicatorValues)
+              exitIndicatorValues = meta.indicatorValues;
+            if (!exitKDValues && meta.kdValues) exitKDValues = meta.kdValues;
+            if (!exitMACDValues && meta.macdValues)
+              exitMACDValues = meta.macdValues;
+          }
+        }
+        if (!exitRuleResult) {
         switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
@@ -9013,6 +9096,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,7 +9359,21 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if (compositeEvaluators && compositeEvaluators.shortExit) {
+          const compositeResult = evaluateCompositeRole('shortExit', i);
+          if (compositeResult) {
+            shortExitRuleResult = compositeResult;
+            coverSignal = compositeResult.cover === true;
+            const meta = compositeResult.meta || {};
+            if (!coverIndicatorValues && meta.indicatorValues)
+              coverIndicatorValues = meta.indicatorValues;
+            if (!coverKDValues && meta.kdValues) coverKDValues = meta.kdValues;
+            if (!coverMACDValues && meta.macdValues)
+              coverMACDValues = meta.macdValues;
+          }
+        }
+        if (!shortExitRuleResult) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9545,6 +9643,7 @@ function runStrategy(data, params, options = {}) {
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
+          }
         }
         const finalShortExitRule =
           shortExitRuleResult ||
@@ -9658,6 +9757,20 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
+      if (compositeEvaluators && compositeEvaluators.longEntry) {
+        const compositeResult = evaluateCompositeRole('longEntry', i);
+        if (compositeResult) {
+          entryRuleResult = compositeResult;
+          buySignal = compositeResult.enter === true;
+          const meta = compositeResult.meta || {};
+          if (!entryIndicatorValues && meta.indicatorValues)
+            entryIndicatorValues = meta.indicatorValues;
+          if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+          if (!entryMACDValues && meta.macdValues)
+            entryMACDValues = meta.macdValues;
+        }
+      }
+      if (!entryRuleResult) {
       switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
@@ -9895,6 +10008,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,7 +10111,8 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (!shortEntryRuleResult) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10345,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||
@@ -12384,6 +12500,9 @@ self.onmessage = async function (e) {
     optimizeParamName,
     optimizeRange,
   } = e.data;
+  if (params && typeof params === 'object' && e.data?.strategyDsl) {
+    params.strategyDsl = e.data.strategyDsl;
+  }
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
