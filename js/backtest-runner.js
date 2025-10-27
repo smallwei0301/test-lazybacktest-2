@@ -24,6 +24,46 @@
     return normalized;
   }
 
+  function clonePlain(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => clonePlain(item));
+    }
+    if (value && typeof value === 'object') {
+      const clone = {};
+      Object.keys(value).forEach((key) => {
+        clone[key] = clonePlain(value[key]);
+      });
+      return clone;
+    }
+    return value;
+  }
+
+  function sanitizeDslComposites(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+      return [];
+    }
+    const sanitized = [];
+    list.forEach((item) => {
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      const id = typeof item.id === 'string' ? item.id.trim() : '';
+      if (!id) {
+        return;
+      }
+      const label = typeof item.label === 'string' && item.label.trim() ? item.label : id;
+      if (!item.definition || typeof item.definition !== 'object') {
+        return;
+      }
+      sanitized.push({
+        id,
+        label,
+        definition: clonePlain(item.definition),
+      });
+    });
+    return sanitized;
+  }
+
   function isIndexSymbol(stockNo) {
     if (!stockNo || typeof stockNo !== 'string') {
       return false;
@@ -302,6 +342,10 @@
       effectiveStartDate: lookbackDecision.effectiveStartDate,
       lookbackDays: lookbackDecision.lookbackDays,
     };
+    const dslComposites = sanitizeDslComposites(options?.dslComposites);
+    if (dslComposites.length > 0) {
+      workerMessage.dslComposites = dslComposites;
+    }
     const workerPath = resolveWorkerUrl();
     if (typeof Worker !== 'function') {
       throw new Error('當前環境不支援 Web Worker，無法執行回測');

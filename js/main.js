@@ -3739,6 +3739,7 @@ function setManualVerificationBusy(busy) {
         'manualVerifySampleBacktestBtn',
         'manualVerifyLegacyLoadBtn',
         'manualVerifyBatchFlowBtn',
+        'manualVerifyStrategyDslBtn',
     ];
     buttonIds.forEach((id) => {
         const btn = document.getElementById(id);
@@ -4174,13 +4175,143 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+async function runManualVerificationStrategyDsl() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在啟動策略 DSL Sandbox…', 'info');
+
+    const logLines = [];
+    const composer = window.LazyStrategyDslComposer;
+    const registry = window.StrategyPluginRegistry;
+    const contract = window.StrategyPluginContract;
+    const runner = window.BacktestRunner;
+
+    const composites = [
+        {
+            id: 'dev_dsl_entry_rsi_kd',
+            label: 'DSL 進場：RSI<30 AND KD<20',
+            definition: {
+                op: 'AND',
+                rules: [
+                    { plugin: 'rsi_oversold', params: { threshold: 30 } },
+                    { plugin: 'k_d_cross', params: { thresholdX: 20 } },
+                ],
+            },
+            summary: '進場：RSI<30 AND KD<20',
+        },
+        {
+            id: 'dev_dsl_exit_rsi_trailing',
+            label: 'DSL 出場：RSI>70 OR 移動停損',
+            definition: {
+                op: 'OR',
+                rules: [
+                    { plugin: 'rsi_overbought', params: { threshold: 70 } },
+                    { plugin: 'trailing_stop', params: { percentage: 5 } },
+                ],
+            },
+            summary: '出場：RSI>70 OR 移動停損(5%)',
+        },
+    ];
+
+    try {
+        if (!composer || typeof composer.buildComposite !== 'function') {
+            throw new Error('DSL Composer 未載入');
+        }
+        if (!registry || (typeof registry.registerStrategy !== 'function' && typeof registry.register !== 'function')) {
+            throw new Error('策略註冊中心尚未初始化');
+        }
+        if (!runner || typeof runner.run !== 'function') {
+            throw new Error('BacktestRunner 尚未就緒');
+        }
+
+        const baseParams = getBacktestParams();
+        if (!baseParams?.startDate || !baseParams?.endDate) {
+            throw new Error('請先設定回測的起訖日期');
+        }
+
+        const ensureRegistered = (entry) => {
+            const hasStrategy = typeof registry.hasStrategy === 'function' ? registry.hasStrategy(entry.id) : false;
+            if (hasStrategy) {
+                return;
+            }
+            const evaluator = composer.buildComposite(entry.definition, registry, { contract });
+            const plugin = {
+                meta: {
+                    id: entry.id,
+                    label: entry.label,
+                    paramsSchema: { type: 'object', properties: {}, additionalProperties: false },
+                },
+                run(context) {
+                    return evaluator(context);
+                },
+            };
+            if (typeof registry.registerStrategy === 'function') {
+                registry.registerStrategy(plugin);
+            } else {
+                registry.register(plugin);
+            }
+        };
+
+        composites.forEach((entry) => ensureRegistered(entry));
+
+        const runParams = {
+            ...baseParams,
+            entryStrategy: composites[0].id,
+            exitStrategy: composites[1].id,
+            entryParams: {},
+            exitParams: {},
+            enableShorting: false,
+            shortEntryStrategy: null,
+            shortExitStrategy: null,
+            shortEntryParams: {},
+            shortExitParams: {},
+            dslComposites: composites.map((item) => ({
+                id: item.id,
+                label: item.label,
+                definition: item.definition,
+            })),
+            onProgress: (payload) => {
+                if (payload?.message) {
+                    updateManualVerificationStatus(`DSL Sandbox 執行中：${payload.message}`, 'info');
+                }
+            },
+        };
+
+        logLines.push(composites[0].summary, composites[1].summary);
+        const result = await runner.run(runParams);
+        const trades = Array.isArray(result?.data?.trades) ? result.data.trades : [];
+        logLines.push(`交易筆數：${trades.length}`);
+        trades.slice(0, 3).forEach((trade, index) => {
+            const date = trade?.date || trade?.exit?.date || trade?.entry?.date || '未知日期';
+            const type = trade?.type || trade?.exit?.type || trade?.entry?.type || '未知類型';
+            const price = Number.isFinite(trade?.price) ? trade.price.toFixed(2) : '—';
+            const profit = Number.isFinite(trade?.profitPercent)
+                ? `${trade.profitPercent.toFixed(2)}%`
+                : Number.isFinite(trade?.returnRate)
+                ? `${trade.returnRate.toFixed(2)}%`
+                : '未提供';
+            logLines.push(`#${index + 1} ${date} ${type} @${price} 報酬 ${profit}`);
+        });
+
+        updateManualVerificationStatus('策略 DSL Sandbox 完成，可於主畫面檢視回測結果。', 'success');
+        appendManualVerificationEntry('策略 DSL Sandbox', logLines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 DSL Sandbox 失敗：${message}`, 'error');
+        appendManualVerificationEntry('策略 DSL Sandbox', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
         return;
     }
 
@@ -4202,6 +4333,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (dslBtn) {
+        dslBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDsl();
         });
     }
 }
