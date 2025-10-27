@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-STRATEGY-DSL-20261010A
 
 // 全局變量
 let stockChart = null;
@@ -25,6 +26,7 @@ const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20261010A';
 const loadingMascotState = {
     lastSource: null,
     rotation: {
@@ -39,6 +41,12 @@ const loadingMascotState = {
 };
 
 window.cachedDataStore = cachedDataStore;
+if (typeof window !== 'undefined') {
+    if (!window.lazyStrategyDsl) {
+        window.lazyStrategyDsl = {};
+    }
+    window.lazyStrategyDsl.buildPayload = buildStrategyDslPayload;
+}
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
 let sortState = { key: 'annualizedReturn', direction: 'desc' };
@@ -3815,6 +3823,62 @@ function compareParamValues(expected, actual) {
     return String(expected) === String(actual);
 }
 
+async function runManualVerificationStrategyDsl() {
+    try {
+        const params = getBacktestParams();
+        if (!validateBacktestParams(params)) {
+            return;
+        }
+        const dsl = buildStrategyDslPayload(params);
+        if (!dsl) {
+            showError('目前策略設定無法建立 DSL。');
+            return;
+        }
+        const previewEl = document.getElementById('strategyDslPreview');
+        const wrapperEl = document.getElementById('strategyDslPreviewWrapper');
+        if (previewEl) {
+            previewEl.textContent = JSON.stringify(dsl, null, 2);
+        }
+        if (wrapperEl) {
+            wrapperEl.classList.remove('hidden');
+        }
+        console.info('[Developer][StrategyDSL] 輸出 DSL', dsl);
+        const composer = window.LazyStrategyComposer;
+        const registry = window.StrategyPluginRegistry;
+        if (composer && typeof composer.buildComposite === 'function' && registry) {
+            const roles = [
+                ['longEntry', '做多進場'],
+                ['longExit', '做多出場'],
+                ['shortEntry', '做空進場'],
+                ['shortExit', '回補出場'],
+            ];
+            const failures = [];
+            const passes = [];
+            roles.forEach(([key, label]) => {
+                const node = dsl[key];
+                if (!node) return;
+                try {
+                    composer.buildComposite(node, registry);
+                    passes.push(label);
+                } catch (error) {
+                    failures.push(`${label}: ${error.message || error}`);
+                    console.error(`[Developer][StrategyDSL] ${label} 驗證失敗`, error);
+                }
+            });
+            if (failures.length === 0) {
+                showSuccess(`策略 DSL 驗證成功（${passes.join('、')}）`);
+            } else {
+                showError(`策略 DSL 驗證失敗：${failures.join('；')}`);
+            }
+        } else {
+            showInfo('策略 DSL 已產生，待策略組合模組載入後將自動驗證。');
+        }
+    } catch (error) {
+        console.error('[Developer][StrategyDSL] 驗證時發生錯誤', error);
+        showError(`策略 DSL 驗證失敗：${error.message || error}`);
+    }
+}
+
 async function runManualVerificationExitDefaults() {
     if (manualVerificationState.busy) return;
     setManualVerificationBusy(true);
@@ -4179,8 +4243,9 @@ function initManualVerificationTools() {
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const strategyDslBtn = document.getElementById('manualVerifyStrategyDslBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !strategyDslBtn) {
         return;
     }
 
@@ -4202,6 +4267,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (strategyDslBtn) {
+        strategyDslBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDsl();
         });
     }
 }
@@ -5115,6 +5185,64 @@ function getStrategyParams(type) {
 
     return params;
 }
+function cloneStrategyParams(source) {
+    if (!source || typeof source !== 'object') {
+        return {};
+    }
+    try {
+        return JSON.parse(JSON.stringify(source));
+    } catch (error) {
+        const clone = {};
+        Object.keys(source).forEach((key) => {
+            const value = source[key];
+            if (value && typeof value === 'object') {
+                clone[key] = cloneStrategyParams(value);
+            } else {
+                clone[key] = value;
+            }
+        });
+        return clone;
+    }
+}
+
+function buildStrategyDslPayload(params) {
+    if (!params || typeof params !== 'object') {
+        return null;
+    }
+    const payload = { version: STRATEGY_DSL_VERSION };
+    if (typeof params.entryStrategy === 'string' && params.entryStrategy) {
+        payload.longEntry = {
+            type: 'plugin',
+            id: params.entryStrategy,
+            params: cloneStrategyParams(params.entryParams),
+        };
+    }
+    if (typeof params.exitStrategy === 'string' && params.exitStrategy) {
+        payload.longExit = {
+            type: 'plugin',
+            id: params.exitStrategy,
+            params: cloneStrategyParams(params.exitParams),
+        };
+    }
+    if (params.enableShorting) {
+        if (typeof params.shortEntryStrategy === 'string' && params.shortEntryStrategy) {
+            payload.shortEntry = {
+                type: 'plugin',
+                id: params.shortEntryStrategy,
+                params: cloneStrategyParams(params.shortEntryParams),
+            };
+        }
+        if (typeof params.shortExitStrategy === 'string' && params.shortExitStrategy) {
+            payload.shortExit = {
+                type: 'plugin',
+                id: params.shortExitStrategy,
+                params: cloneStrategyParams(params.shortExitParams),
+            };
+        }
+    }
+    return payload;
+}
+
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -5507,6 +5635,10 @@ function getSuggestion() {
 
     try {
         const params = getBacktestParams();
+        const strategyDsl = buildStrategyDslPayload(params);
+        if (strategyDsl) {
+            params.strategyDsl = strategyDsl;
+        }
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
         const windowOptions = {
             minBars: 90,
@@ -5562,6 +5694,7 @@ function getSuggestion() {
             effectiveStartDate,
             cachedData: Array.isArray(cachedStockData) ? cachedStockData : null,
             lastBacktestRange: { start: params.startDate, end: params.endDate },
+            strategyDsl,
         };
 
         const dataDebug = (lastOverallResult && lastOverallResult.dataDebug) || {};

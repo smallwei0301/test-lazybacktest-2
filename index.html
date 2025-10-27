@@ -504,6 +504,31 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="strategyDslTester">
+                                            <button
+                                                id="manualVerifyStrategyDslBtn"
+                                                type="button"
+                                                class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors"
+                                                style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                            >
+                                                <i data-lucide="code-xml" class="lucide w-4 h-4"></i>
+                                                產生策略 DSL
+                                            </button>
+                                            <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
+                                                按下後會顯示目前策略的 DSL JSON，並在背景驗證是否可組成策略組合，方便人工檢查。
+                                            </p>
+                                            <div
+                                                id="strategyDslPreviewWrapper"
+                                                class="hidden border rounded-md bg-white/70 shadow-sm p-3 text-[11px] overflow-x-auto"
+                                                style="border-color: var(--border); color: var(--muted-foreground);"
+                                            >
+                                                <pre
+                                                    id="strategyDslPreview"
+                                                    class="whitespace-pre-wrap break-all text-[11px]"
+                                                    style="color: var(--foreground);"
+                                                ></pre>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="dataDiagnosticsContainer">
                                             <button
                                                 id="toggleDataDiagnostics"
@@ -2798,6 +2823,7 @@
 
     <script src="js/shared-lookback.js"></script>
     <script src="js/strategy-plugin-contract.js"></script>
+    <script src="js/strategies/composer.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/config.js"></script>
