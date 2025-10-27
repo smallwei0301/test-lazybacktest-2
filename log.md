@@ -1672,6 +1672,15 @@ NODE`
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-19 — Patch LB-DSL-COMPOSER-20260919A
+- **Issue recap**: 策略組合仍以單一插件 ID 傳遞至 Worker，無法支援 AND/OR/NOT 的 DSL 配置，也缺乏開發者端快速檢查與單元測試保護。
+- **Fix**:
+  - 新增 `js/strategies/composer.js`，提供遞迴 `buildComposite`，可解析 AND/OR/NOT 結構並串接策略插件，保留停損資訊與 meta。同步在 `index.html` 與 `js/worker.js` 載入。
+  - `js/main.js` 序列化 UI 選擇為 DSL JSON，主執行緒將其送入 Worker，並於開發者區域新增「策略 DSL 驗證」按鈕，可快速確認 DSL 組譯是否成功。
+  - `js/worker.js` 在回測前建構複合策略評估器，於多空進出場分支優先執行 DSL，失敗時回退既有邏輯，確保停損等欄位沿用。
+  - 新增 `tests/strategy-composer.test.js` 驗證 AND/OR/NOT 與停損傳遞，`package.json` 更新測試流程。
+- **Testing**: `npm test`、`npm run typecheck`
+
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
 - **Fix**:
