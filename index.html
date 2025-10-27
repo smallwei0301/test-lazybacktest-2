@@ -504,6 +504,20 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="composerTesterContainer">
+                                            <div class="text-[11px] font-medium" style="color: var(--foreground);">
+                                                策略 Composer 手動檢驗
+                                            </div>
+                                            <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                使用範例 DSL 驗證進出場組合是否與單一策略一致，並快速檢查多檔股票的暖身起點與倉位狀態。
+                                            </p>
+                                            <div id="composerTesterButtons" class="flex flex-wrap gap-2"></div>
+                                            <div
+                                                id="composerTesterResult"
+                                                class="text-xs hidden rounded-md border px-3 py-2"
+                                                style="border-color: var(--border);"
+                                            ></div>
+                                        </div>
                                         <div class="space-y-2" id="dataDiagnosticsContainer">
                                             <button
                                                 id="toggleDataDiagnostics"
@@ -2800,6 +2814,8 @@
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/strategy-param-utils.js"></script>
+    <script src="js/strategy-composer.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>
     <script src="js/loading-mascot-sources.js"></script>

@@ -32,57 +32,6 @@
     return trimmed.startsWith('^') && trimmed.length > 1;
   }
 
-  function clampNumeric(value, descriptor) {
-    if (!Number.isFinite(value)) {
-      return value;
-    }
-    let output = value;
-    if (descriptor.type === 'integer') {
-      output = Math.round(output);
-    }
-    if (Number.isFinite(descriptor.minimum)) {
-      output = Math.max(descriptor.minimum, output);
-    }
-    if (Number.isFinite(descriptor.maximum)) {
-      output = Math.min(descriptor.maximum, output);
-    }
-    return output;
-  }
-
-  function applySchemaDefaults(schema, rawParams) {
-    if (!schema || typeof schema !== 'object') {
-      return rawParams && typeof rawParams === 'object' ? { ...rawParams } : {};
-    }
-    const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
-    const output = {};
-    Object.keys(properties).forEach((key) => {
-      const descriptor = properties[key];
-      if (descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'default')) {
-        output[key] = descriptor.default;
-      }
-    });
-    if (!rawParams || typeof rawParams !== 'object') {
-      return output;
-    }
-    Object.keys(rawParams).forEach((key) => {
-      const value = rawParams[key];
-      const descriptor = properties[key];
-      if (!descriptor || typeof descriptor !== 'object') {
-        output[key] = value;
-        return;
-      }
-      if (descriptor.type === 'integer' || descriptor.type === 'number') {
-        const numeric = toNumber(value);
-        if (Number.isFinite(numeric)) {
-          output[key] = clampNumeric(numeric, descriptor);
-        }
-      } else {
-        output[key] = value;
-      }
-    });
-    return output;
-  }
-
   function sanitizeStagePercentages(values, fallback) {
     if (!Array.isArray(values)) {
       return Array.isArray(fallback) && fallback.length > 0 ? fallback.slice() : [100];
@@ -115,8 +64,49 @@
     if (!strategyId) {
       return {};
     }
-    const meta = resolveStrategyMeta(registry, strategyId);
-    return applySchemaDefaults(meta && meta.paramsSchema, params);
+    const paramUtils = globalScope.StrategyParamUtils;
+    if (paramUtils && typeof paramUtils.buildParamsWithSchema === 'function') {
+      return paramUtils.buildParamsWithSchema(registry, strategyId, params);
+    }
+    return params && typeof params === 'object' ? { ...params } : {};
+  }
+
+  function cloneRuleObject(raw) {
+    try {
+      return JSON.parse(JSON.stringify(raw));
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[BacktestRunner] 複製策略組合定義失敗', error);
+      }
+      return null;
+    }
+  }
+
+  function normalizeCompositeRule(value) {
+    if (!value) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return null;
+      }
+      try {
+        return JSON.parse(trimmed);
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[BacktestRunner] 解析策略組合 JSON 失敗', error);
+        }
+        return null;
+      }
+    }
+    if (Array.isArray(value)) {
+      return null;
+    }
+    if (typeof value === 'object') {
+      return cloneRuleObject(value);
+    }
+    return null;
   }
 
   function resolveWorkerUrl() {
@@ -232,11 +222,15 @@
     if (!entryStrategy || !exitStrategy) {
       throw new Error('BacktestRunner.run 需要 entryStrategy 與 exitStrategy');
     }
+    const entryRule = normalizeCompositeRule(options.entryRule || options.longEntryRule);
+    const exitRule = normalizeCompositeRule(options.exitRule || options.longExitRule);
     const entryParams = buildStrategyParams(registry, entryStrategy, options.entryParams || options.longEntryParams);
     const exitParams = buildStrategyParams(registry, exitStrategy, options.exitParams || options.longExitParams);
     const enableShorting = Boolean(options.enableShorting || options.allowShortSelling);
     const shortEntryStrategy = enableShorting ? (options.shortEntryStrategy || null) : null;
     const shortExitStrategy = enableShorting ? (options.shortExitStrategy || null) : null;
+    const shortEntryRule = enableShorting ? normalizeCompositeRule(options.shortEntryRule) : null;
+    const shortExitRule = enableShorting ? normalizeCompositeRule(options.shortExitRule) : null;
     const shortEntryParams = enableShorting ? buildStrategyParams(registry, shortEntryStrategy, options.shortEntryParams) : {};
     const shortExitParams = enableShorting ? buildStrategyParams(registry, shortExitStrategy, options.shortExitParams) : {};
     const buyFeeRaw = toNumber(options.buyFee);
@@ -264,6 +258,8 @@
       splitAdjustment,
       entryStrategy,
       exitStrategy,
+      entryRule,
+      exitRule,
       entryParams,
       exitParams,
       entryStages,
@@ -273,6 +269,8 @@
       enableShorting,
       shortEntryStrategy,
       shortExitStrategy,
+      shortEntryRule,
+      shortExitRule,
       shortEntryParams,
       shortExitParams,
       buyFee,

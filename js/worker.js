@@ -21,6 +21,8 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('strategy-param-utils.js');
+importScripts('strategy-composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -42,6 +44,15 @@ const CLASSIFICATION_MODES = {
   BINARY: 'binary',
   MULTICLASS: 'multiclass',
 };
+
+const composerApi =
+  typeof self !== 'undefined' && self.StrategyComposer
+    ? self.StrategyComposer
+    : null;
+const strategyParamUtils =
+  typeof self !== 'undefined' && self.StrategyParamUtils
+    ? self.StrategyParamUtils
+    : null;
 
 const legacyRuleResultNormaliser =
   typeof self !== 'undefined' &&
@@ -7900,7 +7911,9 @@ function runStrategy(data, params, options = {}) {
       stopLoss: globalSL,
       takeProfit: globalTP,
       entryStrategy,
+      entryRule,
       exitStrategy,
+      exitRule,
       entryParams,
       entryStages,
       entryStagingMode,
@@ -7910,6 +7923,8 @@ function runStrategy(data, params, options = {}) {
       enableShorting,
       shortEntryStrategy,
       shortExitStrategy,
+      shortEntryRule,
+      shortExitRule,
       shortEntryParams,
       shortExitParams,
       tradeTiming,
@@ -7917,6 +7932,43 @@ function runStrategy(data, params, options = {}) {
       sellFee,
       positionBasis,
     } = params;
+
+    const cloneCompositeRule = (definition) => {
+      if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+        return null;
+      }
+      try {
+        return JSON.parse(JSON.stringify(definition));
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[Worker] 複合策略定義複製失敗', error);
+        }
+        return null;
+      }
+    };
+
+    const compositeBlueprints = {
+      longEntry: {
+        rule: cloneCompositeRule(entryRule),
+        fallbackStrategy: entryStrategy,
+        fallbackParams: entryParams,
+      },
+      longExit: {
+        rule: cloneCompositeRule(exitRule),
+        fallbackStrategy: exitStrategy,
+        fallbackParams: exitParams,
+      },
+      shortEntry: {
+        rule: enableShorting ? cloneCompositeRule(shortEntryRule) : null,
+        fallbackStrategy: shortEntryStrategy,
+        fallbackParams: shortEntryParams,
+      },
+      shortExit: {
+        rule: enableShorting ? cloneCompositeRule(shortExitRule) : null,
+        fallbackStrategy: shortExitStrategy,
+        fallbackParams: shortExitParams,
+      },
+    };
 
     const entryStagePercentsRaw = Array.isArray(entryStages)
       ? entryStages.map((value) => Number(value))
@@ -8059,6 +8111,83 @@ function runStrategy(data, params, options = {}) {
     volume: volumes,
     date: dates,
   };
+
+  const compositeEvaluators = {
+    longEntry: null,
+    longExit: null,
+    shortEntry: null,
+    shortExit: null,
+  };
+
+  const composerAvailable = composerApi && typeof composerApi.buildComposite === 'function';
+
+  function buildCompositeEvaluator(role, blueprint) {
+    if (!composerAvailable || !blueprint) {
+      return null;
+    }
+    let ruleDefinition = blueprint.rule;
+    if (!ruleDefinition && blueprint.fallbackStrategy) {
+      ruleDefinition = {
+        strategy: blueprint.fallbackStrategy,
+        params:
+          blueprint.fallbackParams && typeof blueprint.fallbackParams === 'object'
+            ? { ...blueprint.fallbackParams }
+            : {},
+      };
+    }
+    if (!ruleDefinition) {
+      return null;
+    }
+    try {
+      const evaluator = composerApi.buildComposite(ruleDefinition, pluginRegistry, {
+        role,
+        prepareParams(strategyId, rawParams) {
+          if (strategyParamUtils && typeof strategyParamUtils.buildParamsWithSchema === 'function') {
+            return strategyParamUtils.buildParamsWithSchema(pluginRegistry, strategyId, rawParams);
+          }
+          return rawParams && typeof rawParams === 'object' ? { ...rawParams } : {};
+        },
+        invoke(strategyId, context, params, extras) {
+          return callStrategyPlugin(strategyId, role, context.index, params, extras);
+        },
+      });
+      if (typeof evaluator !== 'function') {
+        return null;
+      }
+      return (index, extras) => {
+        const baseContext = {
+          role,
+          index,
+          series: pluginSeries,
+          runtime: pluginRuntimeInfo,
+        };
+        return evaluator(baseContext, extras);
+      };
+    } catch (error) {
+      console.error(`[Worker] 建立 ${role} 複合策略失敗`, error);
+      return null;
+    }
+  }
+
+  if (composerAvailable) {
+    compositeEvaluators.longEntry = buildCompositeEvaluator('longEntry', compositeBlueprints.longEntry);
+    compositeEvaluators.longExit = buildCompositeEvaluator('longExit', compositeBlueprints.longExit);
+    compositeEvaluators.shortEntry = buildCompositeEvaluator('shortEntry', compositeBlueprints.shortEntry);
+    compositeEvaluators.shortExit = buildCompositeEvaluator('shortExit', compositeBlueprints.shortExit);
+  }
+
+  function evaluateCompositeRule(role, index, extras) {
+    const evaluator = compositeEvaluators[role];
+    if (!evaluator) {
+      return null;
+    }
+    try {
+      return evaluator(index, extras) || null;
+    } catch (error) {
+      console.error(`[Worker] ${role} 複合策略執行失敗`, error);
+      return null;
+    }
+  }
 
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
@@ -8738,6 +8867,29 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
+        const exitCompositeExtras = { currentPrice: curC, referencePrice: curPeakP };
+        if (compositeEvaluators.longExit) {
+          try {
+            const compositeResult = evaluateCompositeRule('longExit', i, exitCompositeExtras);
+            if (compositeResult) {
+              exitRuleResult = compositeResult;
+              sellSignal = compositeResult.exit === true;
+              const meta = compositeResult.meta || {};
+              if (!exitIndicatorValues && meta.indicatorValues) {
+                exitIndicatorValues = meta.indicatorValues;
+              }
+              if (!exitKDValues && meta.kdValues) {
+                exitKDValues = meta.kdValues;
+              }
+              if (!exitMACDValues && meta.macdValues) {
+                exitMACDValues = meta.macdValues;
+              }
+            }
+          } catch (compositeError) {
+            console.error('[Worker LONG EXIT] 複合策略執行失敗', compositeError);
+          }
+        }
+        if (!exitRuleResult) {
         switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
@@ -9013,6 +9165,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,6 +9428,29 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
+        const shortExitExtras = { currentPrice: curC, referencePrice: currentLowSinceShort };
+        if (compositeEvaluators.shortExit) {
+          try {
+            const compositeResult = evaluateCompositeRule('shortExit', i, shortExitExtras);
+            if (compositeResult) {
+              shortExitRuleResult = compositeResult;
+              coverSignal = compositeResult.cover === true;
+              const meta = compositeResult.meta || {};
+              if (!coverIndicatorValues && meta.indicatorValues) {
+                coverIndicatorValues = meta.indicatorValues;
+              }
+              if (!coverKDValues && meta.kdValues) {
+                coverKDValues = meta.kdValues;
+              }
+              if (!coverMACDValues && meta.macdValues) {
+                coverMACDValues = meta.macdValues;
+              }
+            }
+          } catch (compositeError) {
+            console.error('[Worker SHORT EXIT] 複合策略執行失敗', compositeError);
+          }
+        }
+        if (!shortExitRuleResult) {
         switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
@@ -9546,6 +9722,7 @@ function runStrategy(data, params, options = {}) {
             coverSignal = false;
             break;
         }
+        }
         const finalShortExitRule =
           shortExitRuleResult ||
           normaliseRuleResultFromLegacy(
@@ -9658,6 +9835,28 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
+      if (compositeEvaluators.longEntry) {
+        try {
+          const compositeResult = evaluateCompositeRule('longEntry', i, null);
+          if (compositeResult) {
+            entryRuleResult = compositeResult;
+            buySignal = compositeResult.enter === true;
+            const meta = compositeResult.meta || {};
+            if (!entryIndicatorValues && meta.indicatorValues) {
+              entryIndicatorValues = meta.indicatorValues;
+            }
+            if (!entryKDValues && meta.kdValues) {
+              entryKDValues = meta.kdValues;
+            }
+            if (!entryMACDValues && meta.macdValues) {
+              entryMACDValues = meta.macdValues;
+            }
+          }
+        } catch (compositeError) {
+          console.error('[Worker LONG ENTRY] 複合策略執行失敗', compositeError);
+        }
+      }
+      if (!entryRuleResult) {
       switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
@@ -9895,6 +10094,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,6 +10197,28 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
+      if (compositeEvaluators.shortEntry) {
+        try {
+          const compositeResult = evaluateCompositeRule('shortEntry', i, null);
+          if (compositeResult) {
+            shortEntryRuleResult = compositeResult;
+            shortSignal = compositeResult.short === true;
+            const meta = compositeResult.meta || {};
+            if (!shortEntryIndicatorValues && meta.indicatorValues) {
+              shortEntryIndicatorValues = meta.indicatorValues;
+            }
+            if (!shortEntryKDValues && meta.kdValues) {
+              shortEntryKDValues = meta.kdValues;
+            }
+            if (!shortEntryMACDValues && meta.macdValues) {
+              shortEntryMACDValues = meta.macdValues;
+            }
+          }
+        } catch (compositeError) {
+          console.error('[Worker SHORT ENTRY] 複合策略執行失敗', compositeError);
+        }
+      }
+      if (!shortEntryRuleResult) {
       switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
@@ -10230,6 +10452,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+      }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||
