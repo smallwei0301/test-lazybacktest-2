@@ -97,6 +97,33 @@
     return sanitized;
   }
 
+  function cloneRuleConfig(value) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[BacktestRunner] 規則字串解析失敗', error);
+        }
+        return null;
+      }
+    }
+    if (typeof value === 'object') {
+      try {
+        return JSON.parse(JSON.stringify(value));
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[BacktestRunner] 規則複製失敗', error);
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
   function resolveStrategyMeta(registry, strategyId) {
     if (!registry || typeof registry.getStrategyMetaById !== 'function') {
       return null;
@@ -252,6 +279,10 @@
     const exitStages = sanitizeStagePercentages(options.exitStages, [100]);
     const entryStagingMode = options.entryStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
     const exitStagingMode = options.exitStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
+    const entryRule = cloneRuleConfig(options.entryRule);
+    const exitRule = cloneRuleConfig(options.exitRule);
+    const shortEntryRule = cloneRuleConfig(options.shortEntryRule);
+    const shortExitRule = cloneRuleConfig(options.shortExitRule);
 
     return {
       stockNo,
@@ -275,6 +306,10 @@
       shortExitStrategy,
       shortEntryParams,
       shortExitParams,
+      entryRule,
+      exitRule,
+      shortEntryRule: enableShorting ? shortEntryRule : null,
+      shortExitRule: enableShorting ? shortExitRule : null,
       buyFee,
       sellFee,
       positionBasis,

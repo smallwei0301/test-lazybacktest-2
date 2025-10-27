@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('lib/strategy-composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8060,6 +8061,108 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  const strategyComposer =
+    typeof self !== 'undefined' &&
+    self.StrategyComposer &&
+    typeof self.StrategyComposer.buildComposite === 'function'
+      ? self.StrategyComposer
+      : null;
+
+  function cloneRuleConfig(source) {
+    if (!source) {
+      return null;
+    }
+    if (typeof source === 'string') {
+      try {
+        return JSON.parse(source);
+      } catch (parseError) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[StrategyComposer] 無法解析字串規則', parseError);
+        }
+        return null;
+      }
+    }
+    if (source && typeof source === 'object') {
+      try {
+        return JSON.parse(JSON.stringify(source));
+      } catch (cloneError) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[StrategyComposer] 複製規則失敗', cloneError);
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function resolveLegacyRule(strategyId, strategyParams) {
+    if (!strategyId || typeof strategyId !== 'string') {
+      return null;
+    }
+    const paramsClone =
+      strategyParams && typeof strategyParams === 'object'
+        ? JSON.parse(JSON.stringify(strategyParams))
+        : {};
+    return { op: 'PLUGIN', strategy: strategyId, params: paramsClone };
+  }
+
+  function createRuleEvaluator(role, ruleConfig, legacyId, legacyParams) {
+    if (!strategyComposer || !pluginRegistry) {
+      return null;
+    }
+    let resolvedConfig = cloneRuleConfig(ruleConfig);
+    if (!resolvedConfig) {
+      resolvedConfig = resolveLegacyRule(legacyId, legacyParams);
+    }
+    if (!resolvedConfig) {
+      return null;
+    }
+    try {
+      return strategyComposer.buildComposite(resolvedConfig, pluginRegistry, {
+        role,
+        contract: StrategyPluginContract,
+        indicators,
+        cacheStore: pluginCacheStore,
+        series: pluginSeries,
+        runtime: pluginRuntimeInfo,
+      });
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.error) {
+        console.error(`[StrategyComposer] ${role} 規則建立失敗`, error);
+      }
+      return null;
+    }
+  }
+
+  const longEntryEvaluator = createRuleEvaluator(
+    'longEntry',
+    params.entryRule,
+    params.entryStrategy,
+    params.entryParams,
+  );
+  const longExitEvaluator = createRuleEvaluator(
+    'longExit',
+    params.exitRule,
+    params.exitStrategy,
+    params.exitParams,
+  );
+  const shortEntryEvaluator = enableShorting
+    ? createRuleEvaluator(
+        'shortEntry',
+        params.shortEntryRule,
+        params.shortEntryStrategy,
+        params.shortEntryParams,
+      )
+    : null;
+  const shortExitEvaluator = enableShorting
+    ? createRuleEvaluator(
+        'shortExit',
+        params.shortExitRule,
+        params.shortExitStrategy,
+        params.shortExitParams,
+      )
+    : null;
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -8738,7 +8841,26 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        if (longExitEvaluator) {
+          try {
+            const composedExit = longExitEvaluator(i);
+            if (composedExit && typeof composedExit === 'object') {
+              exitRuleResult = composedExit;
+              sellSignal = composedExit.exit === true;
+            }
+          } catch (composerError) {
+            if (typeof console !== 'undefined' && console.error) {
+              console.error(
+                `[StrategyComposer] longExit evaluate 失敗 (${dates[i]})`,
+                composerError,
+              );
+            }
+            exitRuleResult = null;
+            sellSignal = false;
+          }
+        }
+        if (!longExitEvaluator || exitRuleResult === null) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9012,12 +9134,22 @@ function runStrategy(data, params, options = {}) {
           case "fixed_stop_loss":
             sellSignal = false;
             break;
+          }
         }
         const finalExitRule =
-          exitRuleResult ||
-          normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
+          exitRuleResult && typeof exitRuleResult === 'object'
+            ? exitRuleResult
+            : normaliseRuleResultFromLegacy(
+                exitStrategy,
+                'longExit',
+                { exit: sellSignal },
+                i,
+              );
         sellSignal = finalExitRule.exit === true;
-        const exitMeta = finalExitRule.meta;
+        const exitMeta =
+          finalExitRule && finalExitRule.meta && typeof finalExitRule.meta === 'object'
+            ? finalExitRule.meta
+            : null;
         if (!exitIndicatorValues && exitMeta && exitMeta.indicatorValues)
           exitIndicatorValues = exitMeta.indicatorValues;
         if (!exitKDValues && exitMeta && exitMeta.kdValues)
@@ -9275,7 +9407,26 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if (shortExitEvaluator) {
+          try {
+            const composedShortExit = shortExitEvaluator(i);
+            if (composedShortExit && typeof composedShortExit === 'object') {
+              shortExitRuleResult = composedShortExit;
+              coverSignal = composedShortExit.cover === true;
+            }
+          } catch (composerError) {
+            if (typeof console !== 'undefined' && console.error) {
+              console.error(
+                `[StrategyComposer] shortExit evaluate 失敗 (${dates[i]})`,
+                composerError,
+              );
+            }
+            shortExitRuleResult = null;
+            coverSignal = false;
+          }
+        }
+        if (!shortExitEvaluator || shortExitRuleResult === null) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9545,17 +9696,24 @@ function runStrategy(data, params, options = {}) {
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
+          }
         }
         const finalShortExitRule =
-          shortExitRuleResult ||
-          normaliseRuleResultFromLegacy(
-            shortExitStrategy,
-            'shortExit',
-            { cover: coverSignal },
-            i,
-          );
+          shortExitRuleResult && typeof shortExitRuleResult === 'object'
+            ? shortExitRuleResult
+            : normaliseRuleResultFromLegacy(
+                shortExitStrategy,
+                'shortExit',
+                { cover: coverSignal },
+                i,
+              );
         coverSignal = finalShortExitRule.cover === true;
-        const shortExitMeta = finalShortExitRule.meta;
+        const shortExitMeta =
+          finalShortExitRule &&
+          finalShortExitRule.meta &&
+          typeof finalShortExitRule.meta === 'object'
+            ? finalShortExitRule.meta
+            : null;
         if (!coverIndicatorValues && shortExitMeta && shortExitMeta.indicatorValues)
           coverIndicatorValues = shortExitMeta.indicatorValues;
         if (!coverKDValues && shortExitMeta && shortExitMeta.kdValues)
@@ -9658,7 +9816,26 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
+      if (longEntryEvaluator) {
+        try {
+          const composedResult = longEntryEvaluator(i);
+          if (composedResult && typeof composedResult === 'object') {
+            entryRuleResult = composedResult;
+            buySignal = composedResult.enter === true;
+          }
+        } catch (composerError) {
+          if (typeof console !== 'undefined' && console.error) {
+            console.error(
+              `[StrategyComposer] longEntry evaluate 失敗 (${dates[i]})`,
+              composerError,
+            );
+          }
+          entryRuleResult = null;
+          buySignal = false;
+        }
+      }
+      if (!longEntryEvaluator || entryRuleResult === null) {
+        switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
           const pluginResult = callStrategyPlugin(
@@ -9894,12 +10071,22 @@ function runStrategy(data, params, options = {}) {
               };
           }
           break;
+        }
       }
       const finalEntryRule =
-        entryRuleResult ||
-        normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
+        entryRuleResult && typeof entryRuleResult === 'object'
+          ? entryRuleResult
+          : normaliseRuleResultFromLegacy(
+              entryStrategy,
+              'longEntry',
+              { enter: buySignal },
+              i,
+            );
       buySignal = finalEntryRule.enter === true;
-      const entryMeta = finalEntryRule.meta;
+      const entryMeta =
+        finalEntryRule && finalEntryRule.meta && typeof finalEntryRule.meta === 'object'
+          ? finalEntryRule.meta
+          : null;
       if (!entryIndicatorValues && entryMeta && entryMeta.indicatorValues)
         entryIndicatorValues = entryMeta.indicatorValues;
       if (!entryKDValues && entryMeta && entryMeta.kdValues)
@@ -9997,7 +10184,26 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (shortEntryEvaluator) {
+        try {
+          const composedShortEntry = shortEntryEvaluator(i);
+          if (composedShortEntry && typeof composedShortEntry === 'object') {
+            shortEntryRuleResult = composedShortEntry;
+            shortSignal = composedShortEntry.short === true;
+          }
+        } catch (composerError) {
+          if (typeof console !== 'undefined' && console.error) {
+            console.error(
+              `[StrategyComposer] shortEntry evaluate 失敗 (${dates[i]})`,
+              composerError,
+            );
+          }
+          shortEntryRuleResult = null;
+          shortSignal = false;
+        }
+      }
+      if (!shortEntryEvaluator || shortEntryRuleResult === null) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,17 +10436,24 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
       }
       const finalShortEntryRule =
-        shortEntryRuleResult ||
-        normaliseRuleResultFromLegacy(
-          shortEntryStrategy,
-          'shortEntry',
-          { short: shortSignal },
-          i,
-        );
+        shortEntryRuleResult && typeof shortEntryRuleResult === 'object'
+          ? shortEntryRuleResult
+          : normaliseRuleResultFromLegacy(
+              shortEntryStrategy,
+              'shortEntry',
+              { short: shortSignal },
+              i,
+            );
       shortSignal = finalShortEntryRule.short === true;
-      const shortEntryMeta = finalShortEntryRule.meta;
+      const shortEntryMeta =
+        finalShortEntryRule &&
+        finalShortEntryRule.meta &&
+        typeof finalShortEntryRule.meta === 'object'
+          ? finalShortEntryRule.meta
+          : null;
       if (!shortEntryIndicatorValues && shortEntryMeta && shortEntryMeta.indicatorValues)
         shortEntryIndicatorValues = shortEntryMeta.indicatorValues;
       if (!shortEntryKDValues && shortEntryMeta && shortEntryMeta.kdValues)
