@@ -17,10 +17,12 @@
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
+// Patch Tag: LB-WORKER-COMPOSITE-20250720A — 回測核心改用 Composer 複合規則函式。
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('strategy-composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8060,7 +8062,7 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
-  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+  function directCallStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
       (typeof pluginRegistry.getStrategyById !== 'function' && typeof pluginRegistry.get !== 'function') ||
@@ -8140,6 +8142,113 @@ function runStrategy(data, params, options = {}) {
       console.error(`[StrategyPlugin:${strategyId}] 執行失敗`, pluginError);
       return null;
     }
+  }
+
+  const composer =
+    typeof self !== 'undefined' && self.StrategyComposer && typeof self.StrategyComposer === 'object'
+      ? self.StrategyComposer
+      : null;
+  const compositeEvaluators = {
+    longEntry: null,
+    longExit: null,
+    shortEntry: null,
+    shortExit: null,
+  };
+
+  if (composer && typeof composer.buildComposite === 'function') {
+    const roleConfigs = [
+      { role: 'longEntry', dslKey: 'entryDsl', strategyKey: 'entryStrategy', paramsKey: 'entryParams' },
+      { role: 'longExit', dslKey: 'exitDsl', strategyKey: 'exitStrategy', paramsKey: 'exitParams' },
+      {
+        role: 'shortEntry',
+        dslKey: 'shortEntryDsl',
+        strategyKey: 'shortEntryStrategy',
+        paramsKey: 'shortEntryParams',
+        guard: () => enableShorting === true,
+      },
+      {
+        role: 'shortExit',
+        dslKey: 'shortExitDsl',
+        strategyKey: 'shortExitStrategy',
+        paramsKey: 'shortExitParams',
+        guard: () => enableShorting === true,
+      },
+    ];
+
+    roleConfigs.forEach((config) => {
+      if (typeof config.guard === 'function' && !config.guard()) {
+        return;
+      }
+      let dslNode = null;
+      const providedDsl = params && params[config.dslKey];
+      if (providedDsl && typeof providedDsl === 'object') {
+        try {
+          dslNode = providedDsl;
+        } catch (dslError) {
+          console.error(`[StrategyComposer:${config.role}] 解析 DSL 失敗`, dslError);
+          dslNode = null;
+        }
+      }
+      if (!dslNode) {
+        const strategyId = params && params[config.strategyKey];
+        if (!strategyId) {
+          return;
+        }
+        const rawParams = params && params[config.paramsKey];
+        try {
+          const normalisedParams =
+            composer && typeof composer.normaliseParams === 'function'
+              ? composer.normaliseParams(pluginRegistry, strategyId, rawParams || {})
+              : rawParams || {};
+          if (typeof composer.createLeaf === 'function') {
+            dslNode = composer.createLeaf(strategyId, normalisedParams);
+          } else {
+            dslNode = { op: 'LEAF', strategy: strategyId, params: normalisedParams || {} };
+          }
+        } catch (leafError) {
+          console.error(`[StrategyComposer:${config.role}] 建立預設節點失敗`, leafError);
+          dslNode = null;
+        }
+      }
+      if (!dslNode) {
+        return;
+      }
+      try {
+        compositeEvaluators[config.role] = composer.buildComposite(dslNode, pluginRegistry, {
+          invokeLeaf({ strategyId, role, index, params: pluginParams, runtime }) {
+            return directCallStrategyPlugin(strategyId, role, index, pluginParams, runtime);
+          },
+        });
+      } catch (buildError) {
+        console.error(`[StrategyComposer:${config.role}] 建立複合策略失敗`, buildError);
+        compositeEvaluators[config.role] = null;
+      }
+    });
+  }
+
+  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+    const evaluator = role && compositeEvaluators[role];
+    if (typeof evaluator === 'function') {
+      try {
+        const overrides =
+          strategyId && baseParams && typeof baseParams === 'object'
+            ? { [strategyId]: baseParams }
+            : undefined;
+        const result = evaluator(
+          { role, index },
+          { paramsOverride: overrides, runtime: extras },
+        );
+        if (result) {
+          return result;
+        }
+      } catch (compositeError) {
+        console.error(`[StrategyComposer:${role}] 評估失敗`, compositeError);
+      }
+    }
+    if (!strategyId) {
+      return null;
+    }
+    return directCallStrategyPlugin(strategyId, role, index, baseParams, extras);
   }
 
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
