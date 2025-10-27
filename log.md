@@ -1,3 +1,10 @@
+## 2026-09-16 — Patch LB-ADJ-COMPOSER-20250624A
+- **Scope**: 調整股價 API Yahoo 主來源與備援記錄治理。
+- **Updates**:
+  - `netlify/functions/calculateAdjustedPrice.js` 新增 Yahoo Finance 日線還原抓取與正規化，未勾拆分時優先回傳 Yahoo 還原價並記錄備援流程。
+  - 調整配息/拆分摘要組合邏輯，未拆分時顯示 Yahoo 主來源與 FinMind 備援、拆分時維持 TWSE/FinMind 合併；新增價格來源診斷記錄以追蹤 Yahoo 失敗原因。
+- **Testing**: `npm run typecheck`。
+
 ## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
 - **Scope**: ANN 美股波動度特徵整合。
 - **Updates**:
