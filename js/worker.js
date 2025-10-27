@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('strategies/composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8060,7 +8061,7 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
-  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+  function invokeStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
       (typeof pluginRegistry.getStrategyById !== 'function' && typeof pluginRegistry.get !== 'function') ||
@@ -8142,6 +8143,148 @@ function runStrategy(data, params, options = {}) {
     }
   }
 
+  const strategyDslInput =
+    params && typeof params.strategyDsl === 'object' && params.strategyDsl !== null
+      ? params.strategyDsl
+      : null;
+  const composerApi =
+    typeof self !== 'undefined' && self.lazybacktestStrategyComposer
+      ? self.lazybacktestStrategyComposer
+      : null;
+  const roleStrategyIds = {
+    longEntry: entryStrategy || null,
+    longExit: exitStrategy || null,
+    shortEntry: enableShorting ? shortEntryStrategy || null : null,
+    shortExit: enableShorting ? shortExitStrategy || null : null,
+  };
+  const compositeEvaluators = {
+    longEntry: null,
+    longExit: null,
+    shortEntry: null,
+    shortExit: null,
+  };
+
+  function buildCompositeEvaluator(roleKey, baseParams) {
+    if (!composerApi || typeof composerApi.buildComposite !== 'function') {
+      return null;
+    }
+    if (!strategyDslInput || typeof strategyDslInput !== 'object') {
+      return null;
+    }
+    const node = strategyDslInput[roleKey];
+    if (!node || typeof node !== 'object') {
+      return null;
+    }
+    const role = roleKey;
+    try {
+      const composite = composerApi.buildComposite(node, pluginRegistry, {
+        role,
+        baseParams: baseParams && typeof baseParams === 'object' ? baseParams : null,
+        invoke(invocation) {
+          return invokeStrategyPlugin(
+            invocation.id,
+            invocation.role || role,
+            invocation.index,
+            invocation.params,
+            invocation.extras,
+          );
+        },
+      });
+      if (composite && typeof composite.evaluate === 'function') {
+        return composite;
+      }
+    } catch (error) {
+      console.error(`[StrategyDSL] 無法建立 ${roleKey} 組合策略`, error);
+    }
+    return null;
+  }
+
+  compositeEvaluators.longEntry = buildCompositeEvaluator('longEntry', entryParams);
+  compositeEvaluators.longExit = buildCompositeEvaluator('longExit', exitParams);
+  compositeEvaluators.shortEntry = enableShorting
+    ? buildCompositeEvaluator('shortEntry', shortEntryParams)
+    : null;
+  compositeEvaluators.shortExit = enableShorting
+    ? buildCompositeEvaluator('shortExit', shortExitParams)
+    : null;
+
+  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+    const composite = compositeEvaluators[role] || null;
+    const primaryId = roleStrategyIds[role] || null;
+    if (composite && typeof composite.evaluate === 'function') {
+      const shouldUseComposite =
+        !primaryId || !strategyId || strategyId === primaryId || strategyId === 'none';
+      if (shouldUseComposite) {
+        try {
+          const compositeResult = composite.evaluate(index, extras);
+          if (compositeResult) {
+            return compositeResult;
+          }
+        } catch (error) {
+          console.error(`[StrategyDSL] ${role} evaluate 失敗`, error);
+        }
+      }
+    }
+    return invokeStrategyPlugin(strategyId, role, index, baseParams, extras);
+  }
+
+  function collectNumericParamsFromDsl(roleKey, baseParams) {
+    if (!strategyDslInput || typeof strategyDslInput !== 'object') {
+      return [];
+    }
+    const root = strategyDslInput[roleKey];
+    if (!root || typeof root !== 'object') {
+      return [];
+    }
+    const numbers = [];
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') {
+        continue;
+      }
+      const typeRaw =
+        typeof node.type === 'string'
+          ? node.type.toLowerCase()
+          : typeof node.op === 'string'
+            ? node.op.toLowerCase()
+            : typeof node.operator === 'string'
+              ? node.operator.toLowerCase()
+              : null;
+      if (typeRaw === 'plugin' || (!typeRaw && typeof node.id === 'string')) {
+        const paramsSource =
+          node.params && typeof node.params === 'object'
+            ? node.params
+            : baseParams && typeof baseParams === 'object'
+              ? baseParams
+              : null;
+        if (paramsSource && typeof paramsSource === 'object') {
+          Object.values(paramsSource).forEach((value) => {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              numbers.push(value);
+            } else if (Array.isArray(value)) {
+              value.forEach((item) => {
+                if (typeof item === 'number' && Number.isFinite(item)) {
+                  numbers.push(item);
+                }
+              });
+            }
+          });
+        }
+      }
+      if (Array.isArray(node.nodes)) {
+        node.nodes.forEach((child) => stack.push(child));
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach((child) => stack.push(child));
+      }
+      if (node.node && typeof node.node === 'object') {
+        stack.push(node.node);
+      }
+    }
+    return numbers;
+  }
+
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
   const warmupSummary = {
     requestedStart: userStartISO,
@@ -8189,8 +8332,20 @@ function runStrategy(data, params, options = {}) {
       shortExitParams?.period,
       shortExitParams?.breakoutPeriod,
       shortExitParams?.signalPeriod,
-      shortExitParams?.percentage,
-    ]);
+    shortExitParams?.percentage,
+  ]);
+  }
+  const compositePeriodValues = []
+    .concat(collectNumericParamsFromDsl('longEntry', entryParams))
+    .concat(collectNumericParamsFromDsl('longExit', exitParams));
+  if (enableShorting) {
+    compositePeriodValues.push(
+      ...collectNumericParamsFromDsl('shortEntry', shortEntryParams),
+      ...collectNumericParamsFromDsl('shortExit', shortExitParams),
+    );
+  }
+  if (compositePeriodValues.length > 0) {
+    allPeriods = allPeriods.concat(compositePeriodValues);
   }
   const validPeriods = allPeriods.filter(
     (p) => typeof p === "number" && p > 0 && isFinite(p),
