@@ -1,3 +1,11 @@
+## 2026-09-20 — Patch LB-STRATEGY-DSL-20260920A
+- **Scope**: 階段5 策略 DSL Composer 與待辦初始化。
+- **Updates**:
+  - 新增 `js/lib/strategy-dsl.js`，提供 `buildComposite` 解析器，支援 AND/OR/NOT 遞迴組合與 paramsSchema 驗證。
+  - 建立 `tests/strategy-dsl.test.js` 覆蓋 AND/OR/NOT 與停損傳遞情境，確保複合策略輸出穩定。
+  - 調整 `package.json` 測試腳本納入新測試，並新增 `todolist.md` 紀錄階段5～10 工作排程。
+- **Testing**: `npm test`（容器環境執行全部單元測試，驗證 DSL 組合計算與既有批量測試皆通過）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
