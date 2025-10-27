@@ -22,6 +22,7 @@ importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
+importScripts('lib/strategy-dsl-composer.js');
 
 const TFJS_VERSION = '4.20.0';
 const TF_BACKEND_TARGET = 'wasm';
@@ -8060,6 +8061,55 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  function registerDslComposites(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return;
+    }
+    const registry = pluginRegistry;
+    const composer = typeof self !== 'undefined' ? self.LazyStrategyDslComposer : null;
+    const contract = typeof self !== 'undefined' ? self.StrategyPluginContract : null;
+    if (!registry || typeof registry.registerStrategy !== 'function') {
+      return;
+    }
+    if (!composer || typeof composer.buildComposite !== 'function') {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[Worker][DSL] 缺少 LazyStrategyDslComposer，無法建立複合策略');
+      }
+      return;
+    }
+    items.forEach((item) => {
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      const id = typeof item.id === 'string' ? item.id.trim() : '';
+      if (!id) {
+        return;
+      }
+      if (typeof registry.hasStrategy === 'function' && registry.hasStrategy(id)) {
+        return;
+      }
+      const label = typeof item.label === 'string' && item.label.trim() ? item.label : id;
+      try {
+        const evaluator = composer.buildComposite(item.definition, registry, { contract });
+        const plugin = {
+          meta: {
+            id,
+            label,
+            paramsSchema: { type: 'object', properties: {}, additionalProperties: false },
+          },
+          run(context) {
+            return evaluator(context);
+          },
+        };
+        registry.registerStrategy(plugin);
+      } catch (error) {
+        if (typeof console !== 'undefined' && console.error) {
+          console.error(`[Worker][DSL] 複合策略 ${id} 註冊失敗`, error);
+        }
+      }
+    });
+  }
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -12384,6 +12434,7 @@ self.onmessage = async function (e) {
     optimizeParamName,
     optimizeRange,
   } = e.data;
+  registerDslComposites(e.data?.dslComposites);
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
       ? lazybacktestShared
