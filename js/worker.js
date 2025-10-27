@@ -20,6 +20,7 @@
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
+importScripts('strategies/composer.js');
 importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
 
@@ -8142,6 +8143,65 @@ function runStrategy(data, params, options = {}) {
     }
   }
 
+  const composerApi =
+    typeof self !== 'undefined' &&
+    self.StrategyComposer &&
+    typeof self.StrategyComposer.buildComposite === 'function'
+      ? self.StrategyComposer
+      : null;
+  const strategyDslRoles =
+    params?.strategyDsl && typeof params.strategyDsl === 'object'
+      ? params.strategyDsl.roles || params.strategyDsl
+      : null;
+  const compositeEvaluators = {};
+  if (composerApi && strategyDslRoles && typeof strategyDslRoles === 'object') {
+    const composerRegistry = {
+      invoke(pluginId, context, pluginParams) {
+        const roleValue =
+          context && typeof context.role === 'string' ? context.role : null;
+        const indexValue = Number.isFinite(context?.index) ? context.index : 0;
+        const extras =
+          context && typeof context === 'object' && context.extras
+            ? context.extras
+            : undefined;
+        const result = callStrategyPlugin(
+          pluginId,
+          roleValue,
+          indexValue,
+          pluginParams || {},
+          extras && typeof extras === 'object' ? extras : undefined,
+        );
+        return (
+          result || { enter: false, exit: false, short: false, cover: false, meta: {} }
+        );
+      },
+      ensureStrategyLoaded:
+        pluginRegistry && typeof pluginRegistry.ensureStrategyLoaded === 'function'
+          ? pluginRegistry.ensureStrategyLoaded.bind(pluginRegistry)
+          : undefined,
+      getStrategyById:
+        pluginRegistry && typeof pluginRegistry.getStrategyById === 'function'
+          ? pluginRegistry.getStrategyById.bind(pluginRegistry)
+          : undefined,
+      get:
+        pluginRegistry && typeof pluginRegistry.get === 'function'
+          ? pluginRegistry.get.bind(pluginRegistry)
+          : undefined,
+    };
+    ['longEntry', 'longExit', 'shortEntry', 'shortExit'].forEach((roleKey) => {
+      const node = strategyDslRoles[roleKey];
+      if (!node) return;
+      try {
+        const evaluator = composerApi.buildComposite(node, composerRegistry);
+        if (typeof evaluator === 'function') {
+          compositeEvaluators[roleKey] = evaluator;
+        }
+      } catch (composerError) {
+        console.error(`[Composer] ${roleKey} DSL 建立失敗`, composerError);
+      }
+    });
+  }
+
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
   const warmupSummary = {
     requestedStart: userStartISO,
@@ -8738,7 +8798,25 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        if (compositeEvaluators.longExit) {
+          try {
+            const compositeResult = compositeEvaluators.longExit({
+              role: 'longExit',
+              index: i,
+            });
+            if (compositeResult && typeof compositeResult === 'object') {
+              exitRuleResult = compositeResult;
+              sellSignal = compositeResult.exit === true;
+            }
+          } catch (composerError) {
+            console.error(
+              `[Composer] longExit 評估失敗 (index=${i})`,
+              composerError,
+            );
+          }
+        }
+        if (!exitRuleResult) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9013,6 +9091,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,7 +9354,25 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if (compositeEvaluators.shortExit) {
+          try {
+            const compositeResult = compositeEvaluators.shortExit({
+              role: 'shortExit',
+              index: i,
+            });
+            if (compositeResult && typeof compositeResult === 'object') {
+              shortExitRuleResult = compositeResult;
+              coverSignal = compositeResult.cover === true;
+            }
+          } catch (composerError) {
+            console.error(
+              `[Composer] shortExit 評估失敗 (index=${i})`,
+              composerError,
+            );
+          }
+        }
+        if (!shortExitRuleResult) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9546,6 +9643,7 @@ function runStrategy(data, params, options = {}) {
             coverSignal = false;
             break;
         }
+        }
         const finalShortExitRule =
           shortExitRuleResult ||
           normaliseRuleResultFromLegacy(
@@ -9658,7 +9756,25 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
+      if (compositeEvaluators.longEntry) {
+        try {
+          const compositeResult = compositeEvaluators.longEntry({
+            role: 'longEntry',
+            index: i,
+          });
+          if (compositeResult && typeof compositeResult === 'object') {
+            entryRuleResult = compositeResult;
+            buySignal = compositeResult.enter === true;
+          }
+        } catch (composerError) {
+          console.error(
+            `[Composer] longEntry 評估失敗 (index=${i})`,
+            composerError,
+          );
+        }
+      }
+      if (!entryRuleResult) {
+        switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
           const pluginResult = callStrategyPlugin(
@@ -9895,6 +10011,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,7 +10114,25 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (compositeEvaluators.shortEntry) {
+        try {
+          const compositeResult = compositeEvaluators.shortEntry({
+            role: 'shortEntry',
+            index: i,
+          });
+          if (compositeResult && typeof compositeResult === 'object') {
+            shortEntryRuleResult = compositeResult;
+            shortSignal = compositeResult.short === true;
+          }
+        } catch (composerError) {
+          console.error(
+            `[Composer] shortEntry 評估失敗 (index=${i})`,
+            composerError,
+          );
+        }
+      }
+      if (!shortEntryRuleResult) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {

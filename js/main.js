@@ -210,6 +210,60 @@ const stagedEntryControls = (() => {
     };
 })();
 
+function normaliseDslParams(params) {
+    if (!params || typeof params !== 'object') {
+        return {};
+    }
+    const cleaned = {};
+    Object.keys(params).forEach((key) => {
+        const value = params[key];
+        if (value === undefined) return;
+        const type = typeof value;
+        if (type === 'number') {
+            if (!Number.isNaN(value)) cleaned[key] = value;
+        } else if (type === 'string' || type === 'boolean') {
+            cleaned[key] = value;
+        }
+    });
+    return cleaned;
+}
+
+function createPluginDslNode(strategyId, params) {
+    if (typeof strategyId !== 'string' || !strategyId) {
+        return null;
+    }
+    return {
+        type: 'plugin',
+        pluginId: strategyId,
+        params: normaliseDslParams(params),
+    };
+}
+
+function buildStrategyDsl(selections) {
+    if (!selections || typeof selections !== 'object') {
+        return null;
+    }
+    const roles = {};
+    const assign = (role, node) => {
+        if (node) {
+            roles[role] = node;
+        }
+    };
+    assign('longEntry', createPluginDslNode(selections.entryStrategy, selections.entryParams));
+    assign('longExit', createPluginDslNode(selections.exitStrategy, selections.exitParams));
+    if (selections.enableShorting) {
+        assign('shortEntry', createPluginDslNode(selections.shortEntryStrategy, selections.shortEntryParams));
+        assign('shortExit', createPluginDslNode(selections.shortExitStrategy, selections.shortExitParams));
+    }
+    if (Object.keys(roles).length === 0) {
+        return null;
+    }
+    return {
+        version: '1.0',
+        roles,
+    };
+}
+
 window.lazybacktestStagedEntry = {
     init: stagedEntryControls.init,
     getValues: () => stagedEntryControls.getValues(),
@@ -4174,13 +4228,74 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+function runManualVerificationStrategyComposer() {
+    const statusEl = document.getElementById('strategyComposerVerifierStatus');
+    if (!statusEl) {
+        return;
+    }
+    const applyMessage = (message, tone) => {
+        statusEl.textContent = message;
+        const toneMap = {
+            success: 'var(--foreground)',
+            error: 'var(--destructive, #b91c1c)',
+            info: 'var(--muted-foreground)',
+        };
+        statusEl.style.color = toneMap[tone] || toneMap.info;
+    };
+
+    try {
+        const params = getBacktestParams();
+        const dsl = params?.strategyDsl;
+        if (!dsl || !dsl.roles || Object.keys(dsl.roles).length === 0) {
+            applyMessage('目前策略選擇尚未建立 DSL，請先設定進出場策略。', 'info');
+            return;
+        }
+        const composer = (typeof window !== 'undefined' && window.StrategyComposer) || null;
+        if (!composer || typeof composer.buildComposite !== 'function') {
+            applyMessage('StrategyComposer 尚未載入，請確認腳本順序。', 'error');
+            return;
+        }
+        const registry = (typeof window !== 'undefined' && window.StrategyPluginRegistry) || null;
+        const facade = {
+            invoke(pluginId) {
+                if (registry && typeof registry.getStrategyMetaById === 'function') {
+                    const meta = registry.getStrategyMetaById(pluginId);
+                    if (!meta) {
+                        throw new Error(`找不到策略 ${pluginId}`);
+                    }
+                }
+                return { enter: false, exit: false, short: false, cover: false, meta: {} };
+            },
+        };
+
+        const builtRoles = [];
+        Object.entries(dsl.roles).forEach(([role, node]) => {
+            if (!node) return;
+            const evaluator = composer.buildComposite(node, facade);
+            if (typeof evaluator !== 'function') {
+                throw new Error(`${role} 無法建立 DSL 評估函式`);
+            }
+            builtRoles.push(role);
+        });
+        if (builtRoles.length === 0) {
+            applyMessage('DSL 結構存在，但沒有任何策略節點。', 'info');
+            return;
+        }
+        applyMessage(`已建立 ${builtRoles.join('、')} 的 DSL 組合，未偵測錯誤。`, 'success');
+    } catch (error) {
+        console.error('[Manual Verification] 策略 DSL 驗證失敗', error);
+        applyMessage(`策略 DSL 驗證失敗：${error?.message || error}`, 'error');
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const composerBtn = document.getElementById('manualVerifyStrategyComposerBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !composerBtn) {
         return;
     }
 
@@ -4202,6 +4317,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (composerBtn) {
+        composerBtn.addEventListener('click', () => {
+            runManualVerificationStrategyComposer();
         });
     }
 }
@@ -5166,6 +5286,18 @@ function getBacktestParams() {
         shortExitParams = getStrategyParams('shortExit');
     }
 
+    const strategyDsl = buildStrategyDsl({
+        entryStrategy,
+        entryParams,
+        exitStrategy,
+        exitParams,
+        enableShorting,
+        shortEntryStrategy,
+        shortEntryParams,
+        shortExitStrategy,
+        shortExitParams,
+    });
+
     const buyFee = parseFloat(document.getElementById('buyFee')?.value) || 0;
     const sellFee = parseFloat(document.getElementById('sellFee')?.value) || 0;
     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital';
@@ -5204,6 +5336,7 @@ function getBacktestParams() {
         market,
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
+        strategyDsl,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;

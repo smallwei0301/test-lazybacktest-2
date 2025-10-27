@@ -750,6 +750,14 @@
                                                     >
                                                         批量/滾動檢查
                                                     </button>
+                                                    <button
+                                                        id="manualVerifyStrategyComposerBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        策略 DSL 組合
+                                                    </button>
                                                 </div>
                                             </div>
                                             <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
@@ -765,6 +773,21 @@
                                                     class="px-3 py-2 text-[11px] space-y-2 hidden border-t"
                                                     style="border-color: var(--border); color: var(--foreground); max-height: 240px; overflow-y: auto; overscroll-behavior: contain;"
                                                 ></div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2" id="strategyComposerVerifier">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="git-merge" class="lucide w-4 h-4"></i>
+                                                    策略 DSL 驗證
+                                                </div>
+                                            </div>
+                                            <div
+                                                id="strategyComposerVerifierStatus"
+                                                class="px-3 py-2 text-[11px] rounded-md border bg-white/70"
+                                                style="border-color: var(--border); color: var(--muted-foreground);"
+                                            >
+                                                尚未檢查策略 DSL 組合。
                                             </div>
                                         </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
@@ -2799,6 +2822,7 @@
     <script src="js/shared-lookback.js"></script>
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
+    <script src="js/strategies/composer.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>
