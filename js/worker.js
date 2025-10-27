@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('strategy-composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8060,6 +8061,59 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  const strategyComposer = typeof self !== 'undefined' ? self.StrategyComposer : null;
+
+  function prepareCompositeRule(role, dslConfig, baseParams) {
+    if (!strategyComposer || typeof strategyComposer.buildComposite !== 'function') {
+      return null;
+    }
+    if (!dslConfig || typeof dslConfig !== 'object') {
+      return null;
+    }
+    try {
+      const baseSnapshot = baseParams && typeof baseParams === 'object' ? { ...baseParams } : {};
+      const namedParams = typeof dslConfig.namedParams === 'object' && !Array.isArray(dslConfig.namedParams)
+        ? dslConfig.namedParams
+        : undefined;
+      const evaluator = strategyComposer.buildComposite(dslConfig, null, {
+        baseParams: baseSnapshot,
+        namedParams,
+        evaluatePlugin(pluginId, context, overrideParams, extras) {
+          const merged = { ...baseSnapshot };
+          if (overrideParams && typeof overrideParams === 'object') {
+            Object.keys(overrideParams).forEach((key) => {
+              merged[key] = overrideParams[key];
+            });
+          }
+          const index = context && typeof context.index === 'number' ? context.index : 0;
+          return callStrategyPlugin(pluginId, role, index, merged, extras);
+        },
+      });
+      return function evaluateComposite(input, extras) {
+        if (input && typeof input === 'object') {
+          const context = { ...input };
+          if (!context.role) {
+            context.role = role;
+          }
+          if (typeof context.index !== 'number') {
+            context.index = 0;
+          }
+          return evaluator(context, extras);
+        }
+        const index = typeof input === 'number' ? input : 0;
+        return evaluator({ role, index }, extras);
+      };
+    } catch (error) {
+      console.error(`[StrategyComposer:${role}] 建立複合規則失敗`, error);
+      return null;
+    }
+  }
+
+  const entryCompositeRule = prepareCompositeRule('longEntry', params.entryStrategyDsl, entryParams);
+  const exitCompositeRule = prepareCompositeRule('longExit', params.exitStrategyDsl, exitParams);
+  const shortEntryCompositeRule = prepareCompositeRule('shortEntry', params.shortEntryStrategyDsl, shortEntryParams);
+  const shortExitCompositeRule = prepareCompositeRule('shortExit', params.shortExitStrategyDsl, shortExitParams);
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -8738,7 +8792,31 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        let exitRuleFromComposer = false;
+
+        if (exitCompositeRule) {
+          try {
+            const evaluated = exitCompositeRule(
+              { role: 'longExit', index: i },
+              { currentPrice: curC, referencePrice: curPeakP },
+            );
+            if (evaluated && typeof evaluated === 'object') {
+              exitRuleResult = evaluated;
+              exitRuleFromComposer = true;
+              sellSignal = evaluated.exit === true;
+              const meta = evaluated.meta && typeof evaluated.meta === 'object' ? evaluated.meta : {};
+              if (!exitIndicatorValues && meta.indicatorValues)
+                exitIndicatorValues = meta.indicatorValues;
+              if (!exitKDValues && meta.kdValues) exitKDValues = meta.kdValues;
+              if (!exitMACDValues && meta.macdValues) exitMACDValues = meta.macdValues;
+            }
+          } catch (composerError) {
+            console.error(`[StrategyComposer:longExit] 評估失敗 (index ${i})`, composerError);
+          }
+        }
+
+        if (!exitRuleFromComposer) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9013,6 +9091,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9024,6 +9103,17 @@ function runStrategy(data, params, options = {}) {
           exitKDValues = exitMeta.kdValues;
         if (!exitMACDValues && exitMeta && exitMeta.macdValues)
           exitMACDValues = exitMeta.macdValues;
+
+        if (!sellSignal && lastBuyP > 0) {
+          const compositeStop = Number(finalExitRule.stopLossPercent);
+          if (!slTrig && Number.isFinite(compositeStop) && compositeStop > 0) {
+            slTrig = curC <= lastBuyP * (1 - compositeStop / 100);
+          }
+          const compositeTake = Number(finalExitRule.takeProfitPercent);
+          if (!tpTrig && Number.isFinite(compositeTake) && compositeTake > 0) {
+            tpTrig = curC >= lastBuyP * (1 + compositeTake / 100);
+          }
+        }
 
         if (!sellSignal && globalSL > 0 && lastBuyP > 0) {
           if (curC <= lastBuyP * (1 - globalSL / 100)) slTrig = true;
@@ -9275,7 +9365,35 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        let shortExitRuleFromComposer = false;
+
+        if (shortExitCompositeRule && check(curL) && lastShortP > 0) {
+          currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+        }
+
+        if (shortExitCompositeRule) {
+          try {
+            const evaluated = shortExitCompositeRule(
+              { role: 'shortExit', index: i },
+              { currentPrice: curC, referencePrice: currentLowSinceShort },
+            );
+            if (evaluated && typeof evaluated === 'object') {
+              shortExitRuleResult = evaluated;
+              shortExitRuleFromComposer = true;
+              coverSignal = evaluated.cover === true;
+              const meta = evaluated.meta && typeof evaluated.meta === 'object' ? evaluated.meta : {};
+              if (!coverIndicatorValues && meta.indicatorValues)
+                coverIndicatorValues = meta.indicatorValues;
+              if (!coverKDValues && meta.kdValues) coverKDValues = meta.kdValues;
+              if (!coverMACDValues && meta.macdValues) coverMACDValues = meta.macdValues;
+            }
+          } catch (composerError) {
+            console.error(`[StrategyComposer:shortExit] 評估失敗 (index ${i})`, composerError);
+          }
+        }
+
+        if (!shortExitRuleFromComposer) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9546,6 +9664,7 @@ function runStrategy(data, params, options = {}) {
             coverSignal = false;
             break;
         }
+        }
         const finalShortExitRule =
           shortExitRuleResult ||
           normaliseRuleResultFromLegacy(
@@ -9562,6 +9681,17 @@ function runStrategy(data, params, options = {}) {
           coverKDValues = shortExitMeta.kdValues;
         if (!coverMACDValues && shortExitMeta && shortExitMeta.macdValues)
           coverMACDValues = shortExitMeta.macdValues;
+
+        if (!coverSignal && lastShortP > 0) {
+          const compositeStop = Number(finalShortExitRule.stopLossPercent);
+          if (!shortSlTrig && Number.isFinite(compositeStop) && compositeStop > 0) {
+            shortSlTrig = curC >= lastShortP * (1 + compositeStop / 100);
+          }
+          const compositeTake = Number(finalShortExitRule.takeProfitPercent);
+          if (!shortTpTrig && Number.isFinite(compositeTake) && compositeTake > 0) {
+            shortTpTrig = curC <= lastShortP * (1 - compositeTake / 100);
+          }
+        }
 
         if (!coverSignal && globalSL > 0 && lastShortP > 0) {
           if (curC >= lastShortP * (1 + globalSL / 100)) shortSlTrig = true;
@@ -9658,114 +9788,31 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
-        case "ma_cross":
-        case "ema_cross": {
-          const pluginResult = callStrategyPlugin(
-            entryStrategy,
-            'longEntry',
-            i,
-            entryParams,
-          );
-          if (pluginResult) {
-            buySignal = pluginResult.enter === true;
-            entryRuleResult = pluginResult;
-            const meta = pluginResult.meta || {};
-            if (!entryIndicatorValues && meta.indicatorValues)
-              entryIndicatorValues = meta.indicatorValues;
-            break;
+      let entryRuleFromComposer = false;
+
+      if (entryCompositeRule) {
+        try {
+          const evaluated = entryCompositeRule({ role: 'longEntry', index: i });
+          if (evaluated && typeof evaluated === 'object') {
+            entryRuleResult = evaluated;
+            entryRuleFromComposer = true;
+            buySignal = evaluated.enter === true;
+            const meta = evaluated.meta && typeof evaluated.meta === 'object' ? evaluated.meta : {};
+            if (!entryIndicatorValues && meta.indicatorValues) entryIndicatorValues = meta.indicatorValues;
+            if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+            if (!entryMACDValues && meta.macdValues) entryMACDValues = meta.macdValues;
           }
-          buySignal =
-            check(indicators.maShort[i]) &&
-            check(indicators.maLong[i]) &&
-            check(indicators.maShort[i - 1]) &&
-            check(indicators.maLong[i - 1]) &&
-            indicators.maShort[i] > indicators.maLong[i] &&
-            indicators.maShort[i - 1] <= indicators.maLong[i - 1];
-          if (buySignal)
-            entryIndicatorValues = {
-              短SMA: [
-                indicators.maShort[i - 1],
-                indicators.maShort[i],
-                indicators.maShort[i + 1] ?? null,
-              ],
-              長SMA: [
-                indicators.maLong[i - 1],
-                indicators.maLong[i],
-                indicators.maLong[i + 1] ?? null,
-              ],
-            };
-          break;
+        } catch (composerError) {
+          console.error(`[StrategyComposer:longEntry] 評估失敗 (index ${i})`, composerError);
         }
-        case "ma_above":
-          buySignal =
-            check(indicators.maExit[i]) &&
-            check(prevC) &&
-            check(indicators.maExit[i - 1]) &&
-            curC > indicators.maExit[i] &&
-            prevC <= indicators.maExit[i - 1];
-          if (buySignal)
-            entryIndicatorValues = {
-              收盤價: [prevC, curC, closes[i + 1] ?? null],
-              SMA: [
-                indicators.maExit[i - 1],
-                indicators.maExit[i],
-                indicators.maExit[i + 1] ?? null,
-              ],
-            };
-          break;
-        case "rsi_oversold":
-          {
+      }
+
+      if (!entryRuleFromComposer) {
+        switch (entryStrategy) {
+          case "ma_cross":
+          case "ema_cross": {
             const pluginResult = callStrategyPlugin(
-              'rsi_oversold',
-              'longEntry',
-              i,
-              entryParams,
-            );
-            if (pluginResult) {
-              buySignal = pluginResult.enter === true;
-              entryRuleResult = pluginResult;
-              const meta = pluginResult.meta || {};
-              if (!entryIndicatorValues && meta.indicatorValues)
-                entryIndicatorValues = meta.indicatorValues;
-              break;
-            }
-            const rE = indicators.rsiEntry[i],
-              rPE = indicators.rsiEntry[i - 1],
-              rThE = entryParams.threshold || 30;
-            buySignal = check(rE) && check(rPE) && rE > rThE && rPE <= rThE;
-            if (buySignal)
-              entryIndicatorValues = {
-                RSI: [rPE, rE, indicators.rsiEntry[i + 1] ?? null],
-              };
-            break;
-          }
-        case "macd_cross":
-          const difE = indicators.macdEntry[i],
-            deaE = indicators.macdSignalEntry[i],
-            difPE = indicators.macdEntry[i - 1],
-            deaPE = indicators.macdSignalEntry[i - 1];
-          buySignal =
-            check(difE) &&
-            check(deaE) &&
-            check(difPE) &&
-            check(deaPE) &&
-            difE > deaE &&
-            difPE <= deaPE;
-          if (buySignal)
-            entryMACDValues = {
-              difPrev: difPE,
-              deaPrev: deaPE,
-              difNow: difE,
-              deaNow: deaE,
-              difNext: indicators.macdEntry[i + 1] ?? null,
-              deaNext: indicators.macdSignalEntry[i + 1] ?? null,
-            };
-          break;
-        case "bollinger_breakout":
-          {
-            const pluginResult = callStrategyPlugin(
-              'bollinger_breakout',
+              entryStrategy,
               'longEntry',
               i,
               entryParams,
@@ -9779,121 +9826,225 @@ function runStrategy(data, params, options = {}) {
               break;
             }
             buySignal =
-              check(indicators.bollingerUpperEntry[i]) &&
-              check(prevC) &&
-              check(indicators.bollingerUpperEntry[i - 1]) &&
-              curC > indicators.bollingerUpperEntry[i] &&
-              prevC <= indicators.bollingerUpperEntry[i - 1];
+              check(indicators.maShort[i]) &&
+              check(indicators.maLong[i]) &&
+              check(indicators.maShort[i - 1]) &&
+              check(indicators.maLong[i - 1]) &&
+              indicators.maShort[i] > indicators.maLong[i] &&
+              indicators.maShort[i - 1] <= indicators.maLong[i - 1];
             if (buySignal)
               entryIndicatorValues = {
-                收盤價: [prevC, curC, closes[i + 1] ?? null],
-                上軌: [
-                  indicators.bollingerUpperEntry[i - 1],
-                  indicators.bollingerUpperEntry[i],
-                  indicators.bollingerUpperEntry[i + 1] ?? null,
+                短SMA: [
+                  indicators.maShort[i - 1],
+                  indicators.maShort[i],
+                  indicators.maShort[i + 1] ?? null,
+                ],
+                長SMA: [
+                  indicators.maLong[i - 1],
+                  indicators.maLong[i],
+                  indicators.maLong[i + 1] ?? null,
                 ],
               };
             break;
           }
-        case "k_d_cross":
-          {
-            const pluginResult = callStrategyPlugin(
-              'k_d_cross',
-              'longEntry',
-              i,
-              entryParams,
-            );
-            if (pluginResult) {
-              buySignal = pluginResult.enter === true;
-              entryRuleResult = pluginResult;
-              const meta = pluginResult.meta || {};
-              if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
-              if (!entryIndicatorValues && meta.indicatorValues)
-                entryIndicatorValues = meta.indicatorValues;
-              break;
-            }
-            const kE = indicators.kEntry[i],
-              dE = indicators.dEntry[i],
-              kPE = indicators.kEntry[i - 1],
-              dPE = indicators.dEntry[i - 1],
-              thX = entryParams.thresholdX || 30;
+          case "ma_above":
             buySignal =
-              check(kE) &&
-              check(dE) &&
-              check(kPE) &&
-              check(dPE) &&
-              kE > dE &&
-              kPE <= dPE &&
-              dE < thX;
+              check(indicators.maExit[i]) &&
+              check(prevC) &&
+              check(indicators.maExit[i - 1]) &&
+              curC > indicators.maExit[i] &&
+              prevC <= indicators.maExit[i - 1];
             if (buySignal)
-              entryKDValues = {
-                kPrev: kPE,
-                dPrev: dPE,
-                kNow: kE,
-                dNow: dE,
-                kNext: indicators.kEntry[i + 1] ?? null,
-                dNext: indicators.dEntry[i + 1] ?? null,
+              entryIndicatorValues = {
+                收盤價: [prevC, curC, closes[i + 1] ?? null],
+                SMA: [
+                  indicators.maExit[i - 1],
+                  indicators.maExit[i],
+                  indicators.maExit[i + 1] ?? null,
+                ],
               };
             break;
-          }
-        case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
-        case "price_breakout":
-          const bpE = entryParams.period || 20;
-          if (i >= bpE) {
-            const hsE = highs.slice(i - bpE, i).filter((h) => check(h));
-            if (hsE.length > 0) {
-              const periodHigh = Math.max(...hsE);
-              buySignal = check(curC) && curC > periodHigh;
+          case "rsi_oversold":
+            {
+              const pluginResult = callStrategyPlugin(
+                'rsi_oversold',
+                'longEntry',
+                i,
+                entryParams,
+              );
+              if (pluginResult) {
+                buySignal = pluginResult.enter === true;
+                entryRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!entryIndicatorValues && meta.indicatorValues)
+                  entryIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const rE = indicators.rsiEntry[i],
+                rPE = indicators.rsiEntry[i - 1],
+                rThE = entryParams.threshold || 30;
+              buySignal = check(rE) && check(rPE) && rE > rThE && rPE <= rThE;
+              if (buySignal)
+                entryIndicatorValues = {
+                  RSI: [rPE, rE, indicators.rsiEntry[i + 1] ?? null],
+                };
+              break;
+            }
+          case "macd_cross":
+            const difE = indicators.macdEntry[i],
+              deaE = indicators.macdSignalEntry[i],
+              difPE = indicators.macdEntry[i - 1],
+              deaPE = indicators.macdSignalEntry[i - 1];
+            buySignal =
+              check(difE) &&
+              check(deaE) &&
+              check(difPE) &&
+              check(deaPE) &&
+              difE > deaE &&
+              difPE <= deaPE;
+            if (buySignal)
+              entryMACDValues = {
+                difPrev: difPE,
+                deaPrev: deaPE,
+                difNow: difE,
+                deaNow: deaE,
+                difNext: indicators.macdEntry[i + 1] ?? null,
+                deaNext: indicators.macdSignalEntry[i + 1] ?? null,
+              };
+            break;
+          case "bollinger_breakout":
+            {
+              const pluginResult = callStrategyPlugin(
+                'bollinger_breakout',
+                'longEntry',
+                i,
+                entryParams,
+              );
+              if (pluginResult) {
+                buySignal = pluginResult.enter === true;
+                entryRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!entryIndicatorValues && meta.indicatorValues)
+                  entryIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              buySignal =
+                check(indicators.bollingerUpperEntry[i]) &&
+                check(prevC) &&
+                check(indicators.bollingerUpperEntry[i - 1]) &&
+                curC > indicators.bollingerUpperEntry[i] &&
+                prevC <= indicators.bollingerUpperEntry[i - 1];
               if (buySignal)
                 entryIndicatorValues = {
                   收盤價: [prevC, curC, closes[i + 1] ?? null],
-                  前高: [null, periodHigh, null],
+                  上軌: [
+                    indicators.bollingerUpperEntry[i - 1],
+                    indicators.bollingerUpperEntry[i],
+                    indicators.bollingerUpperEntry[i + 1] ?? null,
+                  ],
                 };
+              break;
             }
-          }
-          break;
-        case "williams_oversold":
-          const wrE = indicators.williamsEntry[i],
-            wrPE = indicators.williamsEntry[i - 1],
-            wrThE = entryParams.threshold || -80;
-          buySignal = check(wrE) && check(wrPE) && wrE > wrThE && wrPE <= wrThE;
-          if (buySignal)
-            entryIndicatorValues = {
-              "%R": [wrPE, wrE, indicators.williamsEntry[i + 1] ?? null],
-            };
-          break;
-        case "turtle_breakout":
-          const tpE = entryParams.breakoutPeriod || 20;
-          if (i >= tpE) {
-            const hsT = highs.slice(i - tpE, i).filter((h) => check(h));
-            if (hsT.length > 0) {
-              const periodHighT = Math.max(...hsT);
-              buySignal = check(curC) && curC > periodHighT;
+          case "k_d_cross":
+            {
+              const pluginResult = callStrategyPlugin(
+                'k_d_cross',
+                'longEntry',
+                i,
+                entryParams,
+              );
+              if (pluginResult) {
+                buySignal = pluginResult.enter === true;
+                entryRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+                if (!entryIndicatorValues && meta.indicatorValues)
+                  entryIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const kE = indicators.kEntry[i],
+                dE = indicators.dEntry[i],
+                kPE = indicators.kEntry[i - 1],
+                dPE = indicators.dEntry[i - 1],
+                thX = entryParams.thresholdX || 30;
+              buySignal =
+                check(kE) &&
+                check(dE) &&
+                check(kPE) &&
+                check(dPE) &&
+                kE > dE &&
+                kPE <= dPE &&
+                dE < thX;
+              if (buySignal)
+                entryKDValues = {
+                  kPrev: kPE,
+                  dPrev: dPE,
+                  kNow: kE,
+                  dNow: dE,
+                  kNext: indicators.kEntry[i + 1] ?? null,
+                  dNext: indicators.dEntry[i + 1] ?? null,
+                };
+              break;
             }
+          case "volume_spike":
+            const vAE = indicators.volumeAvgEntry[i],
+              vME = entryParams.multiplier || 2;
+            buySignal = check(vAE) && check(curV) && curV > vAE * vME;
             if (buySignal)
               entryIndicatorValues = {
-                收盤價: [prevC, curC, closes[i + 1] ?? null],
-                N日高: [
-                  null,
-                  Math.max(...highs.slice(i - tpE, i).filter(check)),
-                  null,
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgEntry[i - 1] ?? null,
+                  vAE,
+                  indicators.volumeAvgEntry[i + 1] ?? null,
                 ],
               };
-          }
-          break;
+            break;
+          case "price_breakout":
+            const bpE = entryParams.period || 20;
+            if (i >= bpE) {
+              const hsE = highs.slice(i - bpE, i).filter((h) => check(h));
+              if (hsE.length > 0) {
+                const periodHigh = Math.max(...hsE);
+                buySignal = check(curC) && curC > periodHigh;
+                if (buySignal)
+                  entryIndicatorValues = {
+                    收盤價: [prevC, curC, closes[i + 1] ?? null],
+                    前高: [null, periodHigh, null],
+                  };
+              }
+            }
+            break;
+          case "williams_oversold":
+            const wrE = indicators.williamsEntry[i],
+              wrPE = indicators.williamsEntry[i - 1],
+              wrThE = entryParams.threshold || -80;
+            buySignal = check(wrE) && check(wrPE) && wrE > wrThE && wrPE <= wrThE;
+            if (buySignal)
+              entryIndicatorValues = {
+                "%R": [wrPE, wrE, indicators.williamsEntry[i + 1] ?? null],
+              };
+            break;
+          case "turtle_breakout":
+            const tpE = entryParams.breakoutPeriod || 20;
+            if (i >= tpE) {
+              const hsT = highs.slice(i - tpE, i).filter((h) => check(h));
+              if (hsT.length > 0) {
+                const periodHighT = Math.max(...hsT);
+                buySignal = check(curC) && curC > periodHighT;
+              }
+              if (buySignal)
+                entryIndicatorValues = {
+                  收盤價: [prevC, curC, closes[i + 1] ?? null],
+                  N日高: [
+                    null,
+                    Math.max(...highs.slice(i - tpE, i).filter(check)),
+                    null,
+                  ],
+                };
+            }
+            break;
+        }
       }
       const finalEntryRule =
         entryRuleResult ||
@@ -9997,7 +10148,28 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      let shortEntryRuleFromComposer = false;
+
+      if (shortEntryCompositeRule) {
+        try {
+          const evaluated = shortEntryCompositeRule({ role: 'shortEntry', index: i });
+          if (evaluated && typeof evaluated === 'object') {
+            shortEntryRuleResult = evaluated;
+            shortEntryRuleFromComposer = true;
+            shortSignal = evaluated.short === true;
+            const meta = evaluated.meta && typeof evaluated.meta === 'object' ? evaluated.meta : {};
+            if (!shortEntryIndicatorValues && meta.indicatorValues)
+              shortEntryIndicatorValues = meta.indicatorValues;
+            if (!shortEntryKDValues && meta.kdValues) shortEntryKDValues = meta.kdValues;
+            if (!shortEntryMACDValues && meta.macdValues) shortEntryMACDValues = meta.macdValues;
+          }
+        } catch (composerError) {
+          console.error(`[StrategyComposer:shortEntry] 評估失敗 (index ${i})`, composerError);
+        }
+      }
+
+      if (!shortEntryRuleFromComposer) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10402,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+      }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||
