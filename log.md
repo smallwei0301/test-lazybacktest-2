@@ -1,3 +1,12 @@
+## 2026-09-16 — Patch LB-STRATEGY-COMPOSER-20260916A
+- **Scope**: 策略 DSL Composer 與回測核心導入。
+- **Updates**:
+  - 新增 `js/lib/strategy-composer.js`，提供 `buildComposite` 將 JSON DSL 解析為可執行規則函式，支援 AND/OR/NOT、參數預設值與指標診斷整併。
+  - `js/worker.js` 導入 Composer，於多空進出場流程優先使用複合規則函式；未提供 DSL 時自動回退至單一策略節點，並保留倉位與停損停利邏輯。
+  - 新增 `tests/strategy-composer.test.js` 覆蓋 AND/OR/NOT 評估、停損傳遞與錯誤處理，更新 `package.json` 測試指令。
+  - 建立 `todolist.md` 追蹤階段 5～10 任務項目與開發者驗證事項。
+- **Testing**: `npm test`（含新 Composer 單元測試）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
