@@ -92,6 +92,16 @@ const ensureAIBridge = () => {
     return window.lazybacktestAIBridge;
 };
 
+const updateAIBridgeMarket = (market) => {
+    const bridge = ensureAIBridge();
+    if (!bridge) return;
+    const normalized = typeof market === 'string' ? market.toUpperCase() : null;
+    bridge.currentMarket = normalized;
+    if (typeof bridge.getCurrentMarket !== 'function') {
+        bridge.getCurrentMarket = () => bridge.currentMarket;
+    }
+};
+
 function setVisibleStockData(data) {
     visibleStockData = Array.isArray(data) ? data : [];
     const bridge = ensureAIBridge();
@@ -9731,6 +9741,7 @@ function randomizeSettings() { const getRandomElement = (arr) => arr[Math.floor(
 
 // 全域變數
 let currentMarket = 'TWSE'; // 預設為上市
+updateAIBridgeMarket(currentMarket);
 let isAutoSwitching = false; // 防止無限重複切換
 // Patch Tag: LB-TW-NAMELOCK-20250616A
 let manualMarketOverride = false; // 使用者手動鎖定市場時停用自動辨識
@@ -10505,6 +10516,7 @@ function initializeMarketSwitch() {
     if (!marketSelect || !stockNoInput) return;
 
     currentMarket = normalizeMarketValue(marketSelect.value || 'TWSE');
+    updateAIBridgeMarket(currentMarket);
     window.applyMarketPreset?.(currentMarket);
 
     marketSelect.addEventListener('change', () => {
@@ -10513,6 +10525,7 @@ function initializeMarketSwitch() {
 
         const triggeredByAuto = isAutoSwitching === true;
         currentMarket = nextMarket;
+        updateAIBridgeMarket(currentMarket);
         console.log(`[Market Switch] 切換到: ${currentMarket}`);
         if (triggeredByAuto) {
             manualMarketOverride = false;
@@ -11018,6 +11031,7 @@ async function switchToMarket(targetMarket, stockCode, options = {}) {
     manualOverrideCodeSnapshot = '';
     isAutoSwitching = true;
     currentMarket = normalizedMarket;
+    updateAIBridgeMarket(currentMarket);
 
     const marketSelect = document.getElementById('marketSelect');
     if (marketSelect && marketSelect.value !== normalizedMarket) {

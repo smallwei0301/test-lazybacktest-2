@@ -13,8 +13,9 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260128A — 三分類預測幅度欄位與 quartile 門檻同步顯示。
 // Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 預估漲跌幅改以類別平均報酬計算並同步交易表。
 // Patch Tag: LB-AI-SWING-20260210A — 預測漲跌幅移除門檻 fallback，僅顯示模型期望值。
+// Patch Tag: LB-AI-VIX-FEATURE-20260915A — 美股 ANN 訓練自動引入 VIX 波動度特徵。
 (function registerLazybacktestAIPrediction() {
-    const VERSION_TAG = 'LB-AI-SWING-20260210A';
+    const VERSION_TAG = 'LB-AI-VIX-FEATURE-20260915A';
     const DEFAULT_FIXED_FRACTION = 1;
     const SEED_STORAGE_KEY = 'lazybacktest-ai-seeds-v1';
     const MODEL_TYPES = {
@@ -325,6 +326,25 @@
             window.lazybacktestAIBridge = {};
         }
         return window.lazybacktestAIBridge;
+    };
+
+    const resolveCurrentMarket = () => {
+        const bridge = ensureBridge();
+        if (!bridge) return null;
+        try {
+            if (typeof bridge.getCurrentMarket === 'function') {
+                const result = bridge.getCurrentMarket();
+                if (result) {
+                    return String(result).toUpperCase();
+                }
+            }
+        } catch (error) {
+            console.warn('[AI Prediction] 無法讀取當前市場：', error);
+        }
+        if (typeof bridge.currentMarket === 'string' && bridge.currentMarket) {
+            return bridge.currentMarket.toUpperCase();
+        }
+        return null;
     };
 
     const loadStoredSeeds = () => {
@@ -2877,6 +2897,8 @@
         const classificationMode = normalizeClassificationMode(modelState.classification);
 
         showStatus(`[${label}] 訓練中（共 ${hyperparameters.epochs} 輪）...`, 'info');
+        const currentMarket = resolveCurrentMarket();
+        const normalizedMarket = typeof currentMarket === 'string' ? currentMarket : null;
         const taskPayload = {
             rows,
             options: {
@@ -2887,6 +2909,7 @@
                 lookback: hyperparameters.lookback,
                 volatility: resolvedVolatility,
                 classificationMode,
+                marketType: normalizedMarket,
             },
         };
         if (Number.isFinite(requestedSeed)) {
