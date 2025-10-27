@@ -1,3 +1,12 @@
+## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
+- **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
+- **Updates**:
+  - 新增 `js/strategies/composer.js`，支援 AND/OR/NOT 遞迴組合並整合至 Worker 插件呼叫。
+  - `js/main.js`、`js/backtest-runner.js` 將策略選單序列化為 DSL JSON，並於開發者區域加入「策略 DSL 檢查」按鈕。
+  - `js/worker.js` 於啟動時解析 DSL、建立複合函式，並在暖身估算時納入 DSL 參數。
+  - `tests/strategy-composer.test.js` 覆蓋 AND/OR/NOT、停損傳遞等情境，確保 DSL 評估結果正確。
+- **Testing**: `npm test`（含新策略 DSL 單元測試）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。

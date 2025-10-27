@@ -6,6 +6,7 @@
   }
 
   const RUNNER_VERSION = 'LB-PLUGIN-RUNNER-20250712B';
+  const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
   const existing = globalScope.BacktestRunner;
   if (existing && typeof existing.__version__ === 'string' && existing.__version__ >= RUNNER_VERSION) {
     return;
@@ -95,6 +96,58 @@
       return Array.isArray(fallback) && fallback.length > 0 ? fallback.slice() : [100];
     }
     return sanitized;
+  }
+
+  function cloneValueForStrategyDsl(value) {
+    if (value === null) return null;
+    if (value === undefined) return undefined;
+    if (typeof value === 'function') return undefined;
+    if (typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => cloneValueForStrategyDsl(item))
+        .filter((item) => item !== undefined);
+    }
+    const clone = {};
+    Object.keys(value).forEach((key) => {
+      const cloned = cloneValueForStrategyDsl(value[key]);
+      if (cloned !== undefined) {
+        clone[key] = cloned;
+      }
+    });
+    return clone;
+  }
+
+  function createStrategyDslPluginNode(strategyId, params) {
+    if (typeof strategyId !== 'string') return null;
+    const trimmed = strategyId.trim();
+    if (!trimmed) return null;
+    const node = { type: 'plugin', id: trimmed };
+    if (params && typeof params === 'object') {
+      const sanitized = cloneValueForStrategyDsl(params);
+      if (sanitized && typeof sanitized === 'object' && Object.keys(sanitized).length > 0) {
+        node.params = sanitized;
+      }
+    }
+    return node;
+  }
+
+  function buildStrategyDslFromOptions(options) {
+    if (!options || typeof options !== 'object') {
+      return null;
+    }
+    const dsl = { version: STRATEGY_DSL_VERSION };
+    const entryNode = createStrategyDslPluginNode(options.entryStrategy, options.entryParams);
+    if (entryNode) dsl.longEntry = entryNode;
+    const exitNode = createStrategyDslPluginNode(options.exitStrategy, options.exitParams);
+    if (exitNode) dsl.longExit = exitNode;
+    if (options.enableShorting) {
+      const shortEntryNode = createStrategyDslPluginNode(options.shortEntryStrategy, options.shortEntryParams);
+      if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+      const shortExitNode = createStrategyDslPluginNode(options.shortExitStrategy, options.shortExitParams);
+      if (shortExitNode) dsl.shortExit = shortExitNode;
+    }
+    return Object.keys(dsl).length > 1 ? dsl : null;
   }
 
   function resolveStrategyMeta(registry, strategyId) {
@@ -253,6 +306,18 @@
     const entryStagingMode = options.entryStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
     const exitStagingMode = options.exitStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
 
+    const strategyDsl = buildStrategyDslFromOptions({
+      entryStrategy,
+      entryParams,
+      exitStrategy,
+      exitParams,
+      enableShorting,
+      shortEntryStrategy,
+      shortEntryParams,
+      shortExitStrategy,
+      shortExitParams,
+    });
+
     return {
       stockNo,
       startDate,
@@ -283,6 +348,7 @@
       market: normalizedMarket,
       marketType: normalizedMarket,
       priceMode: adjustedPrice ? 'adjusted' : 'raw',
+      strategyDsl,
     };
   }
 
