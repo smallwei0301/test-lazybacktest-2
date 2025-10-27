@@ -83,6 +83,33 @@
     return output;
   }
 
+  function cloneStrategyRuleDefinition(definition) {
+    if (definition === null || definition === undefined) {
+      return null;
+    }
+    if (typeof definition === 'string') {
+      return definition.trim();
+    }
+    if (typeof definition === 'boolean' || typeof definition === 'number') {
+      return definition;
+    }
+    if (Array.isArray(definition)) {
+      return definition.map((item, index) => cloneStrategyRuleDefinition(item));
+    }
+    if (typeof definition === 'object') {
+      const clone = {};
+      Object.keys(definition).forEach((key) => {
+        const value = definition[key];
+        if (typeof value === 'function') {
+          throw new TypeError(`strategy rule ${key} 不可為函式`);
+        }
+        clone[key] = cloneStrategyRuleDefinition(value);
+      });
+      return clone;
+    }
+    return definition;
+  }
+
   function sanitizeStagePercentages(values, fallback) {
     if (!Array.isArray(values)) {
       return Array.isArray(fallback) && fallback.length > 0 ? fallback.slice() : [100];
@@ -239,6 +266,14 @@
     const shortExitStrategy = enableShorting ? (options.shortExitStrategy || null) : null;
     const shortEntryParams = enableShorting ? buildStrategyParams(registry, shortEntryStrategy, options.shortEntryParams) : {};
     const shortExitParams = enableShorting ? buildStrategyParams(registry, shortExitStrategy, options.shortExitParams) : {};
+    const entryComposite = cloneStrategyRuleDefinition(options.entryComposite || options.entryRule || null);
+    const exitComposite = cloneStrategyRuleDefinition(options.exitComposite || options.exitRule || null);
+    const shortEntryComposite = enableShorting
+      ? cloneStrategyRuleDefinition(options.shortEntryComposite || options.shortEntryRule || null)
+      : null;
+    const shortExitComposite = enableShorting
+      ? cloneStrategyRuleDefinition(options.shortExitComposite || options.shortExitRule || null)
+      : null;
     const buyFeeRaw = toNumber(options.buyFee);
     const sellFeeRaw = toNumber(options.sellFee);
     const buyFee = Number.isFinite(buyFeeRaw) && buyFeeRaw >= 0 ? buyFeeRaw : 0;
@@ -266,6 +301,8 @@
       exitStrategy,
       entryParams,
       exitParams,
+      entryComposite,
+      exitComposite,
       entryStages,
       entryStagingMode,
       exitStages,
@@ -275,6 +312,8 @@
       shortExitStrategy,
       shortEntryParams,
       shortExitParams,
+      shortEntryComposite,
+      shortExitComposite,
       buyFee,
       sellFee,
       positionBasis,
