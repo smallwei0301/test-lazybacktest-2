@@ -4174,13 +4174,94 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+async function runManualVerificationStrategyDslDemo() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在執行策略 DSL 示例回測…', 'info');
+
+    const lines = [];
+
+    try {
+        const params = getBacktestParams();
+        if (!params || typeof params !== 'object') {
+            throw new Error('無法取得目前回測參數');
+        }
+
+        const entryDsl = {
+            op: 'AND',
+            rules: [
+                { op: 'PLUGIN', id: 'rsi_oversold', params: { threshold: 30 } },
+                { op: 'PLUGIN', id: 'k_d_cross', params: { thresholdX: 20 } },
+            ],
+        };
+        const exitDsl = {
+            op: 'OR',
+            rules: [
+                { op: 'PLUGIN', id: 'rsi_overbought', params: { threshold: 70 } },
+                { op: 'PLUGIN', id: 'trailing_stop', params: { percentage: 5 } },
+            ],
+        };
+
+        const sampleParams = {
+            ...params,
+            enableShorting: false,
+            entryStrategy: 'rsi_oversold',
+            exitStrategy: 'rsi_overbought',
+            entryParams: { threshold: 30 },
+            exitParams: { threshold: 70, percentage: 5 },
+            entryStrategyDsl: entryDsl,
+            exitStrategyDsl: exitDsl,
+            shortEntryStrategyDsl: null,
+            shortExitStrategyDsl: null,
+        };
+
+        lines.push(`進場 DSL：${JSON.stringify(entryDsl)}`);
+        lines.push(`出場 DSL：${JSON.stringify(exitDsl)}`);
+
+        if (window.BacktestRunner && typeof window.BacktestRunner.run === 'function') {
+            try {
+                const result = await window.BacktestRunner.run(sampleParams);
+                const trades = Array.isArray(result?.trades) ? result.trades : [];
+                lines.push(`✅ 回測完成，交易筆數 ${trades.length}`);
+                if (trades.length > 0) {
+                    const preview = trades.slice(0, Math.min(5, trades.length));
+                    preview.forEach((trade) => {
+                        lines.push(
+                            `- ${trade.date} ${trade.type || 'trade'} @ ${
+                                trade.price !== undefined ? trade.price : 'N/A'
+                            }`,
+                        );
+                    });
+                } else {
+                    lines.push('⚠️ 沒有交易紀錄，請確認示例設定的資料區間。');
+                }
+            } catch (runError) {
+                const message = runError && runError.message ? runError.message : String(runError);
+                lines.push(`❌ 回測執行失敗：${message}`);
+            }
+        } else {
+            lines.push('⚠️ BacktestRunner 未載入，無法執行示例回測。');
+        }
+
+        updateManualVerificationStatus('策略 DSL 示例回測完成。', 'success');
+        appendManualVerificationEntry('策略 DSL 測試', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 DSL 測試失敗：${message}`, 'error');
+        appendManualVerificationEntry('策略 DSL 測試', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const composerBtn = document.getElementById('manualVerifyStrategyComposerBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !composerBtn) {
         return;
     }
 
@@ -4202,6 +4283,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (composerBtn) {
+        composerBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDslDemo();
         });
     }
 }
