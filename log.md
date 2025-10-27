@@ -1,3 +1,12 @@
+## 2026-09-20 — Patch LB-DSL-COMPOSER-20260920A
+- **Scope**: 策略 DSL 組合建構、主執行緒序列化與手動驗證工具。
+- **Updates**:
+  - 新增 `js/strategies/composer.js`，提供 `StrategyComposer.buildComposite` 支援 AND/OR/NOT 巢狀運算並整合策略插件執行。
+  - `js/main.js` 將現有策略選擇序列化為 DSL JSON、加入策略 DSL 手動驗證按鈕，並在回測請求中夾帶 DSL 結構。
+  - `js/worker.js` 引入 Composer，依 DSL 建構複合策略函式後執行插件；`index.html` 新增腳本與按鈕。
+  - 擴充測試：新增 `tests/strategy-composer.test.js` 並更新 `package.json` 的測試流程。
+- **Testing**: `npm test`（涵蓋新增的 DSL 單元測試與原有批量測試腳本）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。

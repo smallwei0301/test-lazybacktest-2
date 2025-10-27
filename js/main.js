@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-DSL-COMPOSER-20260920A
 
 // 全局變量
 let stockChart = null;
@@ -25,6 +26,7 @@ const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
 const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const STRATEGY_DSL_VERSION = 'LB-DSL-COMPOSER-20260920A';
 const loadingMascotState = {
     lastSource: null,
     rotation: {
@@ -3739,6 +3741,7 @@ function setManualVerificationBusy(busy) {
         'manualVerifySampleBacktestBtn',
         'manualVerifyLegacyLoadBtn',
         'manualVerifyBatchFlowBtn',
+        'manualVerifyStrategyDslBtn',
     ];
     buttonIds.forEach((id) => {
         const btn = document.getElementById(id);
@@ -4174,13 +4177,86 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+function runManualVerificationStrategyDsl() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在整理策略 DSL…', 'info');
+
+    try {
+        const params = getBacktestParams();
+        if (!params || typeof params !== 'object') {
+            throw new Error('無法擷取回測參數');
+        }
+        const dsl = params.strategyDsl || null;
+        if (!dsl) {
+            throw new Error('尚未建立策略 DSL 結構');
+        }
+
+        const lines = [];
+        lines.push(`版本：${dsl.version || '未知'}`);
+
+        const roleSummaries = [
+            { key: 'longEntry', label: '多頭進場' },
+            { key: 'longExit', label: '多頭出場' },
+            { key: 'shortEntry', label: '空頭進場' },
+            { key: 'shortExit', label: '空頭回補' },
+        ];
+        roleSummaries.forEach((role) => {
+            lines.push(`${role.label}：${describeStrategyDslNode(dsl[role.key])}`);
+        });
+
+        const pluginIds = new Set();
+        roleSummaries.forEach((role) => {
+            collectStrategyIdsFromDsl(dsl[role.key], pluginIds);
+        });
+
+        const registry = (typeof StrategyPluginRegistry !== 'undefined' && StrategyPluginRegistry)
+            ? StrategyPluginRegistry
+            : null;
+        const missing = [];
+        const verified = [];
+        if (pluginIds.size === 0) {
+            lines.push('⚠️ DSL 中沒有 Plugin 節點，僅包含布林運算。');
+        }
+        pluginIds.forEach((id) => {
+            if (!registry || typeof registry.getStrategyMetaById !== 'function') {
+                verified.push(`ℹ️ ${id}（未載入 Registry）`);
+                return;
+            }
+            const meta = registry.getStrategyMetaById(id);
+            if (meta) {
+                verified.push(`✅ ${id}｜${meta.label || '已註冊'}`);
+            } else {
+                missing.push(`❌ 找不到策略：${id}`);
+            }
+        });
+        if (verified.length > 0) {
+            lines.push(...verified);
+        }
+        if (missing.length > 0) {
+            lines.push(...missing);
+        }
+
+        const tone = missing.length > 0 ? 'warning' : 'success';
+        updateManualVerificationStatus('策略 DSL 檢查完成。', tone);
+        appendManualVerificationEntry('策略 DSL 檢查', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 DSL 檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('策略 DSL 檢查', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
         return;
     }
 
@@ -4202,6 +4278,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (dslBtn) {
+        dslBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDsl();
         });
     }
 }
@@ -5115,6 +5196,130 @@ function getStrategyParams(type) {
 
     return params;
 }
+
+function cloneParamsForDsl(params) {
+    if (!params || typeof params !== 'object') {
+        return {};
+    }
+    const clone = {};
+    Object.keys(params).forEach((key) => {
+        const value = params[key];
+        if (Array.isArray(value)) {
+            clone[key] = value.map((item) => {
+                if (item && typeof item === 'object') {
+                    return cloneParamsForDsl(item);
+                }
+                return item;
+            });
+        } else if (value && typeof value === 'object') {
+            clone[key] = cloneParamsForDsl(value);
+        } else if (value !== undefined) {
+            clone[key] = value;
+        }
+    });
+    return clone;
+}
+
+function buildStrategyDslNode(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+    const strategyId = typeof entry.id === 'string' ? entry.id.trim() : '';
+    if (!strategyId) {
+        return null;
+    }
+    const params = entry.params && typeof entry.params === 'object'
+        ? cloneParamsForDsl(entry.params)
+        : {};
+    return {
+        kind: 'plugin',
+        type: 'plugin',
+        id: strategyId,
+        params,
+    };
+}
+
+function buildStrategyDslSnapshot(config) {
+    if (!config || typeof config !== 'object') {
+        return null;
+    }
+    const snapshot = {
+        version: STRATEGY_DSL_VERSION,
+        longEntry: null,
+        longExit: null,
+        shortEntry: null,
+        shortExit: null,
+    };
+    if (config.longEntry) {
+        snapshot.longEntry = buildStrategyDslNode(config.longEntry);
+    }
+    if (config.longExit) {
+        snapshot.longExit = buildStrategyDslNode(config.longExit);
+    }
+    if (config.shortEntry) {
+        snapshot.shortEntry = buildStrategyDslNode(config.shortEntry);
+    }
+    if (config.shortExit) {
+        snapshot.shortExit = buildStrategyDslNode(config.shortExit);
+    }
+    return snapshot;
+}
+
+function describeStrategyDslNode(node) {
+    if (!node) {
+        return '未設定';
+    }
+    const kindRaw = typeof node.kind === 'string' ? node.kind : node.type;
+    const kind = typeof kindRaw === 'string' ? kindRaw.toUpperCase() : '';
+    if (kind === 'PLUGIN') {
+        return `Plugin｜${node.id || '未指定'}`;
+    }
+    if (kind === 'AND' || kind === 'OR') {
+        const children = Array.isArray(node.children)
+            ? node.children
+            : Array.isArray(node.items)
+                ? node.items
+                : Array.isArray(node.operands)
+                    ? node.operands
+                    : [];
+        const summaries = children.map((child) => describeStrategyDslNode(child));
+        const joiner = kind === 'AND' ? ' ∧ ' : ' ∨ ';
+        return `${kind}(${summaries.join(joiner)})`;
+    }
+    if (kind === 'NOT') {
+        const child = node.child || node.operand || node.item || null;
+        return `NOT(${describeStrategyDslNode(child)})`;
+    }
+    return '未設定';
+}
+
+function collectStrategyIdsFromDsl(node, targetSet) {
+    if (!node || !(targetSet instanceof Set)) {
+        return;
+    }
+    const kindRaw = typeof node.kind === 'string' ? node.kind : node.type;
+    const kind = typeof kindRaw === 'string' ? kindRaw.toUpperCase() : '';
+    if (kind === 'PLUGIN') {
+        if (typeof node.id === 'string' && node.id.trim()) {
+            targetSet.add(node.id.trim());
+        }
+        return;
+    }
+    if (kind === 'AND' || kind === 'OR') {
+        const children = Array.isArray(node.children)
+            ? node.children
+            : Array.isArray(node.items)
+                ? node.items
+                : Array.isArray(node.operands)
+                    ? node.operands
+                    : [];
+        children.forEach((child) => collectStrategyIdsFromDsl(child, targetSet));
+        return;
+    }
+    if (kind === 'NOT') {
+        collectStrategyIdsFromDsl(node.child || node.operand || node.item, targetSet);
+    }
+}
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -5174,6 +5379,13 @@ function getBacktestParams() {
     const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
 
+    const strategyDsl = buildStrategyDslSnapshot({
+        longEntry: { id: entryStrategy, params: entryParams },
+        longExit: { id: exitStrategy, params: exitParams },
+        shortEntry: enableShorting ? { id: shortEntryStrategy, params: shortEntryParams } : null,
+        shortExit: enableShorting ? { id: shortExitStrategy, params: shortExitParams } : null,
+    });
+
     return {
         stockNo,
         startDate,
@@ -5204,6 +5416,7 @@ function getBacktestParams() {
         market,
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
+        strategyDsl,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;

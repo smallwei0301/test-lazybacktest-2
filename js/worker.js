@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('strategies/composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8042,6 +8043,10 @@ function runStrategy(data, params, options = {}) {
       ? self.StrategyPluginRegistry
       : null;
   const pluginCacheStore = new Map();
+  const composerApi =
+    typeof self !== 'undefined' && self.StrategyComposer
+      ? self.StrategyComposer
+      : null;
   const pluginRuntimeInfo = {
     warmupStartIndex: Number.isFinite(
       datasetSummary?.firstRowOnOrAfterWarmupStart?.index,
@@ -8060,20 +8065,15 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
-  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
-    if (
-      !pluginRegistry ||
-      (typeof pluginRegistry.getStrategyById !== 'function' && typeof pluginRegistry.get !== 'function') ||
-      typeof StrategyPluginContract === 'undefined' ||
-      typeof StrategyPluginContract.ensureRuleResult !== 'function'
-    ) {
+  function resolveStrategyPlugin(strategyId) {
+    if (!pluginRegistry) {
       return null;
     }
     let plugin = null;
     try {
       if (typeof pluginRegistry.getStrategyById === 'function') {
         plugin = pluginRegistry.getStrategyById(strategyId);
-      } else {
+      } else if (typeof pluginRegistry.get === 'function') {
         plugin = pluginRegistry.get(strategyId);
       }
     } catch (registryError) {
@@ -8093,11 +8093,33 @@ function runStrategy(data, params, options = {}) {
     if (!plugin || typeof plugin.run !== 'function') {
       return null;
     }
+    return plugin;
+  }
+
+  function getPluginCache(strategyId) {
     let cache = pluginCacheStore.get(strategyId);
     if (!cache) {
       cache = new Map();
       pluginCacheStore.set(strategyId, cache);
     }
+    return cache;
+  }
+
+  function invokeRegisteredStrategy(strategyId, context, baseParams, extras) {
+    if (
+      !strategyId ||
+      !context ||
+      !pluginRegistry ||
+      typeof StrategyPluginContract === 'undefined' ||
+      typeof StrategyPluginContract.ensureRuleResult !== 'function'
+    ) {
+      return null;
+    }
+    const plugin = resolveStrategyPlugin(strategyId);
+    if (!plugin) {
+      return null;
+    }
+    const cache = getPluginCache(strategyId);
     const helpers = {
       getIndicator(key) {
         const source = indicators?.[key];
@@ -8116,6 +8138,8 @@ function runStrategy(data, params, options = {}) {
         return cache.get(key);
       },
     };
+    const role = typeof context.role === 'string' ? context.role : 'longEntry';
+    const index = Number.isFinite(context.index) ? context.index : 0;
     const pluginParams =
       extras && typeof extras === 'object'
         ? { ...(baseParams || {}), __runtime: extras }
@@ -8140,6 +8164,75 @@ function runStrategy(data, params, options = {}) {
       console.error(`[StrategyPlugin:${strategyId}] 執行失敗`, pluginError);
       return null;
     }
+  }
+
+  function buildCompositeEvaluators(strategyDsl) {
+    if (!composerApi || !strategyDsl || typeof strategyDsl !== 'object') {
+      return null;
+    }
+    const registryBridge = {
+      runStrategy(targetId, ctx, params, runtimeExtras) {
+        const safeRole = typeof ctx?.role === 'string' ? ctx.role : 'longEntry';
+        const safeIndex = Number.isFinite(ctx?.index) ? ctx.index : 0;
+        return invokeRegisteredStrategy(
+          targetId,
+          { role: safeRole, index: safeIndex },
+          params,
+          runtimeExtras,
+        );
+      },
+    };
+    const evaluators = {};
+    const roles = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
+    roles.forEach((roleKey) => {
+      const node = strategyDsl[roleKey];
+      if (!node) return;
+      try {
+        const evaluator = composerApi.buildComposite(node, registryBridge);
+        if (typeof evaluator === 'function') {
+          evaluators[roleKey] = (ctx, options) => {
+            const contextRole =
+              typeof ctx?.role === 'string' ? ctx.role : roleKey;
+            const contextIndex = Number.isFinite(ctx?.index) ? ctx.index : 0;
+            const baseContext = {
+              role: contextRole,
+              index: contextIndex,
+              series: pluginSeries,
+              runtime: pluginRuntimeInfo,
+            };
+            return evaluator(baseContext, options || {});
+          };
+        }
+      } catch (composerError) {
+        console.error(
+          `[StrategyComposer] ${roleKey} DSL 編譯失敗`,
+          composerError,
+        );
+      }
+    });
+    return Object.keys(evaluators).length > 0 ? evaluators : null;
+  }
+
+  const compositeEvaluators = buildCompositeEvaluators(params?.strategyDsl);
+
+  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+    if (compositeEvaluators && typeof compositeEvaluators[role] === 'function') {
+      return compositeEvaluators[role](
+        {
+          role,
+          index,
+          series: pluginSeries,
+          runtime: pluginRuntimeInfo,
+        },
+        { baseParams, extras },
+      );
+    }
+    return invokeRegisteredStrategy(
+      strategyId,
+      { role, index },
+      baseParams,
+      extras,
+    );
   }
 
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
