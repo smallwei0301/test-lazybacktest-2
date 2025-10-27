@@ -5115,6 +5115,35 @@ function getStrategyParams(type) {
 
     return params;
 }
+function cloneStrategyParams(params) {
+    if (!params || typeof params !== 'object') return {};
+    const clone = {};
+    Object.keys(params).forEach((key) => {
+        if (key === '__proto__') return;
+        const value = params[key];
+        if (value === undefined) return;
+        if (Array.isArray(value)) {
+            clone[key] = value.map((item) => (item && typeof item === 'object' ? { ...item } : item));
+        } else if (value && typeof value === 'object') {
+            clone[key] = { ...value };
+        } else {
+            clone[key] = value;
+        }
+    });
+    return clone;
+}
+
+function buildCompositeFromSelection(strategyId, role, params) {
+    if (!strategyId || typeof strategyId !== 'string') return null;
+    if (!role || typeof role !== 'string') return null;
+    return {
+        op: 'PLUGIN',
+        pluginId: strategyId,
+        role,
+        params: cloneStrategyParams(params),
+    };
+}
+
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -5166,6 +5195,15 @@ function getBacktestParams() {
         shortExitParams = getStrategyParams('shortExit');
     }
 
+    const entryComposite = buildCompositeFromSelection(entryStrategy, 'longEntry', entryParams);
+    const exitComposite = buildCompositeFromSelection(exitStrategy, 'longExit', exitParams);
+    const shortEntryComposite = enableShorting
+        ? buildCompositeFromSelection(shortEntryStrategy, 'shortEntry', shortEntryParams)
+        : null;
+    const shortExitComposite = enableShorting
+        ? buildCompositeFromSelection(shortExitStrategy, 'shortExit', shortExitParams)
+        : null;
+
     const buyFee = parseFloat(document.getElementById('buyFee')?.value) || 0;
     const sellFee = parseFloat(document.getElementById('sellFee')?.value) || 0;
     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital';
@@ -5198,6 +5236,10 @@ function getBacktestParams() {
         shortExitStrategy,
         shortEntryParams,
         shortExitParams,
+        entryComposite,
+        exitComposite,
+        shortEntryComposite,
+        shortExitComposite,
         buyFee,
         sellFee,
         positionBasis,
