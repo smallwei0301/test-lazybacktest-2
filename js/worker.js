@@ -21,6 +21,7 @@ importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
+importScripts('lib/strategy-composer.js');
 importScripts('config.js');
 
 const TFJS_VERSION = '4.20.0';
@@ -8060,6 +8061,112 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  const strategyComposer =
+    typeof self !== 'undefined' &&
+    self.StrategyComposer &&
+    typeof self.StrategyComposer.buildComposite === 'function'
+      ? self.StrategyComposer
+      : null;
+
+  function cloneParamsForComposite(value) {
+    if (!value || typeof value !== 'object') {
+      return {};
+    }
+    const output = {};
+    Object.keys(value).forEach((key) => {
+      const candidate = value[key];
+      if (Array.isArray(candidate)) {
+        output[key] = candidate.slice();
+      } else if (candidate && typeof candidate === 'object') {
+        output[key] = { ...candidate };
+      } else {
+        output[key] = candidate;
+      }
+    });
+    return output;
+  }
+
+  function normaliseCompositeDefinition(candidate, fallbackId, fallbackParams) {
+    if (candidate && typeof candidate === 'object') {
+      return candidate;
+    }
+    if (!fallbackId) {
+      return null;
+    }
+    return {
+      op: 'PLUGIN',
+      id: fallbackId,
+      params: cloneParamsForComposite(fallbackParams || {}),
+    };
+  }
+
+  function buildCompositeEvaluator(definition, role) {
+    if (!strategyComposer || !definition) {
+      return null;
+    }
+    try {
+      return strategyComposer.buildComposite(definition, pluginRegistry, {
+        evaluatePlugin(pluginId, context, params) {
+          const targetRole = context && typeof context.role === 'string' ? context.role : role;
+          const targetIndex = Number.isFinite(context?.index) ? Number(context.index) : 0;
+          return (
+            callStrategyPlugin(pluginId, targetRole, targetIndex, params, context?.extras) ||
+            null
+          );
+        },
+      });
+    } catch (composerError) {
+      console.error(`[StrategyComposer] 建立 ${role} 規則失敗`, composerError);
+      return null;
+    }
+  }
+
+  function evaluateCompositeRule(evaluator, role, index) {
+    if (typeof evaluator !== 'function') {
+      return null;
+    }
+    try {
+      return evaluator({ role, index });
+    } catch (evaluationError) {
+      console.error(
+        `[StrategyComposer] ${role} 規則在索引 ${index} 評估失敗`,
+        evaluationError,
+      );
+      return null;
+    }
+  }
+
+  const compositeConfig =
+    params && typeof params.strategyComposites === 'object' ? params.strategyComposites : null;
+
+  const longEntryCompositeDefinition = normaliseCompositeDefinition(
+    compositeConfig?.longEntry,
+    params.entryStrategy,
+    params.entryParams,
+  );
+  const longExitCompositeDefinition = normaliseCompositeDefinition(
+    compositeConfig?.longExit,
+    params.exitStrategy,
+    params.exitParams,
+  );
+  const shortEntryCompositeDefinition = normaliseCompositeDefinition(
+    compositeConfig?.shortEntry,
+    params.shortEntryStrategy,
+    params.shortEntryParams,
+  );
+  const shortExitCompositeDefinition = normaliseCompositeDefinition(
+    compositeConfig?.shortExit,
+    params.shortExitStrategy,
+    params.shortExitParams,
+  );
+
+  const compositeEvaluators = {
+    longEntry: buildCompositeEvaluator(longEntryCompositeDefinition, 'longEntry'),
+    longExit: buildCompositeEvaluator(longExitCompositeDefinition, 'longExit'),
+    shortEntry: buildCompositeEvaluator(shortEntryCompositeDefinition, 'shortEntry'),
+    shortExit: buildCompositeEvaluator(shortExitCompositeDefinition, 'shortExit'),
+  };
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -8738,7 +8845,29 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        if (compositeEvaluators.longExit) {
+          const compositeResult = evaluateCompositeRule(
+            compositeEvaluators.longExit,
+            'longExit',
+            i,
+          );
+          if (compositeResult) {
+            exitRuleResult = compositeResult;
+            sellSignal = compositeResult.exit === true;
+            const compositeMeta = compositeResult.meta || {};
+            if (!exitIndicatorValues && compositeMeta.indicatorValues) {
+              exitIndicatorValues = compositeMeta.indicatorValues;
+            }
+            if (!exitKDValues && compositeMeta.kdValues) {
+              exitKDValues = compositeMeta.kdValues;
+            }
+            if (!exitMACDValues && compositeMeta.macdValues) {
+              exitMACDValues = compositeMeta.macdValues;
+            }
+          }
+        }
+        if (!exitRuleResult) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9013,6 +9142,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,7 +9405,29 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if (compositeEvaluators.shortExit) {
+          const compositeResult = evaluateCompositeRule(
+            compositeEvaluators.shortExit,
+            'shortExit',
+            i,
+          );
+          if (compositeResult) {
+            shortExitRuleResult = compositeResult;
+            coverSignal = compositeResult.cover === true;
+            const compositeMeta = compositeResult.meta || {};
+            if (!coverIndicatorValues && compositeMeta.indicatorValues) {
+              coverIndicatorValues = compositeMeta.indicatorValues;
+            }
+            if (!coverKDValues && compositeMeta.kdValues) {
+              coverKDValues = compositeMeta.kdValues;
+            }
+            if (!coverMACDValues && compositeMeta.macdValues) {
+              coverMACDValues = compositeMeta.macdValues;
+            }
+          }
+        }
+        if (!shortExitRuleResult) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9546,6 +9698,7 @@ function runStrategy(data, params, options = {}) {
             coverSignal = false;
             break;
         }
+        }
         const finalShortExitRule =
           shortExitRuleResult ||
           normaliseRuleResultFromLegacy(
@@ -9658,7 +9811,29 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
+      if (compositeEvaluators.longEntry) {
+        const compositeResult = evaluateCompositeRule(
+          compositeEvaluators.longEntry,
+          'longEntry',
+          i,
+        );
+        if (compositeResult) {
+          entryRuleResult = compositeResult;
+          buySignal = compositeResult.enter === true;
+          const compositeMeta = compositeResult.meta || {};
+          if (!entryIndicatorValues && compositeMeta.indicatorValues) {
+            entryIndicatorValues = compositeMeta.indicatorValues;
+          }
+          if (!entryKDValues && compositeMeta.kdValues) {
+            entryKDValues = compositeMeta.kdValues;
+          }
+          if (!entryMACDValues && compositeMeta.macdValues) {
+            entryMACDValues = compositeMeta.macdValues;
+          }
+        }
+      }
+      if (!entryRuleResult) {
+        switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
           const pluginResult = callStrategyPlugin(
@@ -9895,6 +10070,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,7 +10173,29 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (compositeEvaluators.shortEntry) {
+        const compositeResult = evaluateCompositeRule(
+          compositeEvaluators.shortEntry,
+          'shortEntry',
+          i,
+        );
+        if (compositeResult) {
+          shortEntryRuleResult = compositeResult;
+          shortSignal = compositeResult.short === true;
+          const compositeMeta = compositeResult.meta || {};
+          if (!shortEntryIndicatorValues && compositeMeta.indicatorValues) {
+            shortEntryIndicatorValues = compositeMeta.indicatorValues;
+          }
+          if (!shortEntryKDValues && compositeMeta.kdValues) {
+            shortEntryKDValues = compositeMeta.kdValues;
+          }
+          if (!shortEntryMACDValues && compositeMeta.macdValues) {
+            shortEntryMACDValues = compositeMeta.macdValues;
+          }
+        }
+      }
+      if (!shortEntryRuleResult) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10428,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+      }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||
