@@ -20,6 +20,7 @@
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
+importScripts('strategy-composer.js');
 importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
 
@@ -7918,6 +7919,17 @@ function runStrategy(data, params, options = {}) {
       positionBasis,
     } = params;
 
+    const compositeEvaluators = {
+      longEntry: buildCompositeEvaluator(params.entryRule || params.entryRuleDsl, 'longEntry'),
+      longExit: buildCompositeEvaluator(params.exitRule || params.exitRuleDsl, 'longExit'),
+      shortEntry: enableShorting
+        ? buildCompositeEvaluator(params.shortEntryRule || params.shortEntryRuleDsl, 'shortEntry')
+        : null,
+      shortExit: enableShorting
+        ? buildCompositeEvaluator(params.shortExitRule || params.shortExitRuleDsl, 'shortExit')
+        : null,
+    };
+
     const entryStagePercentsRaw = Array.isArray(entryStages)
       ? entryStages.map((value) => Number(value))
       : [];
@@ -8138,6 +8150,70 @@ function runStrategy(data, params, options = {}) {
       });
     } catch (pluginError) {
       console.error(`[StrategyPlugin:${strategyId}] 執行失敗`, pluginError);
+      return null;
+    }
+  }
+
+  const strategyComposer =
+    typeof self !== 'undefined' &&
+    self.StrategyComposer &&
+    typeof self.StrategyComposer.buildComposite === 'function'
+      ? self.StrategyComposer
+      : null;
+
+  function normaliseDslDefinition(raw) {
+    if (!raw) {
+      return null;
+    }
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (error) {
+        console.warn('[StrategyComposer] 解析 DSL 字串失敗', error);
+        return null;
+      }
+    }
+    if (typeof raw === 'object') {
+      return raw;
+    }
+    return null;
+  }
+
+  function buildCompositeEvaluator(rawDefinition, role) {
+    if (!strategyComposer) {
+      return null;
+    }
+    const definition = normaliseDslDefinition(rawDefinition);
+    if (!definition) {
+      return null;
+    }
+    try {
+      const composite = strategyComposer.buildComposite(definition, { registry: pluginRegistry });
+      return function evaluateCompositeRule(index, runtimeContext) {
+        return composite({
+          role,
+          index,
+          runtime: runtimeContext || {},
+          callPlugin(pluginId, params, extras) {
+            return callStrategyPlugin(pluginId, role, index, params, extras);
+          },
+        });
+      };
+    } catch (error) {
+      console.error(`[StrategyComposer] 建立 ${role} 規則失敗`, error);
+      return null;
+    }
+  }
+
+  function evaluateCompositeRule(evaluator, role, index, runtimeContext) {
+    if (typeof evaluator !== 'function') {
+      return null;
+    }
+    try {
+      return evaluator(index, runtimeContext || {});
+    } catch (error) {
+      console.error(`[StrategyComposer] ${role} 規則評估失敗`, error);
       return null;
     }
   }
@@ -8738,7 +8814,34 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        if ((compositeEvaluators.longExit || exitStrategy === "trailing_stop") && check(curH) && lastBuyP > 0) {
+          curPeakP = Math.max(curPeakP || lastBuyP, curH);
+        }
+        if (compositeEvaluators.longExit) {
+          const compositeRuntime = {
+            currentPrice: curC,
+            longPeakPrice: curPeakP,
+            entryPrice: lastBuyP,
+          };
+          const compositeResult = evaluateCompositeRule(
+            compositeEvaluators.longExit,
+            'longExit',
+            i,
+            compositeRuntime,
+          );
+          if (compositeResult) {
+            exitRuleResult = compositeResult;
+            sellSignal = compositeResult.exit === true;
+            const meta = compositeResult.meta || {};
+            if (!exitIndicatorValues && meta.indicatorValues)
+              exitIndicatorValues = meta.indicatorValues;
+            if (!exitKDValues && meta.kdValues) exitKDValues = meta.kdValues;
+            if (!exitMACDValues && meta.macdValues)
+              exitMACDValues = meta.macdValues;
+          }
+        }
+        if (!exitRuleResult) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -8926,9 +9029,6 @@ function runStrategy(data, params, options = {}) {
             }
           case "trailing_stop":
             {
-              if (check(curH) && lastBuyP > 0) {
-                curPeakP = Math.max(curPeakP, curH);
-              }
               const pluginResult = callStrategyPlugin(
                 'trailing_stop',
                 'longExit',
@@ -8945,10 +9045,7 @@ function runStrategy(data, params, options = {}) {
                 break;
               }
               const trailP = exitParams.percentage || 5;
-              if (check(curH) && lastBuyP > 0) {
-                curPeakP = Math.max(curPeakP, curH);
-                sellSignal = curC < curPeakP * (1 - trailP / 100);
-              }
+              sellSignal = curPeakP > 0 && curC < curPeakP * (1 - trailP / 100);
               if (sellSignal)
                 exitIndicatorValues = {
                   收盤價: [null, curC, null],
@@ -9012,6 +9109,7 @@ function runStrategy(data, params, options = {}) {
           case "fixed_stop_loss":
             sellSignal = false;
             break;
+        }
         }
         const finalExitRule =
           exitRuleResult ||
@@ -9275,7 +9373,34 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        if ((compositeEvaluators.shortExit || shortExitStrategy === "cover_trailing_stop") && check(curL)) {
+          currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+        }
+        if (compositeEvaluators.shortExit) {
+          const compositeRuntime = {
+            currentPrice: curC,
+            shortFloorPrice: currentLowSinceShort,
+            entryPrice: lastShortP,
+          };
+          const compositeResult = evaluateCompositeRule(
+            compositeEvaluators.shortExit,
+            'shortExit',
+            i,
+            compositeRuntime,
+          );
+          if (compositeResult) {
+            shortExitRuleResult = compositeResult;
+            coverSignal = compositeResult.cover === true;
+            const meta = compositeResult.meta || {};
+            if (!coverIndicatorValues && meta.indicatorValues)
+              coverIndicatorValues = meta.indicatorValues;
+            if (!coverKDValues && meta.kdValues) coverKDValues = meta.kdValues;
+            if (!coverMACDValues && meta.macdValues)
+              coverMACDValues = meta.macdValues;
+          }
+        }
+        if (!shortExitRuleResult) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9507,9 +9632,6 @@ function runStrategy(data, params, options = {}) {
             break;
           case "cover_trailing_stop":
             {
-              if (check(curL) && lastShortP > 0) {
-                currentLowSinceShort = Math.min(currentLowSinceShort, curL);
-              }
               const pluginResult = callStrategyPlugin(
                 'cover_trailing_stop',
                 'shortExit',
@@ -9526,11 +9648,10 @@ function runStrategy(data, params, options = {}) {
                 break;
               }
               const shortTrailP = shortExitParams.percentage || 5;
-              if (check(curL) && lastShortP > 0) {
-                currentLowSinceShort = Math.min(currentLowSinceShort, curL);
-                coverSignal =
-                  curC > currentLowSinceShort * (1 + shortTrailP / 100);
-              }
+              coverSignal =
+                Number.isFinite(currentLowSinceShort) &&
+                currentLowSinceShort < Infinity &&
+                curC > currentLowSinceShort * (1 + shortTrailP / 100);
               if (coverSignal)
                 coverIndicatorValues = {
                   收盤價: [null, curC, null],
@@ -9545,6 +9666,7 @@ function runStrategy(data, params, options = {}) {
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
+        }
         }
         const finalShortExitRule =
           shortExitRuleResult ||
@@ -9658,7 +9780,31 @@ function runStrategy(data, params, options = {}) {
         entryMACDValues = null,
         entryIndicatorValues = null;
       let entryRuleResult = null;
-      switch (entryStrategy) {
+      if (compositeEvaluators.longEntry) {
+        const compositeRuntime = {
+          currentPrice: curC,
+          previousClose: prevC,
+          nextOpen: canTradeOpen ? nextO : null,
+        };
+        const compositeResult = evaluateCompositeRule(
+          compositeEvaluators.longEntry,
+          'longEntry',
+          i,
+          compositeRuntime,
+        );
+        if (compositeResult) {
+          entryRuleResult = compositeResult;
+          buySignal = compositeResult.enter === true;
+          const meta = compositeResult.meta || {};
+          if (!entryIndicatorValues && meta.indicatorValues)
+            entryIndicatorValues = meta.indicatorValues;
+          if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+          if (!entryMACDValues && meta.macdValues)
+            entryMACDValues = meta.macdValues;
+        }
+      }
+      if (!entryRuleResult) {
+        switch (entryStrategy) {
         case "ma_cross":
         case "ema_cross": {
           const pluginResult = callStrategyPlugin(
@@ -9894,6 +10040,7 @@ function runStrategy(data, params, options = {}) {
               };
           }
           break;
+        }
       }
       const finalEntryRule =
         entryRuleResult ||
@@ -9997,7 +10144,32 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      if (compositeEvaluators.shortEntry) {
+        const compositeRuntime = {
+          currentPrice: curC,
+          previousClose: prevC,
+          nextOpen: canTradeOpen ? nextO : null,
+        };
+        const compositeResult = evaluateCompositeRule(
+          compositeEvaluators.shortEntry,
+          'shortEntry',
+          i,
+          compositeRuntime,
+        );
+        if (compositeResult) {
+          shortEntryRuleResult = compositeResult;
+          shortSignal = compositeResult.short === true;
+          const meta = compositeResult.meta || {};
+          if (!shortEntryIndicatorValues && meta.indicatorValues)
+            shortEntryIndicatorValues = meta.indicatorValues;
+          if (!shortEntryKDValues && meta.kdValues)
+            shortEntryKDValues = meta.kdValues;
+          if (!shortEntryMACDValues && meta.macdValues)
+            shortEntryMACDValues = meta.macdValues;
+        }
+      }
+      if (!shortEntryRuleResult) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10402,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||

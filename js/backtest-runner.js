@@ -207,6 +207,16 @@
     if (!options || typeof options !== 'object') {
       throw new TypeError('BacktestRunner.run 需要傳入設定物件');
     }
+    function cloneDslRule(rule) {
+      if (!rule || typeof rule !== 'object') {
+        return null;
+      }
+      try {
+        return JSON.parse(JSON.stringify(rule));
+      } catch (error) {
+        return null;
+      }
+    }
     const registry = globalScope.StrategyPluginRegistry;
     const rawStockNo = options.stockNo || options.symbol || '2330';
     const stockNo = rawStockNo.toString().trim().toUpperCase();
@@ -283,6 +293,14 @@
       market: normalizedMarket,
       marketType: normalizedMarket,
       priceMode: adjustedPrice ? 'adjusted' : 'raw',
+      entryRule: cloneDslRule(options.entryRule || options.entryRuleDsl),
+      exitRule: cloneDslRule(options.exitRule || options.exitRuleDsl),
+      shortEntryRule: enableShorting
+        ? cloneDslRule(options.shortEntryRule || options.shortEntryRuleDsl)
+        : null,
+      shortExitRule: enableShorting
+        ? cloneDslRule(options.shortExitRule || options.shortExitRuleDsl)
+        : null,
     };
   }
 

@@ -4174,13 +4174,101 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+async function runManualVerificationComposer() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在執行策略 Composer 檢查…', 'info');
+
+    const previousRules = getComposerRulesSnapshot();
+    const sampleEntryRule = {
+        op: 'AND',
+        rules: [
+            { plugin: 'rsi_oversold', params: { threshold: 30 } },
+            { plugin: 'k_d_cross', params: { thresholdX: 30 } },
+        ],
+    };
+    const sampleExitRule = {
+        op: 'OR',
+        rules: [
+            { plugin: 'rsi_overbought', params: { threshold: 70 } },
+            {
+                plugin: 'trailing_stop',
+                params: { percentage: 8 },
+                runtime: { currentPrice: 'currentPrice', referencePrice: 'longPeakPrice' },
+            },
+        ],
+    };
+    const sampleRules = {
+        entryRule: sampleEntryRule,
+        exitRule: sampleExitRule,
+        shortEntryRule: null,
+        shortExitRule: null,
+    };
+
+    try {
+        setComposerRules(sampleRules);
+        const params = getBacktestParams();
+        if (!params || typeof params !== 'object') {
+            throw new Error('無法取得目前回測參數');
+        }
+
+        const summaryLines = [];
+        summaryLines.push('✅ 已套用範例 DSL：RSI<30 AND KD<30 進場；RSI>70 或移動停損出場');
+
+        const symbolsToTest = ['2330', '2412', '0050'];
+        if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+            summaryLines.push('⚠️ BacktestRunner 未載入，僅套用 DSL 規則。');
+        } else {
+            for (const symbol of symbolsToTest) {
+                const runParams = {
+                    ...params,
+                    stockNo: symbol,
+                    entryRule: cloneComposerRule(sampleEntryRule),
+                    exitRule: cloneComposerRule(sampleExitRule),
+                    shortEntryRule: null,
+                    shortExitRule: null,
+                };
+                try {
+                    const result = await window.BacktestRunner.run(runParams);
+                    const trades = Array.isArray(result?.data?.trades) ? result.data.trades : [];
+                    summaryLines.push(`✅ ${symbol} 交易筆數：${trades.length}`);
+                    if (trades.length > 0) {
+                        const firstTrade = trades[0];
+                        summaryLines.push(
+                            `   首筆交易：${firstTrade.date || '未知日期'} ${firstTrade.type || '未知'} @ ${firstTrade.price ?? '—'}`,
+                        );
+                    }
+                    const warmupInfo = result?.data?.warmupSummary || result?.data?.datasetDiagnostics?.warmupSummary;
+                    if (warmupInfo?.effectiveStartDate) {
+                        summaryLines.push(`   暖身起點：${warmupInfo.effectiveStartDate}`);
+                    }
+                } catch (runError) {
+                    const message = runError && runError.message ? runError.message : String(runError);
+                    summaryLines.push(`⚠️ ${symbol} 回測未完成：${message}`);
+                }
+            }
+        }
+
+        updateManualVerificationStatus('策略 Composer 檢查完成。', 'success');
+        appendManualVerificationEntry('策略 Composer', summaryLines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 Composer 檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('策略 Composer', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setComposerRules(previousRules);
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const composerBtn = document.getElementById('manualVerifyComposerBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !composerBtn) {
         return;
     }
 
@@ -4202,6 +4290,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (composerBtn) {
+        composerBtn.addEventListener('click', () => {
+            runManualVerificationComposer();
         });
     }
 }
@@ -5115,6 +5208,62 @@ function getStrategyParams(type) {
 
     return params;
 }
+
+function ensureComposerState() {
+    if (!window.lazybacktestComposerState || typeof window.lazybacktestComposerState !== 'object') {
+        window.lazybacktestComposerState = {
+            entryRule: null,
+            exitRule: null,
+            shortEntryRule: null,
+            shortExitRule: null,
+        };
+    }
+    return window.lazybacktestComposerState;
+}
+
+function cloneComposerRule(rule) {
+    if (!rule || typeof rule !== 'object') {
+        return null;
+    }
+    try {
+        return JSON.parse(JSON.stringify(rule));
+    } catch (error) {
+        console.warn('[Composer] clone 失敗，回傳 null', error);
+        return null;
+    }
+}
+
+function getComposerRulesSnapshot() {
+    const state = ensureComposerState();
+    return {
+        entryRule: cloneComposerRule(state.entryRule),
+        exitRule: cloneComposerRule(state.exitRule),
+        shortEntryRule: cloneComposerRule(state.shortEntryRule),
+        shortExitRule: cloneComposerRule(state.shortExitRule),
+    };
+}
+
+function setComposerRules(rules) {
+    const state = ensureComposerState();
+    state.entryRule = rules?.entryRule ? cloneComposerRule(rules.entryRule) : null;
+    state.exitRule = rules?.exitRule ? cloneComposerRule(rules.exitRule) : null;
+    state.shortEntryRule = rules?.shortEntryRule ? cloneComposerRule(rules.shortEntryRule) : null;
+    state.shortExitRule = rules?.shortExitRule ? cloneComposerRule(rules.shortExitRule) : null;
+    return getComposerRulesSnapshot();
+}
+
+function clearComposerRules() {
+    return setComposerRules({});
+}
+
+if (!window.lazybacktestStrategyComposer) {
+    window.lazybacktestStrategyComposer = {
+        getRules: getComposerRulesSnapshot,
+        setRules: setComposerRules,
+        clearRules: clearComposerRules,
+    };
+}
+
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -5173,6 +5322,7 @@ function getBacktestParams() {
     const rawMarket = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
     const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
+    const composerRules = getComposerRulesSnapshot();
 
     return {
         stockNo,
@@ -5204,6 +5354,10 @@ function getBacktestParams() {
         market,
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
+        entryRule: composerRules.entryRule,
+        exitRule: composerRules.exitRule,
+        shortEntryRule: composerRules.shortEntryRule,
+        shortExitRule: composerRules.shortExitRule,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
