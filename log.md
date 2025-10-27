@@ -1,3 +1,10 @@
+## 2026-09-24 — Patch LB-ADJ-COMPOSER-20250629A
+- **Scope**: 台股還原價 Yahoo 主來源與 TWSE/FinMind 備援診斷。
+- **Updates**:
+  - `netlify/functions/calculateAdjustedPrice.js` 新增 Yahoo Finance 日線還原抓取與正規化流程，未啟用拆分時優先採用，失敗再回退至 TWSE 原始價或 FinMind 備援。
+  - 調整還原摘要與診斷組成，Yahoo 成功時標示 FinMind 僅為備援，並擴充 `priceDiagnostics` 記錄主備來源切換與錯誤原因，便於開發者卡片呈現。
+- **Testing**: 容器環境無法連線 Yahoo/TWSE Proxy，未能執行實際回測；待 Netlify 部署後以 2330（含／不含拆分）實測確認資料來源摘要與備援標記。
+
 ## 2026-09-15 — Patch LB-AI-VIX-FEATURE-20260915A
 - **Scope**: ANN 美股波動度特徵整合。
 - **Updates**:
