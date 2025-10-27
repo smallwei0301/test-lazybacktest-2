@@ -3739,6 +3739,7 @@ function setManualVerificationBusy(busy) {
         'manualVerifySampleBacktestBtn',
         'manualVerifyLegacyLoadBtn',
         'manualVerifyBatchFlowBtn',
+        'manualVerifyStrategyDslBtn',
     ];
     buttonIds.forEach((id) => {
         const btn = document.getElementById(id);
@@ -4174,13 +4175,116 @@ async function runManualVerificationBatchFlow() {
     }
 }
 
+async function runManualVerificationStrategyDsl() {
+    if (manualVerificationState.busy) return;
+    if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        updateManualVerificationStatus('BacktestRunner 尚未載入，無法執行 DSL 測試。', 'warning');
+        return;
+    }
+
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在使用 DSL 範例回測…', 'info');
+
+    const entryDsl = {
+        op: 'AND',
+        rules: [
+            { ref: 'rsi_oversold', params: { period: 14, threshold: 30 } },
+            { ref: 'k_d_cross', params: { period: 9, thresholdX: 20 } },
+        ],
+    };
+    const exitDsl = {
+        op: 'OR',
+        rules: [
+            { ref: 'rsi_overbought', params: { period: 14, threshold: 70 } },
+            { ref: 'trailing_stop', params: { percentage: 5 } },
+        ],
+    };
+
+    const lines = [];
+
+    try {
+        const runOptions = {
+            stockNo: '2330',
+            startDate: '2022-01-01',
+            endDate: '2023-12-31',
+            market: 'TWSE',
+            initialCapital: 200000,
+            positionSize: 50,
+            tradeTiming: 'close',
+            adjustedPrice: true,
+            splitAdjustment: true,
+            entryStrategy: 'rsi_oversold',
+            exitStrategy: 'rsi_overbought',
+            entryParams: { period: 14, threshold: 30 },
+            exitParams: { period: 14, threshold: 70 },
+            enableShorting: false,
+            entryStrategyDsl: entryDsl,
+            exitStrategyDsl: exitDsl,
+        };
+
+        const result = await window.BacktestRunner.run({
+            ...runOptions,
+            onProgress(payload) {
+                if (payload && payload.message) {
+                    updateManualVerificationStatus(`DSL 測試：${payload.message}`, 'info');
+                }
+            },
+        });
+
+        const trades = Array.isArray(result?.data?.completedTrades)
+            ? result.data.completedTrades
+            : [];
+        const summary = {
+            totalTrades: Array.isArray(result?.data?.trades) ? result.data.trades.length : trades.length,
+            winTrades: Number.isFinite(result?.data?.winTrades) ? result.data.winTrades : null,
+            returnRate: Number.isFinite(result?.data?.returnRate) ? result.data.returnRate : null,
+        };
+
+        lines.push('✅ 進場 DSL：RSI<30 AND KD<20');
+        lines.push('✅ 出場 DSL：RSI>70 OR 移動停損 5%');
+
+        if (summary.totalTrades !== null) {
+            lines.push(`交易筆數：${summary.totalTrades}`);
+        }
+        if (summary.returnRate !== null) {
+            const pct = (summary.returnRate * 100).toFixed(2);
+            lines.push(`總報酬率：約 ${pct}%`);
+        }
+
+        trades.slice(0, 3).forEach((trade, index) => {
+            const entryDate = trade?.entry?.date || '—';
+            const exitDate = trade?.exit?.date || '—';
+            const profit = Number.isFinite(trade?.profit)
+                ? `${trade.profit.toFixed(0)} 元`
+                : '—';
+            lines.push(`• 交易 ${index + 1}：${entryDate} → ${exitDate}，損益 ${profit}`);
+        });
+
+        if (trades.length === 0) {
+            lines.push('⚠️ 尚未出現完成的交易，請於實機環境確認資料來源。');
+        }
+
+        updateManualVerificationStatus('策略 DSL 範例回測完成。', 'success');
+        appendManualVerificationEntry('策略 DSL 範例', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 DSL 回測失敗：${message}`, 'warning');
+        lines.push(`❌ 執行失敗：${message}`);
+        lines.push('⚠️ 容器環境可能無法連線到 Netlify Proxy，請於實機再次驗證。');
+        appendManualVerificationEntry('策略 DSL 範例', lines);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
         return;
     }
 
@@ -4202,6 +4306,11 @@ function initManualVerificationTools() {
     if (batchBtn) {
         batchBtn.addEventListener('click', () => {
             runManualVerificationBatchFlow();
+        });
+    }
+    if (dslBtn) {
+        dslBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDsl();
         });
     }
 }

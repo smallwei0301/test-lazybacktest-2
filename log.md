@@ -1,3 +1,13 @@
+## 2026-09-15 — Patch LB-DSL-COMPOSER-20260915A
+- **Scope**: 策略 DSL Composer 與 Worker/手動檢驗整合。
+- **Updates**:
+  - 新增 `js/lib/strategy-dsl.js`，實作 `buildComposite`、DSL 正規化、遞迴組合與參數預設處理。
+  - `js/worker.js` 導入 DSL 評估、暖身週期擴充、移動停損 runtime 傳遞，以及多空進出場的 DSL fallback。
+  - `js/main.js` 與 `index.html` 開發者區新增「策略DSL測試」按鈕，透過 `BacktestRunner` 執行 RSI+KD & 移動停損範例。
+  - `tests/strategy-dsl.test.js` 覆蓋 AND/OR/NOT、停損回傳與 schema default，`package.json` 測試腳本同步更新。
+  - 建立 `todolist.md` 追蹤階段 5~10 任務。
+- **Testing**: `npm test`（含 `strategy-dsl.test.js`）。
+
 ## 2026-09-15 — Patch LB-STRATEGY-ID-20260915B
 - **Scope**: `LB-STRATEGY-ID-20260915A` 後續覆核與型別檢查。
 - **Updates**: 無額外程式碼調整；確認策略 ID 正規化與手動驗證工具腳本在最新提交後維持一致設定。
