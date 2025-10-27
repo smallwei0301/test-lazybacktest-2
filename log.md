@@ -1672,6 +1672,20 @@ NODE`
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-18 — Patch LB-STRATEGY-COMPOSER-20250720A
+- **Summary**: 導入策略 DSL Composer，Worker 透過 `buildComposite` 生成進出場函式並保留既有倉位管理；新增手動驗證按鈕快速以 RSI+KD 與移動停損測試 Composer 輸出。
+- **Details**:
+  - `js/strategy-composer.js` 定義 DSL 解析器，支援 AND/OR/NOT 運算、參數預設與 runtime 映射，提供 Node 測試匯入介面。
+  - `js/worker.js` 以 Composer 生成功能函式，對長短多空策略皆優先採用 DSL，並保留暖身／停損流程；同時支援 trailing stop 的 runtime 映射。
+  - `js/backtest-runner.js`、`js/main.js` 與 `index.html` 加入 Composer 規則傳遞與開發者手動驗證按鈕，`tests/strategy-composer.test.js` 覆蓋 AND/OR/NOT、停損與 runtime 測試。
+- **Testing**: `npm test`
+
+## 2026-09-18 — Patch LB-STRATEGY-COMPOSER-20250721A
+- **Summary**: 補強 Composer 單元測試，驗證巢狀運算元的布林邏輯與錯誤處理，確保 DSL 解析器面對非法輸入時能明確拋出例外。
+- **Details**:
+  - `tests/strategy-composer.test.js` 新增巢狀 AND/NOT/OR 測試並覆蓋空規則、空 plugin 等錯誤情境，維持結果樹狀結構與訊號一致性；同時為測試檔標記版本代碼 `LB-STRATEGY-COMPOSER-20250721A` 以利追蹤。
+- **Testing**: `npm test`
+
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
 - **Fix**:
