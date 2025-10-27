@@ -4238,6 +4238,240 @@ function initDeveloperAreaToggle() {
     });
 }
 
+const composerTesterState = {
+    running: false,
+    version: 'LB-COMPOSER-DEV-20260301A',
+};
+
+function cloneComposerRule(rule) {
+    if (!rule || typeof rule !== 'object') return null;
+    try {
+        return JSON.parse(JSON.stringify(rule));
+    } catch (error) {
+        console.warn('[ComposerTester] 複製複合策略規則失敗', error);
+        return null;
+    }
+}
+
+function buildSampleComposerRules() {
+    return {
+        entryRule: {
+            op: 'AND',
+            rules: [
+                { strategy: 'rsi_oversold', params: { threshold: 30 } },
+                { strategy: 'k_d_cross', params: { thresholdX: 20 } },
+            ],
+        },
+        exitRule: {
+            op: 'OR',
+            rules: [
+                { strategy: 'rsi_overbought', params: { threshold: 70 } },
+                { strategy: 'trailing_stop', params: { percentage: 5 } },
+            ],
+        },
+    };
+}
+
+function setComposerTesterMessage(tone, message) {
+    const resultEl = document.getElementById('composerTesterResult');
+    if (!resultEl) return;
+    const baseClass = ['text-xs', 'rounded-md', 'px-3', 'py-2', 'border'];
+    const toneClassMap = {
+        success: ['bg-emerald-50', 'border-emerald-200', 'text-emerald-700'],
+        warning: ['bg-amber-50', 'border-amber-200', 'text-amber-700'],
+        error: ['bg-rose-50', 'border-rose-200', 'text-rose-700'],
+        info: ['bg-sky-50', 'border-sky-200', 'text-sky-700'],
+    };
+    resultEl.className = baseClass.join(' ');
+    (toneClassMap[tone] || toneClassMap.info).forEach((cls) => resultEl.classList.add(cls));
+    resultEl.textContent = message;
+    resultEl.classList.remove('hidden');
+}
+
+function setComposerButtonsDisabled(disabled) {
+    const container = document.getElementById('composerTesterButtons');
+    if (!container) return;
+    container.querySelectorAll('button').forEach((btn) => {
+        btn.disabled = disabled;
+    });
+}
+
+function initComposerTester() {
+    const container = document.getElementById('composerTesterButtons');
+    if (!container || container.dataset.lbComposerBound === 'true') {
+        return;
+    }
+    const actions = [
+        {
+            id: 'composerSampleRun',
+            label: '執行範例 DSL 回測',
+            handler: runComposerSampleBacktest,
+        },
+        {
+            id: 'composerMultiRun',
+            label: '多檔暖身檢查',
+            handler: runComposerMultiSymbolCheck,
+        },
+    ];
+    actions.forEach((action) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = action.id;
+        btn.className = 'px-3 py-2 text-xs border rounded-md bg-white hover:bg-slate-50 transition-colors flex items-center gap-2';
+        btn.style.borderColor = 'var(--border)';
+        btn.textContent = action.label;
+        btn.addEventListener('click', action.handler);
+        container.appendChild(btn);
+    });
+    container.dataset.lbComposerBound = 'true';
+    setComposerTesterMessage('info', '準備好以 Composer 驗證策略組合。');
+}
+
+function ensureComposerBaseStrategies(params) {
+    const output = { ...params };
+    if (!output.entryStrategy) {
+        output.entryStrategy = 'rsi_oversold';
+    }
+    if (!output.exitStrategy) {
+        output.exitStrategy = 'rsi_overbought';
+    }
+    return output;
+}
+
+async function runComposerSampleBacktest() {
+    if (composerTesterState.running) return;
+    if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        setComposerTesterMessage('error', 'BacktestRunner 尚未就緒，請稍後重試。');
+        return;
+    }
+    let params;
+    try {
+        params = getBacktestParams();
+    } catch (error) {
+        console.error('[ComposerTester] 讀取回測參數失敗', error);
+        setComposerTesterMessage('error', '無法取得目前的回測參數，請檢查表單設定。');
+        return;
+    }
+    if (!params || !params.startDate || !params.endDate) {
+        setComposerTesterMessage('error', '請先設定完整的回測區間與策略再執行檢查。');
+        return;
+    }
+    const sampleRules = buildSampleComposerRules();
+    const sampleParams = ensureComposerBaseStrategies({
+        ...params,
+        entryRule: cloneComposerRule(sampleRules.entryRule),
+        exitRule: cloneComposerRule(sampleRules.exitRule),
+        entryParams: { ...params.entryParams },
+        exitParams: { ...params.exitParams },
+    });
+    composerTesterState.running = true;
+    setComposerButtonsDisabled(true);
+    setComposerTesterMessage('info', '執行範例 DSL 回測中，請稍候...');
+    try {
+        const result = await window.BacktestRunner.run(sampleParams);
+        const tradeCount = Number.isFinite(result?.tradesCount)
+            ? result.tradesCount
+            : Array.isArray(result?.completedTrades)
+                ? result.completedTrades.length
+                : 0;
+        console.group('[ComposerTester] 範例 DSL 回測');
+        console.log('執行參數', sampleParams);
+        console.log('回測結果', result);
+        console.log('完成交易', result?.completedTrades);
+        console.log('暖身診斷', result?.warmupSummary || result?.datasetDiagnostics?.runtime || null);
+        console.groupEnd();
+        setComposerTesterMessage('success', `已完成範例 DSL 回測，共 ${tradeCount} 筆交易。詳情請查看主控台。`);
+    } catch (error) {
+        console.error('[ComposerTester] 範例 DSL 回測失敗', error);
+        setComposerTesterMessage('error', `執行範例 DSL 回測失敗：${error.message || error}`);
+    } finally {
+        composerTesterState.running = false;
+        setComposerButtonsDisabled(false);
+    }
+}
+
+async function runComposerMultiSymbolCheck() {
+    if (composerTesterState.running) return;
+    if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        setComposerTesterMessage('error', 'BacktestRunner 尚未就緒，請稍後重試。');
+        return;
+    }
+    let params;
+    try {
+        params = getBacktestParams();
+    } catch (error) {
+        console.error('[ComposerTester] 讀取回測參數失敗', error);
+        setComposerTesterMessage('error', '無法取得目前的回測參數，請檢查表單設定。');
+        return;
+    }
+    if (!params || !params.startDate || !params.endDate) {
+        setComposerTesterMessage('error', '請先設定完整的回測區間與策略再執行檢查。');
+        return;
+    }
+    const sampleRules = buildSampleComposerRules();
+    const symbolCandidates = new Set([
+        params.stockNo,
+        '2330',
+        '2317',
+        '0050',
+    ]);
+    const summaries = [];
+    composerTesterState.running = true;
+    setComposerButtonsDisabled(true);
+    setComposerTesterMessage('info', '針對多檔股票執行 Composer 暖身檢查中...');
+    try {
+        for (const symbol of symbolCandidates) {
+            if (!symbol) continue;
+            const multiParams = ensureComposerBaseStrategies({
+                ...params,
+                stockNo: symbol,
+                entryRule: cloneComposerRule(sampleRules.entryRule),
+                exitRule: cloneComposerRule(sampleRules.exitRule),
+                entryParams: { ...params.entryParams },
+                exitParams: { ...params.exitParams },
+                shortEntryParams: { ...params.shortEntryParams },
+                shortExitParams: { ...params.shortExitParams },
+            });
+            try {
+                const result = await window.BacktestRunner.run(multiParams);
+                const tradeCount = Number.isFinite(result?.tradesCount)
+                    ? result.tradesCount
+                    : Array.isArray(result?.completedTrades)
+                        ? result.completedTrades.length
+                        : 0;
+                const firstTrade = Array.isArray(result?.completedTrades) && result.completedTrades.length > 0
+                    ? result.completedTrades[0]
+                    : null;
+                const firstTradeDate = firstTrade?.entry?.date || firstTrade?.buyDate || firstTrade?.date || null;
+                const warmupDiagnostics = result?.warmupSummary || result?.datasetDiagnostics?.runtime || result?.runtime || null;
+                summaries.push({ symbol, tradeCount, firstTradeDate, warmupDiagnostics });
+                console.group(`[ComposerTester] ${symbol} 暖身檢查`);
+                console.log('執行參數', multiParams);
+                console.log('回測結果', result);
+                console.log('第一筆交易', firstTrade);
+                console.log('暖身診斷', warmupDiagnostics);
+                console.groupEnd();
+            } catch (symbolError) {
+                console.error(`[ComposerTester] ${symbol} 暖身檢查失敗`, symbolError);
+                summaries.push({ symbol, error: symbolError.message || String(symbolError) });
+            }
+        }
+        const successCount = summaries.filter((item) => !item.error).length;
+        const total = summaries.length;
+        const tone = successCount === total ? 'success' : successCount === 0 ? 'error' : 'warning';
+        setComposerTesterMessage(
+            tone,
+            `多檔檢查完成：${successCount}/${total} 檔執行成功。詳情請查看主控台。`,
+        );
+    } catch (error) {
+        console.error('[ComposerTester] 多檔檢查流程失敗', error);
+        setComposerTesterMessage('error', `多檔檢查流程失敗：${error.message || error}`);
+    } finally {
+        composerTesterState.running = false;
+        setComposerButtonsDisabled(false);
+    }
+}
+
 function getLoadingTextElement() {
     return document.getElementById('loadingText');
 }
@@ -5656,6 +5890,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initComposerTester();
         initBatchDebugLogPanel();
         initStrategyRegistryVerification();
         initManualVerificationTools();
