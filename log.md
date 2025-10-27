@@ -1688,3 +1688,11 @@ NODE`
 - **Diagnostics**: 請於瀏覽器重新載入批量優化分頁，確認買入／賣出策略清單重新顯示且 console 不再出現 `hydrateStrategyNameMap is not defined` 的錯誤；若建立批量偵錯會話，應能看到 `strategy-map-hydrated` 事件。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-15 — Patch LB-STRATEGY-DSL-20250914A
+- **Scope**: 策略 DSL Composer 與複合策略測試基礎建置。
+- **Updates**:
+  - 新增 `js/strategy-dsl.js`，提供 `StrategyDSL.buildComposite` 以解析 AND/OR/NOT DSL、驗證插件參數並輸出純函式介面。
+  - 擴充 `tests/strategy-dsl.test.js` 驗證布林組合、停損停利傳遞、NOT 反轉與 JSON Schema 約束。
+  - 新增 `todolist.md` 追蹤階段 5~10 任務並更新 `package.json` 測試腳本。
+- **Testing**: `npm test`（容器環境執行，通過 DSL 組合單元測試與既有批量模組測試）。
+
