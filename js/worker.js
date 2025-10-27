@@ -8,6 +8,7 @@
 // Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Volatility quartile diagnostics for reproducibility.
 // Patch Tag: LB-AI-VOL-QUARTILE-20260111A — Quartile fallback indicators and share diagnostics for AI volatility tiers.
 // Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
+// Patch Tag: LB-COMPOSER-DSL-20250720A — Strategy DSL composer integration for staged pipeline.
 // Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
 // Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
 // Patch Tag: LB-AI-VIX-FEATURE-20260915A — 美股 ANN 訓練同步抓取 ^VIX 指數作為額外特徵。
@@ -20,6 +21,7 @@
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
+importScripts('strategy-composer.js');
 importScripts('strategy-plugin-manifest.js');
 importScripts('config.js');
 
@@ -8060,6 +8062,149 @@ function runStrategy(data, params, options = {}) {
     date: dates,
   };
 
+  const composerApi =
+    typeof self !== 'undefined' && self.StrategyComposer && typeof self.StrategyComposer.buildComposite === 'function'
+      ? self.StrategyComposer
+      : null;
+  const composerHelperStore = new Map();
+
+  function cloneStrategyParamsForComposer(rawParams) {
+    if (!rawParams || typeof rawParams !== 'object') return {};
+    const clone = {};
+    Object.keys(rawParams).forEach((key) => {
+      if (key === '__proto__') return;
+      const value = rawParams[key];
+      if (value === undefined) return;
+      if (Array.isArray(value)) {
+        clone[key] = value.map((item) => (item && typeof item === 'object' ? { ...item } : item));
+      } else if (value && typeof value === 'object') {
+        clone[key] = { ...value };
+      } else {
+        clone[key] = value;
+      }
+    });
+    return clone;
+  }
+
+  function buildPrimitiveComposite(strategyId, role, baseParams) {
+    if (!strategyId || typeof strategyId !== 'string' || !role) {
+      return null;
+    }
+    return {
+      op: 'PLUGIN',
+      pluginId: strategyId,
+      role,
+      params: cloneStrategyParamsForComposer(baseParams),
+    };
+  }
+
+  function fallbackContainsPlugin(definition, targetId) {
+    if (!definition || typeof definition !== 'object' || !targetId) {
+      return false;
+    }
+    const pluginId =
+      typeof definition.pluginId === 'string'
+        ? definition.pluginId
+        : typeof definition.strategyId === 'string'
+        ? definition.strategyId
+        : typeof definition.id === 'string'
+        ? definition.id
+        : null;
+    if (pluginId === targetId) {
+      return true;
+    }
+    const op = typeof definition.op === 'string' ? definition.op.trim().toUpperCase() : null;
+    if (op === 'NOT') {
+      return fallbackContainsPlugin(definition.rule, targetId);
+    }
+    if (op === 'AND' || op === 'OR') {
+      const rules = Array.isArray(definition.rules) ? definition.rules : [];
+      for (let idx = 0; idx < rules.length; idx += 1) {
+        if (fallbackContainsPlugin(rules[idx], targetId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function compositeContainsPlugin(definition, pluginId) {
+    if (!pluginId) return false;
+    if (composerApi && typeof composerApi.containsPlugin === 'function') {
+      try {
+        return composerApi.containsPlugin(definition, pluginId);
+      } catch (containsError) {
+        console.error('[StrategyComposer] containsPlugin 失敗', containsError);
+      }
+    }
+    return fallbackContainsPlugin(definition, pluginId);
+  }
+
+  function getComposerHelpers(namespace) {
+    if (composerHelperStore.has(namespace)) {
+      return composerHelperStore.get(namespace);
+    }
+    const helpers = {
+      getIndicator(key) {
+        const source = indicators?.[key];
+        return Array.isArray(source) ? source : undefined;
+      },
+      log(message, details) {
+        if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+          if (details) console.debug(`[StrategyComposer:${namespace}] ${message}`, details);
+          else console.debug(`[StrategyComposer:${namespace}] ${message}`);
+        }
+      },
+    };
+    composerHelperStore.set(namespace, helpers);
+    return helpers;
+  }
+
+  function buildCompositeEvaluator(definition, role, namespace) {
+    if (!composerApi || !definition) {
+      return null;
+    }
+    try {
+      const compositeFn = composerApi.buildComposite(definition, pluginRegistry, { role });
+      return function evaluateComposite(index, runtimeOverrides) {
+        const helpers = getComposerHelpers(namespace);
+        return compositeFn({
+          index,
+          series: pluginSeries,
+          helpers,
+          runtime: pluginRuntimeInfo,
+          composerRuntime: runtimeOverrides || {},
+        });
+      };
+    } catch (error) {
+      console.error(`[StrategyComposer] 建立 ${namespace} 組合失敗`, error);
+      return null;
+    }
+  }
+
+  const entryCompositeDefinition =
+    params.entryComposite || buildPrimitiveComposite(params.entryStrategy, 'longEntry', params.entryParams);
+  const exitCompositeDefinition =
+    params.exitComposite || buildPrimitiveComposite(params.exitStrategy, 'longExit', params.exitParams);
+  const shortEntryCompositeDefinition = params.enableShorting
+    ? params.shortEntryComposite || buildPrimitiveComposite(params.shortEntryStrategy, 'shortEntry', params.shortEntryParams)
+    : null;
+  const shortExitCompositeDefinition = params.enableShorting
+    ? params.shortExitComposite || buildPrimitiveComposite(params.shortExitStrategy, 'shortExit', params.shortExitParams)
+    : null;
+
+  const evaluateLongEntryComposite = buildCompositeEvaluator(entryCompositeDefinition, 'longEntry', 'longEntry');
+  const evaluateLongExitComposite = buildCompositeEvaluator(exitCompositeDefinition, 'longExit', 'longExit');
+  const evaluateShortEntryComposite = params.enableShorting
+    ? buildCompositeEvaluator(shortEntryCompositeDefinition, 'shortEntry', 'shortEntry')
+    : null;
+  const evaluateShortExitComposite = params.enableShorting
+    ? buildCompositeEvaluator(shortExitCompositeDefinition, 'shortExit', 'shortExit')
+    : null;
+
+  const exitUsesTrailingStop = compositeContainsPlugin(exitCompositeDefinition, 'trailing_stop');
+  const shortExitUsesTrailingStop = compositeContainsPlugin(shortExitCompositeDefinition, 'cover_trailing_stop');
+
   function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
     if (
       !pluginRegistry ||
@@ -8738,7 +8883,37 @@ function runStrategy(data, params, options = {}) {
           exitMACDValues = null,
           exitIndicatorValues = null;
         let exitRuleResult = null;
-        switch (exitStrategy) {
+        const exitRuntimeOverrides = {};
+        if (exitUsesTrailingStop && check(curH) && lastBuyP > 0) {
+          curPeakP = Math.max(curPeakP || 0, curH);
+        }
+        if (exitUsesTrailingStop) {
+          exitRuntimeOverrides.trailing_stop = {
+            currentPrice: curC,
+            referencePrice: curPeakP,
+          };
+        }
+        let useLegacyExit = true;
+        if (evaluateLongExitComposite) {
+          try {
+            const compositeResult = evaluateLongExitComposite(
+              i,
+              Object.keys(exitRuntimeOverrides).length > 0 ? exitRuntimeOverrides : null,
+            );
+            if (compositeResult && typeof compositeResult === 'object') {
+              exitRuleResult = compositeResult;
+              sellSignal = compositeResult.exit === true;
+              useLegacyExit = false;
+            }
+          } catch (composerError) {
+            console.error(
+              `[StrategyComposer] longExit 組合評估失敗 (index=${i}, date=${dates[i]})`,
+              composerError,
+            );
+          }
+        }
+        if (useLegacyExit) {
+          switch (exitStrategy) {
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9013,6 +9188,7 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        }
         const finalExitRule =
           exitRuleResult ||
           normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
@@ -9275,7 +9451,37 @@ function runStrategy(data, params, options = {}) {
           coverMACDValues = null,
           coverIndicatorValues = null;
         let shortExitRuleResult = null;
-        switch (shortExitStrategy) {
+        const shortExitRuntimeOverrides = {};
+        if (shortExitUsesTrailingStop && check(curL) && lastShortP > 0) {
+          currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+        }
+        if (shortExitUsesTrailingStop) {
+          shortExitRuntimeOverrides.cover_trailing_stop = {
+            currentPrice: curC,
+            referencePrice: currentLowSinceShort,
+          };
+        }
+        let useLegacyShortExit = true;
+        if (evaluateShortExitComposite) {
+          try {
+            const compositeResult = evaluateShortExitComposite(
+              i,
+              Object.keys(shortExitRuntimeOverrides).length > 0 ? shortExitRuntimeOverrides : null,
+            );
+            if (compositeResult && typeof compositeResult === 'object') {
+              shortExitRuleResult = compositeResult;
+              coverSignal = compositeResult.cover === true;
+              useLegacyShortExit = false;
+            }
+          } catch (composerError) {
+            console.error(
+              `[StrategyComposer] shortExit 組合評估失敗 (index=${i}, date=${dates[i]})`,
+              composerError,
+            );
+          }
+        }
+        if (useLegacyShortExit) {
+          switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
             {
@@ -9545,6 +9751,7 @@ function runStrategy(data, params, options = {}) {
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
+        }
         }
         const finalShortExitRule =
           shortExitRuleResult ||
@@ -9895,6 +10102,7 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
+      }
       const finalEntryRule =
         entryRuleResult ||
         normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
@@ -9997,7 +10205,24 @@ function runStrategy(data, params, options = {}) {
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
       let shortEntryRuleResult = null;
-      switch (shortEntryStrategy) {
+      let useLegacyShortEntry = true;
+      if (evaluateShortEntryComposite) {
+        try {
+          const compositeResult = evaluateShortEntryComposite(i, null);
+          if (compositeResult && typeof compositeResult === 'object') {
+            shortEntryRuleResult = compositeResult;
+            shortSignal = compositeResult.short === true;
+            useLegacyShortEntry = false;
+          }
+        } catch (composerError) {
+          console.error(
+            `[StrategyComposer] shortEntry 組合評估失敗 (index=${i}, date=${dates[i]})`,
+            composerError,
+          );
+        }
+      }
+      if (useLegacyShortEntry) {
+        switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
           {
@@ -10230,6 +10455,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+      }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||
