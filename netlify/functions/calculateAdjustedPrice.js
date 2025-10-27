@@ -1,4 +1,4 @@
-// netlify/functions/calculateAdjustedPrice.js (v13.7 - Split ratio diagnostics)
+// netlify/functions/calculateAdjustedPrice.js (v13.8 - Yahoo primary with TWSE/FinMind fallback)
 // Patch Tag: LB-ADJ-COMPOSER-20240525A
 // Patch Tag: LB-ADJ-COMPOSER-20250523A
 // Patch Tag: LB-ADJ-COMPOSER-20241020A
@@ -26,9 +26,10 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250518A
 // Patch Tag: LB-ADJ-COMPOSER-20250522A
 // Patch Tag: LB-ADJ-COMPOSER-20250527A
+// Patch Tag: LB-ADJ-COMPOSER-20250630A
 import fetch from 'node-fetch';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250527A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250630A';
 
 let fetchImpl = fetch;
 
@@ -45,6 +46,11 @@ function setFetchImplementation(fn) {
 function resetFetchImplementation() {
   fetchImpl = fetch;
 }
+
+const SECONDS_IN_DAY = 24 * 60 * 60;
+const YAHOO_PRICE_SOURCE_LABEL = 'Yahoo Finance (還原)';
+const YAHOO_DATA_SOURCE_LABEL = 'Yahoo Finance';
+const YAHOO_USER_AGENT = 'Mozilla/5.0';
 
 const SUBSCRIPTION_PRICE_ALIAS_KEYS = [
   'cash_capital_increase_subscription_price',
@@ -638,6 +644,191 @@ function parseNumber(value, options = {}) {
 function safeRound(value) {
   if (!Number.isFinite(value)) return null;
   return Number(Math.round(value * 10000) / 10000);
+}
+
+function buildYahooPeriodRange(startDate, endDate) {
+  const now = new Date();
+  const hasValidStart = startDate instanceof Date && !Number.isNaN(startDate.getTime());
+  const hasValidEnd = endDate instanceof Date && !Number.isNaN(endDate.getTime());
+  let from = hasValidStart ? new Date(startDate.getTime()) : null;
+  let to = hasValidEnd ? new Date(endDate.getTime()) : null;
+  if (!from) {
+    from = new Date(now);
+    from.setFullYear(from.getFullYear() - 10);
+  } else {
+    from.setMonth(from.getMonth() - 2);
+  }
+  if (!to) {
+    to = new Date(now);
+  } else {
+    to.setMonth(to.getMonth() + 2);
+  }
+  if (to > now) {
+    to = new Date(now);
+  }
+  if (to <= from) {
+    to = new Date(from.getTime() + SECONDS_IN_DAY * 1000);
+  }
+  const period1 = Math.max(0, Math.floor(from.getTime() / 1000));
+  const period2 = Math.max(period1 + SECONDS_IN_DAY, Math.floor(to.getTime() / 1000) + SECONDS_IN_DAY);
+  return { period1, period2 };
+}
+
+async function fetchYahooDailySeries(stockNo, startDate, endDate) {
+  const symbol = `${stockNo}.TW`;
+  console.log(`[calculateAdjustedPrice] 嘗試 Yahoo Finance: ${symbol}`);
+  const { period1, period2 } = buildYahooPeriodRange(startDate, endDate);
+  const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+  url.searchParams.set('interval', '1d');
+  url.searchParams.set('includeAdjustedClose', 'true');
+  if (Number.isFinite(period1)) {
+    url.searchParams.set('period1', String(period1));
+  }
+  if (Number.isFinite(period2)) {
+    url.searchParams.set('period2', String(period2));
+  }
+  const response = await fetchImpl(url.toString(), {
+    headers: { 'User-Agent': YAHOO_USER_AGENT },
+  });
+  if (!response.ok) {
+    throw new Error(`Yahoo HTTP ${response.status}`);
+  }
+  const json = await response.json();
+  if (json?.chart?.error) {
+    throw new Error(`Yahoo 回應錯誤: ${json.chart.error.description}`);
+  }
+  const result = json?.chart?.result?.[0];
+  if (!result || !Array.isArray(result.timestamp)) {
+    throw new Error('Yahoo 回傳資料格式異常');
+  }
+  return {
+    stockName: result.meta?.shortName || stockNo,
+    quote: result.indicators?.quote?.[0] || {},
+    adjclose: result.indicators?.adjclose?.[0]?.adjclose || [],
+    timestamps: result.timestamp,
+  };
+}
+
+function normaliseYahooDailyRows(stockNo, yahooData) {
+  if (!yahooData) return [];
+  const quote = yahooData.quote || {};
+  const adjclose = Array.isArray(yahooData.adjclose) ? yahooData.adjclose : [];
+  const timestamps = Array.isArray(yahooData.timestamps) ? yahooData.timestamps : [];
+  const entries = [];
+  for (let i = 0; i < timestamps.length; i += 1) {
+    const ts = Number(timestamps[i]);
+    if (!Number.isFinite(ts)) continue;
+    const date = new Date(ts * 1000);
+    if (Number.isNaN(date.getTime())) continue;
+    const isoDate = `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+    entries.push({
+      date: isoDate,
+      rawOpen: Number(quote.open?.[i]),
+      rawHigh: Number(quote.high?.[i]),
+      rawLow: Number(quote.low?.[i]),
+      rawClose: Number(quote.close?.[i]),
+      adjClose: Number(adjclose?.[i]),
+      volume: Number(quote.volume?.[i]),
+    });
+  }
+
+  entries.sort(
+    (a, b) => new Date(`${a.date}T00:00:00Z`).getTime() - new Date(`${b.date}T00:00:00Z`).getTime(),
+  );
+
+  const rows = [];
+  let prevAdjustedForChange = null;
+  let prevRawForChange = null;
+  for (const entry of entries) {
+    const { date, rawOpen, rawHigh, rawLow, rawClose, adjClose, volume } = entry;
+    const referenceClose = Number.isFinite(rawClose)
+      ? rawClose
+      : Number.isFinite(adjClose)
+        ? adjClose
+        : null;
+    if (!Number.isFinite(referenceClose)) {
+      continue;
+    }
+    let openValue;
+    let highValue;
+    let lowValue;
+    let closeValue;
+    let changeValue = 0;
+
+    if (Number.isFinite(adjClose)) {
+      const scaleBase = Number.isFinite(rawClose) && rawClose !== 0 ? rawClose : referenceClose;
+      const scale = Number.isFinite(scaleBase) && scaleBase !== 0 ? adjClose / scaleBase : 1;
+      const baseOpen = Number.isFinite(rawOpen) ? rawOpen : referenceClose;
+      const baseHigh = Number.isFinite(rawHigh) ? rawHigh : Math.max(baseOpen ?? referenceClose, referenceClose);
+      const baseLow = Number.isFinite(rawLow) ? rawLow : Math.min(baseOpen ?? referenceClose, referenceClose);
+      closeValue = safeRound(adjClose);
+      openValue = safeRound(baseOpen * scale);
+      highValue = safeRound(baseHigh * scale);
+      lowValue = safeRound(baseLow * scale);
+      if (Number.isFinite(prevAdjustedForChange) && Number.isFinite(closeValue)) {
+        changeValue = safeRound(closeValue - prevAdjustedForChange);
+      } else {
+        changeValue = 0;
+      }
+      if (Number.isFinite(closeValue)) {
+        prevAdjustedForChange = closeValue;
+      }
+      if (Number.isFinite(rawClose)) {
+        prevRawForChange = safeRound(rawClose);
+      }
+    } else {
+      closeValue = safeRound(referenceClose);
+      const baseOpen = Number.isFinite(rawOpen) ? rawOpen : referenceClose;
+      const baseHigh = Number.isFinite(rawHigh) ? rawHigh : Math.max(baseOpen ?? referenceClose, referenceClose);
+      const baseLow = Number.isFinite(rawLow) ? rawLow : Math.min(baseOpen ?? referenceClose, referenceClose);
+      openValue = safeRound(baseOpen);
+      highValue = safeRound(baseHigh);
+      lowValue = safeRound(baseLow);
+      if (Number.isFinite(prevRawForChange) && Number.isFinite(closeValue)) {
+        changeValue = safeRound(closeValue - prevRawForChange);
+      } else {
+        changeValue = 0;
+      }
+      if (Number.isFinite(closeValue)) {
+        prevRawForChange = closeValue;
+      }
+    }
+
+    if (openValue === null || highValue === null || lowValue === null || closeValue === null) {
+      continue;
+    }
+
+    rows.push({
+      date,
+      open: openValue,
+      high: highValue,
+      low: lowValue,
+      close: closeValue,
+      change: Number.isFinite(changeValue) ? changeValue : 0,
+      volume: Number.isFinite(volume) ? Math.round(volume) : 0,
+      rawOpen: Number.isFinite(rawOpen) ? safeRound(rawOpen) : null,
+      rawHigh: Number.isFinite(rawHigh) ? safeRound(rawHigh) : null,
+      rawLow: Number.isFinite(rawLow) ? safeRound(rawLow) : null,
+      rawClose: Number.isFinite(rawClose) ? safeRound(rawClose) : null,
+      adjustedClose: Number.isFinite(adjClose) ? safeRound(adjClose) : null,
+      stockName: yahooData.stockName || stockNo,
+      priceSource: YAHOO_PRICE_SOURCE_LABEL,
+    });
+  }
+
+  return rows;
+}
+
+async function fetchYahooAdjustedPrice(stockNo, startDate, endDate) {
+  const payload = await fetchYahooDailySeries(stockNo, startDate, endDate);
+  const rows = normaliseYahooDailyRows(stockNo, payload);
+  return {
+    stockName: payload.stockName || stockNo,
+    rows,
+    priceSource: YAHOO_PRICE_SOURCE_LABEL,
+    dataSource: YAHOO_DATA_SOURCE_LABEL,
+    adjusted: true,
+  };
 }
 
 function readField(raw, key) {
@@ -2718,8 +2909,68 @@ function buildDebugSteps({
   resultEvents,
   adjustments,
   fallbackInfo,
+  priceDiagnostics,
 }) {
   const priceRows = Array.isArray(priceData?.rows) ? priceData.rows.length : 0;
+  const primaryPriceLabel = priceSourceLabel || priceData?.priceSource || '';
+  const priceDetailParts = [];
+  if (priceRows > 0) {
+    priceDetailParts.push(`${priceRows} 筆`);
+  } else {
+    priceDetailParts.push('0 筆');
+  }
+  if (primaryPriceLabel) {
+    priceDetailParts.push(primaryPriceLabel);
+  }
+  if (priceDiagnostics?.primary?.detail) {
+    const primaryStatus = priceDiagnostics?.primary?.status || 'info';
+    if (primaryStatus === 'error') {
+      priceDetailParts.push(`主來源失敗：${priceDiagnostics.primary.detail}`);
+    } else if (primaryStatus !== 'success' || !primaryPriceLabel) {
+      priceDetailParts.push(priceDiagnostics.primary.detail);
+    }
+  }
+  if (Array.isArray(priceDiagnostics?.fallbacks)) {
+    priceDiagnostics.fallbacks.forEach((attempt) => {
+      if (!attempt) return;
+      const label = attempt.label || '備援來源';
+      const statusText = (() => {
+        if (!attempt.status) return 'info';
+        if (attempt.status === 'success') return '成功';
+        if (attempt.status === 'error') return '失敗';
+        if (attempt.status === 'warning') return '警告';
+        return attempt.status;
+      })();
+      const detailText = attempt.detail || null;
+      const reasonText = attempt.reason && attempt.reason !== detailText ? attempt.reason : null;
+      const suffixParts = [];
+      if (detailText) {
+        suffixParts.push(detailText);
+      }
+      if (reasonText) {
+        suffixParts.push(`原因：${reasonText}`);
+      }
+      const suffix = suffixParts.length > 0 ? `：${suffixParts.join('；')}` : '';
+      priceDetailParts.push(`→ ${label} ${statusText}${suffix}`);
+    });
+  }
+  const priceFallbackSuccess = Array.isArray(priceDiagnostics?.fallbacks)
+    ? priceDiagnostics.fallbacks.some((attempt) => attempt?.status === 'success')
+    : false;
+  const primaryStatus = priceDiagnostics?.primary?.status;
+  let priceStatus;
+  if (priceRows <= 0) {
+    priceStatus = 'error';
+  } else if (primaryStatus === 'error') {
+    priceStatus = priceFallbackSuccess ? 'warning' : 'error';
+  } else if (primaryStatus === 'pending') {
+    priceStatus = 'warning';
+  } else if (primaryStatus === 'warning') {
+    priceStatus = 'warning';
+  } else {
+    priceStatus = 'success';
+  }
+  const priceDetail = priceDetailParts.join(' ・ ').trim();
   const totalDividendRows = Number.isFinite(dividendResultStats?.totalRecords)
     ? dividendResultStats.totalRecords
     : Array.isArray(dividendResultStats?.rawRecords)
@@ -2737,18 +2988,22 @@ function buildDebugSteps({
     : 0;
   const skipReasons = summariseAdjustmentSkipReasons(adjustments);
 
+  const dividendStatus = dividendResultStats?.status || (totalDividendRows > 0 ? 'success' : 'warning');
+  const dividendDetail = dividendResultStats?.detail
+    || `原始 ${totalDividendRows} 筆 ・ 區間 ${filteredDividendRows} 筆`;
+
   const steps = [
     {
       key: 'priceFetch',
       label: '價格資料',
-      status: priceRows > 0 ? 'success' : 'error',
-      detail: `${priceRows} 筆 ・ ${priceSourceLabel || priceData?.priceSource || ''}`.trim(),
+      status: priceStatus,
+      detail: priceDetail,
     },
     {
       key: 'dividendResultFetch',
       label: '配息結果',
-      status: totalDividendRows > 0 ? 'success' : 'warning',
-      detail: `原始 ${totalDividendRows} 筆 ・ 區間 ${filteredDividendRows} 筆`,
+      status: dividendStatus,
+      detail: dividendDetail,
     },
   ];
 
@@ -2808,7 +3063,18 @@ function buildSummary(
 ) {
   const basePriceSource =
     priceSourceLabel || priceData.priceSource || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
-  const uniqueSources = new Set([basePriceSource, 'FinMind (除權息還原)']);
+  const additionalSourceLabels = Array.isArray(dividendStats?.additionalSources)
+    ? dividendStats.additionalSources.filter((label) => typeof label === 'string' && label.trim().length > 0)
+    : null;
+  const uniqueSources = new Set([basePriceSource]);
+  if (additionalSourceLabels && additionalSourceLabels.length > 0) {
+    additionalSourceLabels.forEach((label) => uniqueSources.add(label));
+  } else if (
+    Array.isArray(adjustments) &&
+    adjustments.some((event) => !event?.skipped)
+  ) {
+    uniqueSources.add('FinMind (除權息還原)');
+  }
   if (
     splitStats &&
     Number.isFinite(splitStats.eventCount) &&
@@ -2863,6 +3129,8 @@ function buildSummary(
       skipReasons && Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
     priceSource: basePriceSource,
     dividendSource: dividendSourceLabel || FINMIND_DIVIDEND_RESULT_LABEL,
+    dividendStatus: dividendStats?.status || undefined,
+    dividendDetail: dividendStats?.detail || undefined,
     sources: Array.from(uniqueSources),
     splitEvents: splitEventCount,
     splitRows: splitFilteredCount,
@@ -2929,27 +3197,123 @@ export const handler = async (event) => {
 
     let priceData;
     let priceSourceLabel = '';
+    const priceDiagnostics = {
+      primary: null,
+      fallbacks: [],
+    };
+    const useYahooPrimary = !enableSplitAdjustment && market === 'TWSE';
+
     if (market === 'TPEX') {
+      priceDiagnostics.primary = {
+        label: 'FinMind (原始)',
+        status: 'pending',
+        detail: '上櫃市場採用 FinMind 原始價格',
+      };
       priceData = await fetchFinMindPrice(stockNo, startISO, endISO);
       priceSourceLabel = priceData.priceSource;
+      priceDiagnostics.primary.status = 'success';
+    } else if (useYahooPrimary) {
+      const yahooAttempt = {
+        label: YAHOO_PRICE_SOURCE_LABEL,
+        status: 'pending',
+        detail: 'Yahoo Finance (還原) 為主來源',
+      };
+      priceDiagnostics.primary = yahooAttempt;
+      try {
+        priceData = await fetchYahooAdjustedPrice(stockNo, startDate, endDate);
+        priceSourceLabel = priceData.priceSource;
+        yahooAttempt.status = 'success';
+        yahooAttempt.detail = 'Yahoo Finance 已提供調整後收盤價';
+      } catch (yahooError) {
+        yahooAttempt.status = 'error';
+        yahooAttempt.detail = yahooError?.message || 'Yahoo Finance 取得失敗';
+        yahooAttempt.error = yahooError?.message || null;
+        console.warn(
+          '[calculateAdjustedPrice] Yahoo Finance 還原來源失敗，改用 TWSE/FinMind 備援。',
+          yahooError,
+        );
+        const twseAttempt = {
+          label: 'TWSE (原始)',
+          status: 'pending',
+          reason: yahooAttempt.detail,
+        };
+        priceDiagnostics.fallbacks.push(twseAttempt);
+        try {
+          priceData = await fetchTwseRange(stockNo, startDate, endDate);
+          priceSourceLabel = priceData.priceSource;
+          twseAttempt.status = 'success';
+          twseAttempt.detail = 'TWSE 原始價格取得成功';
+        } catch (primaryError) {
+          twseAttempt.status = 'error';
+          twseAttempt.detail = primaryError?.message || 'TWSE 原始資料取得失敗';
+          console.warn(
+            '[calculateAdjustedPrice] TWSE 原始資料取得失敗，改用 FinMind 備援來源。',
+            primaryError,
+          );
+          const finmindAttempt = {
+            label: 'FinMind (原始備援)',
+            status: 'pending',
+            reason: primaryError?.message || 'TWSE 原始資料取得失敗',
+          };
+          priceDiagnostics.fallbacks.push(finmindAttempt);
+          try {
+            const fallback = await fetchFinMindPrice(stockNo, startISO, endISO, {
+              label: 'FinMind (原始備援)',
+            });
+            priceData = fallback;
+            priceSourceLabel = fallback.priceSource;
+            finmindAttempt.status = 'success';
+            finmindAttempt.detail = 'FinMind 原始價格取得成功';
+          } catch (finmindError) {
+            finmindAttempt.status = 'error';
+            finmindAttempt.detail = finmindError?.message || 'FinMind 原始備援失敗';
+            throw finmindError;
+          }
+        }
+      }
     } else {
+      const twseAttempt = {
+        label: 'TWSE (原始)',
+        status: 'pending',
+        detail: 'TWSE 為主來源',
+      };
+      priceDiagnostics.primary = twseAttempt;
       try {
         priceData = await fetchTwseRange(stockNo, startDate, endDate);
         priceSourceLabel = priceData.priceSource;
+        twseAttempt.status = 'success';
+        twseAttempt.detail = 'TWSE 原始價格取得成功';
       } catch (primaryError) {
+        twseAttempt.status = 'error';
+        twseAttempt.detail = primaryError?.message || 'TWSE 原始資料取得失敗';
         console.warn(
           '[calculateAdjustedPrice] TWSE 原始資料取得失敗，改用 FinMind 備援來源。',
           primaryError,
         );
-        const fallback = await fetchFinMindPrice(stockNo, startISO, endISO, {
+        const finmindAttempt = {
           label: 'FinMind (原始備援)',
-        });
-        priceData = fallback;
-        priceSourceLabel = fallback.priceSource;
+          status: 'pending',
+          reason: twseAttempt.detail,
+        };
+        priceDiagnostics.fallbacks.push(finmindAttempt);
+        try {
+          const fallback = await fetchFinMindPrice(stockNo, startISO, endISO, {
+            label: 'FinMind (原始備援)',
+          });
+          priceData = fallback;
+          priceSourceLabel = fallback.priceSource;
+          finmindAttempt.status = 'success';
+          finmindAttempt.detail = 'FinMind 原始價格取得成功';
+        } catch (finmindError) {
+          finmindAttempt.status = 'error';
+          finmindAttempt.detail = finmindError?.message || 'FinMind 原始備援失敗';
+          throw finmindError;
+        }
       }
     }
 
     const priceRows = Array.isArray(priceData.rows) ? priceData.rows : [];
+    const priceDataAdjusted = Boolean(priceData?.adjusted);
     let priceRangeStartISO = null;
     let priceRangeEndISO = null;
     if (priceRows.length > 0) {
@@ -2992,7 +3356,8 @@ export const handler = async (event) => {
     const recomputeAppliedFlag = (collection) =>
       Array.isArray(collection) && collection.some((item) => !item?.skipped);
 
-    const dividendResultOutcome = priceRows.length
+    const shouldDeriveDividend = priceRows.length > 0 && (!priceDataAdjusted || enableSplitAdjustment);
+    const dividendResultOutcome = shouldDeriveDividend
       ? await deriveAdjustedSeriesFromDividendResult({
           stockNo,
           startISO,
@@ -3013,6 +3378,34 @@ export const handler = async (event) => {
             priceRangeEndISO,
           })
         : null;
+
+    if (!shouldDeriveDividend) {
+      const skipMessage = 'Yahoo Finance 已包含調整後收盤價，未啟動 FinMind 還原流程。';
+      dividendDiagnostics.dividendResult = {
+        totalRecords: 0,
+        filteredRecords: 0,
+        eventCount: 0,
+        appliedAdjustments: 0,
+        status: 'skipped',
+        detail: skipMessage,
+      };
+      dividendDiagnostics.resultInfo = {
+        status: 'info',
+        detail: skipMessage,
+      };
+      dividendDiagnostics.responseLog = [
+        {
+          source: 'Yahoo Finance',
+          message: 'Primary source already provides adjusted close; skipped FinMind dividend result pipeline.',
+        },
+      ];
+      dividendDiagnostics.debugLog = [
+        {
+          status: 'skipped',
+          message: skipMessage,
+        },
+      ];
+    }
 
     if (dividendResultOutcome) {
       const diag = dividendResultOutcome.diagnostics || null;
@@ -3253,7 +3646,9 @@ export const handler = async (event) => {
       };
     }
 
-    if (!hasAppliedAdjustments && priceRows.length > 0) {
+    const allowAdjustedSeriesFallback = shouldDeriveDividend;
+
+    if (allowAdjustedSeriesFallback && !hasAppliedAdjustments && priceRows.length > 0) {
       const fallbackResult = await deriveAdjustedSeriesFallback({
         stockNo,
         startISO,
@@ -3298,12 +3693,20 @@ export const handler = async (event) => {
       resultEvents: effectiveEvents,
       adjustments: effectiveAdjustments,
       fallbackInfo,
+      priceDiagnostics,
     });
 
     const baseSourceLabel =
-      priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
-    ;
-    const combinedSourceParts = [baseSourceLabel, 'FinMind (除權息還原)'];
+      priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)');
+    const dividendAdditionalSources = shouldDeriveDividend
+      ? ['FinMind (除權息還原)']
+      : priceDataAdjusted
+        ? ['FinMind (除權息還原備援)']
+        : [];
+    const combinedSourceParts = [baseSourceLabel];
+    dividendAdditionalSources
+      .filter((label) => typeof label === 'string' && label.trim().length > 0)
+      .forEach((label) => combinedSourceParts.push(label));
     if (
       splitResultOutcome &&
       Array.isArray(splitResultOutcome.events) &&
@@ -3319,23 +3722,42 @@ export const handler = async (event) => {
     const dividendSourceLabelForSummary =
       fallbackInfo?.applied && fallbackInfo?.label
         ? fallbackInfo.label
-        : FINMIND_DIVIDEND_RESULT_LABEL;
+        : shouldDeriveDividend
+          ? FINMIND_DIVIDEND_RESULT_LABEL
+          : 'Yahoo Finance (還原收盤；FinMind 備援)';
 
-    const dividendSummaryStats = {
-      resultFilteredCount: Number.isFinite(dividendDiagnostics.dividendResult?.filteredRecords)
-        ? dividendDiagnostics.dividendResult.filteredRecords
-        : undefined,
-      resultTotalCount: Number.isFinite(dividendDiagnostics.dividendResult?.totalRecords)
-        ? dividendDiagnostics.dividendResult.totalRecords
-        : undefined,
-      eventCount: Number.isFinite(dividendDiagnostics.dividendResult?.eventCount)
-        ? dividendDiagnostics.dividendResult.eventCount
-        : effectiveEvents.length,
-      lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
-      fetchStartISO: dividendResultOutcome?.payload?.fetchStartISO || null,
-      fetchEndISO: dividendResultOutcome?.payload?.fetchEndISO || null,
-      dividendSourceLabel: dividendSourceLabelForSummary,
-    };
+    const dividendSummaryStats = shouldDeriveDividend
+      ? {
+          resultFilteredCount: Number.isFinite(dividendDiagnostics.dividendResult?.filteredRecords)
+            ? dividendDiagnostics.dividendResult.filteredRecords
+            : undefined,
+          resultTotalCount: Number.isFinite(dividendDiagnostics.dividendResult?.totalRecords)
+            ? dividendDiagnostics.dividendResult.totalRecords
+            : undefined,
+          eventCount: Number.isFinite(dividendDiagnostics.dividendResult?.eventCount)
+            ? dividendDiagnostics.dividendResult.eventCount
+            : effectiveEvents.length,
+          lookbackWindowDays: FINMIND_DIVIDEND_LOOKBACK_DAYS,
+          fetchStartISO: dividendResultOutcome?.payload?.fetchStartISO || null,
+          fetchEndISO: dividendResultOutcome?.payload?.fetchEndISO || null,
+          dividendSourceLabel: dividendSourceLabelForSummary,
+          status:
+            dividendResultOutcome?.info?.status || (hasAppliedAdjustments ? 'success' : 'warning'),
+          detail: dividendResultOutcome?.info?.detail || undefined,
+          additionalSources: dividendAdditionalSources,
+        }
+      : {
+          resultFilteredCount: 0,
+          resultTotalCount: 0,
+          eventCount: 0,
+          lookbackWindowDays: 0,
+          fetchStartISO: null,
+          fetchEndISO: null,
+          dividendSourceLabel: dividendSourceLabelForSummary,
+          status: 'info',
+          detail: 'Yahoo Finance 已包含調整後收盤價，未啟動 FinMind 還原流程。',
+          additionalSources: dividendAdditionalSources,
+        };
 
     const splitSummaryStats = splitResultOutcome
       ? {
@@ -3382,6 +3804,7 @@ export const handler = async (event) => {
       adjustmentFallback: fallbackInfo || null,
       adjustmentFallbackApplied: Boolean(fallbackInfo?.applied),
       finmindStatus,
+      priceDiagnostics,
     };
 
     return jsonResponse(200, responseBody);
