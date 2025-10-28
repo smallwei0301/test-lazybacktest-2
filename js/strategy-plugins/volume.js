@@ -1,4 +1,5 @@
 // Patch Tag: LB-PLUGIN-VERIFIER-20260813A
+// Patch Tag: LB-VOLUME-SPIKE-FLOW-20260730A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   const registry = globalScope?.StrategyPluginRegistry;
@@ -62,8 +63,8 @@
         triggered = volume > avg * multiplier;
       }
 
+      const role = context?.role || 'longEntry';
       const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
-      base.enter = triggered;
       if (triggered) {
         base.meta = {
           indicatorValues: {
@@ -72,6 +73,22 @@
           },
         };
       }
+
+      switch (role) {
+        case 'longExit':
+          base.exit = triggered;
+          break;
+        case 'shortEntry':
+          base.short = triggered;
+          break;
+        case 'shortExit':
+          base.cover = triggered;
+          break;
+        default:
+          base.enter = triggered;
+          break;
+      }
+
       return base;
     },
   );

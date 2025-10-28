@@ -1,3 +1,13 @@
+## 2026-07-30 — Patch LB-PERFORMANCE-ADVICE-20260730A
+- **Issue recap**: 期間績效分析無法顯示資料、策略建議文字缺乏流程化指引，成交量暴增出場未能觸發，且自動資料撈取時間須調整。
+- **Fix**:
+  - `js/backtest.js`、`js/worker.js` 依「最近 N 年」設定計算 1～N 年期間績效，輸出年化報酬、夏普、索提諾與回撤，並建立 `renderPerformanceAnalysis` 版面；同步新增建議流程（版本 `LB-PERFORMANCE-ANALYSIS-20260730A` 與 `LB-STRATEGY-ADVICE-20260730A`）。
+  - `js/backtest.js` 重新整理策略摘要流程卡，將指標比對、風控、交易樣本與敏感度整合成四段建議，並移除建議文字中的連續標點。
+  - `js/strategy-plugins/volume.js` 修正 `volume_spike` 在出場／空單角色未觸發的問題（`LB-VOLUME-SPIKE-FLOW-20260730A`）。
+  - `css/style.css` 停用頁籤容器按下縮放效果；`js/main.js` 傳遞 `recentYears` 參數；`netlify.toml` 更新排程為每日 13:40 預抓資料。
+- **Diagnostics**: 請於瀏覽器以 `recentYears=5` 執行回測，檢視期間表格是否顯示最近 1～5 年指標，確認策略摘要產出四段建議，並在成交量暴增作為出場策略時驗證訊號觸發；另於 Netlify 後台確認 Cron 設定為 `40 5 * * *`。
+- **Testing**: `npm run test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:

@@ -16,6 +16,8 @@
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
 // Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250730A
+// Patch Tag: LB-PERFORMANCE-ANALYSIS-20260730A
+// Patch Tag: LB-STRATEGY-ADVICE-20260730A
 
 const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
     driftStable: 6,
@@ -83,6 +85,7 @@ let visibleStockData = [];
 let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
+let lastRecentYearsSetting = null;
 
 const ensureAIBridge = () => {
     if (typeof window === 'undefined') return null;
@@ -1534,6 +1537,84 @@ function buildStrategyHealthSummary(result) {
     };
 }
 
+function buildStrategyAdviceFlow(result = {}) {
+    const advice = [];
+    const comparison = buildStrategyComparisonSummary(result || {});
+    const health = buildStrategyHealthSummary(result || {});
+    const warnings = Array.isArray(health.warningLines) ? health.warningLines : [];
+    const positiveLine = typeof health.positiveLine === 'string' ? health.positiveLine : null;
+
+    if (Number.isFinite(comparison.diff)) {
+        if (comparison.diff <= -1.5) {
+            advice.push('報酬落後買入持有，請用參數優化重測策略。');
+        } else if (comparison.diff >= 1.5) {
+            advice.push('報酬領先買入持有，建議啟用滾動測試驗證。');
+        } else {
+            advice.push('報酬接近買入持有，延長期間並搭配趨勢診斷。');
+        }
+    } else {
+        advice.push('尚未取得買入持有基準，請檢查資料暖身。');
+    }
+
+    let riskMessage = null;
+    if (warnings.some((line) => line.includes('最大回撤'))) {
+        riskMessage = '最大回撤偏高，請在風控設定調整停損與部位。';
+    } else if (warnings.some((line) => line.includes('夏普值'))) {
+        riskMessage = '夏普值偏低，建議啟用風險優化調整倉位。';
+    } else if (warnings.some((line) => line.includes('索提諾比率'))) {
+        riskMessage = '索提諾偏低，請檢查停損或調整出場策略。';
+    } else if (warnings.some((line) => line.includes('年化報酬'))) {
+        riskMessage = '年化報酬不足，請微調進出場條件或資金運用。';
+    } else if (positiveLine) {
+        riskMessage = '風險指標穩定，可保留設定並建立績效追蹤。';
+    }
+    if (riskMessage) advice.push(riskMessage);
+
+    const totalTrades = Number.isFinite(result?.tradesCount)
+        ? Number(result.tradesCount)
+        : Number.isFinite(result?.totalTrades)
+            ? Number(result.totalTrades)
+            : null;
+    if (Number.isFinite(totalTrades)) {
+        if (totalTrades < 10) {
+            advice.push('交易筆數少於10筆，請延長期間或放寬策略條件。');
+        } else {
+            advice.push('交易樣本充足，請檢查交易記錄確認執行品質。');
+        }
+    }
+
+    const sensitivitySummary = result?.sensitivityAnalysis?.summary
+        || result?.parameterSensitivity?.summary
+        || result?.sensitivityData?.summary
+        || null;
+    if (sensitivitySummary) {
+        const score = Number.isFinite(sensitivitySummary.stabilityScore)
+            ? Number(sensitivitySummary.stabilityScore)
+            : null;
+        const averageDrift = Number.isFinite(sensitivitySummary.averageDriftPercent)
+            ? Math.abs(Number(sensitivitySummary.averageDriftPercent))
+            : null;
+        const scenarioCount = Number.isFinite(sensitivitySummary.scenarioCount)
+            ? Number(sensitivitySummary.scenarioCount)
+            : null;
+        if (score !== null && score >= 70 && (averageDrift === null || averageDrift <= ANNUALIZED_SENSITIVITY_THRESHOLDS.driftStable)) {
+            advice.push('敏感度穩健，請排程定期重跑並更新策略備註。');
+        } else if (score !== null && score >= 40) {
+            advice.push('敏感度普通，建議調整擾動步長並再次優化。');
+        } else if (score !== null) {
+            advice.push('敏感度偏危險，請縮小參數範圍並搭配滾動測試。');
+        } else if (scenarioCount !== null && scenarioCount < 10) {
+            advice.push('敏感度樣本不足，請增加擾動組數後再評估。');
+        } else {
+            advice.push('敏感度資訊不完整，請重新執行參數擾動測試。');
+        }
+    } else {
+        advice.push('尚未執行敏感度分析，請啟用參數擾動檢查穩定度。');
+    }
+
+    return dedupeTextList(advice.filter((line) => typeof line === 'string' && line.length > 0));
+}
+
 function buildSensitivityScoreAdvice(result) {
     const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
     const summary = data?.summary || null;
@@ -1610,7 +1691,8 @@ function buildSensitivityScoreAdvice(result) {
         return null;
     }
 
-    return `${segments.join('，')}。`;
+    const message = `${segments.join('，')}。`;
+    return message.replace(/([，。！？、；])([，。！？、；]+)/g, '$1');
 }
 
 function determineStrategyStatusState(diff, comparisonAvailable) {
@@ -1635,30 +1717,14 @@ function updateStrategyStatusCard(result) {
     const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
     const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
     const diffText = '';
-    const health = buildStrategyHealthSummary(result || {});
-    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {});
-
-    const detailLines = [];
-    if (comparison.line) {
-        detailLines.push(comparison.line);
-    }
-    if (Array.isArray(health.warningLines) && health.warningLines.length > 0) {
-        detailLines.push(...health.warningLines);
-    }
-    if (sensitivityAdvice) {
-        detailLines.push(sensitivityAdvice);
-    }
-    if (health.positiveLine) {
-        detailLines.push(health.positiveLine);
-    }
+    const detailLines = buildStrategyAdviceFlow(result || {});
 
     applyStrategyStatusState(state, {
         diffText,
         detail: {
             emphasisedLine: null,
             bulletLines: detailLines,
-            collapsible: detailLines.length > 0,
-            collapsibleSummary: '展開完整重點條列',
+            collapsible: false,
         },
     });
 }
@@ -4661,6 +4727,14 @@ function runBacktestInternal() {
     if (!workerUrl) { showError("背景計算引擎尚未準備就緒，請稍候再試或重新載入頁面。"); hideLoading(); resetStrategyStatusCard('error'); return; }
     try {
         const params=getBacktestParams();
+        lastRecentYearsSetting = Number.isFinite(params.recentYears) && params.recentYears > 0
+            ? params.recentYears
+            : null;
+        if (lastRecentYearsSetting !== null) {
+            params.recentYears = lastRecentYearsSetting;
+        } else {
+            delete params.recentYears;
+        }
         console.log("[Main] Params:", params);
         const isValid = validateBacktestParams(params);
         console.log("[Main] Validation:", isValid);
@@ -5187,7 +5261,7 @@ function clearPreviousResults() {
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    setPerformanceAnalysisPlaceholder();
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -5233,6 +5307,128 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+const PERFORMANCE_TABLE_CONTAINER_ID = 'performance-table-container';
+const PERFORMANCE_CONTAINER_FLEX_CLASSES = ['flex', 'items-center', 'justify-center', 'border-dashed'];
+const PERFORMANCE_PLACEHOLDER_TEXT = '請先執行回測以生成期間績效數據。';
+
+function setPerformanceAnalysisPlaceholder(message = PERFORMANCE_PLACEHOLDER_TEXT) {
+    const container = document.getElementById(PERFORMANCE_TABLE_CONTAINER_ID);
+    if (!container) return;
+    PERFORMANCE_CONTAINER_FLEX_CLASSES.forEach((cls) => container.classList.add(cls));
+    container.style.borderColor = 'var(--card)';
+    container.innerHTML = `<p class="text-sm" style="color: var(--muted-foreground);">${escapeHtml(message)}</p>`;
+    container.scrollLeft = 0;
+}
+
+function renderPerformanceAnalysis(result) {
+    const container = document.getElementById(PERFORMANCE_TABLE_CONTAINER_ID);
+    if (!container) return;
+    const subPeriodResults = (result && typeof result === 'object' && result.subPeriodResults)
+        ? result.subPeriodResults
+        : lastSubPeriodResults;
+    const yearsSetting = Number.isFinite(lastRecentYearsSetting) && lastRecentYearsSetting > 0
+        ? Math.min(lastRecentYearsSetting, 50)
+        : null;
+
+    if (!yearsSetting || !subPeriodResults || typeof subPeriodResults !== 'object') {
+        setPerformanceAnalysisPlaceholder(PERFORMANCE_PLACEHOLDER_TEXT);
+        return;
+    }
+
+    const yearEntries = [];
+    for (let year = 1; year <= yearsSetting; year += 1) {
+        const key = `${year}Y`;
+        const label = `最近${year === 1 ? '一年' : `${year}年`}`;
+        const entry = Object.prototype.hasOwnProperty.call(subPeriodResults, key)
+            ? subPeriodResults[key]
+            : null;
+        const normalized = entry && typeof entry === 'object' ? entry : null;
+        yearEntries.push({ key, label, data: normalized });
+    }
+
+    const hasResult = yearEntries.some((entry) => entry.data !== null);
+    if (!hasResult) {
+        setPerformanceAnalysisPlaceholder('尚無足夠期間績效資料，請延長期間或縮小 N。');
+        return;
+    }
+
+    PERFORMANCE_CONTAINER_FLEX_CLASSES.forEach((cls) => container.classList.remove(cls));
+    container.style.borderColor = 'var(--border)';
+
+    const missingHtml = '<span class="text-muted-foreground/70 italic">資料不足</span>';
+    const formatPercent = (value, { showSign = true, positiveIsGood = true } = {}) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            if (numeric === Infinity) {
+                return '<span class="text-emerald-600">∞</span>';
+            }
+            if (numeric === -Infinity) {
+                return '<span class="text-rose-600">-∞</span>';
+            }
+            return missingHtml;
+        }
+        const signPrefix = showSign && numeric > 0 ? '+' : '';
+        const text = `${signPrefix}${numeric.toFixed(2)}%`;
+        let className = 'text-muted-foreground';
+        if (numeric > 0) {
+            className = positiveIsGood ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold';
+        } else if (numeric < 0) {
+            className = positiveIsGood ? 'text-rose-600 font-semibold' : 'text-emerald-600 font-semibold';
+        }
+        return `<span class="${className}">${text}</span>`;
+    };
+    const formatNumber = (value) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            if (numeric === Infinity) return '<span class="text-emerald-600">∞</span>';
+            if (numeric === -Infinity) return '<span class="text-rose-600">-∞</span>';
+            return missingHtml;
+        }
+        return `<span>${numeric.toFixed(2)}</span>`;
+    };
+
+    const metrics = [
+        { key: 'annualizedReturn', label: '策略年化報酬(%)', formatter: (value) => formatPercent(value, { showSign: true, positiveIsGood: true }) },
+        { key: 'totalReturn', label: '策略累積報酬(%)', formatter: (value) => formatPercent(value, { showSign: true, positiveIsGood: true }) },
+        { key: 'totalBuyHoldReturn', label: '買入持有累積報酬(%)', formatter: (value) => formatPercent(value, { showSign: true, positiveIsGood: true }) },
+        { key: 'sharpeRatio', label: '夏普值', formatter: formatNumber },
+        { key: 'sortinoRatio', label: '索提諾比率', formatter: formatNumber },
+        { key: 'maxDrawdown', label: '最大回撤(%)', formatter: (value) => formatPercent(value, { showSign: false, positiveIsGood: false }) },
+    ];
+
+    const headerCells = yearEntries
+        .map((entry) => `<th scope="col" class="px-3 py-2 font-medium text-center whitespace-nowrap">${escapeHtml(entry.label)}</th>`)
+        .join('');
+    const bodyRows = metrics
+        .map((metric) => {
+            const cells = yearEntries
+                .map((entry) => {
+                    const raw = entry.data ? entry.data[metric.key] : null;
+                    return `<td class="px-3 py-2 text-center">${metric.formatter(raw)}</td>`;
+                })
+                .join('');
+            return `
+                <tr>
+                    <th scope="row" class="px-3 py-2 text-left font-medium" style="color: var(--foreground);">${escapeHtml(metric.label)}</th>
+                    ${cells}
+                </tr>`;
+        })
+        .join('');
+
+    const tableHtml = [
+        '<div class="inline-block min-w-full align-middle">',
+        '<table class="min-w-full divide-y divide-border text-xs text-left" style="color: var(--foreground);">',
+        `<thead class="bg-muted/10 text-[11px] uppercase tracking-wide" style="color: var(--muted-foreground);">`,
+        `<tr><th scope="col" class="px-3 py-2 font-medium">指標</th>${headerCells}</tr></thead>`,
+        `<tbody class="divide-y divide-border">${bodyRows}</tbody>`,
+        '</table>',
+        '</div>',
+    ].join('');
+
+    container.innerHTML = tableHtml;
+    container.scrollLeft = 0;
 }
 
 function formatSkipReasons(skipReasons) {
@@ -6382,6 +6578,7 @@ function handleBacktestResult(result, stockName, dataSource) {
 
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
+        renderPerformanceAnalysis(result);
         displayTradeResults(result);
         renderChart(result);
         updateChartTrendOverlay();
