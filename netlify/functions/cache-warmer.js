@@ -83,7 +83,7 @@ async function runWarmer() {
 }
 
 export const config = {
-  schedule: '0 18 * * *', // 每日台灣凌晨 (UTC+8 => 02:00)
+  schedule: '40 5 * * *', // 每日台灣下午 13:40（UTC+8），Netlify 以 UTC 05:40 執行
 };
 
 export default async () => {

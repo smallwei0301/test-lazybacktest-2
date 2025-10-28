@@ -1531,10 +1531,21 @@ function buildStrategyHealthSummary(result) {
         warningLines,
         positiveLine,
         allGood,
+        metrics: {
+            annualizedReturn,
+            buyHoldAnnualizedReturn: Number.isFinite(result?.buyHoldAnnualizedReturn)
+                ? Number(result.buyHoldAnnualizedReturn)
+                : null,
+            sharpe,
+            sortino,
+            maxDrawdown,
+            returnRatio,
+            sharpeHalfRatio,
+        },
     };
 }
 
-function buildSensitivityScoreAdvice(result) {
+function collectSensitivityInsights(result) {
     const data = result?.sensitivityAnalysis || result?.parameterSensitivity || result?.sensitivityData;
     const summary = data?.summary || null;
     if (!summary) {
@@ -1564,22 +1575,22 @@ function buildSensitivityScoreAdvice(result) {
     const segments = [];
 
     if (rawScore === null) {
-        segments.push('敏感度總分缺少資料，請重新執行參數擾動測試。');
+        segments.push('敏感度總分缺少資料，請重新執行參數擾動測試');
     } else if (rawScore >= 70) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健區間，參數變動對績效影響有限。`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，屬於穩健區間，參數變動對績效影響有限`);
     } else if (rawScore >= 40) {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，建議列入觀察並在重大行情變化時重新檢測。`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，建議列入觀察並在重大行情變化時重新檢測`);
     } else {
-        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數較敏感，請建立保護機制並控管風險。`);
+        segments.push(`敏感度總分 ${Math.round(rawScore)} 分，策略對參數較敏感，請建立保護機制並控管風險`);
     }
 
     if (averageDrift !== null) {
         if (averageDrift <= driftStable) {
-            segments.push(`平均漂移控制在 ±${driftStable}pp內，報酬變動穩定。`);
+            segments.push(`平均漂移控制在 ±${driftStable}pp 內，報酬變動穩定`);
         } else if (averageDrift <= driftCaution) {
-            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議增加樣本或調整倉位分散風險。`);
+            segments.push(`平均漂移約 ${averageDrift.toFixed(1)}pp，建議增加樣本或調整倉位分散風險`);
         } else {
-            segments.push(`平均漂移達 ${averageDrift.toFixed(1)}pp，請強化風控或縮小部位以降低波動。`);
+            segments.push(`平均漂移達 ${averageDrift.toFixed(1)}pp，請強化風控或縮小部位以降低波動`);
         }
     }
 
@@ -1591,26 +1602,162 @@ function buildSensitivityScoreAdvice(result) {
         const oppositeMagnitude = dominantDirection === '調高' ? negativeDrift : positiveDrift;
         if (Number.isFinite(dominantMagnitude)) {
             if (dominantMagnitude > directionRisk) {
-                segments.push(`${dominantDirection}方向平均偏移超過 ${directionRisk}pp，請優先檢視該組參數的穩定度。`);
+                segments.push(`${dominantDirection}方向平均偏移超過 ${directionRisk}pp，請優先檢視該組參數的穩定度`);
             } else if (dominantMagnitude > directionWatch) {
-                segments.push(`${dominantDirection}方向平均偏移落在 ${directionWatch}～${directionRisk}pp，建議再做滾動驗證。`);
+                segments.push(`${dominantDirection}方向平均偏移落在 ${directionWatch}～${directionRisk}pp，建議再做滾動驗證`);
             } else if (Number.isFinite(oppositeMagnitude) && oppositeMagnitude <= directionSafe && dominantMagnitude <= directionSafe) {
-                segments.push(`調高與調低方向平均偏移皆在 ${directionSafe}pp 內，參數變動可控。`);
+                segments.push(`調高與調低方向平均偏移皆在 ${directionSafe}pp 內，參數變動可控`);
             } else {
-                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，請持續追蹤擾動趨勢。`);
+                segments.push(`${dominantDirection}方向平均偏移約 ${dominantMagnitude.toFixed(1)}pp，請持續追蹤擾動趨勢`);
             }
         }
     }
 
     if (sampleCount !== null) {
-        segments.push(`擾動樣本共 ${sampleCount} 組，資料量足以支撐判斷。`);
+        segments.push(`擾動樣本共 ${sampleCount} 組，資料量足以支撐判斷`);
     }
 
-    if (segments.length === 0) {
+    return {
+        rawScore,
+        averageDrift,
+        positiveDrift,
+        negativeDrift,
+        sampleCount,
+        segments,
+        thresholds: {
+            driftStable,
+            driftCaution,
+            directionSafe,
+            directionWatch,
+            directionRisk,
+        },
+    };
+}
+
+function formatSensitivitySegments(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) {
         return null;
     }
+    const cleaned = segments
+        .map((line) => (typeof line === 'string' ? line.trim().replace(/[，。、。！？；]+$/gu, '') : ''))
+        .filter((line) => line.length > 0);
+    if (cleaned.length === 0) {
+        return null;
+    }
+    const joined = cleaned.join('，');
+    return `${joined}。`.replace(/([，。、。！？])\1+/gu, '$1');
+}
 
-    return `${segments.join('，')}。`;
+function buildSensitivityScoreAdvice(result) {
+    const insights = collectSensitivityInsights(result);
+    if (!insights) {
+        return null;
+    }
+    return formatSensitivitySegments(insights.segments);
+}
+
+function buildStrategyFlowAdvice(result) {
+    const steps = [];
+    const pushStep = (text) => {
+        if (typeof text === 'string' && text.trim().length > 0) {
+            steps.push(text.trim());
+        }
+    };
+
+    const hasData = Array.isArray(result?.dates) && result.dates.length > 1;
+    if (!hasData) {
+        pushStep('尚未完成回測，請執行回測並開啟資料診斷卡。');
+        return steps;
+    }
+
+    const comparison = buildStrategyComparisonSummary(result || {});
+    if (Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn)) {
+        if (comparison.diff <= -1.5) {
+            pushStep('策略落後買入持有，請在參數優化面板測試。');
+        } else if (Math.abs(comparison.diff) < 1.5) {
+            pushStep('策略接近買入持有，改用最近N年與滾動測試確認。');
+        } else {
+            pushStep('策略領先買入持有，檢查風險管理與停損設定。');
+        }
+    } else {
+        pushStep('資料不足，請用資料暖身診斷確認抓取結果。');
+    }
+
+    const health = buildStrategyHealthSummary(result || {});
+    const metrics = health.metrics || {};
+    const annualized = Number.isFinite(metrics.annualizedReturn) ? metrics.annualizedReturn : null;
+    const buyHoldAnnualized = Number.isFinite(metrics.buyHoldAnnualizedReturn)
+        ? metrics.buyHoldAnnualizedReturn
+        : null;
+
+    if (annualized !== null) {
+        if (buyHoldAnnualized !== null && annualized < buyHoldAnnualized - 0.5) {
+            pushStep('年化報酬低於買入持有，啟用參數優化與分段優化。');
+        } else if (annualized >= 12) {
+            pushStep('年化報酬穩健，請儲存策略並安排滾動測試追蹤。');
+        } else {
+            pushStep('年化報酬偏低，請調整進出場條件與資金配置。');
+        }
+    }
+
+    const maxDrawdown = Number.isFinite(metrics.maxDrawdown) ? metrics.maxDrawdown : null;
+    const sharpe = Number.isFinite(metrics.sharpe) ? metrics.sharpe : null;
+    const sortino = Number.isFinite(metrics.sortino) ? metrics.sortino : null;
+    const returnRatio = Number.isFinite(metrics.returnRatio) ? metrics.returnRatio : null;
+    const sharpeHalfRatio = Number.isFinite(metrics.sharpeHalfRatio) ? metrics.sharpeHalfRatio : null;
+
+    let riskHandled = false;
+    if (maxDrawdown !== null && maxDrawdown > 20) {
+        pushStep('最大回撤超過20%，請在風險管理卡縮小部位並設停損。');
+        riskHandled = true;
+    }
+    if (!riskHandled && sharpe !== null && sharpe < 1) {
+        pushStep('夏普值低於1，請強化風險管理或調整倉位配置。');
+        riskHandled = true;
+    }
+    if (!riskHandled && sortino !== null && sortino < 1) {
+        pushStep('索提諾比率偏低，請調整停損或分散進出場條件。');
+        riskHandled = true;
+    }
+    if (!riskHandled && Number.isFinite(returnRatio) && (returnRatio < 0.5 || returnRatio > 1.5)) {
+        pushStep('前後段報酬比偏離，請啟用滾動測試驗證穩定度。');
+        riskHandled = true;
+    }
+    if (!riskHandled && Number.isFinite(sharpeHalfRatio) && (sharpeHalfRatio < 0.5 || sharpeHalfRatio > 1.5)) {
+        pushStep('前後段夏普比偏離，請用滾動測試確認穩定度。');
+        riskHandled = true;
+    }
+    if (!riskHandled) {
+        pushStep('風險指標穩定，建議設定停損與警示持續監測。');
+    }
+
+    const tradesCount = resolveTotalTradesMetric(result);
+    if (Number.isFinite(tradesCount) && tradesCount < 15) {
+        pushStep('交易次數少於15筆，延長期間或調整進場條件。');
+    }
+
+    const sensitivity = collectSensitivityInsights(result || {});
+    if (!sensitivity) {
+        pushStep('敏感度未完成，請至敏感度分析面板執行擾動測試。');
+    } else {
+        const { rawScore, averageDrift, sampleCount, thresholds } = sensitivity;
+        const driftLimit = thresholds?.driftStable ?? ANNUALIZED_SENSITIVITY_THRESHOLDS.driftStable;
+        if (sampleCount !== null && sampleCount < 10) {
+            pushStep('擾動樣本少於10組，請擴充敏感度測試樣本。');
+        } else if (rawScore !== null && rawScore < 70) {
+            pushStep('敏感度總分低於70，請調整參數後重新執行敏感度分析。');
+        } else if (Number.isFinite(averageDrift) && averageDrift > driftLimit) {
+            pushStep(`平均漂移超過${driftLimit}pp，請微調參數並重跑敏感度分析。`);
+        } else {
+            pushStep('敏感度穩健，請記錄版本並安排定期重跑分析。');
+        }
+    }
+
+    if (steps.length === 0) {
+        pushStep('指標資料有限，建議重新執行回測並保存紀錄。');
+    }
+
+    return steps.map((text) => (text.length > 50 ? `${text.slice(0, 49)}…` : text));
 }
 
 function determineStrategyStatusState(diff, comparisonAvailable) {
@@ -1635,30 +1782,14 @@ function updateStrategyStatusCard(result) {
     const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
     const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
     const diffText = '';
-    const health = buildStrategyHealthSummary(result || {});
-    const sensitivityAdvice = buildSensitivityScoreAdvice(result || {});
-
-    const detailLines = [];
-    if (comparison.line) {
-        detailLines.push(comparison.line);
-    }
-    if (Array.isArray(health.warningLines) && health.warningLines.length > 0) {
-        detailLines.push(...health.warningLines);
-    }
-    if (sensitivityAdvice) {
-        detailLines.push(sensitivityAdvice);
-    }
-    if (health.positiveLine) {
-        detailLines.push(health.positiveLine);
-    }
-
+    const flowSteps = buildStrategyFlowAdvice(result || {});
     applyStrategyStatusState(state, {
         diffText,
         detail: {
             emphasisedLine: null,
-            bulletLines: detailLines,
-            collapsible: detailLines.length > 0,
-            collapsibleSummary: '展開完整重點條列',
+            bulletLines: flowSteps,
+            collapsible: flowSteps.length > 1,
+            collapsibleSummary: '展開流程建議',
         },
     });
 }
@@ -5187,7 +5318,7 @@ function clearPreviousResults() {
     document.getElementById("backtest-result").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("trade-results").innerHTML=`<p class="text-gray-500">請執行回測</p>`;
     document.getElementById("optimization-results").innerHTML=`<p class="text-gray-500">請執行優化</p>`;
-    document.getElementById("performance-table-container").innerHTML=`<p class="text-gray-500">請先執行回測以生成期間績效數據。</p>`;
+    renderPerformancePeriodTable(null, null);
     if(stockChart){
         stockChart.destroy(); 
         stockChart=null; 
@@ -6340,6 +6471,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
 
+document.addEventListener('DOMContentLoaded', () => {
+    const yearsInput = document.getElementById('recentYears');
+    if (yearsInput) {
+        yearsInput.addEventListener('change', () => {
+            if (lastOverallResult && lastSubPeriodResults) {
+                renderPerformancePeriodTable(lastOverallResult, lastSubPeriodResults);
+            }
+        });
+    }
+    const applyYearsBtn = document.getElementById('applyYearsBtn');
+    if (applyYearsBtn) {
+        applyYearsBtn.addEventListener('click', () => {
+            if (lastOverallResult && lastSubPeriodResults) {
+                renderPerformancePeriodTable(lastOverallResult, lastSubPeriodResults);
+            }
+        });
+    }
+});
+
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
     const suggestionArea = document.getElementById('today-suggestion-area');
@@ -6383,6 +6533,7 @@ function handleBacktestResult(result, stockName, dataSource) {
         updateDataSourceDisplay(dataSource, stockName);
         displayBacktestResult(result);
         displayTradeResults(result);
+        renderPerformancePeriodTable(result, result.subPeriodResults || null);
         renderChart(result);
         updateChartTrendOverlay();
         activateTab('summary');
@@ -7629,6 +7780,125 @@ function renderChart(result) {
         e.preventDefault();
     });
 }
+
+function renderPerformancePeriodTable(result, subPeriodResults) {
+    const container = document.getElementById('performance-table-container');
+    if (!container) {
+        return;
+    }
+
+    if (!result) {
+        container.innerHTML = '<p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">請先執行回測以生成期間績效數據。</p>';
+        return;
+    }
+
+    const yearsInput = document.getElementById('recentYears');
+    const targetYearsRaw = yearsInput ? Number.parseInt(yearsInput.value, 10) : NaN;
+    const targetYears = Number.isFinite(targetYearsRaw) ? Math.min(Math.max(targetYearsRaw, 1), 50) : 5;
+
+    const periodData = subPeriodResults && typeof subPeriodResults === 'object' ? subPeriodResults : {};
+
+    const periodColumns = [];
+    for (let year = 1; year <= targetYears; year += 1) {
+        const key = `${year}Y`;
+        periodColumns.push({
+            key,
+            label: `最近${year}年`,
+            data: periodData[key] || null,
+        });
+    }
+
+    const buyHoldSeries = Array.isArray(result?.buyHoldReturns) ? result.buyHoldReturns : [];
+    const overallBuyHold = buyHoldSeries.length > 0
+        ? Number.parseFloat(buyHoldSeries[buyHoldSeries.length - 1])
+        : (Number.isFinite(result?.buyHoldReturn) ? Number(result.buyHoldReturn) : null);
+
+    const overallColumn = {
+        key: 'overall',
+        label: '總計',
+        data: {
+            totalReturn: Number.isFinite(result?.returnRate) ? Number(result.returnRate) : null,
+            totalBuyHoldReturn: Number.isFinite(overallBuyHold) ? overallBuyHold : null,
+            sharpeRatio: Number.isFinite(result?.sharpeRatio) ? Number(result.sharpeRatio) : null,
+            sortinoRatio: Number.isFinite(result?.sortinoRatio) ? Number(result.sortinoRatio) : null,
+            maxDrawdown: Number.isFinite(result?.maxDrawdown) ? Number(result.maxDrawdown) : null,
+        },
+    };
+
+    const columns = [...periodColumns, overallColumn];
+
+    const formatReturnCell = (value) => {
+        if (!Number.isFinite(value)) {
+            return '<span style="color: var(--muted-foreground);">—</span>';
+        }
+        const color = value >= 0 ? '#16a34a' : '#dc2626';
+        return `<span style="color: ${color};">${value.toFixed(2)}%</span>`;
+    };
+
+    const formatDrawdownCell = (value) => {
+        if (!Number.isFinite(value)) {
+            return '<span style="color: var(--muted-foreground);">—</span>';
+        }
+        const color = value <= 0 ? '#16a34a' : '#dc2626';
+        return `<span style="color: ${color};">${value.toFixed(2)}%</span>`;
+    };
+
+    const formatRatioCell = (value) => {
+        if (value === Infinity) {
+            return '<span style="color: var(--foreground);">∞</span>';
+        }
+        if (value === -Infinity) {
+            return '<span style="color: var(--foreground);">-∞</span>';
+        }
+        if (!Number.isFinite(value)) {
+            return '<span style="color: var(--muted-foreground);">—</span>';
+        }
+        return `<span style="color: var(--foreground);">${value.toFixed(2)}</span>`;
+    };
+
+    const metrics = [
+        { key: 'totalReturn', label: '策略累積報酬 (%)', renderer: formatReturnCell },
+        { key: 'totalBuyHoldReturn', label: '買入持有累積報酬 (%)', renderer: formatReturnCell },
+        { key: 'sharpeRatio', label: '夏普比率', renderer: formatRatioCell },
+        { key: 'sortinoRatio', label: '索提諾比率', renderer: formatRatioCell },
+        { key: 'maxDrawdown', label: '最大回撤 (%)', renderer: formatDrawdownCell },
+    ];
+
+    const headerCells = columns
+        .map((column) =>
+            `<th class="px-3 py-2 text-right font-semibold whitespace-nowrap" style="color: var(--muted-foreground);">${column.label}</th>`
+        )
+        .join('');
+
+    const bodyRows = metrics
+        .map((metric) => {
+            const cells = columns
+                .map((column) => {
+                    const cellValue = column.data ? column.data[metric.key] : null;
+                    return `<td class="px-3 py-2 text-right">${metric.renderer(cellValue)}</td>`;
+                })
+                .join('');
+            return `<tr><th class="px-3 py-2 text-left font-medium" style="color: var(--foreground);">${metric.label}</th>${cells}</tr>`;
+        })
+        .join('');
+
+    container.innerHTML = `
+        <div class="overflow-x-auto w-full">
+            <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--foreground);">
+                    <tr>
+                        <th class="px-3 py-2 text-left font-semibold" style="color: var(--muted-foreground);">指標</th>
+                        ${headerCells}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-border" style="border-color: var(--border); color: var(--muted-foreground);">
+                    ${bodyRows}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 // 優化專用進度顯示函數
 function showOptimizationProgress(message) {
     console.log('[Main] showOptimizationProgress 被調用:', message);

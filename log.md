@@ -1,3 +1,12 @@
+## 2026-09-17 — Patch LB-PERFORMANCE-FLOW-20260917A
+- **Scope**: 期間績效分析回復、策略建議流程與排程調整。
+- **Updates**:
+  - `js/backtest.js` 新增 `renderPerformancePeriodTable`，依「最近N年」設定動態輸出年度子區間與總計績效；回測結果與 `recentYears` 調整時即時重繪。
+  - `js/backtest.js` 更新策略摘要流程為流程式建議、修正敏感度文案重複標點與字詞，並同步清除舊縮放樣式、重新掛載回傳資料。
+  - `js/strategy-plugins/volume.js` 修正成交量暴增策略於各角色下的觸發旗標，恢復出場訊號；`index.html` 取消標籤縮放動畫。
+  - `netlify/functions/cache-warmer.js`、`netlify.toml` 調整快取預熱 cron 至每日 13:40 (台灣時間)；`log.md` 記錄變更。
+- **Testing**: `npm test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
