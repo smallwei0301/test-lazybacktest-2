@@ -758,6 +758,14 @@
                                                     >
                                                         策略 DSL 檢查
                                                     </button>
+                                                    <button
+                                                        id="manualVerifyDslPersistenceBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        DSL 還原檢查
+                                                    </button>
                                                 </div>
                                             </div>
                                             <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
@@ -1162,55 +1170,21 @@
                                     </div>
                                     <div class="card-content space-y-6">
                                         <div class="grid md:grid-cols-2 gap-6">
-                                            <div>
-                                                <label for="entryStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">
-                                                    <i data-lucide="arrow-up-circle" class="lucide-sm inline mr-1 text-green-600"></i>
-                                                    做多進場策略
-                                                </label>
-                                                <select
-                                                    id="entryStrategy"
-                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
-                                                >
-                                                    <option value="ma_cross">均線黃金交叉</option>
-                                                    <option value="ma_above">價格突破均線</option>
-                                                    <option value="rsi_oversold">RSI超賣</option>
-                                                    <option value="macd_cross">MACD黃金交叉 (DI版)</option>
-                                                    <option value="bollinger_breakout">布林通道突破</option>
-                                                    <option value="k_d_cross">KD黃金交叉 (D&lt;X)</option>
-                                                    <option value="volume_spike">成交量暴增</option>
-                                                    <option value="price_breakout">價格突破前高</option>
-                                                    <option value="williams_oversold">威廉指標超賣</option>
-                                                    <option value="turtle_breakout">海龜突破 (僅進場)</option>
-                                                </select>
-                                                <div id="entryParams" class="mt-4 space-y-3"></div>
-                                            </div>
+                                            <div
+                                                id="entryStrategyContainer"
+                                                class="strategy-form-slot space-y-3"
+                                                data-role="longEntry"
+                                                data-icon="arrow-up-circle"
+                                                data-label="做多進場策略"
+                                            ></div>
 
-                                            <div class="space-y-3">
-                                                <label for="exitStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">
-                                                    <i data-lucide="arrow-down-circle" class="lucide-sm inline mr-1 text-red-600"></i>
-                                                    做多出場策略
-                                                </label>
-                                                <select
-                                                    id="exitStrategy"
-                                                    class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
-                                                >
-                                                    <option value="ma_cross_exit">均線死亡交叉</option>
-                                                    <option value="ma_below">價格跌破均線</option>
-                                                    <option value="rsi_overbought">RSI超買</option>
-                                                    <option value="macd_cross_exit">MACD死亡交叉 (DI版)</option>
-                                                    <option value="bollinger_reversal">布林通道反轉</option>
-                                                    <option value="k_d_cross_exit">KD死亡交叉 (D&gt;Y)</option>
-                                                    <option value="volume_spike">成交量暴增</option>
-                                                    <option value="price_breakdown">價格跌破前低</option>
-                                                    <option value="williams_overbought">威廉指標超買</option>
-                                                    <option value="turtle_stop_loss">海龜停損 (N日低)</option>
-                                                    <option value="trailing_stop">移動停損 (%)</option>
-                                                    <option value="fixed_stop_loss">(由風險管理控制)</option>
-                                                </select>
-                                                <div id="exitParams" class="mt-4 space-y-3"></div>
-                                            </div>
+                                            <div
+                                                id="exitStrategyContainer"
+                                                class="strategy-form-slot space-y-3"
+                                                data-role="longExit"
+                                                data-icon="arrow-down-circle"
+                                                data-label="做多出場策略"
+                                            ></div>
                                         </div>
 
                                         <!-- Short Selling Option -->
@@ -1225,47 +1199,21 @@
 
                                             <div id="short-strategy-area" class="hidden space-y-4">
                                                 <div class="grid md:grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label for="shortEntryStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">做空進場策略</label>
-                                                        <select
-                                                            id="shortEntryStrategy"
-                                                            class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
-                                                        >
-                                                            <option value="short_ma_cross">均線死亡交叉 (做空)</option>
-                                                            <option value="short_ma_below">價格跌破均線 (做空)</option>
-                                                            <option value="short_rsi_overbought">RSI超買 (做空)</option>
-                                                            <option value="short_macd_cross">MACD死亡交叉 (DI版) (做空)</option>
-                                                            <option value="short_bollinger_reversal">布林通道反轉 (做空)</option>
-                                                            <option value="short_k_d_cross">KD死亡交叉 (D&gt;Y) (做空)</option>
-                                                            <option value="short_price_breakdown">價格跌破前低 (做空)</option>
-                                                            <option value="short_williams_overbought">威廉指標超買 (做空)</option>
-                                                            <option value="short_turtle_stop_loss">海龜N日低 (做空)</option>
-                                                        </select>
-                                                        <div id="shortEntryParams" class="mt-3 space-y-2"></div>
-                                                    </div>
+                                                    <div
+                                                        id="shortEntryStrategyContainer"
+                                                        class="strategy-form-slot space-y-3"
+                                                        data-role="shortEntry"
+                                                        data-icon="trending-down"
+                                                        data-label="做空進場策略"
+                                                    ></div>
 
-                                                    <div>
-                                                        <label for="shortExitStrategy" class="block text-xs font-medium text-foreground mb-2" style="color: var(--foreground);">回補出場策略</label>
-                                                        <select
-                                                            id="shortExitStrategy"
-                                                            class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
-                                                        >
-                                                            <option value="cover_ma_cross">均線黃金交叉 (回補)</option>
-                                                            <option value="cover_ma_above">價格突破均線 (回補)</option>
-                                                            <option value="cover_rsi_oversold">RSI超賣 (回補)</option>
-                                                            <option value="cover_macd_cross">MACD黃金交叉 (DI版) (回補)</option>
-                                                            <option value="cover_bollinger_breakout">布林通道突破 (回補)</option>
-                                                            <option value="cover_k_d_cross">KD黃金交叉 (D&lt;X) (回補)</option>
-                                                            <option value="cover_price_breakout">價格突破前高 (回補)</option>
-                                                            <option value="cover_williams_oversold">威廉指標超賣 (回補)</option>
-                                                            <option value="cover_turtle_breakout">海龜N日高 (回補)</option>
-                                                            <option value="cover_trailing_stop">移動停損 (%) (空單停損)</option>
-                                                            <option value="cover_fixed_stop_loss">(由風險管理控制)</option>
-                                                        </select>
-                                                        <div id="shortExitParams" class="mt-3 space-y-2"></div>
-                                                    </div>
+                                                    <div
+                                                        id="shortExitStrategyContainer"
+                                                        class="strategy-form-slot space-y-3"
+                                                        data-role="shortExit"
+                                                        data-icon="repeat-2"
+                                                        data-label="回補出場策略"
+                                                    ></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -2808,6 +2756,7 @@
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/ui/strategy-form.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>

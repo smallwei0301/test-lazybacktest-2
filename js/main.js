@@ -4263,14 +4263,163 @@ async function runManualVerificationStrategyDsl() {
     }
 }
 
+async function runManualVerificationDslPersistence() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在驗證 DSL 還原流程…', 'info');
+
+    const lines = [];
+    const shortToggle = document.getElementById('enableShortSelling');
+    const originalShortEnabled = shortToggle?.checked ?? false;
+
+    const triggerShortToggle = (checked, reason) => {
+        if (!shortToggle) {
+            return false;
+        }
+        shortToggle.checked = Boolean(checked);
+        try {
+            shortToggle.dispatchEvent(new Event('change', { bubbles: true }));
+            if (reason) {
+                lines.push(`✅ ${reason}（狀態：${shortToggle.checked ? '啟用' : '關閉'}）`);
+            }
+            return true;
+        } catch (toggleError) {
+            console.warn('[Manual Verification] 觸發做空開關變更事件失敗', toggleError);
+            if (reason) {
+                lines.push(`⚠️ ${reason}時無法觸發做空開關事件：${toggleError?.message || toggleError}`);
+            }
+            return false;
+        }
+    };
+
+    try {
+        const formApi = window.lazybacktestStrategyForm;
+        if (!formApi || typeof formApi.getDslSnapshot !== 'function') {
+            throw new Error('策略表單模組尚未載入');
+        }
+
+        const snapshot = formApi.getDslSnapshot();
+        if (!snapshot || typeof snapshot !== 'object') {
+            throw new Error('尚未組裝任何 DSL 資料，請先設定策略');
+        }
+
+        const roleTypes = ['entry', 'exit', 'shortEntry', 'shortExit'];
+        const selections = {};
+        roleTypes.forEach((type) => {
+            if (typeof formApi.getRoleSelection !== 'function') {
+                return;
+            }
+            try {
+                const selection = formApi.getRoleSelection(type);
+                if (selection && (selection.strategyId || Object.keys(selection.params || {}).length > 0)) {
+                    selections[type] = {
+                        strategyId: selection.strategyId || null,
+                        params: selection.params || {},
+                    };
+                }
+            } catch (selectionError) {
+                lines.push(`⚠️ 讀取 ${type} 選項時發生錯誤：${selectionError?.message || selectionError}`);
+            }
+        });
+
+        const shouldEnableShorting = Boolean(
+            (selections.shortEntry && selections.shortEntry.strategyId) ||
+                (selections.shortExit && selections.shortExit.strategyId) ||
+                snapshot.shortEntry ||
+                snapshot.shortExit
+        );
+
+        const storageKey = '__lazybacktest_manual_dsl__';
+        localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+                snapshot,
+                selections,
+                enableShorting: shouldEnableShorting,
+                savedAt: new Date().toISOString(),
+            })
+        );
+
+        lines.push(`✅ DSL 已序列化並寫入 localStorage (${storageKey})`);
+
+        if (shortToggle) {
+            triggerShortToggle(false, '檢查前重置做空開關以模擬重新載入');
+        } else {
+            lines.push('⚠️ 找不到做空交易開關，僅檢查 DSL JSON');
+        }
+
+        if (typeof formApi.loadPrimarySelections === 'function') {
+            formApi.loadPrimarySelections({});
+        }
+        if (typeof formApi.loadDslSnapshot === 'function') {
+            formApi.loadDslSnapshot({});
+        }
+
+        if (shortToggle && shouldEnableShorting) {
+            triggerShortToggle(true, '依序列化資料啟用做空開關');
+        } else if (shortToggle) {
+            lines.push('✅ 序列化資料未包含做空策略，維持關閉狀態');
+        }
+
+        if (typeof formApi.loadPrimarySelections === 'function') {
+            formApi.loadPrimarySelections(selections);
+        }
+        if (typeof formApi.loadDslSnapshot === 'function') {
+            formApi.loadDslSnapshot(snapshot);
+        }
+
+        const restoredSnapshot = formApi.getDslSnapshot();
+        const beforeJson = JSON.stringify(snapshot);
+        const afterJson = JSON.stringify(restoredSnapshot);
+        const matched = beforeJson === afterJson;
+
+        lines.push(`原始 DSL：${beforeJson}`);
+        lines.push(`還原後 DSL：${afterJson}`);
+
+        if (matched) {
+            updateManualVerificationStatus('DSL 還原檢查完成（內容一致）。', 'success');
+            lines.push('✅ DSL 還原後與原始內容一致。');
+        } else {
+            updateManualVerificationStatus('DSL 還原檢查完成，但內容不一致。', 'warning');
+            lines.push('⚠️ DSL 還原後與原始內容不同，請檢查序列化流程。');
+        }
+
+        if (shortToggle) {
+            triggerShortToggle(originalShortEnabled, '檢查結束後還原做空開關');
+        }
+
+        appendManualVerificationEntry('DSL 還原檢查', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`DSL 還原檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('DSL 還原檢查', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        try {
+            localStorage.removeItem('__lazybacktest_manual_dsl__');
+        } catch (cleanupError) {
+            console.warn('[Manual Verification] 清理 DSL 檢查資料失敗', cleanupError);
+        }
+        if (shortToggle && shortToggle.checked !== originalShortEnabled) {
+            try {
+                shortToggle.checked = originalShortEnabled;
+                shortToggle.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (restoreError) {
+                console.warn('[Manual Verification] 還原做空開關狀態失敗', restoreError);
+            }
+        }
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
     const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
+    const dslPersistenceBtn = document.getElementById('manualVerifyDslPersistenceBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn && !dslPersistenceBtn) {
         return;
     }
 
@@ -4297,6 +4446,11 @@ function initManualVerificationTools() {
     if (dslBtn) {
         dslBtn.addEventListener('click', () => {
             runManualVerificationStrategyDsl();
+        });
+    }
+    if (dslPersistenceBtn) {
+        dslPersistenceBtn.addEventListener('click', () => {
+            runManualVerificationDslPersistence();
         });
     }
 }
@@ -5176,6 +5330,18 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    const formApi = window.lazybacktestStrategyForm;
+    if (formApi && typeof formApi.getRoleParams === 'function') {
+        try {
+            const params = formApi.getRoleParams(type);
+            if (params && typeof params === 'object') {
+                return params;
+            }
+        } catch (error) {
+            console.warn('[Main] 讀取策略參數失敗，改用舊流程', error);
+        }
+    }
+
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5245,6 +5411,18 @@ function createStrategyDslPluginNode(strategyId, params) {
 }
 
 function buildStrategyDslFromParams(selection) {
+    const formApi = window.lazybacktestStrategyForm;
+    if (formApi && typeof formApi.getDslSnapshot === 'function') {
+        try {
+            const snapshot = formApi.getDslSnapshot();
+            if (snapshot && typeof snapshot === 'object') {
+                return snapshot;
+            }
+        } catch (error) {
+            console.warn('[Main] 讀取 DSL Snapshot 失敗，改用舊流程', error);
+        }
+    }
+
     if (!selection || typeof selection !== 'object') return null;
     const dsl = { version: STRATEGY_DSL_VERSION };
     const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
@@ -5296,12 +5474,43 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
-    const entryStrategy = document.getElementById('entryStrategy')?.value;
+    const formApi = window.lazybacktestStrategyForm;
+
+    let entryStrategy = document.getElementById('entryStrategy')?.value || null;
+    let entryParams = {};
+    if (formApi && typeof formApi.getRoleSelection === 'function') {
+        try {
+            const selection = formApi.getRoleSelection('entry');
+            if (selection) {
+                entryStrategy = selection.strategyId || entryStrategy;
+                entryParams = selection.params || entryParams;
+            }
+        } catch (error) {
+            console.warn('[Main] 讀取做多進場選項失敗', error);
+        }
+    }
+    if (!entryParams || typeof entryParams !== 'object' || Object.keys(entryParams).length === 0) {
+        entryParams = getStrategyParams('entry');
+    }
+
     const exitSelect = document.getElementById('exitStrategy');
     const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
-    const exitStrategy = normalizedExit || exitSelect?.value || null;
-    const entryParams = getStrategyParams('entry');
-    const exitParams = getStrategyParams('exit');
+    let exitStrategy = normalizedExit || exitSelect?.value || null;
+    let exitParams = {};
+    if (formApi && typeof formApi.getRoleSelection === 'function') {
+        try {
+            const selection = formApi.getRoleSelection('exit');
+            if (selection) {
+                exitStrategy = selection.strategyId || exitStrategy;
+                exitParams = selection.params || exitParams;
+            }
+        } catch (error) {
+            console.warn('[Main] 讀取做多出場選項失敗', error);
+        }
+    }
+    if (!exitParams || typeof exitParams !== 'object' || Object.keys(exitParams).length === 0) {
+        exitParams = getStrategyParams('exit');
+    }
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
 
     let shortEntryStrategy = null;
@@ -5315,8 +5524,28 @@ function getBacktestParams() {
         const { normalizedKey: normalizedShortExit } = ensureSelectUsesNormalizedValue('shortExit', shortExitSelect);
         shortEntryStrategy = normalizedShortEntry || shortEntrySelect?.value || null;
         shortExitStrategy = normalizedShortExit || shortExitSelect?.value || null;
-        shortEntryParams = getStrategyParams('shortEntry');
-        shortExitParams = getStrategyParams('shortExit');
+        if (formApi && typeof formApi.getRoleSelection === 'function') {
+            try {
+                const shortEntrySelection = formApi.getRoleSelection('shortEntry');
+                if (shortEntrySelection) {
+                    shortEntryStrategy = shortEntrySelection.strategyId || shortEntryStrategy;
+                    shortEntryParams = shortEntrySelection.params || shortEntryParams;
+                }
+                const shortExitSelection = formApi.getRoleSelection('shortExit');
+                if (shortExitSelection) {
+                    shortExitStrategy = shortExitSelection.strategyId || shortExitStrategy;
+                    shortExitParams = shortExitSelection.params || shortExitParams;
+                }
+            } catch (error) {
+                console.warn('[Main] 讀取做空策略選項失敗', error);
+            }
+        }
+        if (!shortEntryParams || typeof shortEntryParams !== 'object' || Object.keys(shortEntryParams).length === 0) {
+            shortEntryParams = getStrategyParams('shortEntry');
+        }
+        if (!shortExitParams || typeof shortExitParams !== 'object' || Object.keys(shortExitParams).length === 0) {
+            shortExitParams = getStrategyParams('shortExit');
+        }
     }
 
     const buyFee = parseFloat(document.getElementById('buyFee')?.value) || 0;
