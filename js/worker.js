@@ -7042,7 +7042,50 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    // Patch Tag: LB-VOLUME-PARAMS-20260923A — 區分多空出入場的成交量均線並支援自訂倍數。
+    const clampVolumePeriod = (value, fallback) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return Math.max(1, Math.floor(Number(fallback) || 1));
+      }
+      return Math.max(1, Math.min(365, Math.floor(numeric)));
+    };
+
+    const entryVolumePeriod = clampVolumePeriod(ep?.period, 20);
+    indic.volumeAvgEntry = maCalculator(volumes, entryVolumePeriod);
+
+    const exitVolumePeriod = clampVolumePeriod(xp?.period, entryVolumePeriod);
+    indic.volumeAvgExit =
+      exitVolumePeriod === entryVolumePeriod
+        ? indic.volumeAvgEntry
+        : maCalculator(volumes, exitVolumePeriod);
+
+    if (enableShorting) {
+      const shortEntryVolumePeriod = clampVolumePeriod(
+        sep?.period,
+        exitVolumePeriod,
+      );
+      indic.volumeAvgShortEntry =
+        shortEntryVolumePeriod === exitVolumePeriod
+          ? indic.volumeAvgExit
+          : shortEntryVolumePeriod === entryVolumePeriod
+            ? indic.volumeAvgEntry
+            : maCalculator(volumes, shortEntryVolumePeriod);
+
+      const coverVolumePeriod = clampVolumePeriod(
+        sxp?.period,
+        entryVolumePeriod,
+      );
+      indic.volumeAvgCover =
+        coverVolumePeriod === entryVolumePeriod
+          ? indic.volumeAvgEntry
+          : coverVolumePeriod === exitVolumePeriod
+            ? indic.volumeAvgExit
+            : coverVolumePeriod === shortEntryVolumePeriod
+              ? indic.volumeAvgShortEntry
+              : maCalculator(volumes, coverVolumePeriod);
+    }
+
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7312,7 +7355,11 @@ const entryIndicatorBuilders = {
     ];
   },
   volume_spike(params, ctx) {
-    const period = Number(params?.period) || 20;
+    const periodRaw = Number(params?.period);
+    const period =
+      Number.isFinite(periodRaw) && periodRaw > 0
+        ? Math.max(1, Math.floor(periodRaw))
+        : 20;
     const avg = getIndicatorArray(ctx, "volumeAvgEntry");
     return [
       makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
@@ -7428,6 +7475,20 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const periodRaw = Number(params?.period);
+    const period =
+      Number.isFinite(periodRaw) && periodRaw > 0
+        ? Math.max(1, Math.floor(periodRaw))
+        : 20;
+    const avg =
+      getIndicatorArray(ctx, "volumeAvgExit") ||
+      getIndicatorArray(ctx, "volumeAvgEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -8910,17 +8971,31 @@ function runStrategy(data, params, options = {}) {
                   exitIndicatorValues = meta.indicatorValues;
                 break;
               }
-              const avgVolume = indicators.volumeAvgEntry[i];
-              const multiplier = Number(exitParams?.multiplier) || 2;
+              const entryAvgSeries = Array.isArray(indicators.volumeAvgEntry)
+                ? indicators.volumeAvgEntry
+                : null;
+              const exitAvgSeries = Array.isArray(indicators.volumeAvgExit)
+                ? indicators.volumeAvgExit
+                : null;
+              const avgSeries =
+                exitAvgSeries && entryAvgSeries && exitAvgSeries.length === entryAvgSeries.length
+                  ? exitAvgSeries
+                  : exitAvgSeries || entryAvgSeries;
+              const avgVolume = avgSeries ? avgSeries[i] : null;
+              const multiplierRaw = Number(exitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
               sellSignal =
                 check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
               if (sellSignal)
                 exitIndicatorValues = {
                   成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
                   均量: [
-                    indicators.volumeAvgEntry[i - 1] ?? null,
+                    avgSeries?.[i - 1] ?? null,
                     avgVolume,
-                    indicators.volumeAvgEntry[i + 1] ?? null,
+                    avgSeries?.[i + 1] ?? null,
                   ],
                 };
               break;
@@ -10023,19 +10098,29 @@ function runStrategy(data, params, options = {}) {
             break;
           }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const entryAvgSeries = Array.isArray(indicators.volumeAvgEntry)
+              ? indicators.volumeAvgEntry
+              : null;
+            const avgVolume = entryAvgSeries ? entryAvgSeries[i] : null;
+            const multiplierRaw = Number(entryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            buySignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (buySignal)
+              entryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  entryAvgSeries?.[i - 1] ?? null,
+                  avgVolume,
+                  entryAvgSeries?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
