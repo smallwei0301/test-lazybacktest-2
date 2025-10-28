@@ -1,3 +1,13 @@
+## 2026-07-30 — Patch LB-PERFORMANCE-ADVICE-20260730A
+- **Issue recap**: 期間績效分析無法顯示資料、策略建議文字缺乏流程化指引，成交量暴增出場未能觸發，且自動資料撈取時間須調整。
+- **Fix**:
+  - `js/backtest.js`、`js/worker.js` 依「最近 N 年」設定計算 1～N 年期間績效，輸出年化報酬、夏普、索提諾與回撤，並建立 `renderPerformanceAnalysis` 版面；同步新增建議流程（版本 `LB-PERFORMANCE-ANALYSIS-20260730A` 與 `LB-STRATEGY-ADVICE-20260730A`）。
+  - `js/backtest.js` 重新整理策略摘要流程卡，將指標比對、風控、交易樣本與敏感度整合成四段建議，並移除建議文字中的連續標點。
+  - `js/strategy-plugins/volume.js` 修正 `volume_spike` 在出場／空單角色未觸發的問題（`LB-VOLUME-SPIKE-FLOW-20260730A`）。
+  - `css/style.css` 停用頁籤容器按下縮放效果；`js/main.js` 傳遞 `recentYears` 參數；`netlify.toml` 更新排程為每日 13:40 預抓資料。
+- **Diagnostics**: 請於瀏覽器以 `recentYears=5` 執行回測，檢視期間表格是否顯示最近 1～5 年指標，確認策略摘要產出四段建議，並在成交量暴增作為出場策略時驗證訊號觸發；另於 Netlify 後台確認 Cron 設定為 `40 5 * * *`。
+- **Testing**: `npm run test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
@@ -1680,6 +1690,16 @@ NODE`
   - `index.html` 引入新模組腳本，`package.json` 更新 `npm test` 串聯兩組單元測試，並新增 `tests/batch-mapper.test.js` 以 TDD 驗證策略映射行為。
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
+
+## 2026-09-18 — Patch LB-PERFORMANCE-TABLE-20260815A
+- **Issue recap**: 期間績效缺少月度區間且表格方向不符合需求，策略摘要未納入過擬合指標，成交量暴增策略在出場角色無法觸發，頁籤列在點擊時仍會壓縮字型。
+- **Fix**:
+  - `js/worker.js` 新增一個月與六個月的績效計算並改用順序陣列產生 1～N 年的子期間，確保回傳 `subPeriodResults` 時涵蓋全部時序。
+  - `js/backtest.js` 轉置績效分析表格，依 1M、6M、1Y、2Y… 的順序顯示各指標，同步整合過擬合報酬與夏普比的建議文字。
+  - `js/strategy-plugins/volume.js` 依多空進出場切換均量指標鍵，修正成交量暴增出場與回補無法觸發的問題。
+  - `css/style.css`、`index.html` 為頁籤列新增穩定樣式，移除按下時的縮放行為。
+- **Diagnostics**: 請重新執行回測後確認績效分析表顯示 1M/6M 與逐年資料，策略建議卡會描述過擬合比值；測試成交量暴增作為出場條件時應能記錄觸發；操作頁籤時字體不再縮放。
+- **Testing**: `npm run test`
 
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
