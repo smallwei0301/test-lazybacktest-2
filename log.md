@@ -1,3 +1,18 @@
+## 2026-09-22 — Patch LB-UI-STRATEGY-FORM-20250922B
+- **Scope**: 手動 DSL 還原檢查補強做空開關狀態管理。
+- **Updates**:
+  - `js/main.js` 的 `runManualVerificationDslPersistence` 會同步儲存 `enableShorting` 狀態，並在驗證前後自動切換做空開關以模擬重新載入流程，結束後復原使用者設定。
+  - 手動驗證紀錄新增做空狀態提示，缺少做空策略時保持關閉並輸出訊息，避免誤判。
+- **Testing**: `npm test`
+
+## 2026-09-22 — Patch LB-UI-STRATEGY-FORM-20250922A
+- **Scope**: 策略表單動態化、DSL 編輯介面與手動驗證腳本。
+- **Updates**:
+  - 新增 `js/ui/strategy-form.js` 以 `StrategyPluginRegistry` `meta/paramsSchema` 動態產生策略選單、參數表單與 AND/OR/NOT DSL 編輯器，並同步回填回測參數。
+  - `index.html` 改為載入新模組，調整策略卡片為容器節點；`css/style.css` 補上 DSL 卡片與按鈕樣式。
+  - `js/main.js` 接軌新 API，更新策略參數擷取、DSL 序列化及開發者工具，新增「DSL 還原檢查」手動驗證。
+- **Testing**: `npm test`；容器內以手動驗證流程執行「策略 DSL 檢查」、「DSL 還原檢查」確認狀態更新。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
