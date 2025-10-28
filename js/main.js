@@ -5296,6 +5296,11 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
+    const recentYearsInput = document.getElementById('recentYears');
+    const recentYearsValue = recentYearsInput ? Number.parseInt(recentYearsInput.value, 10) : Number.NaN;
+    const recentYears = Number.isFinite(recentYearsValue) && recentYearsValue > 0
+        ? Math.min(recentYearsValue, 50)
+        : null;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitSelect = document.getElementById('exitStrategy');
     const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
@@ -5370,6 +5375,7 @@ function getBacktestParams() {
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
         strategyDsl,
+        recentYears,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
