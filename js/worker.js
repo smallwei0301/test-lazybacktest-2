@@ -106,6 +106,77 @@ const ANN_FEATURE_NAMES = [
   'VIXClose',
 ];
 
+const VOLUME_SPIKE_DEFAULT_MULTIPLIER = (() => {
+  if (
+    typeof strategyDescriptions === 'object' &&
+    strategyDescriptions?.volume_spike?.defaultParams &&
+    Number.isFinite(Number(strategyDescriptions.volume_spike.defaultParams.multiplier))
+  ) {
+    const raw = Number(strategyDescriptions.volume_spike.defaultParams.multiplier);
+    if (raw > 0) {
+      return raw;
+    }
+  }
+  return 2;
+})();
+
+const VOLUME_SIGNAL_FIELD_BY_ROLE = Object.freeze({
+  longEntry: 'enter',
+  longExit: 'exit',
+  shortEntry: 'short',
+  shortExit: 'cover',
+});
+
+function toFiniteNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normaliseVolumeMultiplier(raw, fallback = VOLUME_SPIKE_DEFAULT_MULTIPLIER) {
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+  return fallback;
+}
+
+function computeVolumeSpikeFallback({ indicatorSeries, volumes, index, multiplier, indicatorKey }) {
+  if (!Array.isArray(indicatorSeries) || !Array.isArray(volumes)) {
+    return { triggered: false, meta: null };
+  }
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= indicatorSeries.length || idx >= volumes.length) {
+    return { triggered: false, meta: null };
+  }
+  const avg = toFiniteNumber(indicatorSeries[idx]);
+  const volume = toFiniteNumber(volumes[idx]);
+  if (avg === null || volume === null) {
+    return { triggered: false, meta: null };
+  }
+  const threshold = avg * multiplier;
+  const triggered = volume > threshold;
+  if (!triggered) {
+    return { triggered: false, meta: null };
+  }
+  const prevVolume = idx > 0 ? toFiniteNumber(volumes[idx - 1]) : null;
+  const nextVolume = idx + 1 < volumes.length ? toFiniteNumber(volumes[idx + 1]) : null;
+  const prevAvg = idx > 0 ? toFiniteNumber(indicatorSeries[idx - 1]) : null;
+  const nextAvg = idx + 1 < indicatorSeries.length ? toFiniteNumber(indicatorSeries[idx + 1]) : null;
+  const thresholdVolume = toFiniteNumber(threshold);
+  return {
+    triggered: true,
+    meta: {
+      indicatorValues: {
+        成交量: [prevVolume, volume, nextVolume],
+        均量: [prevAvg, avg, nextAvg],
+      },
+      multiplier,
+      indicatorKey,
+      thresholdVolume,
+    },
+  };
+}
+
 function normalizeClassificationMode(mode) {
   return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
 }
@@ -7042,7 +7113,52 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    const normaliseVolumePeriod = (value, fallback) => {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 1) {
+        return Math.floor(num);
+      }
+      const fb = Number(fallback);
+      if (Number.isFinite(fb) && fb >= 1) {
+        return Math.floor(fb);
+      }
+      return 20;
+    };
+    const volumePeriodCache = new Map();
+    const resolveVolumeAverage = (period) => {
+      const key = Number.isFinite(period) && period >= 1 ? Math.floor(period) : 20;
+      if (!volumePeriodCache.has(key)) {
+        volumePeriodCache.set(key, maCalculator(volumes, key));
+      }
+      return volumePeriodCache.get(key);
+    };
+    const volumeEntryPeriod = normaliseVolumePeriod(ep?.period, 20);
+    const volumeExitPeriod = normaliseVolumePeriod(xp?.period, volumeEntryPeriod);
+    const volumeShortEntryPeriod = enableShorting
+      ? normaliseVolumePeriod(sep?.period, volumeExitPeriod)
+      : volumeExitPeriod;
+    const volumeShortExitPeriod = enableShorting
+      ? normaliseVolumePeriod(sxp?.period, volumeShortEntryPeriod)
+      : volumeExitPeriod;
+    indic.volumeAvgEntry = resolveVolumeAverage(volumeEntryPeriod);
+    indic.volumeAvgExit =
+      volumeExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeExitPeriod);
+    indic.volumeAvgShortEntry =
+      volumeShortEntryPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortEntryPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortEntryPeriod);
+    indic.volumeAvgShortExit =
+      volumeShortExitPeriod === volumeShortEntryPeriod
+        ? indic.volumeAvgShortEntry
+        : volumeShortExitPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortExitPeriod);
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7430,6 +7546,14 @@ const exitIndicatorBuilders = {
       ),
     ];
   },
+  volume_spike_exit(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
+    ];
+  },
   trailing_stop(params, ctx) {
     const pct = Number(params?.percentage) || 5;
     return [
@@ -7475,6 +7599,7 @@ const exitIndicatorBuilders = {
 };
 exitIndicatorBuilders.ma_cross_exit = exitIndicatorBuilders.ma_cross;
 exitIndicatorBuilders.macd_cross_exit = exitIndicatorBuilders.macd_cross;
+exitIndicatorBuilders.volume_spike = exitIndicatorBuilders.volume_spike_exit;
 
 const shortEntryIndicatorBuilders = {
   short_ma_cross(params, ctx) {
@@ -7572,6 +7697,14 @@ const shortEntryIndicatorBuilders = {
         getIndicatorArray(ctx, "williamsShortEntry"),
         { decimals: 2 },
       ),
+    ];
+  },
+  short_volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgShortEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   short_turtle_stop_loss(params, ctx) {
@@ -7684,6 +7817,14 @@ const shortExitIndicatorBuilders = {
         getIndicatorArray(ctx, "williamsCover"),
         { decimals: 2 },
       ),
+    ];
+  },
+  cover_volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgShortExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   cover_turtle_breakout(params, ctx) {
@@ -8226,6 +8367,35 @@ function runStrategy(data, params, options = {}) {
       }
     }
     return invokeStrategyPlugin(strategyId, role, index, baseParams, extras);
+  }
+
+  function evaluateVolumeSpikeStrategy(
+    pluginId,
+    role,
+    index,
+    strategyParams,
+    indicatorSeries,
+    indicatorKey,
+  ) {
+    const pluginResult = callStrategyPlugin(pluginId, role, index, strategyParams);
+    if (pluginResult) {
+      return { ruleResult: pluginResult };
+    }
+    const multiplier = normaliseVolumeMultiplier(strategyParams?.multiplier);
+    const fallback = computeVolumeSpikeFallback({
+      indicatorSeries,
+      volumes,
+      index,
+      multiplier,
+      indicatorKey,
+    });
+    const signalField = VOLUME_SIGNAL_FIELD_BY_ROLE[role] || 'enter';
+    const candidate = { [signalField]: fallback.triggered };
+    if (fallback.meta) {
+      candidate.meta = fallback.meta;
+    }
+    const ruleResult = normaliseRuleResultFromLegacy(pluginId, role, candidate, index);
+    return { ruleResult };
   }
 
   function collectNumericParamsFromDsl(roleKey, baseParams) {
@@ -8894,6 +9064,22 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike":
+          case "volume_spike_exit":
+            {
+              const pluginId =
+                exitStrategy === "volume_spike" ? "volume_spike_exit" : exitStrategy;
+              const evaluation = evaluateVolumeSpikeStrategy(
+                pluginId,
+                "longExit",
+                i,
+                exitParams,
+                indicators.volumeAvgExit,
+                "volumeAvgExit",
+              );
+              exitRuleResult = evaluation.ruleResult;
+              break;
+            }
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9641,6 +9827,19 @@ function runStrategy(data, params, options = {}) {
                 "%R": [wrPC, wrC, indicators.williamsCover[i + 1] ?? null],
               };
             break;
+          case "cover_volume_spike":
+            {
+              const evaluation = evaluateVolumeSpikeStrategy(
+                "cover_volume_spike",
+                "shortExit",
+                i,
+                shortExitParams,
+                indicators.volumeAvgShortExit,
+                "volumeAvgShortExit",
+              );
+              shortExitRuleResult = evaluation.ruleResult;
+              break;
+            }
           case "cover_turtle_breakout":
             const tpC = shortExitParams.breakoutPeriod || 20;
             if (i >= tpC) {
@@ -9992,19 +10191,18 @@ function runStrategy(data, params, options = {}) {
             break;
           }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const evaluation = evaluateVolumeSpikeStrategy(
+              "volume_spike",
+              "longEntry",
+              i,
+              entryParams,
+              indicators.volumeAvgEntry,
+              "volumeAvgEntry",
+            );
+            entryRuleResult = evaluation.ruleResult;
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
@@ -10366,6 +10564,19 @@ function runStrategy(data, params, options = {}) {
               "%R": [wrPSE, wrSE, indicators.williamsShortEntry[i + 1] ?? null],
             };
           break;
+        case "short_volume_spike":
+          {
+            const evaluation = evaluateVolumeSpikeStrategy(
+              "short_volume_spike",
+              "shortEntry",
+              i,
+              shortEntryParams,
+              indicators.volumeAvgShortEntry,
+              "volumeAvgShortEntry",
+            );
+            shortEntryRuleResult = evaluation.ruleResult;
+            break;
+          }
         case "short_turtle_stop_loss":
           const slPSE = shortEntryParams.stopLossPeriod || 10;
           if (i >= slPSE) {
@@ -11062,26 +11273,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -11128,6 +11344,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -11156,19 +11390,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,

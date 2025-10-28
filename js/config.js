@@ -11,6 +11,9 @@ const strategyDescriptions = {
     'bollinger_breakout': { name: '布林通道突破', desc: '價格向上突破布林上軌。\n參數: 週期, 標準差', defaultParams: { period: 20, deviations: 2 }, optimizeTargets: [{ name: 'period', label: '週期', range: { from: 10, to: 50, step: 2 } }, { name: 'deviations', label: '標準差', range: { from: 1, to: 3.5, step: 0.1 } }] },
     'k_d_cross': { name: 'KD黃金交叉 (D<X)', desc: 'K>D 且 D<X。\n參數: KD週期, D值上限(X)', defaultParams: { period: 9, thresholdX: 30 }, optimizeTargets: [{ name: 'period', label: 'KD週期', range: { from: 5, to: 21, step: 1 } }, { name: 'thresholdX', label: 'D值上限(X)', range: { from: 10, to: 50, step: 2 } }] },
     'volume_spike': { name: '成交量暴增', desc: '成交量 > N日均量 * 倍數。\n參數: 倍數, 平均週期', defaultParams: { multiplier: 2, period: 20 }, optimizeTargets: [{ name: 'period', label: '平均週期', range: { from: 5, to: 60, step: 2 } }, { name: 'multiplier', label: '倍數', range: { from: 1.2, to: 6, step: 0.2 } }] },
+    'volume_spike_exit': { name: '成交量暴增 (出場)', desc: '成交量 > N日均量 * 倍數。\n參數: 倍數, 平均週期', defaultParams: { multiplier: 2, period: 20 }, optimizeTargets: [{ name: 'period', label: '平均週期', range: { from: 5, to: 60, step: 2 } }, { name: 'multiplier', label: '倍數', range: { from: 1.2, to: 6, step: 0.2 } }] },
+    'short_volume_spike': { name: '成交量暴增 (做空)', desc: '成交量 > N日均量 * 倍數。\n參數: 倍數, 平均週期', defaultParams: { multiplier: 2, period: 20 }, optimizeTargets: [{ name: 'period', label: '平均週期', range: { from: 5, to: 60, step: 2 } }, { name: 'multiplier', label: '倍數', range: { from: 1.2, to: 6, step: 0.2 } }] },
+    'cover_volume_spike': { name: '成交量暴增 (回補)', desc: '成交量 > N日均量 * 倍數。\n參數: 倍數, 平均週期', defaultParams: { multiplier: 2, period: 20 }, optimizeTargets: [{ name: 'period', label: '平均週期', range: { from: 5, to: 60, step: 2 } }, { name: 'multiplier', label: '倍數', range: { from: 1.2, to: 6, step: 0.2 } }] },
     'price_breakout': { name: '價格突破前高', desc: '價格突破前 N 日最高。\n參數: 觀察週期', defaultParams: { period: 20 }, optimizeTargets: [{ name: 'period', label: '觀察週期', range: { from: 5, to: 100, step: 2 } }] },
     'williams_oversold': { name: '威廉指標超賣', desc: 'WR 從超賣區向上反轉。\n參數: 週期, 閾值', defaultParams: { period: 14, threshold: -80 }, optimizeTargets: [{ name: 'period', label: '週期', range: { from: 7, to: 30, step: 1 } }, { name: 'threshold', label: '閾值', range: { from: -95, to: -50, step: 2 } }] },
     'turtle_breakout': { name: '海龜突破 (僅進場)', desc: '價格突破過去 N 日最高。\n參數: 突破週期', defaultParams: { breakoutPeriod: 20 }, optimizeTargets: [{ name: 'breakoutPeriod', label: '突破週期', range: { from: 10, to: 100, step: 2 } }] },
@@ -52,6 +55,7 @@ const STRATEGY_ID_ROLE_MIGRATIONS = Object.freeze({
         ma_cross: 'ma_cross_exit',
         macd_cross: 'macd_cross_exit',
         k_d_cross: 'k_d_cross_exit',
+        volume_spike: 'volume_spike_exit',
     },
     shortEntry: {
         ma_cross: 'short_ma_cross',
@@ -63,6 +67,7 @@ const STRATEGY_ID_ROLE_MIGRATIONS = Object.freeze({
         price_breakdown: 'short_price_breakdown',
         williams_overbought: 'short_williams_overbought',
         turtle_stop_loss: 'short_turtle_stop_loss',
+        volume_spike: 'short_volume_spike',
     },
     shortExit: {
         ma_cross: 'cover_ma_cross',
@@ -76,6 +81,7 @@ const STRATEGY_ID_ROLE_MIGRATIONS = Object.freeze({
         turtle_breakout: 'cover_turtle_breakout',
         trailing_stop: 'cover_trailing_stop',
         fixed_stop_loss: 'cover_fixed_stop_loss',
+        volume_spike: 'cover_volume_spike',
     },
 });
 
