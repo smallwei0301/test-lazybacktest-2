@@ -141,3 +141,60 @@ const globalOptimizeTargets = {
     stopLoss: { label: '停損 (%)', range: { from: 1, to: 30, step: 0.5 } },
     takeProfit: { label: '停利 (%)', range: { from: 5, to: 100, step: 1 } }
 };
+
+const strategyRoleCatalog = Object.freeze({
+    entry: [
+        'ma_cross',
+        'ma_above',
+        'rsi_oversold',
+        'macd_cross',
+        'bollinger_breakout',
+        'k_d_cross',
+        'volume_spike',
+        'price_breakout',
+        'williams_oversold',
+        'turtle_breakout',
+    ],
+    exit: [
+        'ma_cross_exit',
+        'ma_below',
+        'rsi_overbought',
+        'macd_cross_exit',
+        'bollinger_reversal',
+        'k_d_cross_exit',
+        'volume_spike',
+        'price_breakdown',
+        'williams_overbought',
+        'turtle_stop_loss',
+        'trailing_stop',
+        'fixed_stop_loss',
+    ],
+    shortEntry: [
+        'short_ma_cross',
+        'short_ma_below',
+        'short_rsi_overbought',
+        'short_macd_cross',
+        'short_bollinger_reversal',
+        'short_k_d_cross',
+        'short_price_breakdown',
+        'short_williams_overbought',
+        'short_turtle_stop_loss',
+    ],
+    shortExit: [
+        'cover_ma_cross',
+        'cover_ma_above',
+        'cover_rsi_oversold',
+        'cover_macd_cross',
+        'cover_bollinger_breakout',
+        'cover_k_d_cross',
+        'cover_price_breakout',
+        'cover_williams_oversold',
+        'cover_turtle_breakout',
+        'cover_trailing_stop',
+        'cover_fixed_stop_loss',
+    ],
+});
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestStrategyRoleCatalog = strategyRoleCatalog;
+}

@@ -1,3 +1,20 @@
+## 2026-09-26 — Patch LB-STRATEGY-UI-20260926B
+- **Scope**: 策略參數欄位事件繫結修正與 DSL 即時同步。
+- **Updates**:
+  - `js/ui/strategy-form.js` 新增參數欄位監聽器管理，切換策略或新增 DSL 規則時立即繫結事件，確保表單修改會同步更新 DSL 與儲存狀態。
+  - 更新模組版本碼至 `LB-STRATEGY-UI-20260926B`，維持瀏覽器重新載入後會套用最新事件處理邏輯。
+  - `tests/manual/dsl-restore-check.js` 調整標題版本碼，便於手動驗證紀錄與程式碼一致。
+- **Testing**: `npm test`；`node tests/manual/dsl-restore-check.js`（更新後仍適用的手動檢查指引）。
+
+## 2026-09-26 — Patch LB-STRATEGY-UI-20260926A
+- **Scope**: 策略表單動態生成、DSL 編輯器與狀態還原驗證。
+- **Updates**:
+  - 新增 `js/ui/strategy-form.js`，依 Registry `meta`/`paramsSchema` 產生策略選單與參數欄位，並提供 AND/OR/NOT DSL 組裝與 localStorage 狀態保存。
+  - `index.html` 移除靜態選項，導入 DSL 規則管理區塊與「DSL 還原檢查」手動驗證按鈕，腳本順序加入新模組。
+  - `js/main.js`、`js/backtest.js` 改以新模組讀寫策略參數、產生複合 DSL，開發者工具支援 DSL 儲存還原檢查。
+  - `tests/manual/dsl-restore-check.js` 提供手動驗證腳本步驟，`js/config.js` 建立角色策略清單供表單引用。
+- **Testing**: `npm test`；`node tests/manual/dsl-restore-check.js`（確認手動檢查指引）。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
