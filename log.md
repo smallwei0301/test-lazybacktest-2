@@ -1,3 +1,14 @@
+## 2026-09-24 — Patch LB-PERFORMANCE-STRATEGY-20260924A
+- **Issue recap**: 摘要卡片的建議語句缺乏流程脈絡，敏感度說明出現連續標點；績效分析頁無法依「最近 N 年」設定輸出資料，出場策略的成交量暴增條件亦無法觸發，同時快取預熱排程需調整至 13:40。
+- **Fix**:
+  - `js/backtest.js` 更新策略摘要流程為版本 `LB-STRATEGY-STATUS-20260924A`，以績效差距、年化報酬、風險指標與敏感度分數依序產生不超過 50 字的流程建議，並修正敏感度摘要的連續標點。
+  - `js/backtest.js` 導入 `LB-PERFORMANCE-PERIODS-20260924A` 邏輯，根據「最近 N 年」設定動態產生 1～N 年期間表格並加入整體摘要，`js/main.js` 於調整期間後自動刷新，並新增輸入監聽以即時重繪。
+  - `js/strategy-plugins/volume.js` 修補為版本 `LB-VOLUME-SPIKE-20260924A`，依角色回傳對應的進出場旗標，恢復出場策略的成交量暴增條件。
+  - `netlify.toml` 將 `cache-warmer` 時程調整為版本 `LB-CACHE-WARMER-20260924A`，每日 UTC 05:40 觸發對應台灣時間 13:40。
+  - `index.html` 移除分頁按鈕的縮放動畫，避免切換時被誤判為縮小。
+- **Diagnostics**: 建議在本地調整「最近 N 年」數值後重新整理績效分析分頁，確認表格依序出現最近 1～N 年資料；並於策略卡選用成交量暴增作為出場條件，確認成交量高於均量乘以倍數時能觸發訊號。
+- **Testing**: `npm test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
