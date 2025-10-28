@@ -1,4 +1,6 @@
 // Patch Tag: LB-PLUGIN-VERIFIER-20260813A
+// Patch Tag: LB-VOLUME-SPIKE-FLOW-20260730A
+// Patch Tag: LB-VOLUME-EXIT-20240829A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   const registry = globalScope?.StrategyPluginRegistry;
@@ -12,6 +14,19 @@
   function toFinite(value) {
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
+  }
+
+  function resolveIndicatorKey(role) {
+    switch (role) {
+      case 'longExit':
+        return 'volumeAvgExit';
+      case 'shortEntry':
+        return 'volumeAvgShortEntry';
+      case 'shortExit':
+        return 'volumeAvgShortExit';
+      default:
+        return 'volumeAvgEntry';
+    }
   }
 
   function getMeta(config) {
@@ -40,8 +55,9 @@
     (context, params) => {
       const idx = Number(context?.index) || 0;
       const volumes = context?.series?.volume;
+      const indicatorKey = resolveIndicatorKey(context?.role);
       const avgSeries = context?.helpers?.getIndicator
-        ? context.helpers.getIndicator('volumeAvgEntry')
+        ? context.helpers.getIndicator(indicatorKey)
         : undefined;
 
       if (!Array.isArray(volumes) || !Array.isArray(avgSeries)) {
@@ -62,16 +78,35 @@
         triggered = volume > avg * multiplier;
       }
 
+      const role = context?.role || 'longEntry';
       const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
-      base.enter = triggered;
       if (triggered) {
         base.meta = {
           indicatorValues: {
             成交量: [prevVolume, volume, nextVolume],
             均量: [prevAvg, avg, nextAvg],
           },
+          multiplier,
+          indicatorKey,
+          thresholdVolume: avg !== null ? avg * multiplier : null,
         };
       }
+
+      switch (role) {
+        case 'longExit':
+          base.exit = triggered;
+          break;
+        case 'shortEntry':
+          base.short = triggered;
+          break;
+        case 'shortExit':
+          base.cover = triggered;
+          break;
+        default:
+          base.enter = triggered;
+          break;
+      }
+
       return base;
     },
   );
