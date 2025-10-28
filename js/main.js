@@ -4263,14 +4263,62 @@ async function runManualVerificationStrategyDsl() {
     }
 }
 
+async function runManualVerificationDslRestore() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查策略 DSL 儲存與還原狀態…', 'info');
+
+    const lines = [];
+
+    try {
+        const form = window.lazybacktestStrategyForm;
+        if (
+            !form ||
+            typeof form.exportState !== 'function' ||
+            typeof form.restoreState !== 'function'
+        ) {
+            throw new Error('StrategyForm 模組未載入');
+        }
+
+        const beforeState = form.exportState();
+        if (typeof form.persistState === 'function') {
+            form.persistState();
+        }
+        const restored = form.restoreState();
+        const afterState = form.exportState();
+
+        const beforeJson = JSON.stringify(beforeState);
+        const afterJson = JSON.stringify(afterState);
+
+        if (!restored) {
+            lines.push('⚠️ localStorage 無先前紀錄或還原流程未觸發。');
+            updateManualVerificationStatus('DSL 還原檢查完成（未偵測到可還原的紀錄）。', 'warning');
+        } else if (beforeJson === afterJson) {
+            lines.push('✅ DSL 狀態儲存與還原一致。');
+            updateManualVerificationStatus('DSL 還原檢查完成。', 'success');
+        } else {
+            lines.push('❌ 還原後的 DSL 狀態與目前表單不一致，請檢查策略表單同步機制。');
+            updateManualVerificationStatus('DSL 還原檢查偵測到差異。', 'error');
+        }
+        appendManualVerificationEntry('DSL 還原檢查', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`DSL 還原檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('DSL 還原檢查', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
 function initManualVerificationTools() {
     const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
     const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
     const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
     const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
     const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
+    const dslRestoreBtn = document.getElementById('manualVerifyDslRestoreBtn');
 
-    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn && !dslRestoreBtn) {
         return;
     }
 
@@ -4297,6 +4345,11 @@ function initManualVerificationTools() {
     if (dslBtn) {
         dslBtn.addEventListener('click', () => {
             runManualVerificationStrategyDsl();
+        });
+    }
+    if (dslRestoreBtn) {
+        dslRestoreBtn.addEventListener('click', () => {
+            runManualVerificationDslRestore();
         });
     }
 }
@@ -5074,108 +5127,27 @@ function ensureSelectUsesNormalizedValue(type, selectElement) {
 }
 
 function resolveStrategyParamPresentation(type, strategyId, paramName) {
-    let label = paramName;
-    let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
-
-    if (strategyId === 'k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdX') {
-            label = 'D值上限(X)';
-            idSuffix = 'KdThresholdX';
-        }
-    } else if (strategyId === 'k_d_cross_exit') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdY') {
-            label = 'D值下限(Y)';
-            idSuffix = 'KdThresholdY';
-        }
-    } else if (strategyId === 'turtle_stop_loss' && paramName === 'stopLossPeriod') {
-        label = '停損週期';
-        idSuffix = 'StopLossPeriod';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'signalPeriod') {
-        label = 'DEA週期(x)';
-        idSuffix = 'SignalPeriod';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'shortPeriod') {
-        label = 'DI短EMA(n)';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'longPeriod') {
-        label = 'DI長EMA(m)';
-    } else if (strategyId === 'short_k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdY') {
-            label = 'D值下限(Y)';
-            idSuffix = 'ShortKdThresholdY';
-        }
-    } else if (strategyId === 'cover_k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdX') {
-            label = 'D值上限(X)';
-            idSuffix = 'CoverKdThresholdX';
-        }
-    } else if (strategyId === 'short_macd_cross') {
-        if (paramName === 'shortPeriod') {
-            label = 'DI短EMA(n)';
-        } else if (paramName === 'longPeriod') {
-            label = 'DI長EMA(m)';
-        } else if (paramName === 'signalPeriod') {
-            label = 'DEA週期(x)';
-            idSuffix = 'ShortSignalPeriod';
-        }
-    } else if (strategyId === 'cover_macd_cross') {
-        if (paramName === 'shortPeriod') {
-            label = 'DI短EMA(n)';
-        } else if (paramName === 'longPeriod') {
-            label = 'DI長EMA(m)';
-        } else if (paramName === 'signalPeriod') {
-            label = 'DEA週期(x)';
-            idSuffix = 'CoverSignalPeriod';
-        }
-    } else if (strategyId === 'short_turtle_stop_loss' && paramName === 'stopLossPeriod') {
-        label = '觀察週期';
-        idSuffix = 'ShortStopLossPeriod';
-    } else if (strategyId === 'cover_turtle_breakout' && paramName === 'breakoutPeriod') {
-        label = '突破週期';
-        idSuffix = 'CoverBreakoutPeriod';
-    } else if (strategyId === 'cover_trailing_stop' && paramName === 'percentage') {
-        label = '百分比(%)';
-        idSuffix = 'CoverTrailingStopPercentage';
-    } else {
-        const baseKey = strategyId.replace('short_', '').replace('cover_', '').replace('_exit', '');
-        if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
-            if (paramName === 'shortPeriod') {
-                label = '短期SMA';
-            } else if (paramName === 'longPeriod') {
-                label = '長期SMA';
-            }
-        } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
-            if (paramName === 'period') {
-                label = 'SMA週期';
-            }
-        } else if (paramName === 'period') {
-            label = '週期';
-        } else if (paramName === 'threshold') {
-            label = '閾值';
-        } else if (paramName === 'signalPeriod') {
-            label = '信號週期';
-        } else if (paramName === 'deviations') {
-            label = '標準差';
-        } else if (paramName === 'multiplier') {
-            label = '倍數';
-        } else if (paramName === 'breakoutPeriod') {
-            label = '突破週期';
-        }
+    if (
+        window.lazybacktestStrategyForm &&
+        typeof window.lazybacktestStrategyForm.resolveParamPresentation === 'function'
+    ) {
+        return window.lazybacktestStrategyForm.resolveParamPresentation(type, strategyId, paramName);
     }
-
+    const idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
     return {
-        label,
+        label: paramName,
         inputId: `${type}${idSuffix}`,
     };
 }
 
 function getStrategyParams(type) {
+    if (
+        window.lazybacktestStrategyForm &&
+        typeof window.lazybacktestStrategyForm.getParams === 'function'
+    ) {
+        return window.lazybacktestStrategyForm.getParams(type);
+    }
+
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5247,15 +5219,29 @@ function createStrategyDslPluginNode(strategyId, params) {
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
     const dsl = { version: STRATEGY_DSL_VERSION };
-    const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
-    if (entryNode) dsl.longEntry = entryNode;
-    const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
-    if (exitNode) dsl.longExit = exitNode;
-    if (selection.enableShorting) {
-        const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
-        if (shortEntryNode) dsl.shortEntry = shortEntryNode;
-        const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
-        if (shortExitNode) dsl.shortExit = shortExitNode;
+    const formApi = window.lazybacktestStrategyForm;
+    if (formApi && typeof formApi.getDslNode === 'function') {
+        const entryNode = formApi.getDslNode('entry');
+        if (entryNode) dsl.longEntry = entryNode;
+        const exitNode = formApi.getDslNode('exit');
+        if (exitNode) dsl.longExit = exitNode;
+        if (selection.enableShorting) {
+            const shortEntryNode = formApi.getDslNode('shortEntry');
+            if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+            const shortExitNode = formApi.getDslNode('shortExit');
+            if (shortExitNode) dsl.shortExit = shortExitNode;
+        }
+    } else {
+        const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
+        if (entryNode) dsl.longEntry = entryNode;
+        const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
+        if (exitNode) dsl.longExit = exitNode;
+        if (selection.enableShorting) {
+            const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
+            if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+            const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
+            if (shortExitNode) dsl.shortExit = shortExitNode;
+        }
     }
     return Object.keys(dsl).length > 1 ? dsl : null;
 }
