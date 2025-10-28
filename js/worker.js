@@ -7042,7 +7042,35 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    // Patch Tag: LB-VOLUME-AVG-20260919A
+    const volumeEntryPeriod = ep?.period || 20;
+    const volumeExitPeriod = xp?.period || volumeEntryPeriod;
+    const volumeShortEntryPeriod = enableShorting
+      ? sep?.period ?? volumeExitPeriod
+      : volumeExitPeriod;
+    const volumeCoverPeriod = enableShorting
+      ? sxp?.period ?? volumeEntryPeriod
+      : volumeEntryPeriod;
+
+    indic.volumeAvgEntry = maCalculator(volumes, volumeEntryPeriod);
+    indic.volumeAvgExit =
+      volumeExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : maCalculator(volumes, volumeExitPeriod);
+    if (enableShorting) {
+      indic.volumeAvgShortEntry =
+        volumeShortEntryPeriod === volumeExitPeriod
+          ? indic.volumeAvgExit
+          : volumeShortEntryPeriod === volumeEntryPeriod
+          ? indic.volumeAvgEntry
+          : maCalculator(volumes, volumeShortEntryPeriod);
+      indic.volumeAvgCover =
+        volumeCoverPeriod === volumeEntryPeriod
+          ? indic.volumeAvgEntry
+          : volumeCoverPeriod === volumeExitPeriod
+          ? indic.volumeAvgExit
+          : maCalculator(volumes, volumeCoverPeriod);
+    }
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -9079,6 +9107,41 @@ function runStrategy(data, params, options = {}) {
                 };
               break;
             }
+          case "volume_spike":
+            {
+              // Patch Tag: LB-VOLUME-SPIKE-EXIT-20260919A
+              const pluginResult = callStrategyPlugin(
+                'volume_spike',
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const vAX = indicators.volumeAvgExit[i];
+              const volumeMultiplier =
+                Number.isFinite(exitParams?.multiplier) && exitParams.multiplier > 0
+                  ? Number(exitParams.multiplier)
+                  : 2;
+              sellSignal =
+                check(vAX) && check(curV) && curV > vAX * volumeMultiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgExit[i - 1] ?? null,
+                    vAX,
+                    indicators.volumeAvgExit[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "trailing_stop":
             {
               if (check(curH) && lastBuyP > 0) {
@@ -11074,6 +11137,9 @@ function runStrategy(data, params, options = {}) {
     const fallbackYears = Math.floor(totalYears);
     const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
+    // Patch Tag: LB-PERFORMANCE-PERIODS-20260919A
+    periodsToCalculate["1M"] = 1;
+    periodsToCalculate["6M"] = 6;
     for (let y = 1; y <= yearLimit; y += 1) {
       periodsToCalculate[`${y}Y`] = y * 12;
     }

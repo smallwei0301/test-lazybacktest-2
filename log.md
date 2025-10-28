@@ -1,3 +1,14 @@
+## 2026-09-19 — Patch LB-PERFORMANCE-TRANSPOSE-20260919A
+- **Issue recap**: 期間績效表仍以指標為列、期間為欄，無法呈現最近一個月與六個月的表格；成交量暴增出場訊號持續失效，策略建議亦缺少過擬合指標建議，頁籤列點擊時仍出現縮放感。
+- **Fix**:
+  - `js/backtest.js` 將期間績效表轉為「期間列 × 指標欄」，新增最近一個月與最近六個月資料列，並整合 `LB-PERFORMANCE-TABLE-20260919A`。
+  - `js/worker.js` 擴充期間計算加入 1M/6M 並產出多角色均量陣列，新增 `volume_spike` 出場計算（版本 `LB-PERFORMANCE-PERIODS-20260919A`、`LB-VOLUME-AVG-20260919A`、`LB-VOLUME-SPIKE-EXIT-20260919A`）。
+  - `js/strategy-plugins/volume.js` 依腳色選擇對應均量指標，補強診斷資訊，避免出場無法觸發。
+  - `js/backtest.js` 的策略建議卡納入過擬合報酬率比與夏普值比的正負面建議，確保流程涵蓋分段檢查。
+  - `index.html`、`css/style.css` 加入 `tab-nav` 佈局與樣式，消除頁籤列在按下時的縮放跳動（`LB-TAB-NAV-20260919A`）。
+- **Diagnostics**: 請在啟用「成交量暴增」出場策略後檢視交易紀錄，確認量能突破均量時產生出場事件；於近期設定 `N=2` 驗證期間績效表是否出現「最近一個月／六個月／一年／兩年」四列，並檢查建議卡是否出現過擬合指標建議。
+- **Testing**: `npm run test`
+
 ## 2026-07-30 — Patch LB-PERFORMANCE-ADVICE-20260730A
 - **Issue recap**: 期間績效分析無法顯示資料、策略建議文字缺乏流程化指引，成交量暴增出場未能觸發，且自動資料撈取時間須調整。
 - **Fix**:

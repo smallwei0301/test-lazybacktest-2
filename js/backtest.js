@@ -1570,6 +1570,39 @@ function buildStrategyAdviceFlow(result = {}) {
     }
     if (riskMessage) advice.push(riskMessage);
 
+    const safeDivide = (numerator, denominator) => {
+        const num = Number(numerator);
+        const den = Number(denominator);
+        if (!Number.isFinite(num) || !Number.isFinite(den)) return null;
+        if (Math.abs(den) < 1e-6) return null;
+        return num / den;
+    };
+    const returnRatio = safeDivide(result?.annReturnHalf2, result?.annReturnHalf1);
+    if (returnRatio !== null) {
+        if (returnRatio >= 0.5 && returnRatio <= 1.5) {
+            advice.push('過擬合(報酬率比)貼近1，後段報酬維持穩定。');
+        } else if (returnRatio < 0.5) {
+            advice.push('過擬合(報酬率比)偏低，請延長樣本並檢查走勢。');
+        } else {
+            advice.push('過擬合(報酬率比)偏高，建議啟動滾動測試驗證。');
+        }
+    } else {
+        advice.push('過擬合(報酬率比)資料不足，請重新分段計算。');
+    }
+
+    const sharpeRatioHalf = safeDivide(result?.sharpeHalf2, result?.sharpeHalf1);
+    if (sharpeRatioHalf !== null) {
+        if (sharpeRatioHalf >= 0.5 && sharpeRatioHalf <= 1.5) {
+            advice.push('過擬合(夏普值比)穩定，風險調整後表現一致。');
+        } else if (sharpeRatioHalf < 0.5) {
+            advice.push('過擬合(夏普值比)偏低，請調整風控並比較前後段。');
+        } else {
+            advice.push('過擬合(夏普值比)偏高，請搭配走勢檢查是否過擬合。');
+        }
+    } else {
+        advice.push('過擬合(夏普值比)資料不足，請補齊分段指標。');
+    }
+
     const totalTrades = Number.isFinite(result?.tradesCount)
         ? Number(result.tradesCount)
         : Number.isFinite(result?.totalTrades)
@@ -5337,18 +5370,25 @@ function renderPerformanceAnalysis(result) {
         return;
     }
 
-    const yearEntries = [];
-    for (let year = 1; year <= yearsSetting; year += 1) {
-        const key = `${year}Y`;
-        const label = `最近${year === 1 ? '一年' : `${year}年`}`;
+    // Patch Tag: LB-PERFORMANCE-TABLE-20260919A
+    const periodEntries = [];
+    const pushPeriodEntry = (key, label) => {
+        if (periodEntries.some((entry) => entry.key === key)) return;
         const entry = Object.prototype.hasOwnProperty.call(subPeriodResults, key)
             ? subPeriodResults[key]
             : null;
-        const normalized = entry && typeof entry === 'object' ? entry : null;
-        yearEntries.push({ key, label, data: normalized });
+        periodEntries.push({ key, label, data: entry && typeof entry === 'object' ? entry : null });
+    };
+
+    pushPeriodEntry('1M', '最近一個月');
+    pushPeriodEntry('6M', '最近六個月');
+    for (let year = 1; year <= yearsSetting; year += 1) {
+        const key = `${year}Y`;
+        const label = `最近${year === 1 ? '一年' : `${year}年`}`;
+        pushPeriodEntry(key, label);
     }
 
-    const hasResult = yearEntries.some((entry) => entry.data !== null);
+    const hasResult = periodEntries.some((entry) => entry.data !== null);
     if (!hasResult) {
         setPerformanceAnalysisPlaceholder('尚無足夠期間績效資料，請延長期間或縮小 N。');
         return;
@@ -5398,20 +5438,20 @@ function renderPerformanceAnalysis(result) {
         { key: 'maxDrawdown', label: '最大回撤(%)', formatter: (value) => formatPercent(value, { showSign: false, positiveIsGood: false }) },
     ];
 
-    const headerCells = yearEntries
-        .map((entry) => `<th scope="col" class="px-3 py-2 font-medium text-center whitespace-nowrap">${escapeHtml(entry.label)}</th>`)
+    const headerCells = metrics
+        .map((metric) => `<th scope="col" class="px-3 py-2 font-medium text-center whitespace-nowrap">${escapeHtml(metric.label)}</th>`)
         .join('');
-    const bodyRows = metrics
-        .map((metric) => {
-            const cells = yearEntries
-                .map((entry) => {
+    const bodyRows = periodEntries
+        .map((entry) => {
+            const cells = metrics
+                .map((metric) => {
                     const raw = entry.data ? entry.data[metric.key] : null;
                     return `<td class="px-3 py-2 text-center">${metric.formatter(raw)}</td>`;
                 })
                 .join('');
             return `
                 <tr>
-                    <th scope="row" class="px-3 py-2 text-left font-medium" style="color: var(--foreground);">${escapeHtml(metric.label)}</th>
+                    <th scope="row" class="px-3 py-2 text-left font-medium whitespace-nowrap" style="color: var(--foreground);">${escapeHtml(entry.label)}</th>
                     ${cells}
                 </tr>`;
         })
@@ -5421,7 +5461,7 @@ function renderPerformanceAnalysis(result) {
         '<div class="inline-block min-w-full align-middle">',
         '<table class="min-w-full divide-y divide-border text-xs text-left" style="color: var(--foreground);">',
         `<thead class="bg-muted/10 text-[11px] uppercase tracking-wide" style="color: var(--muted-foreground);">`,
-        `<tr><th scope="col" class="px-3 py-2 font-medium">指標</th>${headerCells}</tr></thead>`,
+        `<tr><th scope="col" class="px-3 py-2 font-medium whitespace-nowrap">期間</th>${headerCells}</tr></thead>`,
         `<tbody class="divide-y divide-border">${bodyRows}</tbody>`,
         '</table>',
         '</div>',

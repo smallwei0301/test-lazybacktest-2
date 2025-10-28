@@ -41,8 +41,17 @@
     (context, params) => {
       const idx = Number(context?.index) || 0;
       const volumes = context?.series?.volume;
+      const role = context?.role || 'longEntry';
+      const indicatorKeyByRole = {
+        longEntry: 'volumeAvgEntry',
+        longExit: 'volumeAvgExit',
+        shortEntry: 'volumeAvgShortEntry',
+        shortExit: 'volumeAvgCover',
+      };
+      const indicatorKey = indicatorKeyByRole[role] || 'volumeAvgEntry';
       const avgSeries = context?.helpers?.getIndicator
-        ? context.helpers.getIndicator('volumeAvgEntry')
+        ? context.helpers.getIndicator(indicatorKey) ||
+          context.helpers.getIndicator('volumeAvgEntry')
         : undefined;
 
       if (!Array.isArray(volumes) || !Array.isArray(avgSeries)) {
@@ -63,14 +72,13 @@
         triggered = volume > avg * multiplier;
       }
 
-      const role = context?.role || 'longEntry';
       const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
       if (triggered) {
         base.meta = {
-          indicatorValues: {
-            成交量: [prevVolume, volume, nextVolume],
-            均量: [prevAvg, avg, nextAvg],
-          },
+            indicatorValues: {
+              成交量: [prevVolume, volume, nextVolume],
+              均量: [prevAvg, avg, nextAvg],
+            },
         };
       }
 
