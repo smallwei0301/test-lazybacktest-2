@@ -7042,7 +7042,27 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    const volumePeriodCache = new Map();
+    const resolveVolumeAverage = (rawPeriod) => {
+      const period = Number(rawPeriod) || 0;
+      if (!Number.isFinite(period) || period <= 0) {
+        return new Array(volumes.length).fill(null);
+      }
+      if (!volumePeriodCache.has(period)) {
+        volumePeriodCache.set(period, maCalculator(volumes, period));
+      }
+      return volumePeriodCache.get(period);
+    };
+    const volumeEntryPeriod = ep?.period || 20;
+    indic.volumeAvgEntry = resolveVolumeAverage(volumeEntryPeriod);
+    const volumeExitPeriod = xp?.period || volumeEntryPeriod;
+    indic.volumeAvgExit = resolveVolumeAverage(volumeExitPeriod);
+    if (enableShorting) {
+      const volumeShortEntryPeriod = sep?.period || volumeEntryPeriod;
+      indic.volumeAvgShortEntry = resolveVolumeAverage(volumeShortEntryPeriod);
+      const volumeCoverPeriod = sxp?.period || volumeExitPeriod;
+      indic.volumeAvgCover = resolveVolumeAverage(volumeCoverPeriod);
+    }
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7428,6 +7448,16 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg =
+      getIndicatorArray(ctx, "volumeAvgExit") ||
+      getIndicatorArray(ctx, "volumeAvgEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -8894,6 +8924,39 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike":
+            {
+              const pluginResult = callStrategyPlugin(
+                "volume_spike",
+                "longExit",
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgSeries =
+                indicators.volumeAvgExit || indicators.volumeAvgEntry || [];
+              const avgVolume = avgSeries[i];
+              const multiplier = Number(exitParams?.multiplier) || 2;
+              sellSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    avgSeries[i - 1] ?? null,
+                    avgVolume,
+                    avgSeries[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -11062,26 +11125,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -11128,6 +11196,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -11156,19 +11242,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
