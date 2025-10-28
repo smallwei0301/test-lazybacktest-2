@@ -62,9 +62,18 @@
         triggered = volume > avg * multiplier;
       }
 
+      const role = typeof context?.role === 'string' ? context.role : 'longEntry';
       const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
-      base.enter = triggered;
       if (triggered) {
+        if (role === 'longExit') {
+          base.exit = true;
+        } else if (role === 'shortEntry') {
+          base.short = true;
+        } else if (role === 'shortExit') {
+          base.cover = true;
+        } else {
+          base.enter = true;
+        }
         base.meta = {
           indicatorValues: {
             成交量: [prevVolume, volume, nextVolume],
