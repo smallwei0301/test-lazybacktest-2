@@ -7042,7 +7042,50 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    // Patch Tag: LB-VOLUME-PARAMS-20260923A — 區分多空出入場的成交量均線並支援自訂倍數。
+    const clampVolumePeriod = (value, fallback) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        return Math.max(1, Math.floor(Number(fallback) || 1));
+      }
+      return Math.max(1, Math.min(365, Math.floor(numeric)));
+    };
+
+    const entryVolumePeriod = clampVolumePeriod(ep?.period, 20);
+    indic.volumeAvgEntry = maCalculator(volumes, entryVolumePeriod);
+
+    const exitVolumePeriod = clampVolumePeriod(xp?.period, entryVolumePeriod);
+    indic.volumeAvgExit =
+      exitVolumePeriod === entryVolumePeriod
+        ? indic.volumeAvgEntry
+        : maCalculator(volumes, exitVolumePeriod);
+
+    if (enableShorting) {
+      const shortEntryVolumePeriod = clampVolumePeriod(
+        sep?.period,
+        exitVolumePeriod,
+      );
+      indic.volumeAvgShortEntry =
+        shortEntryVolumePeriod === exitVolumePeriod
+          ? indic.volumeAvgExit
+          : shortEntryVolumePeriod === entryVolumePeriod
+            ? indic.volumeAvgEntry
+            : maCalculator(volumes, shortEntryVolumePeriod);
+
+      const coverVolumePeriod = clampVolumePeriod(
+        sxp?.period,
+        entryVolumePeriod,
+      );
+      indic.volumeAvgCover =
+        coverVolumePeriod === entryVolumePeriod
+          ? indic.volumeAvgEntry
+          : coverVolumePeriod === exitVolumePeriod
+            ? indic.volumeAvgExit
+            : coverVolumePeriod === shortEntryVolumePeriod
+              ? indic.volumeAvgShortEntry
+              : maCalculator(volumes, coverVolumePeriod);
+    }
+
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7312,7 +7355,11 @@ const entryIndicatorBuilders = {
     ];
   },
   volume_spike(params, ctx) {
-    const period = Number(params?.period) || 20;
+    const periodRaw = Number(params?.period);
+    const period =
+      Number.isFinite(periodRaw) && periodRaw > 0
+        ? Math.max(1, Math.floor(periodRaw))
+        : 20;
     const avg = getIndicatorArray(ctx, "volumeAvgEntry");
     return [
       makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
@@ -7428,6 +7475,20 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const periodRaw = Number(params?.period);
+    const period =
+      Number.isFinite(periodRaw) && periodRaw > 0
+        ? Math.max(1, Math.floor(periodRaw))
+        : 20;
+    const avg =
+      getIndicatorArray(ctx, "volumeAvgExit") ||
+      getIndicatorArray(ctx, "volumeAvgEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -8894,6 +8955,51 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike":
+            {
+              const pluginResult = callStrategyPlugin(
+                "volume_spike",
+                "longExit",
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const entryAvgSeries = Array.isArray(indicators.volumeAvgEntry)
+                ? indicators.volumeAvgEntry
+                : null;
+              const exitAvgSeries = Array.isArray(indicators.volumeAvgExit)
+                ? indicators.volumeAvgExit
+                : null;
+              const avgSeries =
+                exitAvgSeries && entryAvgSeries && exitAvgSeries.length === entryAvgSeries.length
+                  ? exitAvgSeries
+                  : exitAvgSeries || entryAvgSeries;
+              const avgVolume = avgSeries ? avgSeries[i] : null;
+              const multiplierRaw = Number(exitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              sellSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    avgSeries?.[i - 1] ?? null,
+                    avgVolume,
+                    avgSeries?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9992,19 +10098,29 @@ function runStrategy(data, params, options = {}) {
             break;
           }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const entryAvgSeries = Array.isArray(indicators.volumeAvgEntry)
+              ? indicators.volumeAvgEntry
+              : null;
+            const avgVolume = entryAvgSeries ? entryAvgSeries[i] : null;
+            const multiplierRaw = Number(entryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            buySignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (buySignal)
+              entryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  entryAvgSeries?.[i - 1] ?? null,
+                  avgVolume,
+                  entryAvgSeries?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
@@ -11062,26 +11178,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -11128,6 +11249,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -11156,19 +11295,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
