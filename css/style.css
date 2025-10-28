@@ -716,6 +716,35 @@
 [data-tab].tab {
     transition: transform 0.15s ease, color 0.2s ease, border-color 0.2s ease;
 }
+
+[data-tab].tab:active {
+    transform: none !important;
+}
+
+/* Patch Tag: LB-TAB-NAV-20260919A */
+.tab-nav {
+    gap: 2rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+.tab-nav::-webkit-scrollbar {
+    height: 6px;
+}
+.tab-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+.tab-nav::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 40%, transparent);
+    border-radius: 999px;
+}
+.tab-nav .tab {
+    flex: 0 0 auto;
+    transform: none !important;
+}
+.tab-nav .tab:active {
+    transform: none !important;
+}
 .strategy-params { border: 1px solid #d1d5db; padding: 0.75rem; border-radius: 0.375rem; margin-top: 0.5rem; background-color: #f9fafb; }
 .optimize-param-select { margin-left: 0.5rem; padding-right: 2rem; }
 .trade-list::-webkit-scrollbar { width: 6px; }
