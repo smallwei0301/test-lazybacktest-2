@@ -714,7 +714,18 @@
 .tab-content.active { display: block; }
 
 [data-tab].tab {
-    transition: transform 0.15s ease, color 0.2s ease, border-color 0.2s ease;
+    transition: color 0.2s ease, border-color 0.2s ease;
+    transform: none !important;
+}
+
+[data-tab].tab:active,
+[data-tab].tab:focus,
+[data-tab].tab:focus-visible {
+    transform: none !important;
+}
+
+nav[data-tab-strip] {
+    touch-action: manipulation;
 }
 .strategy-params { border: 1px solid #d1d5db; padding: 0.75rem; border-radius: 0.375rem; margin-top: 0.5rem; background-color: #f9fafb; }
 .optimize-param-select { margin-left: 0.5rem; padding-right: 2rem; }
