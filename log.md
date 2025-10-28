@@ -1,3 +1,13 @@
+
+## 2026-09-18 — Patch LB-STRATEGY-ROADMAP-20241001A
+- **Issue recap**: 七階段重構計畫缺少單一任務清單與快速驗證入口，導致開發者無法判斷當前基線是否就緒。
+- **Fix**:
+  - 新增 `js/lib/strategy-refactor-roadmap.js`，將第 0~7 階段彙整成「策略插件模組化基線任務」，並提供版本代碼 `LB-STRATEGY-ROADMAP-20241001A` 及自動／手動驗證指引。
+  - `tests/strategy-refactor-roadmap.test.js` 以 TDD 檢查任務結構、相關檔案與自動驗證命令，`package.json` 同步串聯新測試。
+  - `index.html` / `js/main.js` 在開發者區域新增「策略模組化任務檢查」按鈕，顯示契約、註冊表、清單、DSL 與 roadmap 模組載入狀態，作為手動驗證按鈕。
+- **Diagnostics**: 於主畫面展開開發者區域，點擊「策略模組化任務檢查」，確認五項檢查皆為 ✅，並比對摘要是否描述最新行動計畫。
+- **Testing**: `npm test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:

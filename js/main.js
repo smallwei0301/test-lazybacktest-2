@@ -4333,6 +4333,137 @@ function initDeveloperAreaToggle() {
     });
 }
 
+function computeStrategyRoadmapChecklistState() {
+    const aggregator = typeof window !== 'undefined' ? window.LazybacktestStrategyRefactorRoadmap : null;
+    const task = aggregator && typeof aggregator.getTask === 'function' ? aggregator.getTask() : null;
+    const registry = typeof window !== 'undefined' ? window.StrategyPluginRegistry : null;
+    const contract = typeof window !== 'undefined' ? window.StrategyPluginContract : null;
+    const composerApi = typeof window !== 'undefined' ? window.lazybacktestStrategyComposer : null;
+
+    let manifestMeta = null;
+    if (registry && typeof registry.getStrategyMetaById === 'function') {
+        try {
+            manifestMeta = registry.getStrategyMetaById('turtle_breakout') || registry.getStrategyMetaById('macd_cross');
+        } catch (error) {
+            manifestMeta = null;
+        }
+    }
+
+    const checks = [
+        {
+            id: 'roadmap',
+            label: 'Roadmap 模組載入',
+            ok: Boolean(task),
+            detail: task ? `版本 ${task.version}` : '未載入策略重構任務模組',
+        },
+        {
+            id: 'contract',
+            label: 'StrategyPluginContract 契約',
+            ok:
+                Boolean(contract) &&
+                (typeof contract.version === 'string' || typeof contract.VERSION === 'string'),
+            detail: contract
+                ? `版本 ${contract.version || contract.VERSION || '未知'}`
+                : '未找到全域 StrategyPluginContract',
+        },
+        {
+            id: 'registry',
+            label: 'StrategyPluginRegistry 註冊表',
+            ok: Boolean(registry) && typeof registry.getStrategyMetaById === 'function',
+            detail: registry
+                ? `版本 ${registry.__version__ || '未標示版本'}`
+                : '未找到 StrategyPluginRegistry',
+        },
+        {
+            id: 'manifest',
+            label: '策略清單已載入',
+            ok: Boolean(manifestMeta && manifestMeta.id),
+            detail: manifestMeta
+                ? `範例：${manifestMeta.id}｜${manifestMeta.label || '未標示標籤'}`
+                : '尚未透過 registerLazyStrategy 載入範例策略',
+        },
+        {
+            id: 'composer',
+            label: '策略組合 DSL',
+            ok: Boolean(composerApi && typeof composerApi.buildComposite === 'function'),
+            detail: composerApi
+                ? `版本 ${composerApi.__version__ || '未標示版本'}`
+                : '未找到 lazybacktestStrategyComposer',
+        },
+    ];
+
+    return {
+        summary: task ? task.summary : '尚未載入策略模組化任務摘要，請確認腳本順序。',
+        hint: task ? task.manualValidation : '請確認 js/lib/strategy-refactor-roadmap.js 已於主頁載入。',
+        checks,
+    };
+}
+
+function renderStrategyRoadmapChecklist(state, listEl) {
+    if (!listEl) return;
+    while (listEl.firstChild) {
+        listEl.removeChild(listEl.firstChild);
+    }
+    const items = Array.isArray(state?.checks) ? state.checks : [];
+    items.forEach((item) => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start gap-2';
+        const status = document.createElement('span');
+        status.textContent = item.ok ? '✅' : '⚠️';
+        status.setAttribute('aria-hidden', 'true');
+        const textEl = document.createElement('span');
+        textEl.textContent = `${item.label}：${item.detail}`;
+        if (item.ok) {
+            textEl.classList.add('text-emerald-600');
+        } else {
+            textEl.classList.add('text-rose-600');
+        }
+        li.appendChild(status);
+        li.appendChild(textEl);
+        listEl.appendChild(li);
+    });
+}
+
+function initStrategyRoadmapSelfCheck() {
+    const button = document.getElementById('strategyRoadmapCheckButton');
+    const panel = document.getElementById('strategyRoadmapPanel');
+    const summaryEl = document.getElementById('strategyRoadmapSummary');
+    const checklistEl = document.getElementById('strategyRoadmapChecklist');
+    const hintEl = document.getElementById('strategyRoadmapHint');
+    const closeBtn = document.getElementById('closeStrategyRoadmapPanel');
+
+    if (!button || !panel || !summaryEl || !checklistEl || !hintEl) {
+        return;
+    }
+
+    button.setAttribute('aria-controls', 'strategyRoadmapPanel');
+    button.setAttribute('aria-expanded', 'false');
+
+    const applyState = (open) => {
+        panel.classList.toggle('hidden', !open);
+        panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+            const state = computeStrategyRoadmapChecklistState();
+            summaryEl.textContent = state.summary;
+            hintEl.textContent = state.hint;
+            renderStrategyRoadmapChecklist(state, checklistEl);
+        }
+    };
+
+    button.addEventListener('click', () => {
+        const isHidden = panel.classList.contains('hidden');
+        applyState(isHidden);
+    });
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            applyState(false);
+        });
+    }
+}
+
+
 function getLoadingTextElement() {
     return document.getElementById('loadingText');
 }
@@ -5822,6 +5953,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initStrategyRoadmapSelfCheck();
         initBatchDebugLogPanel();
         initStrategyRegistryVerification();
         initManualVerificationTools();
