@@ -493,6 +493,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
         { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
+        { strategyId: 'volume_spike_exit', configKey: 'volume_spike_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -508,6 +509,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'short_k_d_cross', configKey: 'short_k_d_cross' },
         { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
         { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
+        { strategyId: 'short_volume_spike', configKey: 'short_volume_spike' },
         { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
     ],
     shortExit: [
@@ -519,6 +521,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'cover_k_d_cross', configKey: 'cover_k_d_cross' },
         { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
         { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
+        { strategyId: 'cover_volume_spike', configKey: 'cover_volume_spike' },
         { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
         { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
         { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
@@ -5296,6 +5299,11 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
+    const recentYearsInput = document.getElementById('recentYears');
+    const recentYearsValue = recentYearsInput ? Number.parseInt(recentYearsInput.value, 10) : Number.NaN;
+    const recentYears = Number.isFinite(recentYearsValue) && recentYearsValue > 0
+        ? Math.min(recentYearsValue, 50)
+        : null;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitSelect = document.getElementById('exitStrategy');
     const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
@@ -5370,6 +5378,7 @@ function getBacktestParams() {
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
         strategyDsl,
+        recentYears,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
