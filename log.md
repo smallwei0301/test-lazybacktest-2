@@ -1,3 +1,11 @@
+## 2026-09-14 — Patch LB-VOLUME-SPIKE-BLOCK-20240914A
+- **Scope**: 成交量暴增策略積木化與多角色對齊。
+- **Updates**:
+  - `js/strategy-plugins/volume.js`（`LB-VOLUME-SPIKE-BLOCK-20240914A`）以角色專用變體註冊 `volume_spike`、`volume_spike_exit`、`short_volume_spike`、`cover_volume_spike`，統一倍率/週期正規化並輸出量比診斷。
+  - `js/strategy-plugin-manifest.js`、`js/config.js`、`js/main.js`、`js/batch-optimization.js` 將新 ID 納入策略清單、預設參數與批量優化映射，支援參數優化與 DSL 積木重組。
+  - `js/worker.js` 新增多空出入場的成交量均量指標欄位、指標面板與退回邏輯，確保倍率調整能驅動訊號並回寫診斷。
+- **Testing**: `npm run test`
+
 ## 2026-09-08 — Patch LB-VOLUME-SPIKE-PARAM-20240908A
 - **Scope**: 成交量暴增策略參數與指標對齊。
 - **Updates**:

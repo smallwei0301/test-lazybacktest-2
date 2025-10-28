@@ -7528,6 +7528,7 @@ const exitIndicatorBuilders = {
 };
 exitIndicatorBuilders.ma_cross_exit = exitIndicatorBuilders.ma_cross;
 exitIndicatorBuilders.macd_cross_exit = exitIndicatorBuilders.macd_cross;
+exitIndicatorBuilders.volume_spike_exit = exitIndicatorBuilders.volume_spike;
 
 const shortEntryIndicatorBuilders = {
   short_ma_cross(params, ctx) {
@@ -7635,6 +7636,14 @@ const shortEntryIndicatorBuilders = {
         ctx.getRollingLow(period),
         { decimals: 2 },
       ),
+    ];
+  },
+  short_volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgShortEntry");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
 };
@@ -7747,6 +7756,14 @@ const shortExitIndicatorBuilders = {
         ctx.getRollingHigh(period),
         { decimals: 2 },
       ),
+    ];
+  },
+  cover_volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgShortExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   cover_trailing_stop(params, ctx) {
@@ -8947,10 +8964,13 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike_exit":
           case "volume_spike":
             {
+              const pluginId =
+                exitStrategy === "volume_spike" ? "volume_spike_exit" : exitStrategy;
               const pluginResult = callStrategyPlugin(
-                "volume_spike",
+                pluginId,
                 "longExit",
                 i,
                 exitParams,
@@ -8963,10 +8983,9 @@ function runStrategy(data, params, options = {}) {
                   exitIndicatorValues = meta.indicatorValues;
                 break;
               }
-              const avgVolume =
-                Array.isArray(indicators.volumeAvgExit)
-                  ? indicators.volumeAvgExit[i]
-                  : undefined;
+              const avgVolume = Array.isArray(indicators.volumeAvgExit)
+                ? indicators.volumeAvgExit[i]
+                : undefined;
               const multiplierRaw = Number(exitParams?.multiplier);
               const multiplier =
                 Number.isFinite(multiplierRaw) && multiplierRaw > 0
@@ -9751,6 +9770,43 @@ function runStrategy(data, params, options = {}) {
                 };
             }
             break;
+          case "cover_volume_spike":
+            {
+              const pluginResult = callStrategyPlugin(
+                "cover_volume_spike",
+                "shortExit",
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgVolume = Array.isArray(indicators.volumeAvgShortExit)
+                ? indicators.volumeAvgShortExit[i]
+                : undefined;
+              const multiplierRaw = Number(shortExitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              coverSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (coverSignal)
+                coverIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgShortExit?.[i - 1] ?? null,
+                    avgVolume,
+                    indicators.volumeAvgShortExit?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "cover_trailing_stop":
             {
               if (check(curL) && lastShortP > 0) {
@@ -10497,6 +10553,43 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        case "short_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              "short_volume_spike",
+              "shortEntry",
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume = Array.isArray(indicators.volumeAvgShortEntry)
+              ? indicators.volumeAvgShortEntry[i]
+              : undefined;
+            const multiplierRaw = Number(shortEntryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            shortSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortEntry?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortEntry?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
       }
       const finalShortEntryRule =
         shortEntryRuleResult ||

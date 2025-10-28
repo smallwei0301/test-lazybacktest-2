@@ -493,6 +493,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
         { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
         { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
+        { strategyId: 'volume_spike_exit', configKey: 'volume_spike_exit' },
         { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
         { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
         { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
@@ -509,6 +510,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
         { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
         { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
+        { strategyId: 'short_volume_spike', configKey: 'short_volume_spike' },
     ],
     shortExit: [
         { strategyId: 'cover_ma_cross', configKey: 'cover_ma_cross' },
@@ -520,6 +522,7 @@ const strategyRegistrySampleCandidates = {
         { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
         { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
         { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
+        { strategyId: 'cover_volume_spike', configKey: 'cover_volume_spike' },
         { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
         { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
     ],
