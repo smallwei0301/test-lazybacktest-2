@@ -1,4 +1,6 @@
 // Patch Tag: LB-PLUGIN-VERIFIER-20260813A
+// Patch Tag: LB-VOLUME-SPIKE-FLOW-20260730A
+// Patch Tag: LB-VOLUME-SPIKE-MULTIROLE-20260815A
 (function (root) {
   const globalScope = root || (typeof self !== 'undefined' ? self : this);
   const registry = globalScope?.StrategyPluginRegistry;
@@ -40,8 +42,16 @@
     (context, params) => {
       const idx = Number(context?.index) || 0;
       const volumes = context?.series?.volume;
+      const role = context?.role || 'longEntry';
+      const indicatorKeyByRole = {
+        longEntry: 'volumeAvgEntry',
+        longExit: 'volumeAvgExit',
+        shortEntry: 'volumeAvgShortEntry',
+        shortExit: 'volumeAvgCover',
+      };
+      const indicatorKey = indicatorKeyByRole[role] || 'volumeAvgEntry';
       const avgSeries = context?.helpers?.getIndicator
-        ? context.helpers.getIndicator('volumeAvgEntry')
+        ? context.helpers.getIndicator(indicatorKey) || context.helpers.getIndicator('volumeAvgEntry')
         : undefined;
 
       if (!Array.isArray(volumes) || !Array.isArray(avgSeries)) {
@@ -63,15 +73,31 @@
       }
 
       const base = { enter: false, exit: false, short: false, cover: false, meta: {} };
-      base.enter = triggered;
       if (triggered) {
         base.meta = {
           indicatorValues: {
             成交量: [prevVolume, volume, nextVolume],
             均量: [prevAvg, avg, nextAvg],
           },
+          indicatorKey,
         };
       }
+
+      switch (role) {
+        case 'longExit':
+          base.exit = triggered;
+          break;
+        case 'shortEntry':
+          base.short = triggered;
+          break;
+        case 'shortExit':
+          base.cover = triggered;
+          break;
+        default:
+          base.enter = triggered;
+          break;
+      }
+
       return base;
     },
   );
