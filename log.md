@@ -1,3 +1,21 @@
+## 2026-08-29 — Patch LB-PERF-OVERFIT-20240829A
+- **Scope**: 期間績效表格轉置、策略摘要過擬合檢查與成交量暴增出場修復。
+- **Updates**:
+  - `js/worker.js` (`LB-PERF-TABLE-20240829A`) 新增 1M、6M 區間計算並補足期間覆蓋檢查，輸出期間績效含年化報酬。
+  - `js/backtest.js` (`LB-PERF-TABLE-20240829A`、`LB-ADVICE-OVERFIT-20240829A`、`LB-TAB-UI-20240829A`) 將績效表格改為期間列、指標欄，同步整合過擬合(報酬率比/夏普值比) 建議與頁籤字級固定。
+  - `js/strategy-plugins/volume.js`、`js/worker.js` (`LB-VOLUME-EXIT-20240829A`) 讓成交量暴增策略於出場角色透過插件與回退邏輯判斷訊號。
+- **Testing**: `npm run test`
+
+## 2026-07-30 — Patch LB-PERFORMANCE-ADVICE-20260730A
+- **Issue recap**: 期間績效分析無法顯示資料、策略建議文字缺乏流程化指引，成交量暴增出場未能觸發，且自動資料撈取時間須調整。
+- **Fix**:
+  - `js/backtest.js`、`js/worker.js` 依「最近 N 年」設定計算 1～N 年期間績效，輸出年化報酬、夏普、索提諾與回撤，並建立 `renderPerformanceAnalysis` 版面；同步新增建議流程（版本 `LB-PERFORMANCE-ANALYSIS-20260730A` 與 `LB-STRATEGY-ADVICE-20260730A`）。
+  - `js/backtest.js` 重新整理策略摘要流程卡，將指標比對、風控、交易樣本與敏感度整合成四段建議，並移除建議文字中的連續標點。
+  - `js/strategy-plugins/volume.js` 修正 `volume_spike` 在出場／空單角色未觸發的問題（`LB-VOLUME-SPIKE-FLOW-20260730A`）。
+  - `css/style.css` 停用頁籤容器按下縮放效果；`js/main.js` 傳遞 `recentYears` 參數；`netlify.toml` 更新排程為每日 13:40 預抓資料。
+- **Diagnostics**: 請於瀏覽器以 `recentYears=5` 執行回測，檢視期間表格是否顯示最近 1～5 年指標，確認策略摘要產出四段建議，並在成交量暴增作為出場策略時驗證訊號觸發；另於 Netlify 後台確認 Cron 設定為 `40 5 * * *`。
+- **Testing**: `npm run test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
@@ -1680,6 +1698,14 @@ NODE`
   - `index.html` 引入新模組腳本，`package.json` 更新 `npm test` 串聯兩組單元測試，並新增 `tests/batch-mapper.test.js` 以 TDD 驗證策略映射行為。
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
+
+## 2026-09-18 — Patch LB-VOLUME-PARAM-20240905A
+- **Issue recap**: 做多出場的「成交量暴增」策略無法反映倍數與週期調整，前端顯示的量比也缺少出場週期資料，導致使用者調整參數後績效沒有變化。
+- **Fix**:
+  - `js/worker.js` 針對成交量策略新增 longExit／shortEntry／shortExit 的均量快取並共用適當的移動平均，回補邏輯改以實際角色的倍數參數進行判斷，並補上出場指標欄位顯示。
+  - `js/strategy-plugins/volume.js` 依角色載入對應的均量序列，確保插件觸發時能使用正確的出場參數，維持 multiplier 與 period 的即時生效。
+- **Diagnostics**: 於前端切換出場策略為「成交量暴增」，調整倍數與週期後重新回測，確認交易訊號與指標卡片會同步變動，並在開發者工具觀察 `StrategyPlugin:volume_spike` log 是否帶入 `volumeAvgExit`。
+- **Testing**: `npm run test`
 
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
