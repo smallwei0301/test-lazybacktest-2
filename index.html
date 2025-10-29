@@ -1269,6 +1269,24 @@
                                                 </div>
                                             </div>
                                         </div>
+
+                                        <div id="strategyDslEditor" class="border-t pt-4 space-y-4" style="border-color: var(--border);">
+                                            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                                <div>
+                                                    <h4 class="text-sm font-semibold" style="color: var(--foreground);">策略 DSL 組合器</h4>
+                                                    <p class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
+                                                        拖拉或調整下方規則，可將多種指標組合成 AND / OR / NOT 結構；每個節點都會遵循對應策略的參數限制。
+                                                    </p>
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button type="button" id="strategyDslResetBtn" class="px-3 py-1.5 text-xs border border-border rounded-md transition-colors" style="color: var(--destructive); border-color: color-mix(in srgb, var(--destructive) 45%, transparent);">
+                                                        重設 DSL
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div id="strategyDslRoleEditors" class="space-y-4"></div>
+                                            <div id="strategyDslValidation" class="hidden text-[11px] px-3 py-2 rounded border" style="border-color: color-mix(in srgb, var(--destructive) 35%, transparent); color: var(--destructive); background-color: color-mix(in srgb, var(--destructive) 8%, transparent);"></div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2809,6 +2827,9 @@
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/strategies/composer.js"></script>
+    <script src="js/lib/params-schema.js"></script>
+    <script src="js/lib/strategy-dsl-state.js"></script>
+    <script src="js/lib/strategy-form-focus.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>
     <script src="js/loading-mascot-sources.js"></script>
