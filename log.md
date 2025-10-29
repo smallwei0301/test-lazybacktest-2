@@ -1,3 +1,11 @@
+## 2026-09-20 — Patch LB-COVERAGE-TAIPEI-20260920A
+- **Scope**: 台股 coverage 更新邏輯與暖機排程同步。
+- **Updates**:
+  - `js/backtest.js` 改以實際資料列重建 coverage 與 fingerprint，並在主執行緒與同步快取流程寫回診斷時套用 `computeCoverageFromRows` 與重新正規化抓取紀錄。
+  - `js/main.js` 對 `needsDataFetch` 新增台灣時間 14:00 的過期判斷，僅在覆蓋結束日落在最新資料列時觸發重抓，避免沿用昨日收盤。
+  - `netlify/functions/cache-warmer.js`、`netlify.toml` 調整排程為 UTC 06:00（台灣 14:00）每日預熱，讓熱門標的與當日資料同步。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

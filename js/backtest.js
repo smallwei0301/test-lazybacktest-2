@@ -18,6 +18,7 @@
 // Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250730A
 // Patch Tag: LB-PERFORMANCE-ANALYSIS-20260730A
 // Patch Tag: LB-STRATEGY-ADVICE-20260730A
+// Patch Tag: LB-COVERAGE-TAIPEI-20260920A
 
 const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
     driftStable: 6,
@@ -4951,12 +4952,8 @@ function runBacktestInternal() {
                      const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
+                    const recalculatedCoverage = computeCoverageFromRows(mergedData);
+                    const coverageFingerprint = computeCoverageFingerprint(recalculatedCoverage);
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -4994,7 +4991,7 @@ function runBacktestInternal() {
                     const cacheDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: fetchedRange,
-                        coverage: mergedCoverage,
+                        coverage: recalculatedCoverage,
                     });
                     const cacheEntry = {
                         data: mergedData,
@@ -5003,8 +5000,8 @@ function runBacktestInternal() {
                         market: curSettings.market,
                         dataSources: sourceArray,
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
-                        coverage: mergedCoverage,
-                        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
+                        coverage: recalculatedCoverage,
+                        coverageFingerprint,
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
@@ -5081,7 +5078,8 @@ function runBacktestInternal() {
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
-                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedCoverage = computeCoverageFromRows(Array.isArray(cachedEntry.data) ? cachedEntry.data : []);
+                    const updatedCoverageFingerprint = computeCoverageFingerprint(updatedCoverage);
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
@@ -5092,6 +5090,7 @@ function runBacktestInternal() {
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
                         stockNo: curSettings.stockNo,
                         market: curSettings.market,
+                        coverage: updatedCoverage,
                         dataSources: updatedArray,
                         dataSource: summariseSourceLabels(updatedArray),
                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
@@ -5114,7 +5113,7 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: updatedDiagnostics,
                         lastRemoteFetchDiagnostics: rawFetchDiagnostics,
-                        coverageFingerprint: computeCoverageFingerprint(updatedCoverage),
+                        coverageFingerprint: updatedCoverageFingerprint,
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -8566,10 +8565,8 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         return existingEntry || null;
     }
 
-    const mergedCoverage = mergeIsoCoverage(
-        existingEntry?.coverage || [],
-        fetchedRange && fetchedRange.start && fetchedRange.end ? { start: fetchedRange.start, end: fetchedRange.end } : null,
-    );
+    const recalculatedCoverage = computeCoverageFromRows(mergedData);
+    const coverageFingerprint = computeCoverageFingerprint(recalculatedCoverage);
     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
     if (dataSource) sourceSet.add(dataSource);
     const sourceArray = Array.from(sourceSet);
@@ -8597,7 +8594,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     const updatedEntry = {
         ...(existingEntry || {}),
         data: mergedData,
-        coverage: mergedCoverage,
+        coverage: recalculatedCoverage,
         dataSources: sourceArray,
         dataSource: summariseSourceLabels(sourceArray),
         fetchedAt: Date.now(),
@@ -8617,7 +8614,16 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         effectiveStartDate: curSettings.effectiveStartDate || effectiveStartDate,
         lookbackDays,
         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
-        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+        fetchDiagnostics: normaliseFetchDiagnosticsForCacheReplay(
+            data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+            {
+                source: 'main-thread-sync',
+                requestedRange: fetchedRange,
+                coverage: recalculatedCoverage,
+            },
+        ),
+        lastRemoteFetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+        coverageFingerprint,
     };
 
     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {

@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-TAIPEI-20260920A
 
 // 全局變量
 let stockChart = null;
@@ -5447,6 +5448,10 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const TAIPEI_TIMEZONE_SUFFIX = '+08:00';
+const TAIPEI_COVERAGE_REFRESH_HOUR = 14;
+const TAIWAN_MARKET_KEYS = new Set(['TWSE', 'TPEX']);
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5534,6 +5539,43 @@ function coverageCoversRange(coverage, targetRange) {
         cursor = Math.max(cursor, segment.end);
     }
     return cursor >= targetBounds.end;
+}
+
+function getCoverageLatestDate(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latestMs = null;
+    for (let i = 0; i < coverage.length; i += 1) {
+        const range = coverage[i];
+        if (!range) continue;
+        const candidateIso = range.end || range.start || null;
+        const candidateMs = parseISOToUTC(candidateIso);
+        if (Number.isFinite(candidateMs) && (!Number.isFinite(latestMs) || candidateMs > latestMs)) {
+            latestMs = candidateMs;
+        }
+    }
+    if (!Number.isFinite(latestMs)) return null;
+    return utcToISODate(latestMs);
+}
+
+function computeTaipeiCoverageExpiryMs(dateISO, refreshHour = TAIPEI_COVERAGE_REFRESH_HOUR) {
+    if (!dateISO) return NaN;
+    const refreshHourClamped = Number.isFinite(refreshHour)
+        ? Math.max(0, Math.min(23, Math.floor(refreshHour)))
+        : TAIPEI_COVERAGE_REFRESH_HOUR;
+    const base = new Date(`${dateISO}T00:00:00${TAIPEI_TIMEZONE_SUFFIX}`);
+    const baseMs = base.getTime();
+    if (!Number.isFinite(baseMs)) return NaN;
+    return baseMs + MAIN_DAY_MS + refreshHourClamped * HOUR_MS;
+}
+
+function isTaiwanCoverageExpiredForEndDate(coverage, targetEndISO, nowMs = Date.now(), refreshHour = TAIPEI_COVERAGE_REFRESH_HOUR) {
+    if (!targetEndISO) return false;
+    const latestCoverageIso = getCoverageLatestDate(coverage);
+    if (!latestCoverageIso || latestCoverageIso !== targetEndISO) {
+        return false;
+    }
+    const expiryMs = computeTaipeiCoverageExpiryMs(latestCoverageIso, refreshHour);
+    return Number.isFinite(expiryMs) && nowMs >= expiryMs;
 }
 
 function extractRangeData(data, startISO, endISO) {
@@ -5652,7 +5694,14 @@ function needsDataFetch(cur) {
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    const targetRange = { start: rangeStart, end: cur.endDate };
+    if (!coverageCoversRange(entry.coverage, targetRange)) {
+        return true;
+    }
+    if (TAIWAN_MARKET_KEYS.has(normalizedMarket) && isTaiwanCoverageExpiredForEndDate(entry.coverage, cur.endDate)) {
+        return true;
+    }
+    return false;
 
 }
 // --- 新增：請求並顯示策略建議 ---
