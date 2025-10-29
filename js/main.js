@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-DSL-FORM-20260920A
 
 // 全局變量
 let stockChart = null;
@@ -48,6 +49,8 @@ let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
 let batchDebugLogUnsubscribe = null;
+let strategyParamsManager = null;
+let strategyDslEditorInstance = null;
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
@@ -5176,6 +5179,12 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    if (strategyParamsManager && typeof strategyParamsManager.getParams === 'function') {
+        const managed = strategyParamsManager.getParams(type);
+        if (managed && typeof managed === 'object') {
+            return { ...managed };
+        }
+    }
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5327,17 +5336,27 @@ function getBacktestParams() {
     const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
 
-    const strategyDsl = buildStrategyDslFromParams({
-        entryStrategy,
-        entryParams,
-        exitStrategy,
-        exitParams,
-        enableShorting,
-        shortEntryStrategy,
-        shortEntryParams,
-        shortExitStrategy,
-        shortExitParams,
-    });
+    let strategyDsl = null;
+    if (strategyDslEditorInstance && typeof strategyDslEditorInstance.buildDsl === 'function') {
+        try {
+            strategyDsl = strategyDslEditorInstance.buildDsl();
+        } catch (error) {
+            console.error('[Main] 建立策略 DSL 時發生錯誤', error);
+        }
+    }
+    if (!strategyDsl) {
+        strategyDsl = buildStrategyDslFromParams({
+            entryStrategy,
+            entryParams,
+            exitStrategy,
+            exitParams,
+            enableShorting,
+            shortEntryStrategy,
+            shortEntryParams,
+            shortExitStrategy,
+            shortExitParams,
+        });
+    }
 
     return {
         stockNo,
@@ -5795,6 +5814,45 @@ function initRollingTestFeature() {
     }
 }
 
+function initStrategyParameterForms() {
+    if (typeof window === 'undefined' || !window.lazybacktestStrategyParams || typeof window.lazybacktestStrategyParams.createManager !== 'function') {
+        return;
+    }
+    try {
+        const manager = window.lazybacktestStrategyParams.createManager({
+            strategyDescriptions: typeof strategyDescriptions === 'object' ? strategyDescriptions : null,
+            roles: [
+                { type: 'entry', selectId: 'entryStrategy', containerId: 'entryParams', label: '做多進場' },
+                { type: 'exit', selectId: 'exitStrategy', containerId: 'exitParams', label: '做多出場' },
+                { type: 'shortEntry', selectId: 'shortEntryStrategy', containerId: 'shortEntryParams', label: '做空進場' },
+                { type: 'shortExit', selectId: 'shortExitStrategy', containerId: 'shortExitParams', label: '回補出場' },
+            ],
+        });
+        manager.init();
+        strategyParamsManager = manager;
+        window.lazybacktestStrategyParamsManager = manager;
+    } catch (error) {
+        console.error('[Main] 初始化策略參數表單失敗', error);
+    }
+}
+
+function initStrategyDslComposer() {
+    if (typeof window === 'undefined' || !window.lazybacktestStrategyDslEditor || typeof window.lazybacktestStrategyDslEditor.createEditor !== 'function') {
+        return;
+    }
+    try {
+        const editor = window.lazybacktestStrategyDslEditor.createEditor({
+            containerId: 'strategyDslEditor',
+            strategyDescriptions: typeof strategyDescriptions === 'object' ? strategyDescriptions : null,
+            version: STRATEGY_DSL_VERSION,
+        });
+        strategyDslEditorInstance = editor;
+        window.lazybacktestStrategyDslEditorInstance = editor;
+    } catch (error) {
+        console.error('[Main] 初始化策略 DSL 編輯器失敗', error);
+    }
+}
+
 // --- 初始化調用 ---
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[Main] DOM loaded, initializing...');
@@ -5816,6 +5874,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.init === 'function') {
             window.lazybacktestStagedExit.init();
         }
+
+        initStrategyParameterForms();
+        initStrategyDslComposer();
 
         // 初始化資料來源測試面板
         initDataSourceTester();
