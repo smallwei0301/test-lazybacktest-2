@@ -1,3 +1,10 @@
+## 2026-09-30 — Patch LB-ROLLING-INIT-20260930A
+- **Scope**: 滾動測試優化初始參數與批量優化預設值對齊。
+- **Updates**:
+  - `js/rolling-test.js` 在建立訓練視窗優化流程時，針對進出場（含空單）策略，若啟用優化便改以 `strategyDescriptions` 中的預設參數作為初始值，確保與批量優化一致。
+  - 同步更新滾動測試模組版本代碼為 `LB-ROLLING-INIT-20260930A`。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
