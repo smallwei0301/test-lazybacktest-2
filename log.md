@@ -1,3 +1,11 @@
+## 2026-09-17 — Patch LB-COVERAGE-TAIPEI-20250724A / LB-WARMER-TAIPEI-20250724A
+- **Scope**: 調整台股快取覆蓋判定與 Netlify 預抓排程。
+- **Updates**:
+  - `js/backtest.js`（`LB-COVERAGE-TAIPEI-20250724A`）改以實際資料列重建 coverage 與指紋，避免請求範圍直接寫入造成誤判。
+  - `js/main.js`（`LB-COVERAGE-TAIPEI-20250724A`）新增台北時間 14:00 到期檢查，若最後覆蓋日落後隔日午後仍未更新，會要求重新抓取。
+  - `netlify/functions/cache-warmer.js`（`LB-WARMER-TAIPEI-20250724A`）將排程改為每日 14:00（UTC 06:00）預抓資料。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

@@ -5536,6 +5536,49 @@ function coverageCoversRange(coverage, targetRange) {
     return cursor >= targetBounds.end;
 }
 
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const TAIWAN_REFRESH_HOUR = 14;
+
+function resolveCoverageLatestUtc(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return NaN;
+    let latest = NaN;
+    for (let i = 0; i < coverage.length; i += 1) {
+        const range = coverage[i];
+        if (!range) continue;
+        const candidateIso = range.end || range.start || null;
+        const candidateMs = parseISOToUTC(candidateIso);
+        if (Number.isFinite(candidateMs) && (!Number.isFinite(latest) || candidateMs > latest)) {
+            latest = candidateMs;
+        }
+    }
+    return latest;
+}
+
+function isTaiwanMarketLike(market) {
+    if (typeof isTaiwanMarket === 'function') {
+        return Boolean(isTaiwanMarket(market));
+    }
+    const normalized = (market || '').toString().toUpperCase();
+    return normalized === 'TWSE' || normalized === 'TPEX' || normalized.endsWith('TW');
+}
+
+function isCoverageExpiredByTaipeiCutoff(coverage, market, options = {}) {
+    if (!isTaiwanMarketLike(market)) return false;
+    const latestUtc = resolveCoverageLatestUtc(coverage);
+    if (!Number.isFinite(latestUtc)) return true;
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const nowTaipei = new Date(nowMs + TAIPEI_OFFSET_MS);
+    const latestTaipei = new Date(latestUtc + TAIPEI_OFFSET_MS);
+    const nowDayStart = Date.UTC(nowTaipei.getUTCFullYear(), nowTaipei.getUTCMonth(), nowTaipei.getUTCDate());
+    const latestDayStart = Date.UTC(latestTaipei.getUTCFullYear(), latestTaipei.getUTCMonth(), latestTaipei.getUTCDate());
+    const dayDiff = Math.floor((nowDayStart - latestDayStart) / MAIN_DAY_MS);
+    if (dayDiff <= 0) return false;
+    if (dayDiff === 1) {
+        return nowTaipei.getUTCHours() >= TAIWAN_REFRESH_HOUR;
+    }
+    return dayDiff > 1;
+}
+
 function extractRangeData(data, startISO, endISO) {
     if (!Array.isArray(data)) return [];
     return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
@@ -5652,7 +5695,13 @@ function needsDataFetch(cur) {
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    if (!coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate })) {
+        return true;
+    }
+    if (isCoverageExpiredByTaipeiCutoff(entry.coverage, normalizedMarket, { nowMs: Date.now() })) {
+        return true;
+    }
+    return false;
 
 }
 // --- 新增：請求並顯示策略建議 ---

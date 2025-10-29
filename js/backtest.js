@@ -12,6 +12,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
+// Patch Tag: LB-COVERAGE-TAIPEI-20250724A
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
@@ -4947,16 +4948,11 @@ function runBacktestInternal() {
                              }
                          });
                      }
-                     const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
-                     const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
+                    const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
+                    const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
+                    const mergedCoverage = computeCoverageFromRows(mergedData);
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -5081,7 +5077,7 @@ function runBacktestInternal() {
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
-                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedCoverage = computeCoverageFromRows(Array.isArray(cachedEntry.data) ? cachedEntry.data : []);
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
@@ -5092,6 +5088,7 @@ function runBacktestInternal() {
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
                         stockNo: curSettings.stockNo,
                         market: curSettings.market,
+                        coverage: updatedCoverage,
                         dataSources: updatedArray,
                         dataSource: summariseSourceLabels(updatedArray),
                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
