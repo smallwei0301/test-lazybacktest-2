@@ -1184,6 +1184,33 @@
                                                     <option value="turtle_breakout">海龜突破 (僅進場)</option>
                                                 </select>
                                                 <div id="entryParams" class="mt-4 space-y-3"></div>
+                                                <div id="entryDslEditor" class="mt-4 border border-border rounded-md bg-card p-3 space-y-3">
+                                                    <div class="flex items-start justify-between gap-3">
+                                                        <div class="space-y-1">
+                                                            <p class="text-xs font-semibold" style="color: var(--foreground);">進階條件組合</p>
+                                                            <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">依照需要加入其他策略規則，並用 AND / OR / NOT 組合判斷。未額外新增時等同單一策略。</p>
+                                                        </div>
+                                                        <select
+                                                            id="entryDslOperator"
+                                                            class="px-3 py-1.5 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
+                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                        >
+                                                            <option value="SINGLE">單一條件</option>
+                                                            <option value="AND">全部符合 (AND)</option>
+                                                            <option value="OR">符合任一 (OR)</option>
+                                                            <option value="NOT">條件反向 (NOT)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div id="entryDslNodes" class="space-y-3"></div>
+                                                    <button
+                                                        id="entryDslAddButton"
+                                                        type="button"
+                                                        class="text-xs px-3 py-2 rounded-md border border-border text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        style="border-color: var(--border); color: var(--primary);"
+                                                    >
+                                                        新增其他條件
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             <div class="space-y-3">
@@ -1210,6 +1237,33 @@
                                                     <option value="fixed_stop_loss">(由風險管理控制)</option>
                                                 </select>
                                                 <div id="exitParams" class="mt-4 space-y-3"></div>
+                                                <div id="exitDslEditor" class="mt-4 border border-border rounded-md bg-card p-3 space-y-3">
+                                                    <div class="flex items-start justify-between gap-3">
+                                                        <div class="space-y-1">
+                                                            <p class="text-xs font-semibold" style="color: var(--foreground);">出場條件組合</p>
+                                                            <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">可增加其他出場策略並設定與主策略的邏輯關係，確保停利 / 停損條件更精準。</p>
+                                                        </div>
+                                                        <select
+                                                            id="exitDslOperator"
+                                                            class="px-3 py-1.5 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
+                                                            style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                        >
+                                                            <option value="SINGLE">單一條件</option>
+                                                            <option value="AND">全部符合 (AND)</option>
+                                                            <option value="OR">符合任一 (OR)</option>
+                                                            <option value="NOT">條件反向 (NOT)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div id="exitDslNodes" class="space-y-3"></div>
+                                                    <button
+                                                        id="exitDslAddButton"
+                                                        type="button"
+                                                        class="text-xs px-3 py-2 rounded-md border border-border text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        style="border-color: var(--border); color: var(--primary);"
+                                                    >
+                                                        新增其他條件
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -1243,6 +1297,33 @@
                                                             <option value="short_turtle_stop_loss">海龜N日低 (做空)</option>
                                                         </select>
                                                         <div id="shortEntryParams" class="mt-3 space-y-2"></div>
+                                                        <div id="shortEntryDslEditor" class="mt-3 border border-border rounded-md bg-card p-3 space-y-3">
+                                                            <div class="flex items-start justify-between gap-3">
+                                                                <div class="space-y-1">
+                                                                    <p class="text-xs font-semibold" style="color: var(--foreground);">做空進場條件組合</p>
+                                                                    <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">針對做空策略追加條件，控制進場風險；未新增時維持單一策略。</p>
+                                                                </div>
+                                                                <select
+                                                                    id="shortEntryDslOperator"
+                                                                    class="px-3 py-1.5 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
+                                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                                >
+                                                                    <option value="SINGLE">單一條件</option>
+                                                                    <option value="AND">全部符合 (AND)</option>
+                                                                    <option value="OR">符合任一 (OR)</option>
+                                                                    <option value="NOT">條件反向 (NOT)</option>
+                                                                </select>
+                                                            </div>
+                                                            <div id="shortEntryDslNodes" class="space-y-3"></div>
+                                                            <button
+                                                                id="shortEntryDslAddButton"
+                                                                type="button"
+                                                                class="text-xs px-3 py-2 rounded-md border border-border text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                style="border-color: var(--border); color: var(--primary);"
+                                                            >
+                                                                新增其他條件
+                                                            </button>
+                                                        </div>
                                                     </div>
 
                                                     <div>
@@ -1265,6 +1346,33 @@
                                                             <option value="cover_fixed_stop_loss">(由風險管理控制)</option>
                                                         </select>
                                                         <div id="shortExitParams" class="mt-3 space-y-2"></div>
+                                                        <div id="shortExitDslEditor" class="mt-3 border border-border rounded-md bg-card p-3 space-y-3">
+                                                            <div class="flex items-start justify-between gap-3">
+                                                                <div class="space-y-1">
+                                                                    <p class="text-xs font-semibold" style="color: var(--foreground);">空單回補條件組合</p>
+                                                                    <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">若需要多個條件保護空單，可加入額外策略並設定 AND / OR / NOT。</p>
+                                                                </div>
+                                                                <select
+                                                                    id="shortExitDslOperator"
+                                                                    class="px-3 py-1.5 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-xs"
+                                                                    style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
+                                                                >
+                                                                    <option value="SINGLE">單一條件</option>
+                                                                    <option value="AND">全部符合 (AND)</option>
+                                                                    <option value="OR">符合任一 (OR)</option>
+                                                                    <option value="NOT">條件反向 (NOT)</option>
+                                                                </select>
+                                                            </div>
+                                                            <div id="shortExitDslNodes" class="space-y-3"></div>
+                                                            <button
+                                                                id="shortExitDslAddButton"
+                                                                type="button"
+                                                                class="text-xs px-3 py-2 rounded-md border border-border text-primary hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                style="border-color: var(--border); color: var(--primary);"
+                                                            >
+                                                                新增其他條件
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2810,6 +2918,10 @@
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/lib/strategy-param-schema.js"></script>
+    <script src="js/lib/strategy-dsl-state.js"></script>
+    <script src="js/lib/strategy-dsl-loader.js"></script>
+    <script src="js/lib/strategy-dsl-ui.js"></script>
     <script src="js/backtest-runner.js"></script>
     <script src="js/loading-mascot-sources.js"></script>
     <script src="js/main.js"></script>
