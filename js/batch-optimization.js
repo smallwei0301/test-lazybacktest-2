@@ -1570,7 +1570,8 @@ const EXIT_STRATEGY_SELECT_MAP = {
     'bollinger_reversal': 'bollinger_reversal',
     'k_d_cross_exit': 'k_d_cross_exit',
     'k_d_cross': 'k_d_cross_exit',
-    'volume_spike': 'volume_spike',
+    'volume_spike': 'volume_spike_exit',
+    'volume_spike_exit': 'volume_spike_exit',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
     'williams_overbought_exit': 'williams_overbought',
@@ -1809,7 +1810,7 @@ function generateStrategyOptions() {
         // 賣出策略 (做多出場)
         const sellStrategies = [
             'ma_cross_exit', 'ma_below', 'rsi_overbought', 'macd_cross_exit', 'bollinger_reversal',
-            'k_d_cross_exit', 'volume_spike', 'price_breakdown', 'williams_overbought',
+            'k_d_cross_exit', 'volume_spike_exit', 'price_breakdown', 'williams_overbought',
             'ema_cross_exit', 'turtle_stop_loss', 'trailing_stop', 'fixed_stop_loss'
         ];
         
