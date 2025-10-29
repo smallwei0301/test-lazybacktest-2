@@ -7042,7 +7042,52 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    const normaliseVolumePeriod = (value, fallback) => {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 1) {
+        return Math.floor(num);
+      }
+      const fb = Number(fallback);
+      if (Number.isFinite(fb) && fb >= 1) {
+        return Math.floor(fb);
+      }
+      return 20;
+    };
+    const volumePeriodCache = new Map();
+    const resolveVolumeAverage = (period) => {
+      const key = Number.isFinite(period) && period >= 1 ? Math.floor(period) : 20;
+      if (!volumePeriodCache.has(key)) {
+        volumePeriodCache.set(key, maCalculator(volumes, key));
+      }
+      return volumePeriodCache.get(key);
+    };
+    const volumeEntryPeriod = normaliseVolumePeriod(ep?.period, 20);
+    const volumeExitPeriod = normaliseVolumePeriod(xp?.period, volumeEntryPeriod);
+    const volumeShortEntryPeriod = enableShorting
+      ? normaliseVolumePeriod(sep?.period, volumeExitPeriod)
+      : volumeExitPeriod;
+    const volumeShortExitPeriod = enableShorting
+      ? normaliseVolumePeriod(sxp?.period, volumeShortEntryPeriod)
+      : volumeExitPeriod;
+    indic.volumeAvgEntry = resolveVolumeAverage(volumeEntryPeriod);
+    indic.volumeAvgExit =
+      volumeExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeExitPeriod);
+    indic.volumeAvgShortEntry =
+      volumeShortEntryPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortEntryPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortEntryPeriod);
+    indic.volumeAvgShortExit =
+      volumeShortExitPeriod === volumeShortEntryPeriod
+        ? indic.volumeAvgShortEntry
+        : volumeShortExitPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortExitPeriod);
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7428,6 +7473,14 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -8632,7 +8685,24 @@ function runStrategy(data, params, options = {}) {
     };
 
     const buildAggregatedLongEntry = () => {
+      // Patch Tag: LB-TRADE-ENTRY-INDICATOR-20240910A
       if (currentLongEntryBreakdown.length === 0) return null;
+      const cloneIndicatorValueObject = (source) => {
+        if (!source || typeof source !== "object") {
+          return null;
+        }
+        const clone = {};
+        Object.entries(source).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            clone[key] = value.map((item) => item);
+          } else if (value && typeof value === "object") {
+            clone[key] = { ...value };
+          } else {
+            clone[key] = value;
+          }
+        });
+        return clone;
+      };
       const totalShares = currentLongEntryBreakdown.reduce(
         (sum, info) => sum + (info.originalShares || info.shares || 0),
         0,
@@ -8657,7 +8727,28 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const stageSnapshots = currentLongEntryBreakdown.map((info) => {
+        if (!info || typeof info !== "object") {
+          return info;
+        }
+        const stageClone = { ...info };
+        if (info.indicatorValues && typeof info.indicatorValues === "object") {
+          stageClone.indicatorValues = cloneIndicatorValueObject(
+            info.indicatorValues,
+          );
+        }
+        if (info.kdValues && typeof info.kdValues === "object") {
+          stageClone.kdValues = { ...info.kdValues };
+        }
+        if (info.macdValues && typeof info.macdValues === "object") {
+          stageClone.macdValues = { ...info.macdValues };
+        }
+        return stageClone;
+      });
+      const primaryStage = currentLongEntryBreakdown[0] || null;
+      const fallbackStage =
+        currentLongEntryBreakdown[currentLongEntryBreakdown.length - 1] || null;
+      const aggregatedEntry = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -8667,9 +8758,34 @@ function runStrategy(data, params, options = {}) {
         averageEntryPrice,
         stageCount: currentLongEntryBreakdown.length,
         cumulativeStagePercent: totalPercent,
-        stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
+        stages: stageSnapshots,
         positionId: currentLongPositionId,
       };
+      const attachStageDiagnostics = (stage) => {
+        if (!stage || typeof stage !== "object") {
+          return;
+        }
+        if (stage.indicatorValues && typeof stage.indicatorValues === "object") {
+          aggregatedEntry.indicatorValues = cloneIndicatorValueObject(
+            stage.indicatorValues,
+          );
+        }
+        if (stage.kdValues && typeof stage.kdValues === "object") {
+          aggregatedEntry.kdValues = { ...stage.kdValues };
+        }
+        if (stage.macdValues && typeof stage.macdValues === "object") {
+          aggregatedEntry.macdValues = { ...stage.macdValues };
+        }
+      };
+      attachStageDiagnostics(primaryStage);
+      if (
+        !aggregatedEntry.indicatorValues &&
+        !aggregatedEntry.kdValues &&
+        !aggregatedEntry.macdValues
+      ) {
+        attachStageDiagnostics(fallbackStage);
+      }
+      return aggregatedEntry;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -8894,6 +9010,44 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike_exit":
+            {
+              const pluginResult = callStrategyPlugin(
+                "volume_spike_exit",
+                "longExit",
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgVolume =
+                Array.isArray(indicators.volumeAvgExit)
+                  ? indicators.volumeAvgExit[i]
+                  : undefined;
+              const multiplierRaw = Number(exitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              sellSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgExit?.[i - 1] ?? null,
+                    avgVolume,
+                    indicators.volumeAvgExit?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9570,11 +9724,11 @@ function runStrategy(data, params, options = {}) {
                 };
               break;
             }
-          case "cover_k_d_cross":
-            {
-              const pluginResult = callStrategyPlugin(
-                'cover_k_d_cross',
-                'shortExit',
+        case "cover_k_d_cross":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_k_d_cross',
+              'shortExit',
                 i,
                 shortExitParams,
               );
@@ -9600,19 +9754,57 @@ function runStrategy(data, params, options = {}) {
                 kC > dC &&
                 kPC <= dPC &&
                 dC < thXC;
-              if (coverSignal)
-                coverKDValues = {
-                  kPrev: kPC,
-                  dPrev: dPC,
-                  kNow: kC,
-                  dNow: dC,
-                  kNext: indicators.kCover[i + 1] ?? null,
-                  dNext: indicators.dCover[i + 1] ?? null,
-                };
+            if (coverSignal)
+              coverKDValues = {
+                kPrev: kPC,
+                dPrev: dPC,
+                kNow: kC,
+                dNow: dC,
+                kNext: indicators.kCover[i + 1] ?? null,
+                dNext: indicators.dCover[i + 1] ?? null,
+              };
+            break;
+          }
+        case "cover_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_volume_spike',
+              'shortExit',
+              i,
+              shortExitParams,
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              shortExitRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!coverIndicatorValues && meta.indicatorValues)
+                coverIndicatorValues = meta.indicatorValues;
               break;
             }
-          case "cover_price_breakout":
-            const bpC = shortExitParams.period || 20;
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortExit)
+                ? indicators.volumeAvgShortExit[i]
+                : undefined;
+            const multiplierRaw = Number(shortExitParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            coverSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (coverSignal)
+              coverIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortExit?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortExit?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
+        case "cover_price_breakout":
+          const bpC = shortExitParams.period || 20;
             if (i >= bpC) {
               const hsC = highs.slice(i - bpC, i).filter((h) => check(h));
               if (hsC.length > 0) {
@@ -9992,19 +10184,40 @@ function runStrategy(data, params, options = {}) {
             break;
           }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              "volume_spike",
+              "longEntry",
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume = indicators.volumeAvgEntry[i];
+            const multiplierRaw = Number(entryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            buySignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (buySignal)
+              entryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgEntry[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
@@ -10333,6 +10546,44 @@ function runStrategy(data, params, options = {}) {
                 dNow: dSE,
                 kNext: indicators.kShortEntry[i + 1] ?? null,
                 dNext: indicators.dShortEntry[i + 1] ?? null,
+              };
+            break;
+          }
+        case "short_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_volume_spike',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortEntry)
+                ? indicators.volumeAvgShortEntry[i]
+                : undefined;
+            const multiplierRaw = Number(shortEntryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            shortSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortEntry?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortEntry?.[i + 1] ?? null,
+                ],
               };
             break;
           }
@@ -11062,26 +11313,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -11128,6 +11384,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -11156,19 +11430,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
@@ -12166,7 +12467,95 @@ function formatAbsoluteLabel(value) {
 }
 
 // --- 參數優化邏輯 ---
+// Patch Tag: LB-OPT-DSL-SYNC-20240910A
 const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
+
+function cloneStrategyDslNode(node) {
+  if (!node || typeof node !== "object") {
+    return node ?? null;
+  }
+  if (Array.isArray(node)) {
+    return node.map((child) => cloneStrategyDslNode(child));
+  }
+  const clone = {};
+  Object.keys(node).forEach((key) => {
+    clone[key] = cloneStrategyDslNode(node[key]);
+  });
+  return clone;
+}
+
+function cloneStrategyDsl(root) {
+  if (!root || typeof root !== "object") {
+    return null;
+  }
+  const clone = {};
+  Object.keys(root).forEach((key) => {
+    clone[key] = cloneStrategyDslNode(root[key]);
+  });
+  return clone;
+}
+
+function syncStrategyDslParamValue(dslRoot, roleKey, strategyId, paramName, value) {
+  if (!dslRoot || typeof dslRoot !== "object") {
+    return;
+  }
+  const roleToNodeKey = {
+    entry: "longEntry",
+    exit: "longExit",
+    shortEntry: "shortEntry",
+    shortExit: "shortExit",
+  };
+  const nodeKey = roleToNodeKey[roleKey];
+  if (!nodeKey) {
+    return;
+  }
+  const rootNode = dslRoot[nodeKey];
+  if (!rootNode || typeof rootNode !== "object") {
+    return;
+  }
+  const targetId = typeof strategyId === "string" ? strategyId : null;
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((child) => visit(child));
+      return;
+    }
+    const nodeType =
+      typeof node.type === "string"
+        ? node.type.toLowerCase()
+        : typeof node.op === "string"
+          ? node.op.toLowerCase()
+          : typeof node.operator === "string"
+            ? node.operator.toLowerCase()
+            : null;
+    const nodeId = typeof node.id === "string" ? node.id : null;
+    const matches =
+      nodeType === "plugin"
+        ? !targetId || nodeId === targetId
+        : targetId && nodeId === targetId;
+    if (matches && node.params && typeof node.params === "object") {
+      node.params[paramName] = value;
+    }
+    if (Array.isArray(node.nodes)) {
+      node.nodes.forEach((child) => visit(child));
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child) => visit(child));
+    }
+    if (node.node && typeof node.node === "object") {
+      visit(node.node);
+    }
+    if (node.then && typeof node.then === "object") {
+      visit(node.then);
+    }
+    if (node.otherwise && typeof node.otherwise === "object") {
+      visit(node.otherwise);
+    }
+  };
+  visit(rootNode);
+}
 
 function buildOptimizationValueSweep(range) {
   const safeRange = range && typeof range === "object" ? range : {};
@@ -12241,6 +12630,10 @@ function createOptimizationParamTemplate(baseParams = {}) {
       ) {
         return;
       }
+      if (key === "strategyDsl") {
+        template.base[key] = cloneStrategyDsl(baseParams[key]);
+        return;
+      }
       template.base[key] = baseParams[key];
     });
     template.entryParams =
@@ -12300,6 +12693,9 @@ function instantiateOptimizationParams(template) {
     params.exitStages = template.exitStages.map((stage) =>
       stage && typeof stage === "object" ? { ...stage } : stage,
     );
+  }
+  if (template.base && template.base.strategyDsl) {
+    params.strategyDsl = cloneStrategyDsl(template.base.strategyDsl);
   }
   return params;
 }
@@ -12476,6 +12872,28 @@ async function runOptimization(
       }
       testParams[targetObjKey][optParamName] = curVal;
       testParams.enableShorting = contextRequiresShorting;
+      const strategyIdForRole =
+        optimizeTargetStrategy === "entry"
+          ? testParams.entryStrategy
+          : optimizeTargetStrategy === "exit"
+            ? testParams.exitStrategy
+            : optimizeTargetStrategy === "shortEntry"
+              ? testParams.shortEntryStrategy
+              : optimizeTargetStrategy === "shortExit"
+                ? testParams.shortExitStrategy
+                : null;
+      if (!testParams.strategyDsl && baseParams?.strategyDsl) {
+        testParams.strategyDsl = cloneStrategyDsl(baseParams.strategyDsl);
+      }
+      if (testParams.strategyDsl) {
+        syncStrategyDslParamValue(
+          testParams.strategyDsl,
+          optimizeTargetStrategy,
+          strategyIdForRole,
+          optParamName,
+          curVal,
+        );
+      }
     }
     try {
       const result = runStrategy(stockData, testParams, runOptions);
