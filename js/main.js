@@ -40,6 +40,15 @@ const loadingMascotState = {
 
 const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
 
+let strategyUiInstance = null;
+
+const STRATEGY_TYPE_TO_ROLE = Object.freeze({
+    entry: 'longEntry',
+    exit: 'longExit',
+    shortEntry: 'shortEntry',
+    shortExit: 'shortExit',
+});
+
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
 let currentOptimizationResults = [];
@@ -5176,6 +5185,14 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    const roleKey = STRATEGY_TYPE_TO_ROLE[type] || null;
+    if (roleKey && strategyUiInstance && typeof strategyUiInstance.getPrimarySelection === 'function') {
+        const selection = strategyUiInstance.getPrimarySelection(roleKey);
+        if (selection && selection.params) {
+            return { ...selection.params };
+        }
+    }
+
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5246,6 +5263,12 @@ function createStrategyDslPluginNode(strategyId, params) {
 
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
+    if (strategyUiInstance && typeof strategyUiInstance.buildStrategyDsl === 'function') {
+        const dslFromUi = strategyUiInstance.buildStrategyDsl(selection);
+        if (dslFromUi) {
+            return dslFromUi;
+        }
+    }
     const dsl = { version: STRATEGY_DSL_VERSION };
     const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
     if (entryNode) dsl.longEntry = entryNode;
@@ -5296,12 +5319,12 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
-    const entryStrategy = document.getElementById('entryStrategy')?.value;
+    let entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitSelect = document.getElementById('exitStrategy');
     const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
-    const exitStrategy = normalizedExit || exitSelect?.value || null;
-    const entryParams = getStrategyParams('entry');
-    const exitParams = getStrategyParams('exit');
+    let exitStrategy = normalizedExit || exitSelect?.value || null;
+    let entryParams = getStrategyParams('entry');
+    let exitParams = getStrategyParams('exit');
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
 
     let shortEntryStrategy = null;
@@ -5317,6 +5340,31 @@ function getBacktestParams() {
         shortExitStrategy = normalizedShortExit || shortExitSelect?.value || null;
         shortEntryParams = getStrategyParams('shortEntry');
         shortExitParams = getStrategyParams('shortExit');
+    }
+
+    if (strategyUiInstance && typeof strategyUiInstance.getPrimarySelection === 'function') {
+        const entrySelection = strategyUiInstance.getPrimarySelection('longEntry');
+        if (entrySelection) {
+            entryStrategy = entrySelection.id || entryStrategy;
+            entryParams = entrySelection.params || entryParams;
+        }
+        const exitSelection = strategyUiInstance.getPrimarySelection('longExit');
+        if (exitSelection) {
+            exitStrategy = exitSelection.id || exitStrategy;
+            exitParams = exitSelection.params || exitParams;
+        }
+        if (enableShorting) {
+            const shortEntrySelection = strategyUiInstance.getPrimarySelection('shortEntry');
+            if (shortEntrySelection) {
+                shortEntryStrategy = shortEntrySelection.id || shortEntryStrategy;
+                shortEntryParams = shortEntrySelection.params || shortEntryParams;
+            }
+            const shortExitSelection = strategyUiInstance.getPrimarySelection('shortExit');
+            if (shortExitSelection) {
+                shortExitStrategy = shortExitSelection.id || shortExitStrategy;
+                shortExitParams = shortExitSelection.params || shortExitParams;
+            }
+        }
     }
 
     const buyFee = parseFloat(document.getElementById('buyFee')?.value) || 0;
@@ -5815,6 +5863,30 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.init === 'function') {
             window.lazybacktestStagedExit.init();
+        }
+
+        if (
+            window.lazybacktestStrategyUi
+            && typeof window.lazybacktestStrategyUi.create === 'function'
+            && window.lazybacktestParamSchema
+            && window.lazybacktestStrategyDslState
+        ) {
+            try {
+                strategyUiInstance = window.lazybacktestStrategyUi.create({
+                    registry: window.StrategyPluginRegistry,
+                    paramApi: window.lazybacktestParamSchema,
+                    stateFactory: window.lazybacktestStrategyDslState,
+                    normaliseStrategyId: (type, id) => normaliseStrategyIdForType(type, id),
+                    resolveFieldMetadata: (type, strategyId, paramName) => resolveStrategyParamPresentation(type, strategyId, paramName),
+                    version: STRATEGY_DSL_VERSION,
+                });
+                if (strategyUiInstance && typeof strategyUiInstance.init === 'function') {
+                    strategyUiInstance.init();
+                }
+                window.lazybacktestStrategyUiInstance = strategyUiInstance;
+            } catch (uiError) {
+                console.error('[Main] 初始化策略參數表單失敗', uiError);
+            }
         }
 
         // 初始化資料來源測試面板
