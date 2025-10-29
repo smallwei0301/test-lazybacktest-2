@@ -6,7 +6,7 @@
   }
 
   const RUNNER_VERSION = 'LB-PLUGIN-RUNNER-20250712B';
-  const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
+  const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260917A';
   const existing = globalScope.BacktestRunner;
   if (existing && typeof existing.__version__ === 'string' && existing.__version__ >= RUNNER_VERSION) {
     return;
@@ -137,16 +137,42 @@
       return null;
     }
     const dsl = { version: STRATEGY_DSL_VERSION };
-    const entryNode = createStrategyDslPluginNode(options.entryStrategy, options.entryParams);
-    if (entryNode) dsl.longEntry = entryNode;
-    const exitNode = createStrategyDslPluginNode(options.exitStrategy, options.exitParams);
-    if (exitNode) dsl.longExit = exitNode;
-    if (options.enableShorting) {
-      const shortEntryNode = createStrategyDslPluginNode(options.shortEntryStrategy, options.shortEntryParams);
-      if (shortEntryNode) dsl.shortEntry = shortEntryNode;
-      const shortExitNode = createStrategyDslPluginNode(options.shortExitStrategy, options.shortExitParams);
-      if (shortExitNode) dsl.shortExit = shortExitNode;
+    const editor = globalScope.lazybacktestStrategyDslEditor;
+
+    const entryDsl = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('entry') : null;
+    if (entryDsl) {
+      dsl.longEntry = entryDsl;
+    } else {
+      const entryNode = createStrategyDslPluginNode(options.entryStrategy, options.entryParams);
+      if (entryNode) dsl.longEntry = entryNode;
     }
+
+    const exitDsl = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('exit') : null;
+    if (exitDsl) {
+      dsl.longExit = exitDsl;
+    } else {
+      const exitNode = createStrategyDslPluginNode(options.exitStrategy, options.exitParams);
+      if (exitNode) dsl.longExit = exitNode;
+    }
+
+    if (options.enableShorting) {
+      const shortEntryDsl = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('shortEntry') : null;
+      if (shortEntryDsl) {
+        dsl.shortEntry = shortEntryDsl;
+      } else {
+        const shortEntryNode = createStrategyDslPluginNode(options.shortEntryStrategy, options.shortEntryParams);
+        if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+      }
+
+      const shortExitDsl = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('shortExit') : null;
+      if (shortExitDsl) {
+        dsl.shortExit = shortExitDsl;
+      } else {
+        const shortExitNode = createStrategyDslPluginNode(options.shortExitStrategy, options.shortExitParams);
+        if (shortExitNode) dsl.shortExit = shortExitNode;
+      }
+    }
+
     return Object.keys(dsl).length > 1 ? dsl : null;
   }
 

@@ -1,3 +1,13 @@
+## 2026-09-17 — Patch LB-STRATEGY-DSL-UI-20260917A
+- **Scope**: 策略參數表單自動化與 DSL 拖拉式組裝介面。
+- **Updates**:
+  - 新增 `js/lib/strategy-param-form.js`，統一依 paramsSchema 產生欄位、套用範圍限制並同步到 DSL 編輯器。
+  - 新增 `js/lib/strategy-dsl-editor.js` 與前端卡片，支援 AND/OR/NOT 群組、拖放排序與節點參數編輯。
+  - `js/main.js`、`js/backtest.js`、`js/backtest-runner.js` 串接新管理器與 DSL 編輯器，`getStrategyParams`/`buildStrategyDslFromParams` 改為使用動態結果。
+  - `index.html`、`js/loader.js` 整合 DSL 卡片初始化與策略欄位註冊。
+  - `tests/strategy-param-form.test.js`、`tests/strategy-dsl-editor.test.js` 覆蓋數值校正與 DSL 序列化情境，`npm test` 納入新測試。
+- **Testing**: `npm test`。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
@@ -1696,4 +1706,12 @@ NODE`
   - 同步更新批量偵錯版本碼至 `LB-BATCH-MAPPER-20260917B`，利於區分修補後的 console log 與報告截圖。
 - **Diagnostics**: 請於瀏覽器重新載入批量優化分頁，確認買入／賣出策略清單重新顯示且 console 不再出現 `hydrateStrategyNameMap is not defined` 的錯誤；若建立批量偵錯會話，應能看到 `strategy-map-hydrated` 事件。
 - **Testing**: `npm test`、`npm run typecheck`
+
+## 2026-09-18 — Patch LB-STRATEGY-PARAM-FORM-TEST-20260918A
+- **Issue recap**: 策略參數表單生成器雖具備 schema 正規化能力，但單元測試僅覆蓋數值與基礎推導情境，尚未驗證布林、選單與輸入互動是否能套用 schema 限制。
+- **Fix**:
+  - `tests/strategy-param-form.test.js` 建立輕量 DOM stub，模擬瀏覽器事件並覆蓋布林、選單與數值欄位的互動，確保 `createField` 能依 schema 夾制輸入並觸發回呼。
+  - 測試加入 `mode` 列舉 schema，以驗證 enum 欄位會在非法值時回退預設選項，並確認多組欄位在相同上下文下仍維持單向資料流。
+- **Diagnostics**: 建議在瀏覽器實際拖拉 DSL 後，再切換欄位值觀察表單輸出，確認 console 未出現 schema 校驗錯誤；後續可依此 stub 擴充更多互動測試。
+- **Testing**: `npm test`
 

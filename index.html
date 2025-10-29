@@ -1273,6 +1273,30 @@
                                 </div>
                             </div>
 
+                            <!-- Strategy DSL Editor Card -->
+                            <div class="card" id="strategy-dsl-card">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="workflow" class="lucide text-primary" style="color: var(--primary);"></i>
+                                        策略 DSL 組合器
+                                    </h3>
+                                    <p class="card-description">依參數表單拖拉策略卡片，組合 AND／OR／NOT 規則，儲存時會同步寫入 DSL。</p>
+                                </div>
+                                <div class="card-content space-y-4">
+                                    <div class="space-y-1.5 text-xs" style="color: var(--muted-foreground);">
+                                        <p>1. 勾選「使用 DSL 群組」後，可新增策略規則或巢狀群組。</p>
+                                        <p>2. 透過拖曳重新排序，同一層群組可切換 AND／OR／NOT。</p>
+                                        <p>3. 規則的參數會沿用上方表單設定，也可於卡片中即時調整。</p>
+                                    </div>
+                                    <div class="space-y-4">
+                                        <div id="dslEntryContainer" class="border rounded-lg p-3 space-y-2" style="border-color: var(--border); border-style: dashed;"></div>
+                                        <div id="dslExitContainer" class="border rounded-lg p-3 space-y-2" style="border-color: var(--border); border-style: dashed;"></div>
+                                        <div id="dslShortEntryContainer" class="border rounded-lg p-3 space-y-2" style="border-color: var(--border); border-style: dashed;"></div>
+                                        <div id="dslShortExitContainer" class="border rounded-lg p-3 space-y-2" style="border-color: var(--border); border-style: dashed;"></div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Strategy Management -->
                             <div class="card">
                                 <div class="card-header">
@@ -2810,6 +2834,8 @@
     <script src="js/strategy-plugin-manifest.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/lib/strategy-param-form.js"></script>
+    <script src="js/lib/strategy-dsl-editor.js"></script>
     <script src="js/backtest-runner.js"></script>
     <script src="js/loading-mascot-sources.js"></script>
     <script src="js/main.js"></script>
