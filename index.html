@@ -1273,6 +1273,135 @@
                                 </div>
                             </div>
 
+                            <!-- Strategy DSL Editor Card -->
+                            <div class="card" id="strategyDslEditorCard">
+                                <div class="card-header">
+                                    <h3 class="card-title flex items-center gap-2">
+                                        <i data-lucide="workflow" class="lucide text-primary" style="color: var(--primary);"></i>
+                                        策略 DSL 組裝
+                                    </h3>
+                                    <p class="card-description">拖拉排序條件、切換 AND / OR / NOT 組合邏輯</p>
+                                </div>
+                                <div class="card-content space-y-6" id="strategyDslEditor">
+                                    <div class="space-y-4" data-dsl-role="longEntry">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-semibold" style="color: var(--foreground);">做多進場規則</span>
+                                                <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                    <span>組合運算</span>
+                                                    <select class="text-xs border border-border rounded px-2 py-1 bg-input" data-dsl-operator>
+                                                        <option value="AND">AND</option>
+                                                        <option value="OR">OR</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                <input type="checkbox" class="h-3 w-3" data-dsl-not-toggle>
+                                                <span>套用 NOT</span>
+                                            </label>
+                                        </div>
+                                        <div class="min-h-[80px] border border-dashed border-border rounded-md p-3 bg-background" data-dsl-dropzone>
+                                            <p class="text-[11px] text-muted-foreground" data-dsl-empty-hint>拖拉排序策略條件，或由下方新增</p>
+                                        </div>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <select class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs" data-dsl-add-select>
+                                                <option value="">-- 選擇策略插件 --</option>
+                                            </select>
+                                            <button type="button" class="px-3 py-2 border border-primary text-primary rounded-md text-xs hover:bg-primary hover:text-white transition" data-dsl-add-button>
+                                                新增條件
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4" data-dsl-role="longExit">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-semibold" style="color: var(--foreground);">做多出場規則</span>
+                                                <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                    <span>組合運算</span>
+                                                    <select class="text-xs border border-border rounded px-2 py-1 bg-input" data-dsl-operator>
+                                                        <option value="AND">AND</option>
+                                                        <option value="OR">OR</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                <input type="checkbox" class="h-3 w-3" data-dsl-not-toggle>
+                                                <span>套用 NOT</span>
+                                            </label>
+                                        </div>
+                                        <div class="min-h-[80px] border border-dashed border-border rounded-md p-3 bg-background" data-dsl-dropzone>
+                                            <p class="text-[11px] text-muted-foreground" data-dsl-empty-hint>拖拉排序策略條件，或由下方新增</p>
+                                        </div>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <select class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs" data-dsl-add-select>
+                                                <option value="">-- 選擇策略插件 --</option>
+                                            </select>
+                                            <button type="button" class="px-3 py-2 border border-primary text-primary rounded-md text-xs hover:bg-primary hover:text-white transition" data-dsl-add-button>
+                                                新增條件
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4" data-dsl-role="shortEntry">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-semibold" style="color: var(--foreground);">做空進場規則</span>
+                                                <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                    <span>組合運算</span>
+                                                    <select class="text-xs border border-border rounded px-2 py-1 bg-input" data-dsl-operator>
+                                                        <option value="AND">AND</option>
+                                                        <option value="OR">OR</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                <input type="checkbox" class="h-3 w-3" data-dsl-not-toggle>
+                                                <span>套用 NOT</span>
+                                            </label>
+                                        </div>
+                                        <div class="min-h-[80px] border border-dashed border-border rounded-md p-3 bg-background" data-dsl-dropzone>
+                                            <p class="text-[11px] text-muted-foreground" data-dsl-empty-hint>拖拉排序策略條件，或由下方新增</p>
+                                        </div>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <select class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs" data-dsl-add-select>
+                                                <option value="">-- 選擇策略插件 --</option>
+                                            </select>
+                                            <button type="button" class="px-3 py-2 border border-primary text-primary rounded-md text-xs hover:bg-primary hover:text-white transition" data-dsl-add-button>
+                                                新增條件
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4" data-dsl-role="shortExit">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-xs font-semibold" style="color: var(--foreground);">回補出場規則</span>
+                                                <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                    <span>組合運算</span>
+                                                    <select class="text-xs border border-border rounded px-2 py-1 bg-input" data-dsl-operator>
+                                                        <option value="AND">AND</option>
+                                                        <option value="OR">OR</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <label class="text-[11px] flex items-center gap-1" style="color: var(--muted-foreground);">
+                                                <input type="checkbox" class="h-3 w-3" data-dsl-not-toggle>
+                                                <span>套用 NOT</span>
+                                            </label>
+                                        </div>
+                                        <div class="min-h-[80px] border border-dashed border-border rounded-md p-3 bg-background" data-dsl-dropzone>
+                                            <p class="text-[11px] text-muted-foreground" data-dsl-empty-hint>拖拉排序策略條件，或由下方新增</p>
+                                        </div>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <select class="flex-1 px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs" data-dsl-add-select>
+                                                <option value="">-- 選擇策略插件 --</option>
+                                            </select>
+                                            <button type="button" class="px-3 py-2 border border-primary text-primary rounded-md text-xs hover:bg-primary hover:text-white transition" data-dsl-add-button>
+                                                新增條件
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Strategy Management -->
                             <div class="card">
                                 <div class="card-header">
@@ -2808,6 +2937,9 @@
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/lib/strategy-param-presentation.js"></script>
+    <script src="js/lib/strategy-params-form.js"></script>
+    <script src="js/lib/strategy-dsl-editor.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>

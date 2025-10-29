@@ -151,6 +151,15 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStrategyParams('shortEntry');
         updateStrategyParams('shortExit');
         shortArea.style.display = shortCheckbox.checked ? 'grid' : 'none';
+        if (window.lazybacktestDslEditorUi && typeof window.lazybacktestDslEditorUi.init === 'function') {
+            window.lazybacktestDslEditorUi.init();
+            STRATEGY_OPTION_ROLE_CONFIGS.forEach((config) => {
+                const selectEl = document.getElementById(config.selectId);
+                if (selectEl && typeof window.lazybacktestDslEditorUi.syncRoleFromSelect === 'function') {
+                    window.lazybacktestDslEditorUi.syncRoleFromSelect(config.type, selectEl.value);
+                }
+            });
+        }
         showInfo("請設定參數並執行。");
         console.log("[Main] Initial setup complete.");
 

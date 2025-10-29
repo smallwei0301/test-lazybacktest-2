@@ -5074,108 +5074,35 @@ function ensureSelectUsesNormalizedValue(type, selectElement) {
 }
 
 function resolveStrategyParamPresentation(type, strategyId, paramName) {
-    let label = paramName;
-    let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
-
-    if (strategyId === 'k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdX') {
-            label = 'D值上限(X)';
-            idSuffix = 'KdThresholdX';
-        }
-    } else if (strategyId === 'k_d_cross_exit') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdY') {
-            label = 'D值下限(Y)';
-            idSuffix = 'KdThresholdY';
-        }
-    } else if (strategyId === 'turtle_stop_loss' && paramName === 'stopLossPeriod') {
-        label = '停損週期';
-        idSuffix = 'StopLossPeriod';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'signalPeriod') {
-        label = 'DEA週期(x)';
-        idSuffix = 'SignalPeriod';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'shortPeriod') {
-        label = 'DI短EMA(n)';
-    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'longPeriod') {
-        label = 'DI長EMA(m)';
-    } else if (strategyId === 'short_k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdY') {
-            label = 'D值下限(Y)';
-            idSuffix = 'ShortKdThresholdY';
-        }
-    } else if (strategyId === 'cover_k_d_cross') {
-        if (paramName === 'period') {
-            label = 'KD週期';
-        } else if (paramName === 'thresholdX') {
-            label = 'D值上限(X)';
-            idSuffix = 'CoverKdThresholdX';
-        }
-    } else if (strategyId === 'short_macd_cross') {
-        if (paramName === 'shortPeriod') {
-            label = 'DI短EMA(n)';
-        } else if (paramName === 'longPeriod') {
-            label = 'DI長EMA(m)';
-        } else if (paramName === 'signalPeriod') {
-            label = 'DEA週期(x)';
-            idSuffix = 'ShortSignalPeriod';
-        }
-    } else if (strategyId === 'cover_macd_cross') {
-        if (paramName === 'shortPeriod') {
-            label = 'DI短EMA(n)';
-        } else if (paramName === 'longPeriod') {
-            label = 'DI長EMA(m)';
-        } else if (paramName === 'signalPeriod') {
-            label = 'DEA週期(x)';
-            idSuffix = 'CoverSignalPeriod';
-        }
-    } else if (strategyId === 'short_turtle_stop_loss' && paramName === 'stopLossPeriod') {
-        label = '觀察週期';
-        idSuffix = 'ShortStopLossPeriod';
-    } else if (strategyId === 'cover_turtle_breakout' && paramName === 'breakoutPeriod') {
-        label = '突破週期';
-        idSuffix = 'CoverBreakoutPeriod';
-    } else if (strategyId === 'cover_trailing_stop' && paramName === 'percentage') {
-        label = '百分比(%)';
-        idSuffix = 'CoverTrailingStopPercentage';
-    } else {
-        const baseKey = strategyId.replace('short_', '').replace('cover_', '').replace('_exit', '');
-        if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
-            if (paramName === 'shortPeriod') {
-                label = '短期SMA';
-            } else if (paramName === 'longPeriod') {
-                label = '長期SMA';
-            }
-        } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
-            if (paramName === 'period') {
-                label = 'SMA週期';
-            }
-        } else if (paramName === 'period') {
-            label = '週期';
-        } else if (paramName === 'threshold') {
-            label = '閾值';
-        } else if (paramName === 'signalPeriod') {
-            label = '信號週期';
-        } else if (paramName === 'deviations') {
-            label = '標準差';
-        } else if (paramName === 'multiplier') {
-            label = '倍數';
-        } else if (paramName === 'breakoutPeriod') {
-            label = '突破週期';
-        }
+    const resolver = (typeof window !== 'undefined' && window.LazyStrategyParamPresentation)
+        ? window.LazyStrategyParamPresentation
+        : null;
+    if (resolver && typeof resolver.resolve === 'function') {
+        return resolver.resolve(type, strategyId, paramName);
     }
-
+    const suffix = typeof paramName === 'string' && paramName
+        ? paramName.charAt(0).toUpperCase() + paramName.slice(1)
+        : 'Param';
     return {
-        label,
-        inputId: `${type}${idSuffix}`,
+        label: paramName || '',
+        inputId: `${type}${suffix}`,
     };
 }
 
 function getStrategyParams(type) {
+    const formLib = (typeof window !== 'undefined' && window.LazyStrategyParamsForm)
+        ? window.LazyStrategyParamsForm
+        : null;
+    const formState = (typeof window !== 'undefined' && window.lazybacktestStrategyForms)
+        ? window.lazybacktestStrategyForms[type]
+        : null;
+
+    if (formLib && formState && Array.isArray(formState.fields) && formState.fields.length > 0) {
+        const rawValues = formLib.readValues(formState.container, formState.fields);
+        const validation = formLib.validateValues(formState.schema, formState.fields, rawValues);
+        return validation.values;
+    }
+
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5244,8 +5171,474 @@ function createStrategyDslPluginNode(strategyId, params) {
     return node;
 }
 
+const strategyDslUi = (() => {
+    if (typeof window === 'undefined') {
+        return {
+            init: () => {},
+            buildDsl: () => null,
+            syncRoleFromSelect: () => {},
+        };
+    }
+
+    const editorLib = window.LazyStrategyDslEditor;
+    const formLib = window.LazyStrategyParamsForm;
+    if (!editorLib || !formLib) {
+        return {
+            init: () => {},
+            buildDsl: () => null,
+            syncRoleFromSelect: () => {},
+        };
+    }
+
+    const roleMap = {
+        entry: 'longEntry',
+        exit: 'longExit',
+        shortEntry: 'shortEntry',
+        shortExit: 'shortExit',
+    };
+    const inverseRoleMap = {
+        longEntry: 'entry',
+        longExit: 'exit',
+        shortEntry: 'shortEntry',
+        shortExit: 'shortExit',
+    };
+
+    const roleElements = {};
+    const roleForms = {
+        longEntry: [],
+        longExit: [],
+        shortEntry: [],
+        shortExit: [],
+    };
+
+    const SELECT_LOCK_MESSAGE = '此角色已由策略 DSL 編輯器控制，請在下方 DSL 卡片調整。';
+
+    let state = editorLib.createState();
+
+    function cloneNode(node) {
+        if (!node || typeof node !== 'object') return null;
+        return JSON.parse(JSON.stringify(node));
+    }
+
+    function findSelectElement(type) {
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!doc) return null;
+        return doc.getElementById(`${type}Strategy`);
+    }
+
+    function ensureSelectValue(selectEl, value) {
+        if (!selectEl || !value) return false;
+        const hasOption = Array.from(selectEl.options || []).some((option) => option.value === value);
+        if (!hasOption) {
+            return false;
+        }
+        selectEl.value = value;
+        return true;
+    }
+
+    function lockSelect(type, activeValue) {
+        const selectEl = findSelectElement(type);
+        if (!selectEl) return;
+        if (!selectEl.dataset.dslOriginalTitle) {
+            selectEl.dataset.dslOriginalTitle = selectEl.title || '';
+        }
+        selectEl.dataset.dslLocked = 'true';
+        selectEl.disabled = true;
+        selectEl.title = SELECT_LOCK_MESSAGE;
+        if (activeValue) {
+            ensureSelectValue(selectEl, activeValue);
+        }
+    }
+
+    function unlockSelect(type) {
+        const selectEl = findSelectElement(type);
+        if (!selectEl) return;
+        if (selectEl.dataset.dslOriginalTitle !== undefined) {
+            selectEl.title = selectEl.dataset.dslOriginalTitle;
+            delete selectEl.dataset.dslOriginalTitle;
+        } else {
+            selectEl.removeAttribute('title');
+        }
+        selectEl.disabled = false;
+        delete selectEl.dataset.dslLocked;
+    }
+
+    function firstPluginId(composition) {
+        if (!composition || !Array.isArray(composition.nodes)) return '';
+        const plugin = composition.nodes.find((node) => node && node.type === 'plugin');
+        return plugin ? plugin.id : '';
+    }
+
+    function isSimpleComposition(composition) {
+        if (!composition) return true;
+        if (composition.not) return false;
+        if (composition.operator === 'OR') return false;
+        if (composition.nodes.length === 0) return true;
+        if (composition.nodes.length === 1 && composition.nodes[0] && composition.nodes[0].type === 'plugin') {
+            return true;
+        }
+        return false;
+    }
+
+    function refreshRoleSelectState(role, compositionOverride) {
+        const composition = compositionOverride || extractComposition(state.roles[role]);
+        const type = inverseRoleMap[role] || 'entry';
+        const pluginId = firstPluginId(composition);
+        if (composition.nodes.length === 0) {
+            unlockSelect(type);
+            return;
+        }
+        if (!isSimpleComposition(composition)) {
+            lockSelect(type, pluginId);
+            return;
+        }
+        unlockSelect(type);
+        const selectEl = findSelectElement(type);
+        if (selectEl && pluginId) {
+            ensureSelectValue(selectEl, pluginId);
+        }
+    }
+
+    function extractComposition(roleNode) {
+        if (!roleNode) {
+            return { operator: 'AND', not: false, nodes: [] };
+        }
+        if (roleNode.type === 'NOT') {
+            const inner = extractComposition(roleNode.node);
+            inner.not = true;
+            return inner;
+        }
+        if (roleNode.type === 'AND' || roleNode.type === 'OR') {
+            return {
+                operator: roleNode.type,
+                not: false,
+                nodes: Array.isArray(roleNode.nodes) ? roleNode.nodes.map(cloneNode) : [],
+            };
+        }
+        if (roleNode.type === 'plugin') {
+            return { operator: 'AND', not: false, nodes: [cloneNode(roleNode)] };
+        }
+        return { operator: 'AND', not: false, nodes: [] };
+    }
+
+    function getMeta(strategyId) {
+        const registry = window.StrategyPluginRegistry;
+        if (registry && typeof registry.getStrategyMetaById === 'function') {
+            const meta = registry.getStrategyMetaById(strategyId);
+            if (meta) return meta;
+        }
+        const descriptor = strategyDescriptions?.[strategyId];
+        if (descriptor) {
+            return { id: strategyId, label: descriptor.name || strategyId };
+        }
+        return { id: strategyId, label: strategyId };
+    }
+
+    function populateOptions(selectEl, roleKey) {
+        if (!selectEl) return;
+        selectEl.innerHTML = '<option value="">-- 選擇策略插件 --</option>';
+        const candidates = strategyRegistrySampleCandidates?.[roleKey];
+        if (!Array.isArray(candidates)) return;
+        candidates.forEach((candidate) => {
+            const descriptor = strategyDescriptions?.[candidate.configKey];
+            const option = document.createElement('option');
+            option.value = candidate.strategyId;
+            option.textContent = descriptor?.name || candidate.strategyId;
+            selectEl.appendChild(option);
+        });
+    }
+
+    function renderRole(role) {
+        const elements = roleElements[role];
+        if (!elements) return;
+        const composition = extractComposition(state.roles[role]);
+        if (elements.operatorSelect) {
+            elements.operatorSelect.value = composition.operator;
+        }
+        if (elements.notToggle) {
+            elements.notToggle.checked = composition.not;
+        }
+        const dropzone = elements.dropzone;
+        if (!dropzone) return;
+        dropzone.innerHTML = '';
+        roleForms[role] = [];
+
+        if (composition.nodes.length === 0) {
+            if (elements.emptyHint) {
+                elements.emptyHint.classList.remove('hidden');
+            }
+            refreshRoleSelectState(role, composition);
+            return;
+        }
+        if (elements.emptyHint) {
+            elements.emptyHint.classList.add('hidden');
+        }
+
+        composition.nodes.forEach((node, index) => {
+            const item = document.createElement('div');
+            item.className = 'border border-border rounded-md bg-popover p-3 space-y-2 mb-2 cursor-move';
+            item.setAttribute('draggable', 'true');
+            item.dataset.dslNodeIndex = String(index);
+
+            const header = document.createElement('div');
+            header.className = 'flex items-center justify-between gap-2';
+            const meta = getMeta(node.id);
+            const title = document.createElement('div');
+            title.className = 'text-xs font-semibold flex-1 truncate';
+            title.textContent = meta.label || node.id;
+            header.appendChild(title);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'text-[11px] text-destructive hover:underline';
+            removeBtn.textContent = '移除';
+            removeBtn.addEventListener('click', () => {
+                syncRoleStateFromForms(role);
+                const compositionBefore = extractComposition(state.roles[role]);
+                const nodes = compositionBefore.nodes.slice();
+                nodes.splice(index, 1);
+                let updatedState = editorLib.createState();
+                nodes.forEach((pluginNode) => {
+                    updatedState = editorLib.appendPlugin(updatedState, role, pluginNode);
+                });
+                if (compositionBefore.operator === 'OR') {
+                    updatedState = editorLib.setRootOperator(updatedState, role, 'OR');
+                }
+                if (compositionBefore.not) {
+                    updatedState = editorLib.toggleRootNot(updatedState, role);
+                }
+                state.roles[role] = updatedState.roles[role];
+                renderRole(role);
+            });
+            header.appendChild(removeBtn);
+            item.appendChild(header);
+
+            const formContainer = document.createElement('div');
+            formContainer.className = 'space-y-2';
+            item.appendChild(formContainer);
+
+            const roleKey = inverseRoleMap[role] || 'entry';
+            const schema = (getMeta(node.id)?.paramsSchema) || (window.StrategyPluginRegistry && typeof window.StrategyPluginRegistry.getStrategyMetaById === 'function'
+                ? window.StrategyPluginRegistry.getStrategyMetaById(node.id)?.paramsSchema
+                : null);
+            const fields = formLib.buildFieldDescriptors(schema, {
+                role: `dsl${role.charAt(0).toUpperCase()}${role.slice(1)}`,
+                strategyId: node.id,
+            });
+            const defaults = strategyDescriptions?.[node.id]?.defaultParams || {};
+            const baseValues = formLib.buildInitialValues(schema, defaults);
+            const initialValues = { ...baseValues, ...(node.params || {}) };
+            formLib.renderFields(formContainer, fields, initialValues);
+            roleForms[role].push({
+                strategyId: node.id,
+                fields,
+                schema,
+                container: formContainer,
+            });
+
+            dropzone.appendChild(item);
+        });
+
+        setupDragAndDrop(role, dropzone);
+        refreshRoleSelectState(role, composition);
+    }
+
+    function setupDragAndDrop(role, dropzone) {
+        if (!dropzone) return;
+        dropzone.querySelectorAll('[draggable="true"]').forEach((item) => {
+            item.addEventListener('dragstart', (event) => {
+                event.dataTransfer?.setData('text/plain', item.dataset.dslNodeIndex || '0');
+                event.dataTransfer?.setDragImage(item, item.offsetWidth / 2, item.offsetHeight / 2);
+            });
+            item.addEventListener('dragover', (event) => {
+                event.preventDefault();
+            });
+            item.addEventListener('drop', (event) => {
+                event.preventDefault();
+                const sourceIndex = Number(event.dataTransfer?.getData('text/plain') || '0');
+                const targetIndex = Number(item.dataset.dslNodeIndex || '0');
+                if (!Number.isInteger(sourceIndex) || !Number.isInteger(targetIndex)) {
+                    return;
+                }
+                if (sourceIndex === targetIndex) {
+                    return;
+                }
+                syncRoleStateFromForms(role);
+                const composition = extractComposition(state.roles[role]);
+                const nodes = composition.nodes.slice();
+                const [moved] = nodes.splice(sourceIndex, 1);
+                nodes.splice(targetIndex, 0, moved);
+                let updatedState = editorLib.createState();
+                nodes.forEach((pluginNode) => {
+                    updatedState = editorLib.appendPlugin(updatedState, role, pluginNode);
+                });
+                if (composition.operator === 'OR') {
+                    updatedState = editorLib.setRootOperator(updatedState, role, 'OR');
+                }
+                if (composition.not) {
+                    updatedState = editorLib.toggleRootNot(updatedState, role);
+                }
+                state.roles[role] = updatedState.roles[role];
+                renderRole(role);
+            });
+        });
+    }
+
+    function syncRoleStateFromForms(role) {
+        const elements = roleElements[role];
+        if (!elements) return;
+        const operator = elements.operatorSelect ? elements.operatorSelect.value : 'AND';
+        const notFlag = elements.notToggle ? elements.notToggle.checked : false;
+        let updatedState = editorLib.createState();
+        roleForms[role].forEach((formEntry) => {
+            const raw = formLib.readValues(formEntry.container, formEntry.fields);
+            const validation = formLib.validateValues(formEntry.schema, formEntry.fields, raw);
+            const pluginNode = { type: 'plugin', id: formEntry.strategyId };
+            if (validation.values && Object.keys(validation.values).length > 0) {
+                pluginNode.params = validation.values;
+            }
+            if (Array.isArray(validation.errors) && validation.errors.length > 0) {
+                console.warn('[StrategyDSL] 參數校驗調整', formEntry.strategyId, validation.errors);
+            }
+            updatedState = editorLib.appendPlugin(updatedState, role, pluginNode);
+        });
+        if (operator === 'OR') {
+            updatedState = editorLib.setRootOperator(updatedState, role, 'OR');
+        }
+        if (notFlag) {
+            updatedState = editorLib.toggleRootNot(updatedState, role);
+        }
+        state.roles[role] = updatedState.roles[role];
+    }
+
+    function handleOperatorChange(role) {
+        syncRoleStateFromForms(role);
+        const elements = roleElements[role];
+        if (!elements) return;
+        const value = elements.operatorSelect?.value || 'AND';
+        if (value === 'OR') {
+            state = editorLib.setRootOperator(state, role, 'OR');
+        } else {
+            state = editorLib.setRootOperator(state, role, 'AND');
+        }
+        renderRole(role);
+    }
+
+    function handleNotToggle(role) {
+        syncRoleStateFromForms(role);
+        state = editorLib.toggleRootNot(state, role);
+        renderRole(role);
+    }
+
+    function handleAdd(role) {
+        const elements = roleElements[role];
+        if (!elements || !elements.addSelect) return;
+        const strategyId = elements.addSelect.value;
+        if (!strategyId) return;
+        syncRoleStateFromForms(role);
+        state = editorLib.appendPlugin(state, role, { type: 'plugin', id: strategyId });
+        elements.addSelect.value = '';
+        renderRole(role);
+    }
+
+    function init() {
+        const root = document.getElementById('strategyDslEditor');
+        if (!root) return;
+        root.querySelectorAll('[data-dsl-role]').forEach((section) => {
+            const role = section.getAttribute('data-dsl-role');
+            if (!role || !(role in roleForms)) return;
+            const elements = {
+                section,
+                dropzone: section.querySelector('[data-dsl-dropzone]'),
+                operatorSelect: section.querySelector('[data-dsl-operator]'),
+                notToggle: section.querySelector('[data-dsl-not-toggle]'),
+                addSelect: section.querySelector('[data-dsl-add-select]'),
+                addButton: section.querySelector('[data-dsl-add-button]'),
+                emptyHint: section.querySelector('[data-dsl-empty-hint]'),
+            };
+            roleElements[role] = elements;
+            const canonicalRole = inverseRoleMap[role] || 'entry';
+            populateOptions(elements.addSelect, canonicalRole);
+            if (elements.addButton) {
+                elements.addButton.addEventListener('click', () => handleAdd(role));
+            }
+            if (elements.operatorSelect) {
+                elements.operatorSelect.addEventListener('change', () => handleOperatorChange(role));
+            }
+            if (elements.notToggle) {
+                elements.notToggle.addEventListener('change', () => handleNotToggle(role));
+            }
+            renderRole(role);
+        });
+    }
+
+    function buildDsl(version) {
+        Object.keys(roleForms).forEach((role) => {
+            syncRoleStateFromForms(role);
+        });
+        const dsl = editorLib.toStrategyDsl(state, version);
+        return dsl && Object.keys(dsl).length > 1 ? dsl : null;
+    }
+
+    function syncRoleFromSelect(type, strategyId) {
+        const role = roleMap[type];
+        if (!role) return;
+        const composition = extractComposition(state.roles[role]);
+        const trimmedId = typeof strategyId === 'string' ? strategyId.trim() : '';
+        const isSimple = isSimpleComposition(composition);
+
+        if (!trimmedId) {
+            if (composition.nodes.length === 0) {
+                state = editorLib.setSinglePlugin(state, role, null);
+                renderRole(role);
+                return;
+            }
+            if (isSimple) {
+                state = editorLib.setSinglePlugin(state, role, null);
+                renderRole(role);
+                return;
+            }
+            refreshRoleSelectState(role, composition);
+            return;
+        }
+
+        if (composition.nodes.length === 0) {
+            state = editorLib.appendPlugin(state, role, { type: 'plugin', id: trimmedId });
+            renderRole(role);
+            return;
+        }
+
+        if (isSimple && composition.nodes[0]?.type === 'plugin') {
+            const currentId = composition.nodes[0].id;
+            if (currentId === trimmedId) {
+                refreshRoleSelectState(role, composition);
+                return;
+            }
+            state = editorLib.setSinglePlugin(state, role, { type: 'plugin', id: trimmedId });
+            renderRole(role);
+            return;
+        }
+
+        refreshRoleSelectState(role, composition);
+    }
+
+    return {
+        init,
+        buildDsl,
+        syncRoleFromSelect,
+    };
+})();
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestDslEditorUi = strategyDslUi;
+}
+
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
+    const dslFromEditor = strategyDslUi.buildDsl ? strategyDslUi.buildDsl(STRATEGY_DSL_VERSION) : null;
+    if (dslFromEditor && Object.keys(dslFromEditor).length > 1) {
+        return dslFromEditor;
+    }
     const dsl = { version: STRATEGY_DSL_VERSION };
     const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
     if (entryNode) dsl.longEntry = entryNode;

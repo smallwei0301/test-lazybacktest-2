@@ -1,3 +1,20 @@
+## 2026-09-19 — Patch LB-STRATEGY-DSL-UI-20260919B
+- **Scope**: 策略 DSL UI 與舊版策略選單同步、狀態鎖定提示。
+- **Updates**:
+  - `js/lib/strategy-dsl-editor.js` 新增 `setSinglePlugin`，允許直接以單一插件覆寫或清空角色節點，配合表單切換。
+  - `js/main.js` 的 DSL UI 在節點組合後會自動鎖定對應策略下拉並顯示提示；當 DSL 保持單一插件時，切換選單會直接替換 DSL 插件。
+  - 補強 `tests/strategy-dsl-editor.test.js` 覆蓋 `setSinglePlugin` 行為，確保可覆寫、清空並維持原狀態不被汙染。
+- **Testing**: `npm test`。
+
+## 2026-09-19 — Patch LB-STRATEGY-DSL-UI-20260919A
+- **Scope**: 策略 DSL 編輯器 UI 與 paramsSchema 表單生成器。
+- **Updates**:
+  - 新增 `js/lib/strategy-param-presentation.js`、`strategy-params-form.js` 與 `strategy-dsl-editor.js`，集中處理欄位展示、Schema 驗證與 DSL 組裝狀態。
+  - `js/backtest.js`/`js/main.js` 改用 Schema 自動渲染策略參數、校驗輸入並同步 DSL；`js/loader.js` 啟動拖拉式 DSL 編輯器並沿用原有策略選單。
+  - `index.html` 添加「策略 DSL 組裝」卡片、拖拉節點與 AND/OR/NOT 控制；回測時優先使用自訂 DSL。
+  - 補上單元測試 `tests/strategy-params-form.test.js`、`tests/strategy-dsl-editor.test.js` 覆蓋欄位推導、數值夾限與 DSL 節點操作。
+- **Testing**: `npm test`。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
