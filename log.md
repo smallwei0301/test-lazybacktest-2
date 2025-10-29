@@ -1738,3 +1738,20 @@ NODE`
 - **Diagnostics**: 於參數優化面板選擇成交量暴增倍率時，預期表格會依步進顯示不同的年化報酬等指標；回測完成後的交易紀錄中，買入卡片下方應出現三日指標明細以供比對。
 - **Testing**: `npm run test`
 
+- **Testing**: `npm run test`
+
+## 2024-09-11 — Patch LB-BATCH-OPT-RECOVERY-20240911A
+- **Issue recap**: 前版優化流程在批量優化組合時，因樣板化淺拷貝遺漏部分欄位，導致均線組合等策略的參數掃描結果固定不變，同時成交量暴增結果在批量頁面的「載入」動作會因缺少新 ID 對照而失敗。
+- **Fix**:
+  - `js/worker.js` 的 `runOptimization` 改為以 JSON 深拷貝建立每次測試參數，補強 `strategyDsl`、進出場與做空參數的個別複製流程，確保每個步進值都能以獨立物件執行並反映績效差異。
+  - 批量載入對照表加入 `volume_spike_exit`，讓含成交量暴增出場的批量結果可以順利回填選單與參數。
+- **Diagnostics**: 待 Netlify 實測批量優化，確認均線／成交量暴增組合會產出不同績效，同時「載入」後可直接帶出參數並觸發回測。
+- **Testing**: `npm run test`
+
+## 2024-09-12 — Patch LB-BATCH-OPT-STABILITY-20240912A
+- **Issue recap**: 批量優化仍出現均線等策略參數掃描結果相同的情況，且含成交量暴增的結果在載入時因映射指向錯誤選項而未能觸發回測。
+- **Fix**:
+  - `js/worker.js` 的 `runOptimization` 為每次測試重新複製進出場與多空參數、分批設定與 DSL 策略 ID，並繼承原本的做空開關，避免樣板與測試互相汙染。
+  - `js/batch-optimization.js` 將 `volume_spike` 映射到 `volume_spike_exit` 選項，確保批量結果可順利回填與執行回測。
+- **Diagnostics**: 重新執行批量優化時，均線黃金／死亡交叉的步進結果應呈現不同績效；含成交量暴增的結果點擊「載入」後可立即帶出參數並啟動回測。
+- **Testing**: `npm run test`

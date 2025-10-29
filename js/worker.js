@@ -12493,118 +12493,6 @@ function buildOptimizationValueSweep(range) {
   return deduped;
 }
 
-function createOptimizationParamTemplate(baseParams = {}) {
-  const template = {
-    base: {},
-    entryParams: null,
-    exitParams: null,
-    shortEntryParams: null,
-    shortExitParams: null,
-    entryStages: null,
-    exitStages: null,
-  };
-  if (baseParams && typeof baseParams === "object") {
-    Object.keys(baseParams).forEach((key) => {
-      if (
-        key === "entryParams" ||
-        key === "exitParams" ||
-        key === "shortEntryParams" ||
-        key === "shortExitParams" ||
-        key === "entryStages" ||
-        key === "exitStages"
-      ) {
-        return;
-      }
-      if (key === "strategyDsl" && baseParams.strategyDsl) {
-        try {
-          template.base.strategyDsl = JSON.parse(
-            JSON.stringify(baseParams.strategyDsl),
-          );
-        } catch (cloneError) {
-          console.warn(
-            "[Worker Opt] strategyDsl 深拷貝失敗，將沿用原始參考。",
-            cloneError,
-          );
-          template.base.strategyDsl = baseParams.strategyDsl;
-        }
-        return;
-      }
-      template.base[key] = baseParams[key];
-    });
-    template.entryParams =
-      baseParams.entryParams && typeof baseParams.entryParams === "object"
-        ? { ...baseParams.entryParams }
-        : null;
-    template.exitParams =
-      baseParams.exitParams && typeof baseParams.exitParams === "object"
-        ? { ...baseParams.exitParams }
-        : null;
-    template.shortEntryParams =
-      baseParams.shortEntryParams &&
-      typeof baseParams.shortEntryParams === "object"
-        ? { ...baseParams.shortEntryParams }
-        : null;
-    template.shortExitParams =
-      baseParams.shortExitParams &&
-      typeof baseParams.shortExitParams === "object"
-        ? { ...baseParams.shortExitParams }
-        : null;
-    template.entryStages = Array.isArray(baseParams.entryStages)
-      ? baseParams.entryStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
-      : null;
-    template.exitStages = Array.isArray(baseParams.exitStages)
-      ? baseParams.exitStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
-      : null;
-  }
-  template.base.__skipSensitivity = true;
-  template.base.__optimizationMode = SINGLE_PARAMETER_OPTIMIZER_VERSION;
-  return template;
-}
-
-function instantiateOptimizationParams(template) {
-  const params = { ...template.base };
-  if (template.base && typeof template.base.strategyDsl === "object") {
-    try {
-      params.strategyDsl = JSON.parse(
-        JSON.stringify(template.base.strategyDsl),
-      );
-    } catch (cloneError) {
-      console.warn(
-        "[Worker Opt] strategyDsl 實例化深拷貝失敗，沿用參考。",
-        cloneError,
-      );
-      params.strategyDsl = template.base.strategyDsl;
-    }
-  }
-  if (template.entryParams) {
-    params.entryParams = { ...template.entryParams };
-  }
-  if (template.exitParams) {
-    params.exitParams = { ...template.exitParams };
-  }
-  if (template.shortEntryParams) {
-    params.shortEntryParams = { ...template.shortEntryParams };
-  }
-  if (template.shortExitParams) {
-    params.shortExitParams = { ...template.shortExitParams };
-  }
-  if (template.entryStages) {
-    params.entryStages = template.entryStages.map((stage) =>
-      stage && typeof stage === "object" ? { ...stage } : stage,
-    );
-  }
-  if (template.exitStages) {
-    params.exitStages = template.exitStages.map((stage) =>
-      stage && typeof stage === "object" ? { ...stage } : stage,
-    );
-  }
-  return params;
-}
-
 function updateStrategyDslParam(strategyDsl, roleKey, targetIds, paramName, value) {
   if (!strategyDsl || typeof strategyDsl !== "object") return;
   const root = strategyDsl[roleKey];
@@ -12748,7 +12636,67 @@ async function runOptimization(
     );
     return { results: [], rawDataUsed: dataFetched ? stockData : null };
   }
-  const template = createOptimizationParamTemplate(baseParams || {});
+
+  const cloneParamBag = (bag, fallback) => {
+    const source =
+      bag && typeof bag === "object"
+        ? bag
+        : fallback && typeof fallback === "object"
+          ? fallback
+          : null;
+    if (!source) {
+      return {};
+    }
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(source);
+      } catch (cloneErr) {
+        console.warn(
+          "[Worker Opt] structuredClone param bag failed, falling back to JSON clone.",
+          cloneErr,
+        );
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(source));
+    } catch (jsonErr) {
+      console.warn(
+        "[Worker Opt] JSON clone param bag failed, using shallow copy.",
+        jsonErr,
+      );
+      return { ...source };
+    }
+  };
+
+  const cloneStageList = (stages, fallback) => {
+    const source = Array.isArray(stages)
+      ? stages
+      : Array.isArray(fallback)
+        ? fallback
+        : [];
+    return source.map((value) => value);
+  };
+
+  const resolveStrategyId = (currentId, fallbackId) => {
+    if (typeof currentId === "string" && currentId) {
+      return currentId;
+    }
+    if (typeof fallbackId === "string" && fallbackId) {
+      return fallbackId;
+    }
+    return null;
+  };
+  let serializedBase = null;
+  if (baseParams && typeof baseParams === "object") {
+    try {
+      serializedBase = JSON.stringify(baseParams);
+    } catch (serializeError) {
+      console.warn(
+        "[Worker Opt] 基礎參數序列化失敗，將改用淺拷貝。",
+        serializeError,
+      );
+    }
+  }
   const totalSteps = sweepValues.length;
   let curStep = 0;
   const progressOffset = dataFetched ? 50 : 5;
@@ -12768,32 +12716,76 @@ async function runOptimization(
       progress,
       message: `測試 ${optParamName}=${curVal}`,
     });
-    const testParams = instantiateOptimizationParams(template);
-    const baseEffectiveStart =
-      baseParams?.effectiveStartDate || baseParams?.startDate || null;
-    const baseDataStart =
-      baseParams?.dataStartDate || baseEffectiveStart || baseParams?.startDate || null;
-    const baseLookback =
-      Number.isFinite(baseParams?.lookbackDays) && baseParams.lookbackDays > 0
-        ? baseParams.lookbackDays
-        : null;
-    if (baseParams?.startDate && !testParams.originalStartDate) {
-      testParams.originalStartDate = baseParams.startDate;
+    let testParams = null;
+    if (serializedBase) {
+      try {
+        testParams = JSON.parse(serializedBase);
+      } catch (cloneError) {
+        console.warn(
+          "[Worker Opt] 基礎參數反序列化失敗，改用淺拷貝。",
+          cloneError,
+        );
+      }
     }
-    if (baseEffectiveStart) {
-      testParams.startDate = baseEffectiveStart;
-      testParams.effectiveStartDate = baseEffectiveStart;
-    } else if (testParams.effectiveStartDate) {
-      testParams.startDate = testParams.effectiveStartDate;
+    if (!testParams || typeof testParams !== "object") {
+      testParams = { ...(baseParams || {}) };
     }
-    if (baseDataStart) {
-      testParams.dataStartDate = baseDataStart;
-    } else if (!testParams.dataStartDate && testParams.startDate) {
-      testParams.dataStartDate = testParams.startDate;
+    if (testParams.strategyDsl && typeof testParams.strategyDsl === "object") {
+      try {
+        testParams.strategyDsl = JSON.parse(
+          JSON.stringify(testParams.strategyDsl),
+        );
+      } catch (dslCloneError) {
+        console.warn(
+          "[Worker Opt] strategyDsl 複製失敗，沿用原始參考。",
+          dslCloneError,
+        );
+      }
     }
-    if (baseLookback !== null) {
-      testParams.lookbackDays = baseLookback;
-    }
+    testParams.entryStrategy = resolveStrategyId(
+      testParams.entryStrategy,
+      baseParams?.entryStrategy,
+    );
+    testParams.exitStrategy = resolveStrategyId(
+      testParams.exitStrategy,
+      baseParams?.exitStrategy,
+    );
+    testParams.shortEntryStrategy = resolveStrategyId(
+      testParams.shortEntryStrategy,
+      baseParams?.shortEntryStrategy,
+    );
+    testParams.shortExitStrategy = resolveStrategyId(
+      testParams.shortExitStrategy,
+      baseParams?.shortExitStrategy,
+    );
+
+    testParams.entryParams = cloneParamBag(
+      testParams.entryParams,
+      baseParams?.entryParams,
+    );
+    testParams.exitParams = cloneParamBag(
+      testParams.exitParams,
+      baseParams?.exitParams,
+    );
+    testParams.shortEntryParams = cloneParamBag(
+      testParams.shortEntryParams,
+      baseParams?.shortEntryParams,
+    );
+    testParams.shortExitParams = cloneParamBag(
+      testParams.shortExitParams,
+      baseParams?.shortExitParams,
+    );
+
+    testParams.entryStages = cloneStageList(
+      testParams.entryStages,
+      baseParams?.entryStages,
+    );
+    testParams.exitStages = cloneStageList(
+      testParams.exitStages,
+      baseParams?.exitStages,
+    );
+    testParams.__skipSensitivity = true;
+    testParams.__optimizationMode = SINGLE_PARAMETER_OPTIMIZER_VERSION;
     testParams.__optimizationParam = optParamName;
     testParams.__optimizationValue = curVal;
     if (optimizeTargetStrategy === "risk") {
@@ -12823,7 +12815,13 @@ async function runOptimization(
         testParams[targetObjKey] = {};
       }
       testParams[targetObjKey][optParamName] = curVal;
-      testParams.enableShorting = contextRequiresShorting;
+      if (contextRequiresShorting) {
+        testParams.enableShorting = true;
+      } else if (typeof baseParams?.enableShorting === "boolean") {
+        testParams.enableShorting = baseParams.enableShorting;
+      } else if (typeof testParams.enableShorting !== "boolean") {
+        testParams.enableShorting = false;
+      }
       const dslRoleKey = OPTIMIZATION_ROLE_TO_DSL[optimizeTargetStrategy];
       if (dslRoleKey && testParams.strategyDsl) {
         const strategyIds = [];
