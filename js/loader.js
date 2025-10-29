@@ -59,53 +59,60 @@ document.addEventListener('DOMContentLoaded', function() {
         const shortCheckbox = document.getElementById('enableShortSelling');
         const shortArea = document.getElementById('short-strategy-area');
 
+        const paramFormManager = window.lazybacktestStrategyParamForm;
+        const dslEditor = window.lazybacktestStrategyDslEditor;
+
+        if (dslEditor && typeof dslEditor.init === 'function') {
+            dslEditor.init({
+                roles: [
+                    { role: 'entry', containerId: 'dslEntryContainer', label: '做多進場' },
+                    { role: 'exit', containerId: 'dslExitContainer', label: '做多出場' },
+                    { role: 'shortEntry', containerId: 'dslShortEntryContainer', label: '做空進場' },
+                    { role: 'shortExit', containerId: 'dslShortExitContainer', label: '回補出場' },
+                ],
+            });
+        }
+
+        if (paramFormManager && typeof paramFormManager.registerRole === 'function') {
+            paramFormManager.registerRole('entry', {
+                containerId: 'entryParams',
+                selectId: 'entryStrategy',
+                optimizeSelectId: 'optimizeEntryParamSelect',
+            });
+            paramFormManager.registerRole('exit', {
+                containerId: 'exitParams',
+                selectId: 'exitStrategy',
+                optimizeSelectId: 'optimizeExitParamSelect',
+            });
+            paramFormManager.registerRole('shortEntry', {
+                containerId: 'shortEntryParams',
+                selectId: 'shortEntryStrategy',
+                optimizeSelectId: 'optimizeShortEntryParamSelect',
+            });
+            paramFormManager.registerRole('shortExit', {
+                containerId: 'shortExitParams',
+                selectId: 'shortExitStrategy',
+                optimizeSelectId: 'optimizeShortExitParamSelect',
+            });
+        }
+
         const copyParams = (sourceType, targetType) => {
             const sourceParams = getStrategyParams(sourceType);
             if (!sourceParams || Object.keys(sourceParams).length === 0) {
                 console.log(`[Param Copy] No params found for source ${sourceType}.`);
                 return;
             }
-            const targetParamsContainer = document.getElementById(`${targetType}Params`);
-            if (!targetParamsContainer) {
-                console.warn(`[Param Copy] Target container ${targetType}Params not found.`);
+            if (paramFormManager && typeof paramFormManager.setValues === 'function') {
+                paramFormManager.setValues(targetType, sourceParams);
                 return;
             }
-            const targetSelectElement = document.getElementById(`${targetType}Strategy`);
-            const targetStrategyKey = targetSelectElement ? targetSelectElement.value : null;
-            let targetInternalKey = targetStrategyKey;
-
-            if (targetType === 'shortEntry') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_below', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `short_${targetStrategyKey}`;
-            } else if (targetType === 'shortExit') {
-                if (!strategyDescriptions[targetInternalKey] && ['ma_cross', 'ma_above', 'ema_cross'].includes(targetStrategyKey)) targetInternalKey = `cover_${targetStrategyKey}`;
-            } else if (targetType === 'exit' && ['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(targetStrategyKey)) {
-                targetInternalKey = `${targetStrategyKey}_exit`;
-            }
-            console.log(`[Param Copy] Attempting to copy from ${sourceType} to ${targetType} (InternalKey: ${targetInternalKey})`);
-
-            for (const pName in sourceParams) {
-                const sourceValue = sourceParams[pName];
-                let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1);
-                if (targetInternalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY';
-                else if (targetInternalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX';
-                else if (targetInternalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod';
-                else if (targetInternalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod';
-                else if (targetInternalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod';
-                else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod';
-                else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage';
-                else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY';
-                else if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX';
-                else if ((internalKey === 'macd_cross_exit' || internalKey === 'macd_cross') && pName === 'signalPeriod') idSfx = 'SignalPeriod';
-                else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod';
-
-                const targetId = `${targetType}${idSfx}`;
-                const targetInput = document.getElementById(targetId);
+            Object.entries(sourceParams).forEach(([paramName, value]) => {
+                const fallbackId = `${targetType}${paramName.charAt(0).toUpperCase()}${paramName.slice(1)}`;
+                const targetInput = document.getElementById(fallbackId);
                 if (targetInput) {
-                    targetInput.value = sourceValue;
-                } else {
-                    console.warn(`[Param Copy] Target input not found for ${pName} in ${targetType}: #${targetId}`);
+                    targetInput.value = value;
                 }
-            }
+            });
         };
 
         shortCheckbox.addEventListener('change', function() {

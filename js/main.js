@@ -38,7 +38,7 @@ const loadingMascotState = {
     },
 };
 
-const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
+const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260917A';
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -5176,6 +5176,14 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    const manager = window.lazybacktestStrategyParamForm;
+    if (manager && typeof manager.getValues === 'function') {
+        const values = manager.getValues(type);
+        if (values && typeof values === 'object') {
+            return values;
+        }
+    }
+
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5247,15 +5255,39 @@ function createStrategyDslPluginNode(strategyId, params) {
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
     const dsl = { version: STRATEGY_DSL_VERSION };
-    const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
-    if (entryNode) dsl.longEntry = entryNode;
-    const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
-    if (exitNode) dsl.longExit = exitNode;
+    const editor = window.lazybacktestStrategyDslEditor;
+    const customEntry = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('entry') : null;
+    if (customEntry) {
+        dsl.longEntry = customEntry;
+    } else {
+        const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
+        if (entryNode) dsl.longEntry = entryNode;
+    }
+
+    const customExit = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('exit') : null;
+    if (customExit) {
+        dsl.longExit = customExit;
+    } else {
+        const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
+        if (exitNode) dsl.longExit = exitNode;
+    }
+
     if (selection.enableShorting) {
-        const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
-        if (shortEntryNode) dsl.shortEntry = shortEntryNode;
-        const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
-        if (shortExitNode) dsl.shortExit = shortExitNode;
+        const customShortEntry = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('shortEntry') : null;
+        if (customShortEntry) {
+            dsl.shortEntry = customShortEntry;
+        } else {
+            const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
+            if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+        }
+
+        const customShortExit = editor && typeof editor.getRoleDsl === 'function' ? editor.getRoleDsl('shortExit') : null;
+        if (customShortExit) {
+            dsl.shortExit = customShortExit;
+        } else {
+            const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
+            if (shortExitNode) dsl.shortExit = shortExitNode;
+        }
     }
     return Object.keys(dsl).length > 1 ? dsl : null;
 }

@@ -8777,12 +8777,11 @@ function applyBestStagingRecommendation() {
 
 function updateStrategyParams(type) {
     const strategySelect = document.getElementById(`${type}Strategy`);
-    const paramsContainer = document.getElementById(`${type}Params`);
-    if (!strategySelect || !paramsContainer) {
-        console.error(`[Main] Cannot find elements for type: ${type}`);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element for type: ${type}`);
         return;
     }
-    
+
     const strategyKey = strategySelect.value;
     const normalizedKey = normaliseStrategyIdForRole(type, strategyKey);
     if (normalizedKey && normalizedKey !== strategyKey) {
@@ -8792,149 +8791,31 @@ function updateStrategyParams(type) {
         }
     }
     const internalKey = normalizedKey || strategyKey;
-    
-    const config = strategyDescriptions[internalKey];
-    paramsContainer.innerHTML = '';
-    
-    if (!config?.defaultParams || Object.keys(config.defaultParams).length === 0) {
-        paramsContainer.innerHTML = '<p class="text-xs text-gray-400 italic">此策略無需參數</p>';
-    } else {
-        for (const pName in config.defaultParams) {
-            const defVal = config.defaultParams[pName];
-            let lbl = pName;
-            let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1);
-            
-            // 標籤名稱處理
-            if (internalKey === 'k_d_cross') {
-                if(pName==='period')lbl='KD週期';
-                else if(pName==='thresholdX'){lbl='D值上限(X)';idSfx='KdThresholdX';}
-            } else if (internalKey === 'k_d_cross_exit') {
-                if(pName==='period')lbl='KD週期';
-                else if(pName==='thresholdY'){lbl='D值下限(Y)';idSfx='KdThresholdY';}
-            } else if (internalKey === 'turtle_stop_loss') {
-                if(pName==='stopLossPeriod'){lbl='停損週期';idSfx='StopLossPeriod';}
-            } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') {
-                lbl='DEA週期(x)'; idSfx = 'SignalPeriod';
-            } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'shortPeriod') {
-                lbl='DI短EMA(n)';
-            } else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'longPeriod') {
-                lbl='DI長EMA(m)';
-            } else if (internalKey === 'short_k_d_cross') {
-                if(pName==='period')lbl='KD週期';
-                else if(pName==='thresholdY'){lbl='D值下限(Y)';idSfx='ShortKdThresholdY';}
-            } else if (internalKey === 'cover_k_d_cross') {
-                if(pName==='period')lbl='KD週期';
-                else if(pName==='thresholdX'){lbl='D值上限(X)';idSfx='CoverKdThresholdX';}
-            } else if (internalKey === 'short_macd_cross') {
-                if(pName==='shortPeriod')lbl='DI短EMA(n)';
-                else if(pName==='longPeriod')lbl='DI長EMA(m)';
-                else if(pName==='signalPeriod'){lbl='DEA週期(x)';idSfx='ShortSignalPeriod';}
-            } else if (internalKey === 'cover_macd_cross') {
-                if(pName==='shortPeriod')lbl='DI短EMA(n)';
-                else if(pName==='longPeriod')lbl='DI長EMA(m)';
-                else if(pName==='signalPeriod'){lbl='DEA週期(x)';idSfx='CoverSignalPeriod';}
-            } else if (internalKey === 'short_turtle_stop_loss') {
-                if(pName==='stopLossPeriod'){lbl='觀察週期';idSfx='ShortStopLossPeriod';}
-            } else if (internalKey === 'cover_turtle_breakout') {
-                if(pName==='breakoutPeriod'){lbl='突破週期';idSfx='CoverBreakoutPeriod';}
-            } else if (internalKey === 'cover_trailing_stop') {
-                if(pName==='percentage'){lbl='百分比(%)';idSfx='CoverTrailingStopPercentage';}
-            } else {
-                const baseKey = internalKey.replace('short_', '').replace('cover_', '').replace('_exit', '');
-                if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
-                    if(pName==='shortPeriod')lbl='短期SMA';
-                    else if(pName==='longPeriod')lbl='長期SMA';
-                } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
-                    if(pName==='period')lbl='SMA週期';
-                } else if(pName==='period')lbl='週期';
-                else if(pName==='threshold')lbl='閾值';
-                else if(pName==='signalPeriod')lbl='信號週期';
-                else if(pName==='deviations')lbl='標準差';
-                else if(pName==='multiplier')lbl='成交量倍數';
-                else if(pName==='percentage')lbl='百分比(%)';
-                else if(pName==='breakoutPeriod')lbl='突破週期';
-                else if(pName==='stopLossPeriod')lbl='停損週期';
-                else { lbl = pName; }
-            }
-            
-            const id = `${type}${idSfx}`;
-            const pg = document.createElement('div');
-            const lb = document.createElement('label');
-            lb.htmlFor = id;
-            lb.className = "block text-xs font-medium text-gray-600 mb-1";
-            
-            // 檢查是否有優化範圍資訊並添加範圍顯示（適用於所有策略類型）
-            const optimizeTarget = config.optimizeTargets?.find(t => t.name === pName);
-            if (optimizeTarget?.range) {
-                const rangeText = `${optimizeTarget.range.from}-${optimizeTarget.range.to}`;
-                lb.innerHTML = `${lbl}<br><span class="text-xs text-blue-500 font-normal">範圍: ${rangeText}</span>`;
-            } else {
-                lb.textContent = lbl;
-            }
-            
-            const ip = document.createElement('input');
-            ip.type = 'number';
-            ip.id = id;
-            ip.value = defVal;
-            ip.className = "w-full px-2 py-1 border border-gray-300 rounded-md shadow-sm text-sm focus:ring-blue-500 focus:border-blue-500";
-            
-            // 設定輸入範圍
-            if(pName.includes('Period')||pName==='period'||pName==='stopLossPeriod'||pName==='breakoutPeriod'){
-                ip.min=1;ip.max=200;ip.step=1;
-            } else if(pName==='threshold'&&(internalKey.includes('rsi')||internalKey.includes('williams'))){
-                ip.min=internalKey.includes('williams')?-100:0;
-                ip.max=internalKey.includes('williams')?0:100;
-                ip.step=1;
-            } else if(pName==='thresholdX'||pName==='thresholdY'){
-                ip.min=0;ip.max=100;ip.step=1;
-            } else if(pName==='deviations'){
-                ip.min=0.5;ip.max=5;ip.step=0.1;
-            } else if(pName==='multiplier'){
-                ip.min=1;ip.max=10;ip.step=0.1;
-            } else if(pName==='percentage'){
-                ip.min=0.1;ip.max=100;ip.step=0.1;
-            }
-            
-            pg.appendChild(lb);
-            pg.appendChild(ip);
-            paramsContainer.appendChild(pg);
-        }
+
+    const paramFormManager = window.lazybacktestStrategyParamForm;
+    if (paramFormManager && typeof paramFormManager.renderRoleForm === 'function') {
+        paramFormManager.renderRoleForm(type, internalKey);
     }
-    
-    // 更新優化參數選項
-    let optimizeSelectId = null;
-    if (type === 'entry' || type === 'exit' || type === 'shortEntry' || type === 'shortExit') {
-        if (type === 'entry') optimizeSelectId = 'optimizeEntryParamSelect';
-        else if (type === 'exit') optimizeSelectId = 'optimizeExitParamSelect';
-        else if (type === 'shortEntry') optimizeSelectId = 'optimizeShortEntryParamSelect';
-        else if (type === 'shortExit') optimizeSelectId = 'optimizeShortExitParamSelect';
-        
-        if (optimizeSelectId) {
-            const optimizeSelect = document.getElementById(optimizeSelectId);
-            if (optimizeSelect) {
-                optimizeSelect.innerHTML = '';
-                const targets = config?.optimizeTargets || [];
-                if (targets.length > 0) {
-                    targets.forEach(t => {
-                        const opt = document.createElement('option');
-                        opt.value = t.name;
-                        opt.textContent = t.label;
-                        optimizeSelect.appendChild(opt);
-                    });
-                    optimizeSelect.disabled = false;
-                    optimizeSelect.title = `選擇優化參數`;
-                } else {
-                    const opt = document.createElement('option');
-                    opt.value="null";
-                    opt.textContent = '無可優化';
-                    optimizeSelect.appendChild(opt);
-                    optimizeSelect.disabled = true;
-                    optimizeSelect.title = '此策略無可優化參數';
-                }
-            } else {
-                console.warn(`[Update Params] Optimize select element not found: #${optimizeSelectId}`);
-            }
+
+    const label = (() => {
+        if (strategyDescriptions && strategyDescriptions[internalKey]?.name) {
+            return strategyDescriptions[internalKey].name;
         }
+        const option = strategySelect.selectedOptions && strategySelect.selectedOptions[0];
+        return option ? option.textContent.trim() : internalKey;
+    })();
+
+    const params = paramFormManager && typeof paramFormManager.getValues === 'function'
+        ? paramFormManager.getValues(type)
+        : {};
+
+    const dslEditor = window.lazybacktestStrategyDslEditor;
+    if (dslEditor && typeof dslEditor.syncBaseStrategy === 'function') {
+        dslEditor.syncBaseStrategy(type, {
+            strategyId: internalKey,
+            params,
+            label,
+        });
     }
 }
 
