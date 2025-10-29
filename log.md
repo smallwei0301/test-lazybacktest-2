@@ -1,3 +1,10 @@
+## 2026-10-05 — Patch LB-ROLLING-OPTSEED-20261005A
+- **Scope**: 滾動測試優化初始參數種子與批量一致化。
+- **Updates**:
+  - `js/rolling-test.js` 建立 `buildOptimizationSeedParams`，於滾動測試優化時依批量策略描述覆寫進出場（含空單）初始參數為策略預設值。
+  - 滾動測試優化流程採用預設參數種子建立訓練視窗工作參數，更新模組版本碼為 `LB-ROLLING-OPTSEED-20261005A`。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

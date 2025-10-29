@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.7 ---
-// Patch Tag: LB-ROLLING-TEST-20260709A
+// --- 滾動測試模組 - v2.8 ---
+// Patch Tag: LB-ROLLING-OPTSEED-20261005A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20260709A',
+        version: 'LB-ROLLING-OPTSEED-20261005A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -3139,6 +3139,32 @@
         return clone;
     }
 
+    function buildOptimizationSeedParams(baseParams, plan) {
+        const seed = deepClone(baseParams || {});
+        if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
+            return seed;
+        }
+
+        const scopeSet = new Set(plan.scopes);
+        const applyDefaultsForScope = (scope, strategyKey, paramsKey) => {
+            if (!scopeSet.has(scope)) return;
+            const strategyName = seed[strategyKey];
+            if (!strategyName) return;
+            const configKey = resolveStrategyConfigKey(strategyName, scope) || strategyName;
+            const strategyInfo = strategyDescriptions?.[configKey];
+            if (strategyInfo && typeof strategyInfo.defaultParams === 'object') {
+                seed[paramsKey] = { ...strategyInfo.defaultParams };
+            }
+        };
+
+        applyDefaultsForScope('entry', 'entryStrategy', 'entryParams');
+        applyDefaultsForScope('exit', 'exitStrategy', 'exitParams');
+        applyDefaultsForScope('shortEntry', 'shortEntryStrategy', 'shortEntryParams');
+        applyDefaultsForScope('shortExit', 'shortExitStrategy', 'shortExitParams');
+
+        return seed;
+    }
+
     function normalizeWindowBaseParams(target, windowInfo) {
         if (!target || typeof target !== 'object') return;
         if (windowInfo?.trainingStart) target.startDate = windowInfo.trainingStart;
@@ -3197,7 +3223,8 @@
             engine: 'batchOptimizationWorker',
         };
 
-        const outputParams = deepClone(baseWindowParams);
+        const optimizationSeed = buildOptimizationSeedParams(baseWindowParams, plan);
+        const outputParams = deepClone(optimizationSeed);
         normalizeWindowBaseParams(outputParams, windowInfo);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
@@ -3225,7 +3252,7 @@
             return { params: outputParams, summary };
         }
 
-        const workingParams = deepClone(baseWindowParams);
+        const workingParams = deepClone(optimizationSeed);
         normalizeWindowBaseParams(workingParams, windowInfo);
 
         const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
