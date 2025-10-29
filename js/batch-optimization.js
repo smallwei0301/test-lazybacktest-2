@@ -1570,7 +1570,8 @@ const EXIT_STRATEGY_SELECT_MAP = {
     'bollinger_reversal': 'bollinger_reversal',
     'k_d_cross_exit': 'k_d_cross_exit',
     'k_d_cross': 'k_d_cross_exit',
-    'volume_spike': 'volume_spike',
+    'volume_spike': 'volume_spike_exit',
+    'volume_spike_exit': 'volume_spike_exit',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
     'williams_overbought_exit': 'williams_overbought',
@@ -1630,6 +1631,44 @@ function prepareBaseParamsForOptimization(source) {
     clone.entryStages = Array.isArray(clone.entryStages) ? [...clone.entryStages] : [];
     clone.exitStages = Array.isArray(clone.exitStages) ? [...clone.exitStages] : [];
     return clone;
+}
+
+function rebuildStrategyDslForParams(params) {
+    if (!params || typeof params !== 'object') return params;
+    const dslApi = (typeof lazybacktestStrategyDsl === 'object' && lazybacktestStrategyDsl)
+        ? lazybacktestStrategyDsl
+        : null;
+    const builder = dslApi && typeof dslApi.buildFromParams === 'function'
+        ? dslApi.buildFromParams
+        : null;
+    if (!builder) {
+        return params;
+    }
+
+    const selection = {
+        entryStrategy: params.entryStrategy || null,
+        entryParams: params.entryParams || {},
+        exitStrategy: params.exitStrategy || null,
+        exitParams: params.exitParams || {},
+        enableShorting: Boolean(params.enableShorting || params.shortEntryStrategy || params.shortExitStrategy),
+        shortEntryStrategy: params.shortEntryStrategy || null,
+        shortEntryParams: params.shortEntryParams || {},
+        shortExitStrategy: params.shortExitStrategy || null,
+        shortExitParams: params.shortExitParams || {},
+    };
+
+    try {
+        const dsl = builder(selection);
+        if (dsl) {
+            params.strategyDsl = dsl;
+        } else if (params.strategyDsl) {
+            delete params.strategyDsl;
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to rebuild strategy DSL for params:', error);
+    }
+
+    return params;
 }
 
 // Worker / per-combination 狀態追蹤
@@ -3238,6 +3277,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
+            rebuildStrategyDslForParams(params);
             const preparedParams = enrichParamsWithLookback(params);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
@@ -3732,7 +3772,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         };
         
         console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
-        
+
+        rebuildStrategyDslForParams(params);
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
@@ -3926,7 +3967,8 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             optimizeWorker.terminate();
             resolve({ value: undefined, metric: -Infinity });
         };
-        
+
+        rebuildStrategyDslForParams(params);
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
@@ -5774,6 +5816,7 @@ function performSingleBacktest(params) {
             
             // 發送回測請求 - 使用正確的消息類型
             console.log('[Cross Optimization] Sending message to worker...');
+            rebuildStrategyDslForParams(params);
             const preparedParams = enrichParamsWithLookback(params);
             worker.postMessage({
                 type: 'runBacktest',
@@ -7417,6 +7460,7 @@ function performSingleBacktestFast(params) {
             };
             
             // 發送回測請求 - 使用緩存數據提高速度
+            rebuildStrategyDslForParams(params);
             const preparedParams = enrichParamsWithLookback(params);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
             const cachedUsage = buildCachedDatasetUsage(
