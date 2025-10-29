@@ -672,7 +672,8 @@ function normalizeTesterRows(payload, parseMode) {
         if (!date) return;
         const hasValue = [open, high, low, close, volume].some((value) => value !== null);
         if (!hasValue) return;
-        rows.push({ date, open, high, low, close, volume });
+        const volumeInThousands = Number.isFinite(volume) ? Math.round(volume / 1000) : null;
+        rows.push({ date, open, high, low, close, volume, volumeInThousands });
     };
 
     if (parseMode === 'adjustedComposer') {
@@ -749,10 +750,16 @@ function formatTesterTablePrice(value) {
     return fixed;
 }
 
-function formatTesterTableVolume(value) {
-    if (!Number.isFinite(value)) return '—';
-    const rounded = Math.round(Number(value));
-    return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function formatTesterTableVolume(row) {
+    if (!row || typeof row !== 'object') return '—';
+    const { volumeInThousands, volume } = row;
+    const displayValue = Number.isFinite(volumeInThousands)
+        ? volumeInThousands
+        : Number.isFinite(volume)
+            ? Math.round(Number(volume) / 1000)
+            : null;
+    if (!Number.isFinite(displayValue)) return '—';
+    return Number(displayValue).toLocaleString('zh-TW');
 }
 
 function renderTesterTableRows() {
@@ -778,7 +785,7 @@ function renderTesterTableRows() {
             formatTesterTablePrice(row?.high),
             formatTesterTablePrice(row?.low),
             formatTesterTablePrice(row?.close),
-            formatTesterTableVolume(row?.volume),
+            formatTesterTableVolume(row),
         ];
         numericValues.forEach((text) => {
             const td = document.createElement('td');
@@ -5296,6 +5303,11 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
+    const recentYearsInput = document.getElementById('recentYears');
+    const recentYearsValue = recentYearsInput ? Number.parseInt(recentYearsInput.value, 10) : Number.NaN;
+    const recentYears = Number.isFinite(recentYearsValue) && recentYearsValue > 0
+        ? Math.min(recentYearsValue, 50)
+        : null;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
     const exitSelect = document.getElementById('exitStrategy');
     const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
@@ -5370,6 +5382,7 @@ function getBacktestParams() {
         marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
         strategyDsl,
+        recentYears,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;

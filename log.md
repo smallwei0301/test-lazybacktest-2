@@ -1,3 +1,44 @@
+## 2026-09-10 — Patch LB-VOLUME-SPIKE-OPT-20240910A
+- **Issue recap**: 成交量暴增策略在參數優化時各步進值產生相同績效，且資料測試表格仍顯示除以千後的舊量值，難以確認訊號敏感度。
+- **Fix**:
+  - `js/worker.js` 將成交量保留為原始數值，並在正規化時正確轉成數字型態，同步輸出 `volumeInThousands` 供前端顯示與診斷使用。
+  - `js/main.js` 資料來源測試表格與欄位格式化改讀取 `volumeInThousands`，維持千股顯示同時避免把原始量值誤判為零。
+  - `js/backtest.js` 延續前次調整的千分位顯示邏輯，確保價格檢視器與指標摘要皆以千股呈現並對齊新的欄位名稱。
+- **Testing**: `npm run test`
+
+## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
+- **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
+- **Updates**:
+  - `js/strategy-plugins/volume.js` 以單一模組註冊多空進出場四種插件 ID，統一輸出倍數、門檻與量比診斷（版本 `LB-VOLUME-SPIKE-BLOCKS-20240909A`）。
+  - `js/config.js`、`index.html`、`js/strategy-plugin-manifest.js` 導入 `volume_spike_exit`、`short_volume_spike`、`cover_volume_spike` 三個 ID，供做多出場與空單策略選單、批量優化共用，並維持舊 ID 自動映射。
+  - `js/worker.js` 更新多空出場流程優先透過新插件呼叫，並在退回邏輯套用對應均量陣列與倍數參數，確保參數優化與批量優化都能觸發訊號。
+- **Testing**: `npm run test`
+
+## 2026-09-08 — Patch LB-VOLUME-SPIKE-PARAM-20240908A
+- **Scope**: 成交量暴增策略參數與指標對齊。
+- **Updates**:
+  - `js/worker.js` 依多空進出場分別計算成交量均線 (`volumeAvgEntry/Exit/ShortEntry/ShortExit`)，退回邏輯同步引用對應區間並改採插件優先判斷。
+  - `js/strategy-plugins/volume.js` (`LB-VOLUME-SPIKE-PARAM-20240908A`) 依角色載入正確均量陣列、保留倍數與門檻診斷，確保倍數與期間參數生效。
+- **Testing**: `npm run test`
+
+## 2026-08-29 — Patch LB-PERF-OVERFIT-20240829A
+- **Scope**: 期間績效表格轉置、策略摘要過擬合檢查與成交量暴增出場修復。
+- **Updates**:
+  - `js/worker.js` (`LB-PERF-TABLE-20240829A`) 新增 1M、6M 區間計算並補足期間覆蓋檢查，輸出期間績效含年化報酬。
+  - `js/backtest.js` (`LB-PERF-TABLE-20240829A`、`LB-ADVICE-OVERFIT-20240829A`、`LB-TAB-UI-20240829A`) 將績效表格改為期間列、指標欄，同步整合過擬合(報酬率比/夏普值比) 建議與頁籤字級固定。
+  - `js/strategy-plugins/volume.js`、`js/worker.js` (`LB-VOLUME-EXIT-20240829A`) 讓成交量暴增策略於出場角色透過插件與回退邏輯判斷訊號。
+- **Testing**: `npm run test`
+
+## 2026-07-30 — Patch LB-PERFORMANCE-ADVICE-20260730A
+- **Issue recap**: 期間績效分析無法顯示資料、策略建議文字缺乏流程化指引，成交量暴增出場未能觸發，且自動資料撈取時間須調整。
+- **Fix**:
+  - `js/backtest.js`、`js/worker.js` 依「最近 N 年」設定計算 1～N 年期間績效，輸出年化報酬、夏普、索提諾與回撤，並建立 `renderPerformanceAnalysis` 版面；同步新增建議流程（版本 `LB-PERFORMANCE-ANALYSIS-20260730A` 與 `LB-STRATEGY-ADVICE-20260730A`）。
+  - `js/backtest.js` 重新整理策略摘要流程卡，將指標比對、風控、交易樣本與敏感度整合成四段建議，並移除建議文字中的連續標點。
+  - `js/strategy-plugins/volume.js` 修正 `volume_spike` 在出場／空單角色未觸發的問題（`LB-VOLUME-SPIKE-FLOW-20260730A`）。
+  - `css/style.css` 停用頁籤容器按下縮放效果；`js/main.js` 傳遞 `recentYears` 參數；`netlify.toml` 更新排程為每日 13:40 預抓資料。
+- **Diagnostics**: 請於瀏覽器以 `recentYears=5` 執行回測，檢視期間表格是否顯示最近 1～5 年指標，確認策略摘要產出四段建議，並在成交量暴增作為出場策略時驗證訊號觸發；另於 Netlify 後台確認 Cron 設定為 `40 5 * * *`。
+- **Testing**: `npm run test`
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
