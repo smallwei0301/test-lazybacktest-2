@@ -4951,12 +4951,8 @@ function runBacktestInternal() {
                      const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
+                    const mergedCoverage = computeCoverageFromRows(mergedData);
+                    const mergedCoverageFingerprint = computeCoverageFingerprint(mergedCoverage);
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -5004,7 +5000,7 @@ function runBacktestInternal() {
                         dataSources: sourceArray,
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                         coverage: mergedCoverage,
-                        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
+                        coverageFingerprint: mergedCoverageFingerprint,
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
@@ -5081,7 +5077,8 @@ function runBacktestInternal() {
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
-                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedCoverage = computeCoverageFromRows(Array.isArray(cachedEntry.data) ? cachedEntry.data : []);
+                    const updatedCoverageFingerprint = computeCoverageFingerprint(updatedCoverage);
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
@@ -5114,7 +5111,7 @@ function runBacktestInternal() {
                         datasetDiagnostics: data?.datasetDiagnostics || cachedEntry.datasetDiagnostics || null,
                         fetchDiagnostics: updatedDiagnostics,
                         lastRemoteFetchDiagnostics: rawFetchDiagnostics,
-                        coverageFingerprint: computeCoverageFingerprint(updatedCoverage),
+                        coverageFingerprint: updatedCoverageFingerprint,
                     };
                     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
                         toleranceDays: START_GAP_TOLERANCE_DAYS,
@@ -8566,10 +8563,8 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         return existingEntry || null;
     }
 
-    const mergedCoverage = mergeIsoCoverage(
-        existingEntry?.coverage || [],
-        fetchedRange && fetchedRange.start && fetchedRange.end ? { start: fetchedRange.start, end: fetchedRange.end } : null,
-    );
+    const mergedCoverage = computeCoverageFromRows(mergedData);
+    const mergedCoverageFingerprint = computeCoverageFingerprint(mergedCoverage);
     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
     if (dataSource) sourceSet.add(dataSource);
     const sourceArray = Array.from(sourceSet);
@@ -8598,6 +8593,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         ...(existingEntry || {}),
         data: mergedData,
         coverage: mergedCoverage,
+        coverageFingerprint: mergedCoverageFingerprint,
         dataSources: sourceArray,
         dataSource: summariseSourceLabels(sourceArray),
         fetchedAt: Date.now(),

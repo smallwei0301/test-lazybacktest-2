@@ -5447,6 +5447,90 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const COVERAGE_TAIPEI_TIMEZONE = 'Asia/Taipei';
+const COVERAGE_TAIPEI_REFRESH_HOUR = 14;
+
+function getTaipeiNowParts(referenceDate = new Date()) {
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: COVERAGE_TAIPEI_TIMEZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hourCycle: 'h23',
+        });
+        const parts = formatter.formatToParts(referenceDate);
+        const lookup = {};
+        parts.forEach((part) => {
+            if (part && part.type) {
+                lookup[part.type] = part.value;
+            }
+        });
+        const year = parseInt(lookup.year, 10);
+        const month = parseInt(lookup.month, 10);
+        const day = parseInt(lookup.day, 10);
+        const hour = parseInt(lookup.hour, 10);
+        const minute = parseInt(lookup.minute, 10);
+        const second = parseInt(lookup.second, 10);
+        if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
+            throw new Error('Invalid Taipei time parts');
+        }
+        return { year, month, day, hour, minute, second };
+    } catch (error) {
+        const offsetMs = 8 * 60 * 60 * 1000;
+        const taipeiDate = new Date(referenceDate.getTime() + offsetMs);
+        return {
+            year: taipeiDate.getUTCFullYear(),
+            month: taipeiDate.getUTCMonth() + 1,
+            day: taipeiDate.getUTCDate(),
+            hour: taipeiDate.getUTCHours(),
+            minute: taipeiDate.getUTCMinutes(),
+            second: taipeiDate.getUTCSeconds(),
+        };
+    }
+}
+
+function toIsoDateFromParts(parts) {
+    if (!parts) return null;
+    const { year, month, day } = parts;
+    if (![year, month, day].every((value) => Number.isFinite(value))) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getCoverageLastDateISO(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latest = null;
+    for (let i = 0; i < coverage.length; i += 1) {
+        const range = coverage[i];
+        if (!range || !range.end) continue;
+        if (!latest || range.end > latest) {
+            latest = range.end;
+        }
+    }
+    return latest;
+}
+
+function isCoverageExpiredAtTaipeiCutoff(coverage, targetEndDate) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return false;
+    const lastDateISO = getCoverageLastDateISO(coverage);
+    if (!lastDateISO) return false;
+    const taipeiParts = getTaipeiNowParts();
+    const taipeiDateISO = toIsoDateFromParts(taipeiParts);
+    if (!taipeiDateISO) return false;
+    if (targetEndDate && targetEndDate < taipeiDateISO) {
+        return false;
+    }
+    if (taipeiDateISO <= lastDateISO) {
+        return false;
+    }
+    if (!Number.isFinite(taipeiParts.hour) || taipeiParts.hour < COVERAGE_TAIPEI_REFRESH_HOUR) {
+        return false;
+    }
+    return true;
+}
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5652,8 +5736,13 @@ function needsDataFetch(cur) {
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
-
+    if (!coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate })) {
+        return true;
+    }
+    if (isCoverageExpiredAtTaipeiCutoff(entry.coverage, cur.endDate)) {
+        return true;
+    }
+    return false;
 }
 // --- 新增：請求並顯示策略建議 ---
 function getSuggestion() {

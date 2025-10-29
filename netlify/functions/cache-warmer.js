@@ -83,7 +83,7 @@ async function runWarmer() {
 }
 
 export const config = {
-  schedule: '0 18 * * *', // 每日台灣凌晨 (UTC+8 => 02:00)
+  schedule: '0 6 * * *', // 每日台灣下午 14:00（UTC 06:00）
 };
 
 export default async () => {
