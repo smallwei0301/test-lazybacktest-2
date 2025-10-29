@@ -7042,7 +7042,52 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    const normaliseVolumePeriod = (value, fallback) => {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 1) {
+        return Math.floor(num);
+      }
+      const fb = Number(fallback);
+      if (Number.isFinite(fb) && fb >= 1) {
+        return Math.floor(fb);
+      }
+      return 20;
+    };
+    const volumePeriodCache = new Map();
+    const resolveVolumeAverage = (period) => {
+      const key = Number.isFinite(period) && period >= 1 ? Math.floor(period) : 20;
+      if (!volumePeriodCache.has(key)) {
+        volumePeriodCache.set(key, maCalculator(volumes, key));
+      }
+      return volumePeriodCache.get(key);
+    };
+    const volumeEntryPeriod = normaliseVolumePeriod(ep?.period, 20);
+    const volumeExitPeriod = normaliseVolumePeriod(xp?.period, volumeEntryPeriod);
+    const volumeShortEntryPeriod = enableShorting
+      ? normaliseVolumePeriod(sep?.period, volumeExitPeriod)
+      : volumeExitPeriod;
+    const volumeShortExitPeriod = enableShorting
+      ? normaliseVolumePeriod(sxp?.period, volumeShortEntryPeriod)
+      : volumeExitPeriod;
+    indic.volumeAvgEntry = resolveVolumeAverage(volumeEntryPeriod);
+    indic.volumeAvgExit =
+      volumeExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeExitPeriod);
+    indic.volumeAvgShortEntry =
+      volumeShortEntryPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortEntryPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortEntryPeriod);
+    indic.volumeAvgShortExit =
+      volumeShortExitPeriod === volumeShortEntryPeriod
+        ? indic.volumeAvgShortEntry
+        : volumeShortExitPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortExitPeriod);
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7428,6 +7473,14 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -8657,7 +8710,7 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const aggregated = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -8670,6 +8723,36 @@ function runStrategy(data, params, options = {}) {
         stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
         positionId: currentLongPositionId,
       };
+      const metaSource = currentLongEntryBreakdown.find(
+        (stage) =>
+          stage &&
+          typeof stage === "object" &&
+          (stage.indicatorValues || stage.kdValues || stage.macdValues),
+      );
+      if (metaSource) {
+        if (metaSource.indicatorValues && typeof metaSource.indicatorValues === "object") {
+          try {
+            aggregated.indicatorValues = JSON.parse(
+              JSON.stringify(metaSource.indicatorValues),
+            );
+          } catch (cloneError) {
+            aggregated.indicatorValues = metaSource.indicatorValues;
+          }
+        }
+        if (metaSource.kdValues && typeof metaSource.kdValues === "object") {
+          aggregated.kdValues = { ...metaSource.kdValues };
+        }
+        if (metaSource.macdValues && typeof metaSource.macdValues === "object") {
+          aggregated.macdValues = { ...metaSource.macdValues };
+        }
+        if (metaSource.triggeringStrategy) {
+          aggregated.triggeringStrategy = metaSource.triggeringStrategy;
+        }
+        if (metaSource.stageTrigger) {
+          aggregated.stageTrigger = metaSource.stageTrigger;
+        }
+      }
+      return aggregated;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -8894,6 +8977,44 @@ function runStrategy(data, params, options = {}) {
           exitIndicatorValues = null;
         let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike_exit":
+            {
+              const pluginResult = callStrategyPlugin(
+                "volume_spike_exit",
+                "longExit",
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgVolume =
+                Array.isArray(indicators.volumeAvgExit)
+                  ? indicators.volumeAvgExit[i]
+                  : undefined;
+              const multiplierRaw = Number(exitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              sellSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgExit?.[i - 1] ?? null,
+                    avgVolume,
+                    indicators.volumeAvgExit?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_cross":
           case "ma_cross_exit":
           case "ema_cross":
@@ -9570,11 +9691,11 @@ function runStrategy(data, params, options = {}) {
                 };
               break;
             }
-          case "cover_k_d_cross":
-            {
-              const pluginResult = callStrategyPlugin(
-                'cover_k_d_cross',
-                'shortExit',
+        case "cover_k_d_cross":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_k_d_cross',
+              'shortExit',
                 i,
                 shortExitParams,
               );
@@ -9600,19 +9721,57 @@ function runStrategy(data, params, options = {}) {
                 kC > dC &&
                 kPC <= dPC &&
                 dC < thXC;
-              if (coverSignal)
-                coverKDValues = {
-                  kPrev: kPC,
-                  dPrev: dPC,
-                  kNow: kC,
-                  dNow: dC,
-                  kNext: indicators.kCover[i + 1] ?? null,
-                  dNext: indicators.dCover[i + 1] ?? null,
-                };
+            if (coverSignal)
+              coverKDValues = {
+                kPrev: kPC,
+                dPrev: dPC,
+                kNow: kC,
+                dNow: dC,
+                kNext: indicators.kCover[i + 1] ?? null,
+                dNext: indicators.dCover[i + 1] ?? null,
+              };
+            break;
+          }
+        case "cover_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_volume_spike',
+              'shortExit',
+              i,
+              shortExitParams,
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              shortExitRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!coverIndicatorValues && meta.indicatorValues)
+                coverIndicatorValues = meta.indicatorValues;
               break;
             }
-          case "cover_price_breakout":
-            const bpC = shortExitParams.period || 20;
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortExit)
+                ? indicators.volumeAvgShortExit[i]
+                : undefined;
+            const multiplierRaw = Number(shortExitParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            coverSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (coverSignal)
+              coverIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortExit?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortExit?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
+        case "cover_price_breakout":
+          const bpC = shortExitParams.period || 20;
             if (i >= bpC) {
               const hsC = highs.slice(i - bpC, i).filter((h) => check(h));
               if (hsC.length > 0) {
@@ -9992,19 +10151,40 @@ function runStrategy(data, params, options = {}) {
             break;
           }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              "volume_spike",
+              "longEntry",
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume = indicators.volumeAvgEntry[i];
+            const multiplierRaw = Number(entryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            buySignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (buySignal)
+              entryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgEntry[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
@@ -10333,6 +10513,44 @@ function runStrategy(data, params, options = {}) {
                 dNow: dSE,
                 kNext: indicators.kShortEntry[i + 1] ?? null,
                 dNext: indicators.dShortEntry[i + 1] ?? null,
+              };
+            break;
+          }
+        case "short_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_volume_spike',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortEntry)
+                ? indicators.volumeAvgShortEntry[i]
+                : undefined;
+            const multiplierRaw = Number(shortEntryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            shortSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortEntry?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortEntry?.[i + 1] ?? null,
+                ],
               };
             break;
           }
@@ -11062,26 +11280,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -11128,6 +11351,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -11156,19 +11397,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
@@ -12167,6 +12435,12 @@ function formatAbsoluteLabel(value) {
 
 // --- 參數優化邏輯 ---
 const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
+const OPTIMIZATION_ROLE_TO_DSL = Object.freeze({
+  entry: "longEntry",
+  exit: "longExit",
+  shortEntry: "shortEntry",
+  shortExit: "shortExit",
+});
 
 function buildOptimizationValueSweep(range) {
   const safeRange = range && typeof range === "object" ? range : {};
@@ -12219,89 +12493,51 @@ function buildOptimizationValueSweep(range) {
   return deduped;
 }
 
-function createOptimizationParamTemplate(baseParams = {}) {
-  const template = {
-    base: {},
-    entryParams: null,
-    exitParams: null,
-    shortEntryParams: null,
-    shortExitParams: null,
-    entryStages: null,
-    exitStages: null,
-  };
-  if (baseParams && typeof baseParams === "object") {
-    Object.keys(baseParams).forEach((key) => {
-      if (
-        key === "entryParams" ||
-        key === "exitParams" ||
-        key === "shortEntryParams" ||
-        key === "shortExitParams" ||
-        key === "entryStages" ||
-        key === "exitStages"
-      ) {
-        return;
-      }
-      template.base[key] = baseParams[key];
-    });
-    template.entryParams =
-      baseParams.entryParams && typeof baseParams.entryParams === "object"
-        ? { ...baseParams.entryParams }
-        : null;
-    template.exitParams =
-      baseParams.exitParams && typeof baseParams.exitParams === "object"
-        ? { ...baseParams.exitParams }
-        : null;
-    template.shortEntryParams =
-      baseParams.shortEntryParams &&
-      typeof baseParams.shortEntryParams === "object"
-        ? { ...baseParams.shortEntryParams }
-        : null;
-    template.shortExitParams =
-      baseParams.shortExitParams &&
-      typeof baseParams.shortExitParams === "object"
-        ? { ...baseParams.shortExitParams }
-        : null;
-    template.entryStages = Array.isArray(baseParams.entryStages)
-      ? baseParams.entryStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
-      : null;
-    template.exitStages = Array.isArray(baseParams.exitStages)
-      ? baseParams.exitStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
-      : null;
-  }
-  template.base.__skipSensitivity = true;
-  template.base.__optimizationMode = SINGLE_PARAMETER_OPTIMIZER_VERSION;
-  return template;
-}
+function updateStrategyDslParam(strategyDsl, roleKey, targetIds, paramName, value) {
+  if (!strategyDsl || typeof strategyDsl !== "object") return;
+  const root = strategyDsl[roleKey];
+  if (!root || typeof root !== "object") return;
+  const ids = Array.isArray(targetIds) ? targetIds.filter(Boolean) : [];
 
-function instantiateOptimizationParams(template) {
-  const params = { ...template.base };
-  if (template.entryParams) {
-    params.entryParams = { ...template.entryParams };
-  }
-  if (template.exitParams) {
-    params.exitParams = { ...template.exitParams };
-  }
-  if (template.shortEntryParams) {
-    params.shortEntryParams = { ...template.shortEntryParams };
-  }
-  if (template.shortExitParams) {
-    params.shortExitParams = { ...template.shortExitParams };
-  }
-  if (template.entryStages) {
-    params.entryStages = template.entryStages.map((stage) =>
-      stage && typeof stage === "object" ? { ...stage } : stage,
-    );
-  }
-  if (template.exitStages) {
-    params.exitStages = template.exitStages.map((stage) =>
-      stage && typeof stage === "object" ? { ...stage } : stage,
-    );
-  }
-  return params;
+  const shouldUpdateNode = (pluginId) => {
+    if (!ids.length) return true;
+    return ids.includes(pluginId);
+  };
+
+  const traverse = (node) => {
+    if (!node || typeof node !== "object") return;
+    const typeRaw =
+      typeof node.type === "string"
+        ? node.type.toLowerCase()
+        : typeof node.op === "string"
+          ? node.op.toLowerCase()
+          : typeof node.operator === "string"
+            ? node.operator.toLowerCase()
+            : null;
+    const isPluginNode =
+      typeRaw === "plugin" || (!typeRaw && typeof node.id === "string");
+    if (isPluginNode) {
+      const pluginId = typeof node.id === "string" ? node.id : null;
+      if (pluginId && shouldUpdateNode(pluginId) && node.params) {
+        if (typeof node.params === "object" && node.params !== null) {
+          if (paramName in node.params) {
+            node.params = { ...node.params, [paramName]: value };
+          }
+        }
+      }
+    }
+    if (Array.isArray(node.nodes)) {
+      node.nodes.forEach(traverse);
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach(traverse);
+    }
+    if (node.node && typeof node.node === "object") {
+      traverse(node.node);
+    }
+  };
+
+  traverse(root);
 }
 
 async function runOptimization(
@@ -12400,7 +12636,67 @@ async function runOptimization(
     );
     return { results: [], rawDataUsed: dataFetched ? stockData : null };
   }
-  const template = createOptimizationParamTemplate(baseParams || {});
+
+  const cloneParamBag = (bag, fallback) => {
+    const source =
+      bag && typeof bag === "object"
+        ? bag
+        : fallback && typeof fallback === "object"
+          ? fallback
+          : null;
+    if (!source) {
+      return {};
+    }
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(source);
+      } catch (cloneErr) {
+        console.warn(
+          "[Worker Opt] structuredClone param bag failed, falling back to JSON clone.",
+          cloneErr,
+        );
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(source));
+    } catch (jsonErr) {
+      console.warn(
+        "[Worker Opt] JSON clone param bag failed, using shallow copy.",
+        jsonErr,
+      );
+      return { ...source };
+    }
+  };
+
+  const cloneStageList = (stages, fallback) => {
+    const source = Array.isArray(stages)
+      ? stages
+      : Array.isArray(fallback)
+        ? fallback
+        : [];
+    return source.map((value) => value);
+  };
+
+  const resolveStrategyId = (currentId, fallbackId) => {
+    if (typeof currentId === "string" && currentId) {
+      return currentId;
+    }
+    if (typeof fallbackId === "string" && fallbackId) {
+      return fallbackId;
+    }
+    return null;
+  };
+  let serializedBase = null;
+  if (baseParams && typeof baseParams === "object") {
+    try {
+      serializedBase = JSON.stringify(baseParams);
+    } catch (serializeError) {
+      console.warn(
+        "[Worker Opt] 基礎參數序列化失敗，將改用淺拷貝。",
+        serializeError,
+      );
+    }
+  }
   const totalSteps = sweepValues.length;
   let curStep = 0;
   const progressOffset = dataFetched ? 50 : 5;
@@ -12420,32 +12716,76 @@ async function runOptimization(
       progress,
       message: `測試 ${optParamName}=${curVal}`,
     });
-    const testParams = instantiateOptimizationParams(template);
-    const baseEffectiveStart =
-      baseParams?.effectiveStartDate || baseParams?.startDate || null;
-    const baseDataStart =
-      baseParams?.dataStartDate || baseEffectiveStart || baseParams?.startDate || null;
-    const baseLookback =
-      Number.isFinite(baseParams?.lookbackDays) && baseParams.lookbackDays > 0
-        ? baseParams.lookbackDays
-        : null;
-    if (baseParams?.startDate && !testParams.originalStartDate) {
-      testParams.originalStartDate = baseParams.startDate;
+    let testParams = null;
+    if (serializedBase) {
+      try {
+        testParams = JSON.parse(serializedBase);
+      } catch (cloneError) {
+        console.warn(
+          "[Worker Opt] 基礎參數反序列化失敗，改用淺拷貝。",
+          cloneError,
+        );
+      }
     }
-    if (baseEffectiveStart) {
-      testParams.startDate = baseEffectiveStart;
-      testParams.effectiveStartDate = baseEffectiveStart;
-    } else if (testParams.effectiveStartDate) {
-      testParams.startDate = testParams.effectiveStartDate;
+    if (!testParams || typeof testParams !== "object") {
+      testParams = { ...(baseParams || {}) };
     }
-    if (baseDataStart) {
-      testParams.dataStartDate = baseDataStart;
-    } else if (!testParams.dataStartDate && testParams.startDate) {
-      testParams.dataStartDate = testParams.startDate;
+    if (testParams.strategyDsl && typeof testParams.strategyDsl === "object") {
+      try {
+        testParams.strategyDsl = JSON.parse(
+          JSON.stringify(testParams.strategyDsl),
+        );
+      } catch (dslCloneError) {
+        console.warn(
+          "[Worker Opt] strategyDsl 複製失敗，沿用原始參考。",
+          dslCloneError,
+        );
+      }
     }
-    if (baseLookback !== null) {
-      testParams.lookbackDays = baseLookback;
-    }
+    testParams.entryStrategy = resolveStrategyId(
+      testParams.entryStrategy,
+      baseParams?.entryStrategy,
+    );
+    testParams.exitStrategy = resolveStrategyId(
+      testParams.exitStrategy,
+      baseParams?.exitStrategy,
+    );
+    testParams.shortEntryStrategy = resolveStrategyId(
+      testParams.shortEntryStrategy,
+      baseParams?.shortEntryStrategy,
+    );
+    testParams.shortExitStrategy = resolveStrategyId(
+      testParams.shortExitStrategy,
+      baseParams?.shortExitStrategy,
+    );
+
+    testParams.entryParams = cloneParamBag(
+      testParams.entryParams,
+      baseParams?.entryParams,
+    );
+    testParams.exitParams = cloneParamBag(
+      testParams.exitParams,
+      baseParams?.exitParams,
+    );
+    testParams.shortEntryParams = cloneParamBag(
+      testParams.shortEntryParams,
+      baseParams?.shortEntryParams,
+    );
+    testParams.shortExitParams = cloneParamBag(
+      testParams.shortExitParams,
+      baseParams?.shortExitParams,
+    );
+
+    testParams.entryStages = cloneStageList(
+      testParams.entryStages,
+      baseParams?.entryStages,
+    );
+    testParams.exitStages = cloneStageList(
+      testParams.exitStages,
+      baseParams?.exitStages,
+    );
+    testParams.__skipSensitivity = true;
+    testParams.__optimizationMode = SINGLE_PARAMETER_OPTIMIZER_VERSION;
     testParams.__optimizationParam = optParamName;
     testParams.__optimizationValue = curVal;
     if (optimizeTargetStrategy === "risk") {
@@ -12475,7 +12815,33 @@ async function runOptimization(
         testParams[targetObjKey] = {};
       }
       testParams[targetObjKey][optParamName] = curVal;
-      testParams.enableShorting = contextRequiresShorting;
+      if (contextRequiresShorting) {
+        testParams.enableShorting = true;
+      } else if (typeof baseParams?.enableShorting === "boolean") {
+        testParams.enableShorting = baseParams.enableShorting;
+      } else if (typeof testParams.enableShorting !== "boolean") {
+        testParams.enableShorting = false;
+      }
+      const dslRoleKey = OPTIMIZATION_ROLE_TO_DSL[optimizeTargetStrategy];
+      if (dslRoleKey && testParams.strategyDsl) {
+        const strategyIds = [];
+        if (optimizeTargetStrategy === "entry") {
+          strategyIds.push(testParams.entryStrategy);
+        } else if (optimizeTargetStrategy === "exit") {
+          strategyIds.push(testParams.exitStrategy);
+        } else if (optimizeTargetStrategy === "shortEntry") {
+          strategyIds.push(testParams.shortEntryStrategy);
+        } else if (optimizeTargetStrategy === "shortExit") {
+          strategyIds.push(testParams.shortExitStrategy);
+        }
+        updateStrategyDslParam(
+          testParams.strategyDsl,
+          dslRoleKey,
+          strategyIds,
+          optParamName,
+          curVal,
+        );
+      }
     }
     try {
       const result = runStrategy(stockData, testParams, runOptions);

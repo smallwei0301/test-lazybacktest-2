@@ -286,7 +286,10 @@
     { id: 'williams_oversold', label: '威廉指標超賣', paramsSchema: williamsSchema(-80), loader: loaders.williams },
     { id: 'williams_overbought', label: '威廉指標超買', paramsSchema: williamsSchema(-20), loader: loaders.williams },
     { id: 'short_williams_overbought', label: '威廉指標超買 (做空)', paramsSchema: williamsSchema(-20), loader: loaders.williams },
+    { id: 'cover_volume_spike', label: '成交量暴增 (回補)', paramsSchema: volumeSchema, loader: loaders.volume },
+    { id: 'short_volume_spike', label: '成交量暴增 (做空)', paramsSchema: volumeSchema, loader: loaders.volume },
     { id: 'volume_spike', label: '成交量暴增', paramsSchema: volumeSchema, loader: loaders.volume },
+    { id: 'volume_spike_exit', label: '成交量暴增 (出場)', paramsSchema: volumeSchema, loader: loaders.volume },
   ];
 
   definitions.sort((a, b) => a.label.localeCompare(b.label, 'zh-Hant'));
