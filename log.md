@@ -1,3 +1,11 @@
+## 2026-09-20 — Patch LB-DSL-FORM-20260920A
+- **Scope**: 策略參數自動表單與 DSL 拖拉編輯器。
+- **Updates**:
+  - 新增 `js/lib/strategy-params-schema.js`、`js/lib/strategy-dsl-state.js`，提供 JSON Schema 欄位推導、數值驗證與 DSL 狀態建構工具，並以 TDD 撰寫對應測試。
+  - 新增 `js/strategy-params-form.js` 與 `js/strategy-dsl-editor.js`，依註冊插件 `paramsSchema` 自動生成策略參數表單、提供拖放/AND/OR/NOT 編輯介面，更新 `index.html` 與樣式以呈現新卡片。
+  - `js/main.js` 接線新模組，於 DOM 初始化時建立單向資料流、輸出合法參數並優先使用 DSL 編輯器的複合規則。
+- **Testing**: `npm test`。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:

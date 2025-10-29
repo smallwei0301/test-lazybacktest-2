@@ -1269,12 +1269,33 @@
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
                             </div>
+                        </div>
+                    </div>
 
-                            <!-- Strategy Management -->
-                            <div class="card">
+                    <!-- Strategy DSL Editor -->
+                    <div class="card" id="strategy-dsl-card">
+                        <div class="card-header">
+                            <h3 class="card-title flex items-center gap-2">
+                                <i data-lucide="workflow" class="lucide text-accent" style="color: var(--accent);"></i>
+                                <span class="tooltip">
+                                    策略 DSL 組合器
+                                    <span class="tooltiptext">依據插件的參數 Schema 拖拉組合策略規則，並即時檢查參數。</span>
+                                </span>
+                            </h3>
+                            <p class="card-description">利用 AND / OR / NOT 以及拖放排序建立複合策略規則。</p>
+                        </div>
+                        <div class="card-content space-y-3">
+                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                先從下方各欄位選擇策略加入規則；參數會依 Schema 自動產生並同步校驗，確保送往 Worker 的值皆合法。
+                                可拖曳調整順序或勾選 NOT 切換反向條件，亦可透過上方組合方式控制 AND/OR/NOT。
+                            </p>
+                            <div id="strategyDslEditor" class="space-y-4"></div>
+                        </div>
+                    </div>
+
+                    <!-- Strategy Management -->
+                    <div class="card">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2">
                                         <i data-lucide="file-text" class="lucide text-accent" style="color: var(--accent);"></i>
@@ -2808,6 +2829,10 @@
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/lib/strategy-params-schema.js"></script>
+    <script src="js/lib/strategy-dsl-state.js"></script>
+    <script src="js/strategy-params-form.js"></script>
+    <script src="js/strategy-dsl-editor.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>
