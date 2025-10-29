@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.2.8 ---
 // Patch Tag: LB-BATCH-MAPPER-20260917B
+// Patch Tag: LB-CACHE-GAP-20260921A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -402,6 +403,26 @@ function normaliseDateLikeToMs(value) {
     return null;
 }
 
+function normaliseDateLikeToISO(value) {
+    const timestamp = normaliseDateLikeToMs(value);
+    if (timestamp === null) {
+        return null;
+    }
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return date.toISOString().split('T')[0];
+}
+
+function shiftIsoDate(iso, days) {
+    if (!iso && iso !== 0) return null;
+    const timestamp = normaliseDateLikeToMs(iso);
+    if (timestamp === null) return null;
+    const shifted = timestamp + (days * 24 * 60 * 60 * 1000);
+    return normaliseDateLikeToISO(shifted);
+}
+
 function sliceDatasetRowsByRange(rows, requiredRange) {
     const tolerance = DATASET_COVERAGE_TOLERANCE_MS;
     const startBound = normaliseDateLikeToMs(requiredRange?.dataStartDate
@@ -459,6 +480,50 @@ function sliceDatasetRowsByRange(rows, requiredRange) {
     };
 }
 
+function computeDatasetCoveragePlan(summary, requiredRange, evaluation) {
+    if (!evaluation || evaluation.coverageSatisfied) {
+        return null;
+    }
+
+    const reasons = typeof evaluation.reason === 'string'
+        ? evaluation.reason.split('|')
+        : [];
+    const hasStartGap = reasons.includes('dataset-start-after-required-start');
+
+    if (!hasStartGap) {
+        return null;
+    }
+
+    const datasetStartIso = summary?.startDate || normaliseDateLikeToISO(evaluation.datasetStartTs);
+    const requiredStartIso = requiredRange?.dataStartDate
+        || requiredRange?.effectiveStartDate
+        || requiredRange?.startDate
+        || normaliseDateLikeToISO(evaluation.requiredStartTs);
+
+    if (!datasetStartIso || !requiredStartIso) {
+        return null;
+    }
+
+    const gapEndIso = shiftIsoDate(datasetStartIso, -1);
+    const requiredStartTs = normaliseDateLikeToMs(requiredStartIso);
+    const gapEndTs = normaliseDateLikeToMs(gapEndIso);
+
+    if (requiredStartTs === null || gapEndTs === null) {
+        return null;
+    }
+
+    if (gapEndTs <= requiredStartTs) {
+        return null;
+    }
+
+    return {
+        shouldBackfillStart: true,
+        gapStart: requiredStartIso,
+        gapEnd: gapEndIso,
+        datasetStart: datasetStartIso,
+    };
+}
+
 function buildCachedDatasetUsage(rows, requiredRange) {
     const summary = summarizeDatasetRange(rows);
     const hasDataset = Array.isArray(rows) && rows.length > 0;
@@ -491,12 +556,177 @@ function buildCachedDatasetUsage(rows, requiredRange) {
         }
     }
 
+    const coveragePlan = computeDatasetCoveragePlan(summary, requiredRange, evaluation);
+
     return {
         summary,
         evaluation,
         sliceInfo,
         datasetForWorker,
-        useCachedData
+        useCachedData,
+        coveragePlan
+    };
+}
+
+function mergeDatasetRows(existingRows, additionalRows) {
+    const mergedMap = new Map();
+    const pushRows = (rows, preferExisting = false) => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = extractRowDateValue(row);
+            if (!date) return;
+            if (preferExisting && mergedMap.has(date)) {
+                return;
+            }
+            mergedMap.set(date, row);
+        });
+    };
+
+    pushRows(additionalRows, false);
+    pushRows(existingRows, true);
+
+    const merged = Array.from(mergedMap.values())
+        .filter((row) => row && row.date)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+    return merged;
+}
+
+async function fetchDatasetForGap(preparedParams, context = {}) {
+    if (!workerUrl) {
+        return { error: 'missing-worker-url' };
+    }
+
+    return new Promise((resolve) => {
+        const worker = new Worker(workerUrl);
+        let settled = false;
+
+        const cleanup = (payload) => {
+            if (settled) return;
+            settled = true;
+            try {
+                worker.terminate();
+            } catch (error) {
+                console.warn('[Batch Optimization] Failed to terminate gap worker:', error);
+            }
+            resolve(payload);
+        };
+
+        const timeout = setTimeout(() => {
+            cleanup({ error: 'timeout' });
+        }, 45000);
+
+        worker.onmessage = (event) => {
+            const { type, data } = event.data || {};
+            if (type === 'result') {
+                clearTimeout(timeout);
+                cleanup({ result: data });
+            } else if (type === 'error') {
+                clearTimeout(timeout);
+                cleanup({ error: data?.message || event.data.error || 'worker-error' });
+            } else if (type === 'no_data') {
+                clearTimeout(timeout);
+                cleanup({ error: data?.message || 'no-data' });
+            }
+        };
+
+        worker.onerror = (error) => {
+            clearTimeout(timeout);
+            cleanup({ error: error?.message || 'worker-error', stack: error?.stack || null });
+        };
+
+        try {
+            worker.postMessage({
+                type: 'runBacktest',
+                params: preparedParams,
+                useCachedData: false,
+                cachedData: null
+            });
+        } catch (error) {
+            clearTimeout(timeout);
+            cleanup({ error: error?.message || 'postMessage-failed', stack: error?.stack || null });
+        }
+    });
+}
+
+async function ensureCachedDatasetStartGap(options = {}) {
+    const {
+        plan,
+        existingRows,
+        preparedParams,
+        datasetMeta = {},
+        context = {},
+        cachedSource = 'unknown'
+    } = options;
+
+    if (!plan || !plan.shouldBackfillStart) {
+        return { success: false, reason: 'no-plan' };
+    }
+
+    recordBatchDebug('cached-gap-fill-start', {
+        context: context.label || null,
+        details: context.details || null,
+        plan,
+        cachedSource,
+        ...datasetMeta
+    }, { phase: 'worker', console: false });
+
+    const fetchResult = await fetchDatasetForGap(preparedParams, context);
+
+    if (!fetchResult || fetchResult.error) {
+        recordBatchDebug('cached-gap-fill-failed', {
+            context: context.label || null,
+            details: context.details || null,
+            plan,
+            cachedSource,
+            error: fetchResult?.error || 'unknown-error'
+        }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+        return { success: false, reason: fetchResult?.error || 'unknown-error' };
+    }
+
+    const result = fetchResult.result || {};
+    const rawData = Array.isArray(result.rawData) ? result.rawData : null;
+
+    if (!rawData || rawData.length === 0) {
+        recordBatchDebug('cached-gap-fill-failed', {
+            context: context.label || null,
+            details: context.details || null,
+            plan,
+            cachedSource,
+            error: 'empty-raw-data'
+        }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+        return { success: false, reason: 'empty-raw-data' };
+    }
+
+    const filteredNewRows = rawData.filter((row) => {
+        if (!row || !row.date) return false;
+        if (!plan.datasetStart) return true;
+        return String(row.date) <= String(plan.datasetStart);
+    });
+
+    const mergedRows = mergeDatasetRows(existingRows, filteredNewRows);
+    const addedCount = mergedRows.length - (Array.isArray(existingRows) ? existingRows.length : 0);
+
+    recordBatchDebug('cached-gap-fill-success', {
+        context: context.label || null,
+        details: context.details || null,
+        plan,
+        cachedSource,
+        addedCount,
+        mergedLength: mergedRows.length,
+        fetchedLength: rawData.length,
+        filteredLength: filteredNewRows.length,
+        fetchRange: result?.dataDebug?.fetchRange || null,
+        ...datasetMeta
+    }, { phase: 'worker', console: false });
+
+    return {
+        success: true,
+        mergedData: mergedRows,
+        addedCount,
+        rawData,
+        filteredNewRows
     };
 }
 
@@ -3270,10 +3500,10 @@ async function executeBacktestForCombination(combination, options = {}) {
                 console.log(`[Batch Optimization] Applied risk management:`, combination.riskManagement);
             }
 
-            const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+            let overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                 ? options.cachedDataOverride
                 : null;
-            const cachedPayload = overrideData
+            let cachedPayload = overrideData
                 || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
@@ -3281,8 +3511,37 @@ async function executeBacktestForCombination(combination, options = {}) {
             const preparedParams = enrichParamsWithLookback(params);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            let cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
             let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+
+            if (!coverageEvaluation.coverageSatisfied
+                && cachedUsage.coveragePlan?.shouldBackfillStart
+                && cachedSource !== 'none') {
+                const gapResult = await ensureCachedDatasetStartGap({
+                    plan: cachedUsage.coveragePlan,
+                    existingRows: cachedPayload,
+                    preparedParams,
+                    datasetMeta,
+                    cachedSource,
+                    context: {
+                        label: 'executeBacktestForCombination',
+                        details: summarizeCombination(combination)
+                    }
+                });
+                if (gapResult?.success && Array.isArray(gapResult.mergedData)) {
+                    if (overrideData) {
+                        overrideData = gapResult.mergedData;
+                        options.cachedDataOverride = gapResult.mergedData;
+                    } else {
+                        cachedStockData = gapResult.mergedData;
+                    }
+                    cachedPayload = gapResult.mergedData;
+                    cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+                    coverageEvaluation = cachedUsage.evaluation;
+                    useCachedData = cachedUsage.useCachedData;
+                }
+            }
+
             const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
             if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
@@ -3328,7 +3587,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
             }
 
-            const cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
 
             if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
                 useCachedData = false;
@@ -3646,7 +3905,7 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
 async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials, options = {}) {
     const strategyId = options?.strategyId || null;
     const baseCombo = options?.baseCombo || null;
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
             resolve({ value: undefined, metric: -Infinity });
@@ -3655,13 +3914,13 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
 
         const optimizeWorker = new Worker(workerUrl);
 
-        const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
+        let overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
+        let cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
         const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
-        
+
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
             
@@ -3777,8 +4036,41 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
         let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+
+        if (!coverageEvaluation.coverageSatisfied
+            && cachedUsage.coveragePlan?.shouldBackfillStart
+            && cachedSource !== 'none') {
+            const gapResult = await ensureCachedDatasetStartGap({
+                plan: cachedUsage.coveragePlan,
+                existingRows: cachedPayload,
+                preparedParams,
+                datasetMeta,
+                cachedSource,
+                context: {
+                    label: 'optimize-single-param',
+                    details: {
+                        strategyType,
+                        optimizeTarget: optimizeTarget?.name || null,
+                        strategyId
+                    }
+                }
+            });
+            if (gapResult?.success && Array.isArray(gapResult.mergedData)) {
+                if (overrideData) {
+                    overrideData = gapResult.mergedData;
+                    options.cachedDataOverride = gapResult.mergedData;
+                } else {
+                    cachedStockData = gapResult.mergedData;
+                }
+                cachedPayload = gapResult.mergedData;
+                cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+                coverageEvaluation = cachedUsage.evaluation;
+                useCachedData = cachedUsage.useCachedData;
+            }
+        }
+
         let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
         const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
