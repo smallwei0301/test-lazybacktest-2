@@ -1,3 +1,11 @@
+## 2026-09-19 — Patch LB-CACHE-GAP-20260919A
+- **Issue recap**: 批量優化與單參數優化在快取資料首筆落後暖身起點時會直接放棄快取、重抓全區間，導致頻繁遠端下載且 worker 無法復用更新後的快取。
+- **Fix**:
+  - `js/batch-optimization.js` 於 `buildCachedDatasetUsage` 輸出前段缺口資訊並新增 `ensureCachedDatasetCoverage`，在偵測 `dataset-start-after-required-start` 時透過 worker 補抓缺口範圍、合併回 `cachedStockData` 後重新評估覆蓋狀態；`executeBacktestForCombination`、`optimizeSingleStrategyParameter` 與 `optimizeSingleRiskParameter` 改以更新後的快取送進 worker，避免重複下載。
+  - `js/worker.js` 新增 `fetchDatasetRange` 訊息入口，重用現有 `fetchStockData` 管線返回指定日期範圍、診斷與調整資訊，供前段缺口補抓使用。
+- **Diagnostics**: 建議於批量優化啟動前清空快取後再次執行，檢查偵錯日誌是否出現 `cached-data-gap-detected` 與 `cached-data-gap-recovered`，並確認後續回合 `worker-run-start` 的 `usedCachedData` 為 `true`。
+- **Testing**: `npm test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

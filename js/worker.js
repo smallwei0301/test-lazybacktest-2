@@ -13332,6 +13332,92 @@ self.onmessage = async function (e) {
         adjustmentFallbackInfo:
           outcome?.adjustmentFallbackInfo || workerLastMeta?.adjustmentFallbackInfo || null,
       });
+    } else if (type === "fetchDatasetRange") {
+      try {
+        const fetchParams = e.data?.params || {};
+        const range = e.data?.range || {};
+        const startISO = range.startDate || fetchParams.dataStartDate || fetchParams.startDate;
+        const endISO = range.endDate || fetchParams.endDate || startISO;
+        const effectiveStart = fetchParams.effectiveStartDate || fetchParams.startDate || startISO;
+        const lookbackOverride = Number.isFinite(fetchParams.lookbackDays)
+          ? Number(fetchParams.lookbackDays)
+          : null;
+        if (!fetchParams.stockNo || !startISO) {
+          throw new Error("fetchDatasetRange 缺少必要的 stockNo 或 startDate");
+        }
+
+        const marketKey = fetchParams.marketType || fetchParams.market || "TWSE";
+        const outcome = await fetchStockData(
+          fetchParams.stockNo,
+          startISO,
+          endISO,
+          marketKey,
+          {
+            adjusted: fetchParams.adjustedPrice,
+            splitAdjustment: fetchParams.splitAdjustment,
+            effectiveStartDate: effectiveStart,
+            lookbackDays: lookbackOverride,
+          },
+        );
+
+        const rows = Array.isArray(outcome?.data) ? outcome.data : [];
+        const overview = summariseDatasetRows(rows, {
+          requestedStart: startISO,
+          effectiveStartDate: effectiveStart,
+          warmupStartDate: startISO,
+          dataStartDate: startISO,
+          endDate: endISO,
+        });
+
+        self.postMessage({
+          type: "datasetRangeResult",
+          data: {
+            rows,
+            summary: overview,
+            fetchRange: { start: startISO, end: endISO },
+            priceSource: outcome?.priceSource || null,
+            dataSource: outcome?.dataSource || null,
+            adjustmentFallbackApplied: Boolean(outcome?.adjustmentFallbackApplied),
+            adjustmentFallbackInfo:
+              outcome?.adjustmentFallbackInfo &&
+              typeof outcome.adjustmentFallbackInfo === "object"
+                ? outcome.adjustmentFallbackInfo
+                : null,
+            adjustments: Array.isArray(outcome?.adjustments) ? outcome.adjustments : [],
+            dividendDiagnostics:
+              outcome?.dividendDiagnostics && typeof outcome.dividendDiagnostics === "object"
+                ? outcome.dividendDiagnostics
+                : null,
+            dividendEvents: Array.isArray(outcome?.dividendEvents)
+              ? outcome.dividendEvents
+              : [],
+            splitDiagnostics:
+              outcome?.splitDiagnostics && typeof outcome.splitDiagnostics === "object"
+                ? outcome.splitDiagnostics
+                : null,
+            finmindStatus:
+              outcome?.finmindStatus && typeof outcome.finmindStatus === "object"
+                ? outcome.finmindStatus
+                : null,
+            adjustmentDebugLog: Array.isArray(outcome?.adjustmentDebugLog)
+              ? outcome.adjustmentDebugLog
+              : [],
+            adjustmentChecks: Array.isArray(outcome?.adjustmentChecks)
+              ? outcome.adjustmentChecks
+              : [],
+            diagnostics: outcome?.diagnostics || null,
+            debugSteps: Array.isArray(outcome?.debugSteps) ? outcome.debugSteps : [],
+          },
+        });
+      } catch (error) {
+        self.postMessage({
+          type: "datasetRangeError",
+          data: {
+            message: error?.message || String(error),
+            stack: error?.stack || null,
+          },
+        });
+      }
     } else if (type === "runOptimization") {
       if (!optimizeTargetStrategy || !optimizeParamName || !optimizeRange)
         throw new Error("優化目標、參數名或範圍未指定");
