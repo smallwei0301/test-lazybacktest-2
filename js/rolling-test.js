@@ -3133,6 +3133,43 @@
         return scopes;
     }
 
+    function buildOptimizationBaselineParams(baseParams, plan) {
+        const clone = deepClone(baseParams || {});
+        if (!clone || !plan?.enabled) return clone;
+
+        const scopes = Array.isArray(plan.scopes) ? plan.scopes : [];
+        scopes.forEach((scope) => {
+            if (scope === 'risk') return;
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+            const strategyName = clone[definition.strategyKey];
+            const configKey = resolveStrategyConfigKey(strategyName, scope);
+            const strategyInfo = strategyDescriptions?.[configKey];
+            if (strategyInfo && strategyInfo.defaultParams && typeof strategyInfo.defaultParams === 'object') {
+                clone[definition.paramsKey] = deepClone(strategyInfo.defaultParams);
+            } else {
+                clone[definition.paramsKey] = {};
+            }
+        });
+
+        return clone;
+    }
+
+    function applyOptimizationBaseline(target, baseline, scopes) {
+        if (!target || !baseline) return;
+        const scopeList = Array.isArray(scopes) ? scopes : [];
+        scopeList.forEach((scope) => {
+            if (scope === 'risk') return;
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+            if (baseline[definition.paramsKey] && typeof baseline[definition.paramsKey] === 'object') {
+                target[definition.paramsKey] = deepClone(baseline[definition.paramsKey]);
+            } else {
+                target[definition.paramsKey] = {};
+            }
+        });
+    }
+
     function buildTrainingWindowBaseParams(baseParams, windowInfo) {
         const clone = deepClone(baseParams || {});
         normalizeWindowBaseParams(clone, windowInfo);
@@ -3200,6 +3237,13 @@
         const outputParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(outputParams, windowInfo);
 
+        let baselineParams = null;
+        if (plan?.enabled) {
+            baselineParams = buildOptimizationBaselineParams(baseWindowParams, plan);
+            normalizeWindowBaseParams(baselineParams, windowInfo);
+            applyOptimizationBaseline(outputParams, baselineParams, plan.scopes);
+        }
+
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
         }
@@ -3225,13 +3269,18 @@
             return { params: outputParams, summary };
         }
 
-        const workingParams = deepClone(baseWindowParams);
+        const workingParams = baselineParams
+            ? deepClone(baselineParams)
+            : deepClone(baseWindowParams);
         normalizeWindowBaseParams(workingParams, windowInfo);
 
         const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
         const cachedWindowData = selectCachedDataForWindow(trainingPayload?.dataStartDate, windowInfo.trainingEnd);
 
-        const baselineSnapshots = captureOptimizationBaselines(plan.scopes, outputParams);
+        const baselineSnapshots = captureOptimizationBaselines(
+            plan.scopes,
+            baselineParams || outputParams,
+        );
         const scopeResults = [];
         const handledScopes = new Set();
 

@@ -1,3 +1,10 @@
+## 2026-09-21 — Patch LB-ROLLING-DEFAULT-20260921A
+- **Scope**: 滾動測試訓練期優化初始參數與批量優化對齊。
+- **Updates**:
+  - `js/rolling-test.js` 在建立訓練視窗參數時引入 `buildOptimizationBaselineParams` 與 `applyOptimizationBaseline`，於自動優化啟動時改以策略預設參數作為初始值，確保與批量優化一致。
+  - 調整視窗優化流程使用預設參數快照作為 baseline，避免沿用使用者當前設定造成最佳化結果偏移。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
