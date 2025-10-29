@@ -1,3 +1,11 @@
+## 2026-09-10 — Patch LB-VOLUME-SPIKE-OPT-20240910A
+- **Issue recap**: 成交量暴增策略在參數優化時各步進值產生相同績效，且資料測試表格仍顯示除以千後的舊量值，難以確認訊號敏感度。
+- **Fix**:
+  - `js/worker.js` 將成交量保留為原始數值，並在正規化時正確轉成數字型態，同步輸出 `volumeInThousands` 供前端顯示與診斷使用。
+  - `js/main.js` 資料來源測試表格與欄位格式化改讀取 `volumeInThousands`，維持千股顯示同時避免把原始量值誤判為零。
+  - `js/backtest.js` 延續前次調整的千分位顯示邏輯，確保價格檢視器與指標摘要皆以千股呈現並對齊新的欄位名稱。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

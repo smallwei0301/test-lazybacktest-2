@@ -4033,13 +4033,20 @@ async function fetchAdjustedPriceRange(
           ? row.price_source
           : null;
 
+    const volumeNumeric = Number(volumeRaw);
+    const hasVolume = Number.isFinite(volumeNumeric);
+    const normalizedVolume = hasVolume ? volumeNumeric : null;
+    const normalizedVolumeInThousands = hasVolume
+      ? Math.round(volumeNumeric / 1000)
+      : null;
     normalizedRows.push({
       date: isoDate,
       open: normalizedOpen,
       high: normalizedHigh,
       low: normalizedLow,
       close: normalizedClose,
-      volume: Math.round(volumeRaw / 1000),
+      volume: normalizedVolume,
+      volumeInThousands: normalizedVolumeInThousands,
       adjustedFactor: Number.isFinite(factor) ? factor : undefined,
       rawOpen: resolvedRawOpen,
       rawHigh: resolvedRawHigh,
@@ -8710,7 +8717,9 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const lastStage =
+        currentLongEntryBreakdown[currentLongEntryBreakdown.length - 1] || null;
+      const aggregated = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -8723,6 +8732,15 @@ function runStrategy(data, params, options = {}) {
         stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
         positionId: currentLongPositionId,
       };
+      if (lastStage) {
+        if (lastStage.kdValues) aggregated.kdValues = lastStage.kdValues;
+        if (lastStage.macdValues) aggregated.macdValues = lastStage.macdValues;
+        if (lastStage.indicatorValues)
+          aggregated.indicatorValues = lastStage.indicatorValues;
+        if (lastStage.stageTrigger)
+          aggregated.stageTrigger = lastStage.stageTrigger;
+      }
+      return aggregated;
     };
 
     const computeExitStagePlan = (totalShares) => {

@@ -5667,8 +5667,8 @@ function renderDiagnosticsSamples(containerId, samples, options = {}) {
             const close = sample.close !== undefined && sample.close !== null
                 ? escapeHtml(sample.close.toString())
                 : '—';
-            const volume = sample.volume !== undefined && sample.volume !== null
-                ? escapeHtml(sample.volume.toString())
+            const volume = Number.isFinite(sample.volume)
+                ? escapeHtml(Math.round(sample.volume).toLocaleString('zh-TW'))
                 : '—';
             return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
                 <div style="color: var(--foreground);">${date} (${index})</div>
@@ -5702,8 +5702,8 @@ function renderDiagnosticsPreview(containerId, rows) {
             const low = row.low !== undefined && row.low !== null
                 ? escapeHtml(row.low.toString())
                 : '—';
-            const volume = row.volume !== undefined && row.volume !== null
-                ? escapeHtml(row.volume.toString())
+            const volume = Number.isFinite(row.volume)
+                ? escapeHtml(Math.round(row.volume).toLocaleString('zh-TW'))
                 : '—';
             return `<div class="border rounded px-2 py-1 text-[11px]" style="border-color: var(--border);">
                 <div style="color: var(--foreground);">${date} (${index})</div>
@@ -6451,7 +6451,7 @@ function openPriceInspectorModal() {
     baseHeaderConfig.push(
         { key: 'position', label: '倉位狀態', align: 'left' },
         { key: 'formula', label: '計算公式', align: 'left' },
-        { key: 'volume', label: '(千股)量', align: 'right' },
+        { key: 'volume', label: '量(千股)', align: 'right' },
         { key: 'source', label: '價格來源', align: 'left' },
     );
 
@@ -6488,8 +6488,13 @@ function openPriceInspectorModal() {
     };
     const rowsHtml = visibleStockData
         .map((row, rowIndex) => {
-            const volumeLabel = Number.isFinite(row?.volume)
-                ? Number(row.volume).toLocaleString('zh-TW')
+            const volumeThousands = Number.isFinite(row?.volumeInThousands)
+                ? row.volumeInThousands
+                : Number.isFinite(row?.volume)
+                    ? Math.round(Number(row.volume) / 1000)
+                    : null;
+            const volumeLabel = Number.isFinite(volumeThousands)
+                ? Number(volumeThousands).toLocaleString('zh-TW')
                 : '—';
             const factor = Number(row?.adjustedFactor);
             const closeValue = Number(row?.close);
@@ -7480,26 +7485,33 @@ function displayBacktestResult(result) {
     }
 const checkDisplay = (v) => v !== null && v !== undefined && !isNaN(v); 
 
-const formatIndicatorValues = (indicatorValues) => { 
-    try { 
-        if (!indicatorValues || typeof indicatorValues !== 'object' || Object.keys(indicatorValues).length === 0) return ''; 
-        const formatV = (v) => checkDisplay(v) ? v.toFixed(2) : '--'; 
-        const parts = Object.entries(indicatorValues).map(([label, values]) => { 
-            if (Array.isArray(values) && values.length === 3) { 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values[0])} / ${formatV(values[1])} / ${formatV(values[2])}</span>`; 
-            } else if (checkDisplay(values)) { 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values)}</span>`; 
-            } else if (Array.isArray(values) && values.length === 2){ 
-                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatV(values[0])} / ${formatV(values[1])}</span>`; 
-            } 
-            return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ?</span>`; 
-        }).filter(part => part !== null); 
-        return parts.length > 0 ? '<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(' + parts.join(' ') + ')</div>' : ''; 
-    } catch (e) { 
-        console.error("[Main] Error in formatIndicatorValues:", e, indicatorValues); 
-        return '<div class="mt-1 text-xs" style="color: #dc2626;">(指標值格式錯誤)</div>'; 
-    } 
-}; 
+const formatIndicatorValues = (indicatorValues) => {
+    try {
+        if (!indicatorValues || typeof indicatorValues !== 'object' || Object.keys(indicatorValues).length === 0) return '';
+        const formatValueByLabel = (label, value) => {
+            if (!checkDisplay(value)) return '--';
+            const normalizedLabel = typeof label === 'string' ? label : '';
+            if (normalizedLabel.includes('量')) {
+                return Math.round(value).toLocaleString('zh-TW');
+            }
+            return Number(value).toFixed(2);
+        };
+        const parts = Object.entries(indicatorValues).map(([label, values]) => {
+            if (Array.isArray(values) && values.length === 3) {
+                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatValueByLabel(label, values[0])} / ${formatValueByLabel(label, values[1])} / ${formatValueByLabel(label, values[2])}</span>`;
+            } else if (Array.isArray(values) && values.length === 2) {
+                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatValueByLabel(label, values[0])} / ${formatValueByLabel(label, values[1])}</span>`;
+            } else if (checkDisplay(values)) {
+                return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ${formatValueByLabel(label, values)}</span>`;
+            }
+            return `<span class="mr-2 whitespace-nowrap text-xs" style="color: var(--muted-foreground);">${label}: ?</span>`;
+        }).filter((part) => part !== null);
+        return parts.length > 0 ? '<div class="mt-1 text-xs" style="color: var(--muted-foreground);">(' + parts.join(' ') + ')</div>' : '';
+    } catch (e) {
+        console.error("[Main] Error in formatIndicatorValues:", e, indicatorValues);
+        return '<div class="mt-1 text-xs" style="color: #dc2626;">(指標值格式錯誤)</div>';
+    }
+};
 
 const formatKDParams = (kdVals) => { 
     try { 
