@@ -1571,6 +1571,7 @@ const EXIT_STRATEGY_SELECT_MAP = {
     'k_d_cross_exit': 'k_d_cross_exit',
     'k_d_cross': 'k_d_cross_exit',
     'volume_spike': 'volume_spike',
+    'volume_spike_exit': 'volume_spike_exit',
     'price_breakdown': 'price_breakdown',
     'williams_overbought': 'williams_overbought',
     'williams_overbought_exit': 'williams_overbought',
@@ -1620,6 +1621,66 @@ function resolveParamFieldMap(strategyKey) {
     return mapping;
 }
 
+function synchroniseStrategyDslWithParams(params) {
+    if (!params || typeof params !== 'object') {
+        return;
+    }
+
+    const builder = (typeof window !== 'undefined'
+        && window.lazybacktestStrategyDsl
+        && typeof window.lazybacktestStrategyDsl.buildFromParams === 'function')
+        ? window.lazybacktestStrategyDsl.buildFromParams
+        : null;
+
+    const currentDsl = params.strategyDsl && typeof params.strategyDsl === 'object'
+        ? params.strategyDsl
+        : null;
+    const extractId = (node) => (node && typeof node === 'object' && typeof node.id === 'string' ? node.id : null);
+    const hasShortNodes = (dsl) => Boolean(dsl && (dsl.shortEntry || dsl.shortExit));
+    const selection = {
+        entryStrategy: params.entryStrategy || params.longEntryStrategy || null,
+        entryParams: params.entryParams && typeof params.entryParams === 'object' ? { ...params.entryParams } : {},
+        exitStrategy: params.exitStrategy || params.longExitStrategy || null,
+        exitParams: params.exitParams && typeof params.exitParams === 'object' ? { ...params.exitParams } : {},
+        enableShorting: Boolean(params.enableShorting),
+        shortEntryStrategy: params.enableShorting ? (params.shortEntryStrategy || null) : null,
+        shortEntryParams: params.enableShorting && params.shortEntryParams && typeof params.shortEntryParams === 'object'
+            ? { ...params.shortEntryParams }
+            : {},
+        shortExitStrategy: params.enableShorting ? (params.shortExitStrategy || null) : null,
+        shortExitParams: params.enableShorting && params.shortExitParams && typeof params.shortExitParams === 'object'
+            ? { ...params.shortExitParams }
+            : {},
+    };
+
+    const entryId = extractId(currentDsl?.longEntry);
+    const exitId = extractId(currentDsl?.longExit);
+    const shortEntryId = extractId(currentDsl?.shortEntry);
+    const shortExitId = extractId(currentDsl?.shortExit);
+
+    const needsShortingNodes = selection.enableShorting
+        && (selection.shortEntryStrategy || selection.shortExitStrategy);
+
+    const shouldRebuild = !currentDsl
+        || (selection.entryStrategy && entryId && entryId !== selection.entryStrategy)
+        || (selection.exitStrategy && exitId && exitId !== selection.exitStrategy)
+        || (needsShortingNodes && selection.shortEntryStrategy && shortEntryId && shortEntryId !== selection.shortEntryStrategy)
+        || (needsShortingNodes && selection.shortExitStrategy && shortExitId && shortExitId !== selection.shortExitStrategy)
+        || (!needsShortingNodes && hasShortNodes(currentDsl));
+
+    if (shouldRebuild) {
+        if (!builder) {
+            return;
+        }
+        const dsl = builder(selection);
+        if (dsl && typeof dsl === 'object') {
+            params.strategyDsl = dsl;
+        } else if (params.strategyDsl) {
+            delete params.strategyDsl;
+        }
+    }
+}
+
 function prepareBaseParamsForOptimization(source) {
     const clone = clonePlainObject(source || {});
     if (!clone || typeof clone !== 'object') return {};
@@ -1629,6 +1690,7 @@ function prepareBaseParamsForOptimization(source) {
     clone.shortExitParams = clone.shortExitParams && typeof clone.shortExitParams === 'object' ? { ...clone.shortExitParams } : {};
     clone.entryStages = Array.isArray(clone.entryStages) ? [...clone.entryStages] : [];
     clone.exitStages = Array.isArray(clone.exitStages) ? [...clone.exitStages] : [];
+    synchroniseStrategyDslWithParams(clone);
     return clone;
 }
 
@@ -1684,12 +1746,14 @@ function enrichParamsWithLookback(params) {
         }) || effectiveStartDate;
     }
     if (!dataStartDate) dataStartDate = effectiveStartDate;
-    return {
+    const enriched = {
         ...params,
         effectiveStartDate,
         dataStartDate,
         lookbackDays,
     };
+    synchroniseStrategyDslWithParams(enriched);
+    return enriched;
 }
 
 function resetBatchWorkerStatus() {
