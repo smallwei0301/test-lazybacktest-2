@@ -532,6 +532,13 @@ const STRATEGY_OPTION_ROLE_CONFIGS = [
     { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
 ];
 
+const STRATEGY_PARAM_FORM_VERSION = 'LB-STRATEGY-PARAM-FORM-20260921A';
+const strategyParamControllers = new Map();
+let strategyDslEditorController = null;
+const strategySchemaUtils = (typeof window !== 'undefined' && window.lazybacktestStrategySchema)
+    ? window.lazybacktestStrategySchema
+    : null;
+
 function pickRandomStrategyCandidate(list) {
     if (!Array.isArray(list) || list.length === 0) {
         return null;
@@ -541,6 +548,20 @@ function pickRandomStrategyCandidate(list) {
 }
 
 function cloneDefaultStrategyParams(configKey) {
+    const registry = typeof window !== 'undefined' ? window.StrategyPluginRegistry : null;
+    if (registry && typeof registry.getStrategyMetaById === 'function' && strategySchemaUtils) {
+        try {
+            const meta = registry.getStrategyMetaById(configKey);
+            if (meta?.paramsSchema) {
+                const sanitized = strategySchemaUtils.sanitizeParams(meta.paramsSchema, {});
+                if (sanitized && typeof sanitized === 'object') {
+                    return { ...sanitized };
+                }
+            }
+        } catch (schemaError) {
+            console.warn('[Main] cloneDefaultStrategyParams schema fallback 失敗', schemaError);
+        }
+    }
     const descriptor = strategyDescriptions?.[configKey];
     if (!descriptor || !descriptor.defaultParams) {
         return {};
@@ -5176,39 +5197,236 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
-    const strategySelectId = `${type}Strategy`;
-    const strategySelect = document.getElementById(strategySelectId);
-    if (!strategySelect) {
-        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
-        return {};
+    const controller = strategyParamControllers.get(type);
+    if (controller && typeof controller.getValues === 'function') {
+        try {
+            const values = controller.getValues();
+            return values && typeof values === 'object' ? { ...values } : {};
+        } catch (error) {
+            console.warn(`[Main] 取得 ${type} 參數失敗`, error);
+        }
     }
+    return {};
+}
 
-    const { normalizedKey } = ensureSelectUsesNormalizedValue(type, strategySelect);
-    const strategyId = normalizedKey || strategySelect.value;
-    const descriptor = strategyDescriptions?.[strategyId];
-    if (!descriptor?.defaultParams) {
-        return {};
+const STRATEGY_TYPE_TO_DSL_ROLE = Object.freeze({
+    entry: 'longEntry',
+    exit: 'longExit',
+    shortEntry: 'shortEntry',
+    shortExit: 'shortExit',
+});
+
+const DSL_ROLE_TO_STRATEGY_TYPE = Object.freeze({
+    longEntry: 'entry',
+    longExit: 'exit',
+    shortEntry: 'shortEntry',
+    shortExit: 'shortExit',
+});
+
+function resolveStrategyMetaById(strategyId) {
+    if (!strategyId) return null;
+    const registry = typeof window !== 'undefined' ? window.StrategyPluginRegistry : null;
+    if (!registry || typeof registry.getStrategyMetaById !== 'function') {
+        return null;
     }
+    try {
+        return registry.getStrategyMetaById(strategyId);
+    } catch (error) {
+        console.warn('[Main] 讀取策略 meta 失敗', error);
+        return null;
+    }
+}
 
-    const params = {};
-    Object.entries(descriptor.defaultParams).forEach(([paramName, defaultValue]) => {
-        const { inputId } = resolveStrategyParamPresentation(type, strategyId, paramName);
-        const input = document.getElementById(inputId);
-        if (!input) {
-            params[paramName] = defaultValue;
+function getStrategyParamsSchema(strategyId) {
+    const meta = resolveStrategyMetaById(strategyId);
+    return meta && meta.paramsSchema ? meta.paramsSchema : null;
+}
+
+function ensureStrategyParamController(type) {
+    if (strategyParamControllers.has(type)) {
+        return strategyParamControllers.get(type);
+    }
+    const paramsFormApi = typeof window !== 'undefined' ? window.lazybacktestStrategyParamsForm : null;
+    if (!paramsFormApi || typeof paramsFormApi.createController !== 'function') {
+        return null;
+    }
+    const containerId = `${type}Params`;
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return null;
+    }
+    const controller = paramsFormApi.createController({
+        container,
+        prefix: `${type}-params`,
+        schemaUtils: strategySchemaUtils,
+        schemaProvider: (strategyId) => getStrategyParamsSchema(strategyId),
+        labelResolver(strategyId, paramName) {
+            return resolveStrategyParamPresentation(type, strategyId, paramName);
+        },
+    });
+    strategyParamControllers.set(type, controller);
+    return controller;
+}
+
+function renderStrategyParamsForType(type, strategyId, params) {
+    const controller = ensureStrategyParamController(type);
+    if (!controller) {
+        return;
+    }
+    const selectId = `${type}Strategy`;
+    const select = document.getElementById(selectId);
+    let resolvedId = strategyId;
+    if (select) {
+        const { normalizedKey } = ensureSelectUsesNormalizedValue(type, select);
+        if (resolvedId && normalizedKey && normalizedKey !== resolvedId) {
+            resolvedId = normalizedKey;
+            select.value = normalizedKey;
+        } else if (!resolvedId) {
+            resolvedId = normalizedKey || select.value || null;
+        } else if (select.value !== resolvedId) {
+            select.value = resolvedId;
+        }
+    }
+    controller.render(resolvedId, params || {});
+}
+
+function setupStrategyParamForms() {
+    if (strategyParamControllers.size > 0) {
+        return;
+    }
+    STRATEGY_OPTION_ROLE_CONFIGS.forEach((config) => {
+        const controller = ensureStrategyParamController(config.type);
+        const select = document.getElementById(config.selectId);
+        if (!controller || !select) {
             return;
         }
-        if (input.type === 'number') {
-            const parsed = input.value === '' ? NaN : Number(input.value);
-            params[paramName] = Number.isFinite(parsed) ? parsed : defaultValue;
-        } else if (input.type === 'checkbox') {
-            params[paramName] = Boolean(input.checked);
-        } else {
-            params[paramName] = input.value !== '' ? input.value : defaultValue;
-        }
+        const { normalizedKey } = ensureSelectUsesNormalizedValue(config.type, select);
+        const strategyId = normalizedKey || select.value || null;
+        const defaults = cloneDefaultStrategyParams(strategyId);
+        controller.render(strategyId, defaults);
+        select.addEventListener('change', () => {
+            const { normalizedKey: current } = ensureSelectUsesNormalizedValue(config.type, select);
+            const nextId = current || select.value || null;
+            const nextDefaults = cloneDefaultStrategyParams(nextId);
+            renderStrategyParamsForType(config.type, nextId, nextDefaults);
+        });
     });
+    if (typeof window !== 'undefined' && strategyParamControllers.size > 0) {
+        window.lazybacktestStrategyForms = Object.freeze({
+            version: STRATEGY_PARAM_FORM_VERSION,
+            onSettingsLoaded: syncStrategyFormsFromSettings,
+            getController(type) {
+                return strategyParamControllers.get(type) || null;
+            },
+        });
+    }
+}
 
-    return params;
+function syncStrategyFormsFromSettings(settings) {
+    if (!settings || typeof settings !== 'object') {
+        return;
+    }
+    const mapping = [
+        { type: 'entry', strategyKey: 'entryStrategy', paramsKey: 'entryParams' },
+        { type: 'exit', strategyKey: 'exitStrategy', paramsKey: 'exitParams' },
+        { type: 'shortEntry', strategyKey: 'shortEntryStrategy', paramsKey: 'shortEntryParams' },
+        { type: 'shortExit', strategyKey: 'shortExitStrategy', paramsKey: 'shortExitParams' },
+    ];
+    mapping.forEach((entry) => {
+        const controller = ensureStrategyParamController(entry.type);
+        if (!controller) return;
+        const select = document.getElementById(`${entry.type}Strategy`);
+        const rawId = settings[entry.strategyKey];
+        if (select && rawId) {
+            select.value = rawId;
+        }
+        const { normalizedKey } = select ? ensureSelectUsesNormalizedValue(entry.type, select) : { normalizedKey: rawId };
+        const strategyId = normalizedKey || rawId || (select ? select.value : null);
+        const params = settings[entry.paramsKey] || {};
+        controller.render(strategyId, params);
+    });
+    syncStrategyDslFromSettings(settings);
+}
+
+function syncStrategyDslFromSettings(settings) {
+    if (!strategyDslEditorController || typeof strategyDslEditorController.setDsl !== 'function') {
+        return;
+    }
+    try {
+        const dsl = settings && typeof settings === 'object' ? settings.strategyDsl : null;
+        if (dsl && typeof dsl === 'object') {
+            strategyDslEditorController.setDsl(dsl);
+        } else {
+            strategyDslEditorController.setDsl(null);
+        }
+    } catch (error) {
+        console.warn('[Main] 同步策略 DSL 失敗', error);
+        strategyDslEditorController.setDsl(null);
+    }
+}
+
+function collectCurrentStrategySelection() {
+    const entrySelect = document.getElementById('entryStrategy');
+    const exitSelect = document.getElementById('exitStrategy');
+    const shortEntrySelect = document.getElementById('shortEntryStrategy');
+    const shortExitSelect = document.getElementById('shortExitStrategy');
+    const enableShort = document.getElementById('enableShortSelling')?.checked ?? false;
+
+    const { normalizedKey: normalizedEntry } = entrySelect ? ensureSelectUsesNormalizedValue('entry', entrySelect) : { normalizedKey: null };
+    const { normalizedKey: normalizedExit } = exitSelect ? ensureSelectUsesNormalizedValue('exit', exitSelect) : { normalizedKey: null };
+    const { normalizedKey: normalizedShortEntry } = shortEntrySelect ? ensureSelectUsesNormalizedValue('shortEntry', shortEntrySelect) : { normalizedKey: null };
+    const { normalizedKey: normalizedShortExit } = shortExitSelect ? ensureSelectUsesNormalizedValue('shortExit', shortExitSelect) : { normalizedKey: null };
+
+    return {
+        entryStrategy: normalizedEntry || entrySelect?.value || null,
+        exitStrategy: normalizedExit || exitSelect?.value || null,
+        entryParams: getStrategyParams('entry'),
+        exitParams: getStrategyParams('exit'),
+        enableShorting: enableShort,
+        shortEntryStrategy: enableShort ? (normalizedShortEntry || shortEntrySelect?.value || null) : null,
+        shortExitStrategy: enableShort ? (normalizedShortExit || shortExitSelect?.value || null) : null,
+        shortEntryParams: enableShort ? getStrategyParams('shortEntry') : {},
+        shortExitParams: enableShort ? getStrategyParams('shortExit') : {},
+    };
+}
+
+function collectStrategyOptionsForDsl() {
+    const catalog = collectStrategyOptionCatalog();
+    const optionMap = {};
+    catalog.roles.forEach((role) => {
+        const dslRole = STRATEGY_TYPE_TO_DSL_ROLE[role.type] || role.type;
+        optionMap[dslRole] = role.options.map((option) => ({ id: option.id, label: option.label }));
+    });
+    return optionMap;
+}
+
+function initStrategyDslEditor() {
+    const editorApi = typeof window !== 'undefined' ? window.lazybacktestStrategyDslEditor : null;
+    if (!editorApi || typeof editorApi.init !== 'function') {
+        return;
+    }
+    const container = document.getElementById('dslEditorContainer');
+    if (!container) {
+        return;
+    }
+    const strategyOptions = collectStrategyOptionsForDsl();
+    strategyDslEditorController = editorApi.init({
+        container,
+        strategyOptions,
+        schemaUtils: strategySchemaUtils,
+        schemaProvider: (strategyId) => getStrategyParamsSchema(strategyId),
+        labelResolver(strategyId, paramName, role) {
+            const mappedType = DSL_ROLE_TO_STRATEGY_TYPE[role] || 'entry';
+            return resolveStrategyParamPresentation(mappedType, strategyId, paramName);
+        },
+        dslVersion: STRATEGY_DSL_VERSION,
+    });
+    const importBtn = document.getElementById('dslImportCurrentButton');
+    if (importBtn && strategyDslEditorController && typeof strategyDslEditorController.importSelection === 'function') {
+        importBtn.addEventListener('click', () => {
+            strategyDslEditorController.importSelection(collectCurrentStrategySelection());
+        });
+    }
 }
 function cloneValueForStrategyDsl(value, path = 'value') {
     if (value === null) return null;
@@ -5246,18 +5464,40 @@ function createStrategyDslPluginNode(strategyId, params) {
 
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
-    const dsl = { version: STRATEGY_DSL_VERSION };
+    const fallbackDsl = { version: STRATEGY_DSL_VERSION };
     const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
-    if (entryNode) dsl.longEntry = entryNode;
+    if (entryNode) fallbackDsl.longEntry = entryNode;
     const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
-    if (exitNode) dsl.longExit = exitNode;
+    if (exitNode) fallbackDsl.longExit = exitNode;
     if (selection.enableShorting) {
         const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
-        if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+        if (shortEntryNode) fallbackDsl.shortEntry = shortEntryNode;
         const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
-        if (shortExitNode) dsl.shortExit = shortExitNode;
+        if (shortExitNode) fallbackDsl.shortExit = shortExitNode;
     }
-    return Object.keys(dsl).length > 1 ? dsl : null;
+    const fallbackValid = Object.keys(fallbackDsl).length > 1 ? fallbackDsl : null;
+    const customDsl = strategyDslEditorController && typeof strategyDslEditorController.getDsl === 'function'
+        ? strategyDslEditorController.getDsl()
+        : null;
+    if (!customDsl) {
+        return fallbackValid;
+    }
+    const merged = { version: customDsl.version || STRATEGY_DSL_VERSION };
+    if (fallbackValid) {
+        Object.keys(fallbackValid).forEach((key) => {
+            if (key !== 'version' && fallbackValid[key]) {
+                merged[key] = fallbackValid[key];
+            }
+        });
+    }
+    Object.keys(customDsl).forEach((key) => {
+        if (key === 'version') {
+            merged.version = customDsl.version || merged.version;
+        } else if (customDsl[key]) {
+            merged[key] = customDsl[key];
+        }
+    });
+    return Object.keys(merged).length > 1 ? merged : null;
 }
 
 if (typeof window !== 'undefined') {
@@ -5804,6 +6044,9 @@ document.addEventListener('DOMContentLoaded', function() {
         initDates();
 
         initLoadingMascotSanitiser();
+
+        setupStrategyParamForms();
+        initStrategyDslEditor();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();

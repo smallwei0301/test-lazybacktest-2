@@ -1,3 +1,21 @@
+## 2026-09-22 — Patch LB-STRATEGY-DSL-20260922A
+- **Scope**: DSL 編輯器狀態回填與儲存策略同步。
+- **Updates**:
+  - `js/lib/strategy-dsl-state.js` 新增 `fromDsl` 轉換與版本更新為 `LB-STRATEGY-DSL-STATE-20260922A`，支援從 DSL JSON 還原編輯器狀態。
+  - `js/strategy-dsl-editor.js` 增補 `setDsl` 與穩定的狀態合併流程，確保載入保存策略時同步更新參數表單。
+  - `js/main.js` 於載入策略設定時同步渲染 DSL 編輯器，無自訂 DSL 時會重置為空白狀態。
+  - `tests/strategy-dsl-state.test.js` 擴充 `fromDsl` 單元測試，覆蓋 NOT 與 OR 結構還原。
+- **Testing**: `npm test`
+
+## 2026-09-21 — Patch LB-STRATEGY-FORM-20260921A
+- **Scope**: 策略參數自動生成表單與 DSL 編輯器 UI。
+- **Updates**:
+  - 新增 `js/lib/strategy-param-schema.js`、`js/strategy-params-form.js` 自動根據 paramsSchema 產生欄位，含數值、布林、列舉等型別校驗。
+  - 建立 `js/lib/strategy-dsl-state.js`、`js/strategy-dsl-editor.js`，提供拖拉重排、AND/OR/NOT 切換與多策略規則編輯。
+  - `js/main.js` 導入策略參數控制器、DSL 編輯器整合、回測設定載入同步；`js/backtest.js` 載入策略時同步通知新表單。
+  - `index.html` 注入 DSL 編輯器介面與新腳本。
+- **Testing**: `npm test`（含新增 schema、DSL state 單元測試）。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
