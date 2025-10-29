@@ -1,3 +1,10 @@
+## 2026-09-21 — Patch LB-CACHE-GAP-20260921A
+- **Scope**: 批量優化使用快取資料時的暖身缺口補抓。
+- **Updates**:
+  - `js/batch-optimization.js` 新增資料缺口判斷與 `cached-gap-fill-*` 除錯事件，於偵測 `dataset-start-after-required-start` 時改以 Worker 先補抓缺口並合併回 `cachedStockData` 或覆寫視窗快取，避免直接停用快取。
+  - `js/batch-optimization.js` 於 `executeBacktestForCombination`、`optimizeSingleStrategyParameter` 導入補抓後重算覆蓋狀態流程，讓 Worker 持續使用更新後的快取資料，降低重複遠端下載。
+- **Testing**: `npm test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
