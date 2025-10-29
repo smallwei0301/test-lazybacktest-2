@@ -1269,6 +1269,33 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="border-t pt-4 space-y-3" style="border-color: var(--border);">
+                                            <div class="flex items-start justify-between gap-4 flex-wrap">
+                                                <div class="space-y-1">
+                                                    <label class="block text-xs font-medium" style="color: var(--foreground);">
+                                                        <i data-lucide="code-xml" class="lucide-sm inline mr-1 text-primary"></i>
+                                                        策略 DSL 編輯器（Beta）
+                                                    </label>
+                                                    <p class="text-[11px] leading-snug" style="color: var(--muted-foreground);">
+                                                        依策略參數 schema 自動生成欄位，拖曳排序即可組合 AND/OR/NOT 規則，未新增規則時沿用上方單一策略。
+                                                    </p>
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="dslImportCurrentButton"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] border rounded transition-colors"
+                                                        style="border-color: var(--border); color: var(--accent);"
+                                                    >
+                                                        匯入目前設定
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div id="dslEditorContainer" class="space-y-4"></div>
+                                            <p class="text-[10px]" style="color: var(--muted-foreground);">
+                                                建立後會同步套用至回測，刪除所有規則即可恢復為單一策略。
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2808,6 +2835,10 @@
     <script src="js/strategy-plugin-contract.js"></script>
     <script src="js/strategy-plugin-registry.js"></script>
     <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/lib/strategy-param-schema.js"></script>
+    <script src="js/lib/strategy-dsl-state.js"></script>
+    <script src="js/strategy-params-form.js"></script>
+    <script src="js/strategy-dsl-editor.js"></script>
     <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
     <script src="js/backtest-runner.js"></script>
