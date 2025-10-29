@@ -1,3 +1,12 @@
+## 2026-09-19 — Patch LB-COVERAGE-TAIPEI-20260919A
+- **Issue recap**: 回測主執行緒將請求範圍直接寫入 coverage，導致資料其實只到前一交易日卻被標記為已覆蓋今日，進而阻擋補抓；同時快取無法辨識台灣收盤後的新交易日，下午 2 點後仍沿用舊資料。
+- **Fix**:
+  - `js/backtest.js` 於快取寫入與沿用分支改以 `computeCoverageFromRows` 重建覆蓋範圍並更新指紋，確保僅紀錄實際拿到的交易日。
+  - `js/main.js` 新增台灣時間 14:00 的 coverage 失效判斷與最後一筆日期運算，讓主執行緒在跨日後自動觸發重新抓取。
+  - `netlify.toml` 將 `cache-warmer` 排程改至台灣時間每日 14:00 執行，配合盤後兩小時內補齊新資料。
+- **Diagnostics**: 待於本地回測設定「結束日 = 今日」並跨越下午 14:00 台灣時間，觀察 console 是否自動觸發補抓並更新最後一筆日期。
+- **Testing**: 待本地執行 `npm run typecheck` 確認靜態檢查維持通過。
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

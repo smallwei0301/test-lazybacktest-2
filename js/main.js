@@ -5447,6 +5447,8 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const TAIWAN_TIME_OFFSET_MINUTES = 8 * 60;
+const TAIWAN_DAILY_CUTOFF_UTC_HOUR = 6; // 14:00 台灣時間
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5534,6 +5536,53 @@ function coverageCoversRange(coverage, targetRange) {
         cursor = Math.max(cursor, segment.end);
     }
     return cursor >= targetBounds.end;
+}
+
+function getCoverageLastDateISO(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latestEnd = null;
+    coverage.forEach((range) => {
+        if (!range) return;
+        const endMs = parseISOToUTC(range.end);
+        if (!Number.isFinite(endMs)) return;
+        if (latestEnd === null || endMs > latestEnd) {
+            latestEnd = endMs;
+        }
+    });
+    if (!Number.isFinite(latestEnd)) return null;
+    return utcToISODate(latestEnd);
+}
+
+function getTaipeiLocalDateInfo(nowMs) {
+    const offsetMs = TAIWAN_TIME_OFFSET_MINUTES * 60 * 1000;
+    const local = new Date(nowMs + offsetMs);
+    return {
+        isoDate: `${local.getUTCFullYear()}-${String(local.getUTCMonth() + 1).padStart(2, '0')}-${String(local.getUTCDate()).padStart(2, '0')}`,
+    };
+}
+
+function computeTaipeiCutoffExpiryUtc(lastDateIso) {
+    if (!lastDateIso || typeof lastDateIso !== 'string') return null;
+    const [yearStr, monthStr, dayStr] = lastDateIso.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10) - 1;
+    const day = parseInt(dayStr, 10);
+    if ([year, month, day].some((value) => !Number.isFinite(value))) {
+        return null;
+    }
+    return Date.UTC(year, month, day + 1, TAIWAN_DAILY_CUTOFF_UTC_HOUR, 0, 0, 0);
+}
+
+function isCoverageExpiredForTaipeiCutoff(coverage, nowMs = Date.now()) {
+    const lastDateIso = getCoverageLastDateISO(coverage);
+    if (!lastDateIso) return true;
+    const taipeiInfo = getTaipeiLocalDateInfo(nowMs);
+    if (taipeiInfo.isoDate <= lastDateIso) {
+        return false;
+    }
+    const expiryUtcMs = computeTaipeiCutoffExpiryUtc(lastDateIso);
+    if (!Number.isFinite(expiryUtcMs)) return true;
+    return nowMs >= expiryUtcMs;
 }
 
 function extractRangeData(data, startISO, endISO) {
@@ -5652,7 +5701,13 @@ function needsDataFetch(cur) {
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    if (!coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate })) {
+        return true;
+    }
+    if (isCoverageExpiredForTaipeiCutoff(entry.coverage)) {
+        return true;
+    }
+    return false;
 
 }
 // --- 新增：請求並顯示策略建議 ---
