@@ -4951,12 +4951,8 @@ function runBacktestInternal() {
                      const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
+                    const mergedCoverage = computeCoverageFromRows(mergedData);
+                    const mergedCoverageFingerprint = computeCoverageFingerprint(mergedCoverage);
                      const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
                      if (dataSource) sourceSet.add(dataSource);
                      const sourceArray = Array.from(sourceSet);
@@ -5004,7 +5000,7 @@ function runBacktestInternal() {
                         dataSources: sourceArray,
                         dataSource: summariseSourceLabels(sourceArray.length > 0 ? sourceArray : [dataSource || '']),
                         coverage: mergedCoverage,
-                        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
+                        coverageFingerprint: mergedCoverageFingerprint,
                         fetchedAt: Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
@@ -5081,7 +5077,9 @@ function runBacktestInternal() {
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
-                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedCoverage = computeCoverageFromRows(
+                        Array.isArray(cachedEntry.data) ? cachedEntry.data : [],
+                    );
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
@@ -5089,6 +5087,7 @@ function runBacktestInternal() {
                     });
                     const updatedEntry = {
                         ...cachedEntry,
+                        coverage: updatedCoverage,
                         stockName: stockName || cachedEntry.stockName || params.stockNo,
                         stockNo: curSettings.stockNo,
                         market: curSettings.market,
