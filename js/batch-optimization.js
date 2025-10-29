@@ -1,5 +1,6 @@
 // --- 批量策略優化功能 - v1.2.8 ---
 // Patch Tag: LB-BATCH-MAPPER-20260917B
+// Patch Tag: LB-CACHE-RECOVERY-20261005A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -12,9 +13,11 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
 const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
+const BATCH_CACHE_RECOVERY_VERSION = 'LB-CACHE-RECOVERY-20261005A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
+const batchCacheGapRecoveryState = new Map();
 
 function normaliseBatchStrategyId(role, strategyId) {
     if (!strategyId) {
@@ -518,6 +521,14 @@ function buildBatchDatasetMeta(params = {}) {
         meta.priceMode = params.adjustedPrice ? 'adjusted' : 'raw';
     }
 
+    if (typeof params.adjustedPrice === 'boolean') {
+        meta.adjustedPrice = params.adjustedPrice;
+    }
+
+    if (typeof params.splitAdjustment === 'boolean') {
+        meta.splitAdjustment = params.splitAdjustment;
+    }
+
     if (params.tradeTiming) {
         meta.tradeTiming = params.tradeTiming;
     }
@@ -589,6 +600,312 @@ function evaluateDatasetCoverage(summary, requiredRange) {
         requiredStartTs,
         requiredEndTs
     };
+}
+
+function formatTimestampToISO(value) {
+    const ts = normaliseDateLikeToMs(value);
+    if (ts === null) {
+        return null;
+    }
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return date.toISOString().split('T')[0];
+}
+
+function resolveIsoDate(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+            return trimmed;
+        }
+    }
+    return formatTimestampToISO(value);
+}
+
+function parseIsoDateToUtc(iso) {
+    if (!iso || typeof iso !== 'string') {
+        return null;
+    }
+    const safeIso = `${iso}T00:00:00Z`;
+    const date = new Date(safeIso);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function diffIsoDays(laterIso, earlierIso) {
+    const laterDate = parseIsoDateToUtc(laterIso);
+    const earlierDate = parseIsoDateToUtc(earlierIso);
+    if (!laterDate || !earlierDate) {
+        return null;
+    }
+    const diffMs = laterDate.getTime() - earlierDate.getTime();
+    return Math.round(diffMs / (24 * 60 * 60 * 1000));
+}
+
+function mergeDatasetRows(existingRows, newRows) {
+    const map = new Map();
+    if (Array.isArray(existingRows)) {
+        existingRows.forEach((row) => {
+            if (row && row.date) {
+                map.set(row.date, row);
+            }
+        });
+    }
+    if (Array.isArray(newRows)) {
+        newRows.forEach((row) => {
+            if (row && row.date) {
+                map.set(row.date, row);
+            }
+        });
+    }
+    return Array.from(map.values()).sort((a, b) => {
+        const aDate = parseIsoDateToUtc(a?.date);
+        const bDate = parseIsoDateToUtc(b?.date);
+        if (!aDate || !bDate) {
+            return 0;
+        }
+        return aDate.getTime() - bDate.getTime();
+    });
+}
+
+function buildGapRecoveryKey(meta, gapStartIso, gapEndIso) {
+    const stockNo = meta?.stockNo || meta?.symbol || '';
+    const market = (meta?.market || meta?.marketType || '').toUpperCase();
+    const priceMode = (meta?.priceMode || (meta?.adjustedPrice ? 'adjusted' : 'raw') || '').toLowerCase();
+    const splitFlag = typeof meta?.splitAdjustment === 'boolean'
+        ? meta.splitAdjustment
+        : Boolean(meta?.split);
+    return [market, priceMode, splitFlag ? 'split' : 'nosplit', stockNo, gapStartIso || 'unknown', gapEndIso || 'unknown']
+        .join('|');
+}
+
+async function fetchGapDatasetViaWorker(gapParams, fetchMeta = {}) {
+    if (!workerUrl) {
+        throw new Error('[Batch Optimization] Worker URL unavailable for gap recovery');
+    }
+
+    return new Promise((resolve, reject) => {
+        const gapWorker = new Worker(workerUrl);
+        let settled = false;
+
+        const cleanup = () => {
+            try {
+                gapWorker.terminate();
+            } catch (terminateError) {
+                console.warn('[Batch Optimization] Failed to terminate gap recovery worker:', terminateError);
+            }
+        };
+
+        const finish = (result, error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            if (error) {
+                reject(error);
+            } else {
+                resolve(result);
+            }
+        };
+
+        gapWorker.onmessage = (event) => {
+            const { type, data } = event.data || {};
+            if (type === 'progress') {
+                return;
+            }
+            if (type === 'result') {
+                const rows = Array.isArray(data?.rawData)
+                    ? data.rawData
+                    : Array.isArray(data?.rawDataUsed)
+                        ? data.rawDataUsed
+                        : [];
+                finish({
+                    rows,
+                    diagnostics: data?.datasetDiagnostics?.fetch || null,
+                    rawMeta: data?.rawMeta || null,
+                    dataDebug: data?.dataDebug || null,
+                    response: data,
+                    meta: fetchMeta
+                });
+            } else if (type === 'no_data') {
+                finish({ rows: [], diagnostics: null, meta: fetchMeta, response: data || null });
+            } else if (type === 'error') {
+                const errorMessage = data?.message || 'Unknown worker error';
+                finish(null, new Error(errorMessage));
+            }
+        };
+
+        gapWorker.onerror = (errorEvent) => {
+            finish(null, errorEvent?.error || errorEvent || new Error('Worker runtime error'));
+        };
+
+        try {
+            gapWorker.postMessage({
+                type: 'runBacktest',
+                params: gapParams,
+                useCachedData: false,
+                cachedData: null,
+                cachedMeta: null,
+                sessionContext: { source: 'batch-cache-gap-recovery' }
+            });
+        } catch (postError) {
+            finish(null, postError);
+        }
+    });
+}
+
+async function recoverCachedDatasetStartGap(options = {}) {
+    const {
+        cachedUsage,
+        cachedPayload,
+        requiredRange,
+        preparedParams,
+        datasetMeta,
+        context,
+        combination,
+        cachedSource,
+        overrideDataRef
+    } = options;
+
+    const evaluationReason = typeof cachedUsage?.evaluation?.reason === 'string'
+        ? cachedUsage.evaluation.reason
+        : '';
+    if (!evaluationReason.includes('dataset-start-after-required-start')) {
+        return null;
+    }
+
+    const requiredStartIso = resolveIsoDate(requiredRange?.dataStartDate
+        || requiredRange?.effectiveStartDate
+        || requiredRange?.startDate);
+    const datasetStartIso = resolveIsoDate(cachedUsage?.summary?.startDate);
+    if (!requiredStartIso || !datasetStartIso) {
+        return null;
+    }
+
+    if (requiredStartIso >= datasetStartIso) {
+        return null;
+    }
+
+    const gapKey = buildGapRecoveryKey(datasetMeta, requiredStartIso, datasetStartIso);
+    if (batchCacheGapRecoveryState.has(gapKey)) {
+        return batchCacheGapRecoveryState.get(gapKey);
+    }
+
+    const recoveryPromise = (async () => {
+        const gapDays = diffIsoDays(datasetStartIso, requiredStartIso);
+        const gapMeta = {
+            version: BATCH_CACHE_RECOVERY_VERSION,
+            context,
+            gapStart: requiredStartIso,
+            gapEnd: datasetStartIso,
+            gapDays,
+            source: cachedSource,
+            combination: combination ? summarizeCombination(combination) : null,
+            ...datasetMeta
+        };
+
+        recordBatchDebug('cache-gap-detected', gapMeta, { phase: 'worker', console: false });
+
+        const gapParams = clonePlainObject(preparedParams || {});
+        gapParams.startDate = requiredStartIso;
+        gapParams.endDate = datasetStartIso;
+        gapParams.dataStartDate = requiredStartIso;
+        gapParams.bufferedStartDate = requiredStartIso;
+        gapParams.effectiveStartDate = requiredStartIso;
+
+        if (!gapParams.stockNo && datasetMeta?.stockNo) {
+            gapParams.stockNo = datasetMeta.stockNo;
+        }
+        if (!gapParams.marketType && datasetMeta?.market) {
+            gapParams.marketType = datasetMeta.market;
+        }
+        if (!gapParams.market && datasetMeta?.market) {
+            gapParams.market = datasetMeta.market;
+        }
+
+        if (gapParams.endDate < gapParams.startDate) {
+            gapParams.endDate = gapParams.startDate;
+        }
+
+        recordBatchDebug('cache-gap-fetch-start', {
+            ...gapMeta,
+            gapParams: {
+                startDate: gapParams.startDate,
+                endDate: gapParams.endDate,
+                market: gapParams.market || gapParams.marketType || null
+            }
+        }, { phase: 'worker', console: false });
+
+        let fetchResult = null;
+        try {
+            fetchResult = await fetchGapDatasetViaWorker(gapParams, {
+                context,
+                gapStart: requiredStartIso,
+                gapEnd: datasetStartIso,
+                gapKey
+            });
+        } catch (error) {
+            recordBatchDebug('cache-gap-fetch-failed', {
+                ...gapMeta,
+                message: error?.message || String(error)
+            }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+            return null;
+        }
+
+        const fetchedRows = Array.isArray(fetchResult?.rows) ? fetchResult.rows : [];
+        if (fetchedRows.length === 0) {
+            recordBatchDebug('cache-gap-fetch-empty', {
+                ...gapMeta,
+                diagnostics: fetchResult?.diagnostics || null
+            }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+            return null;
+        }
+
+        const mergedRows = mergeDatasetRows(cachedPayload, fetchedRows);
+        const updatedUsage = buildCachedDatasetUsage(mergedRows, requiredRange);
+
+        const applyMeta = {
+            ...gapMeta,
+            fetchedRows: fetchedRows.length,
+            mergedLength: mergedRows.length,
+            diagnostics: fetchResult?.diagnostics || null,
+            overrideUpdated: false,
+            globalUpdated: false
+        };
+
+        if (typeof cachedStockData !== 'undefined') {
+            cachedStockData = mergedRows;
+            applyMeta.globalUpdated = true;
+        }
+
+        if (Array.isArray(overrideDataRef)) {
+            overrideDataRef.splice(0, overrideDataRef.length, ...mergedRows);
+            applyMeta.overrideUpdated = true;
+        }
+
+        recordBatchDebug('cache-gap-merged', applyMeta, { phase: 'worker', console: false });
+
+        return {
+            updatedRows: mergedRows,
+            updatedUsage,
+            fetchResult,
+            meta: applyMeta
+        };
+    })();
+
+    batchCacheGapRecoveryState.set(gapKey, recoveryPromise.finally(() => {
+        batchCacheGapRecoveryState.delete(gapKey);
+    }));
+
+    return batchCacheGapRecoveryState.get(gapKey);
 }
 
 function getWindowLocalStorage() {
@@ -3196,7 +3513,7 @@ async function processStrategyCombinations(combinations, config) {
 
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination, options = {}) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
         combination = normaliseBatchCombination(combination);
         let datasetMeta = {};
         try {
@@ -3273,7 +3590,7 @@ async function executeBacktestForCombination(combination, options = {}) {
             const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                 ? options.cachedDataOverride
                 : null;
-            const cachedPayload = overrideData
+            let cachedPayload = overrideData
                 || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
@@ -3281,9 +3598,34 @@ async function executeBacktestForCombination(combination, options = {}) {
             const preparedParams = enrichParamsWithLookback(params);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
-            let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
-            const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+            let cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            let coverageEvaluation = cachedUsage.evaluation;
+            let { useCachedData } = cachedUsage;
+            let sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+
+            if (!coverageEvaluation.coverageSatisfied
+                && typeof coverageEvaluation.reason === 'string'
+                && coverageEvaluation.reason.includes('dataset-start-after-required-start')) {
+                const recovery = await recoverCachedDatasetStartGap({
+                    cachedUsage,
+                    cachedPayload,
+                    requiredRange,
+                    preparedParams,
+                    datasetMeta,
+                    context: 'executeBacktestForCombination',
+                    combination,
+                    cachedSource,
+                    overrideDataRef: overrideData
+                });
+
+                if (recovery && Array.isArray(recovery.updatedRows)) {
+                    cachedPayload = recovery.updatedRows;
+                    cachedUsage = recovery.updatedUsage;
+                    coverageEvaluation = cachedUsage.evaluation;
+                    useCachedData = cachedUsage.useCachedData;
+                    sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+                }
+            }
 
             if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
                 recordBatchDebug('cached-data-slice-applied', {
@@ -3646,7 +3988,7 @@ async function optimizeMultipleStrategyParameters(strategy, strategyType, strate
 async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyType, targetMetric, trials, options = {}) {
     const strategyId = options?.strategyId || null;
     const baseCombo = options?.baseCombo || null;
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
         if (!workerUrl) {
             console.error('[Batch Optimization] Worker not available');
             resolve({ value: undefined, metric: -Infinity });
@@ -3658,7 +4000,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
+        let cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
         const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
         
@@ -3777,11 +4119,37 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
-        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
-        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
-        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+        let cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        let coverageEvaluation = cachedUsage.evaluation;
+        let { useCachedData } = cachedUsage;
+        let sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
+        if (!coverageEvaluation.coverageSatisfied
+            && typeof coverageEvaluation.reason === 'string'
+            && coverageEvaluation.reason.includes('dataset-start-after-required-start')) {
+            const recovery = await recoverCachedDatasetStartGap({
+                cachedUsage,
+                cachedPayload,
+                requiredRange,
+                preparedParams,
+                datasetMeta,
+                context: 'optimize-single-param',
+                combination: baseCombo,
+                cachedSource,
+                overrideDataRef: overrideData
+            });
+
+            if (recovery && Array.isArray(recovery.updatedRows)) {
+                cachedPayload = recovery.updatedRows;
+                cachedUsage = recovery.updatedUsage;
+                coverageEvaluation = cachedUsage.evaluation;
+                useCachedData = cachedUsage.useCachedData;
+                sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+            }
+        }
+
+        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+        
         if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
             recordBatchDebug('cached-data-slice-applied', {
                 context: 'optimize-single-param',
