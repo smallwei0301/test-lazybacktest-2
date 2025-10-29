@@ -12898,6 +12898,37 @@ self.onmessage = async function (e) {
     await handleAITrainLSTMMessage(e.data);
     return;
   }
+  if (type === 'fetchRangePatch') {
+    try {
+      const params = e.data?.params || {};
+      const marketType = params.marketType || params.market || params.marketKey || 'TWSE';
+      const outcome = await fetchStockData(
+        params.stockNo,
+        params.startDate,
+        params.endDate,
+        marketType,
+        {
+          adjusted: params.adjustedPrice,
+          splitAdjustment: params.splitAdjustment,
+          effectiveStartDate: params.effectiveStartDate || params.startDate,
+          lookbackDays: params.lookbackDays || null,
+        },
+      );
+      self.postMessage({
+        type: 'fetchRangePatchResult',
+        data: outcome,
+        requestId: e.data?.requestId || null,
+      });
+    } catch (error) {
+      self.postMessage({
+        type: 'error',
+        context: 'fetchRangePatch',
+        requestId: e.data?.requestId || null,
+        data: { message: error?.message || String(error), stack: error?.stack || null },
+      });
+    }
+    return;
+  }
   const {
     params,
     useCachedData,
