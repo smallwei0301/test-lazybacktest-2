@@ -1,5 +1,5 @@
-// --- 滾動測試模組 - v2.7 ---
-// Patch Tag: LB-ROLLING-TEST-20260709A
+// --- 滾動測試模組 - v2.8 ---
+// Patch Tag: LB-ROLLING-INIT-20260930A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20260709A',
+        version: 'LB-ROLLING-INIT-20260930A',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -3149,6 +3149,27 @@
         target.exitStages = normalizeStageArray(target.exitStages, 100, 100);
     }
 
+    function applyOptimizationScopeDefaults(target, scopes) {
+        if (!target || typeof target !== 'object') return;
+        if (!Array.isArray(scopes) || scopes.length === 0) return;
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) return;
+
+        const scopeSet = new Set(scopes);
+        const ensureDefaultsForScope = (scope) => {
+            if (!scopeSet.has(scope)) return;
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+            const strategyName = target[definition.strategyKey];
+            if (!strategyName) return;
+            const strategyKey = resolveStrategyConfigKey(strategyName, scope) || strategyName;
+            const strategyInfo = strategyDescriptions?.[strategyKey];
+            if (!strategyInfo || typeof strategyInfo.defaultParams !== 'object') return;
+            target[definition.paramsKey] = deepClone(strategyInfo.defaultParams);
+        };
+
+        ['entry', 'exit', 'shortEntry', 'shortExit'].forEach(ensureDefaultsForScope);
+    }
+
     function stripRelativeRangeControls(target) {
         const keys = [
             'recentYears',
@@ -3199,6 +3220,7 @@
 
         const outputParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(outputParams, windowInfo);
+        applyOptimizationScopeDefaults(outputParams, plan?.scopes);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
@@ -3227,6 +3249,7 @@
 
         const workingParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(workingParams, windowInfo);
+        applyOptimizationScopeDefaults(workingParams, plan?.scopes);
 
         const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
         const cachedWindowData = selectCachedDataForWindow(trainingPayload?.dataStartDate, windowInfo.trainingEnd);
