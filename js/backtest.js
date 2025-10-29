@@ -8782,7 +8782,23 @@ function updateStrategyParams(type) {
         console.error(`[Main] Cannot find elements for type: ${type}`);
         return;
     }
-    
+
+    const formsApi = window.lazybacktestStrategyForms;
+    if (formsApi && typeof formsApi.getController === 'function') {
+        const controller = formsApi.getController(type);
+        if (controller) {
+            const normalizedKey = normaliseStrategyIdForRole(type, strategySelect.value);
+            if (normalizedKey && normalizedKey !== strategySelect.value) {
+                const hasOption = Array.from(strategySelect.options || []).some((option) => option.value === normalizedKey);
+                if (hasOption) {
+                    strategySelect.value = normalizedKey;
+                }
+            }
+            controller.setStrategy(strategySelect.value, controller.getValues());
+            return;
+        }
+    }
+
     const strategyKey = strategySelect.value;
     const normalizedKey = normaliseStrategyIdForRole(type, strategyKey);
     if (normalizedKey && normalizedKey !== strategyKey) {

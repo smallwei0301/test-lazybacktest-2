@@ -532,6 +532,866 @@ const STRATEGY_OPTION_ROLE_CONFIGS = [
     { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
 ];
 
+const STRATEGY_FORM_VERSION = 'LB-STRATEGY-FORM-20260919A';
+const STRATEGY_DSL_UI_VERSION = 'LB-STRATEGY-DSL-UI-20260918A';
+
+const paramsSchemaApi = (typeof window !== 'undefined' && window.lazybacktestParamsSchema)
+    ? window.lazybacktestParamsSchema
+    : null;
+const dslStateApi = (typeof window !== 'undefined' && window.lazybacktestStrategyDslState)
+    ? window.lazybacktestStrategyDslState
+    : null;
+const formFocusApi = (typeof window !== 'undefined' && window.lazybacktestFormFocus)
+    ? window.lazybacktestFormFocus
+    : null;
+
+const STRATEGY_ROLE_LABELS = Object.freeze({
+    entry: '做多進場',
+    exit: '做多出場',
+    shortEntry: '做空進場',
+    shortExit: '回補出場',
+});
+
+const STRATEGY_DSL_ROLE_KEY = Object.freeze({
+    entry: 'longEntry',
+    exit: 'longExit',
+    shortEntry: 'shortEntry',
+    shortExit: 'shortExit',
+});
+
+const strategyParamsControllers = {};
+const strategyDslNodeForms = {
+    entry: new Map(),
+    exit: new Map(),
+    shortEntry: new Map(),
+    shortExit: new Map(),
+};
+let strategyDslState = dslStateApi && typeof dslStateApi.createState === 'function'
+    ? dslStateApi.createState()
+    : null;
+
+function resolveStrategyParamErrorMessage(code) {
+    switch (code) {
+        case 'out_of_range':
+            return '已自動調整為允許範圍內的數值。';
+        case 'multiple_of':
+            return '已對齊可用的刻度。';
+        case 'enum':
+            return '已還原為可用的選項。';
+        case 'invalid':
+            return '格式無效，請重新輸入。';
+        case 'missing':
+            return '缺少必要值，已套用預設設定。';
+        default:
+            return '參數已自動調整。';
+    }
+}
+
+function getStrategyMeta(strategyId) {
+    if (!strategyId || !window.StrategyPluginRegistry) {
+        return null;
+    }
+    const registry = window.StrategyPluginRegistry;
+    if (typeof registry.getStrategyMetaById === 'function') {
+        const directMeta = registry.getStrategyMetaById(strategyId);
+        if (directMeta) {
+            return directMeta;
+        }
+    }
+    if (typeof registry.ensureStrategyLoaded === 'function') {
+        try {
+            registry.ensureStrategyLoaded(strategyId);
+        } catch (error) {
+            console.warn('[StrategyForm] ensureStrategyLoaded 失敗：%s', error && error.message ? error.message : error);
+        }
+        if (typeof registry.getStrategyMetaById === 'function') {
+            return registry.getStrategyMetaById(strategyId);
+        }
+    }
+    return null;
+}
+
+function getStrategyDefaultParams(strategyId) {
+    if (!strategyId) {
+        return {};
+    }
+    if (paramsSchemaApi && typeof paramsSchemaApi.extractDefaults === 'function') {
+        const meta = getStrategyMeta(strategyId);
+        if (meta?.paramsSchema) {
+            const defaults = paramsSchemaApi.extractDefaults(meta.paramsSchema);
+            if (defaults && Object.keys(defaults).length > 0) {
+                return { ...defaults };
+            }
+        }
+    }
+    const descriptor = strategyDescriptions?.[strategyId];
+    if (descriptor?.defaultParams) {
+        return JSON.parse(JSON.stringify(descriptor.defaultParams));
+    }
+    return {};
+}
+
+function getRoleStrategyOptions(roleKey) {
+    const roleConfig = STRATEGY_OPTION_ROLE_CONFIGS.find((config) => config.type === roleKey);
+    if (!roleConfig) {
+        return [];
+    }
+    const select = document.getElementById(roleConfig.selectId);
+    if (!select) {
+        return [];
+    }
+    return Array.from(select.options || [])
+        .filter((option) => option.value)
+        .map((option) => ({ value: option.value, label: option.textContent || option.value }));
+}
+
+function cloneDslParams(params) {
+    if (!params || typeof params !== 'object') {
+        return {};
+    }
+    if (Array.isArray(params)) {
+        return params
+            .filter((item) => item !== undefined && typeof item !== 'function')
+            .map((item) => (typeof item === 'object' && item !== null ? cloneDslParams(item) : item));
+    }
+    const clone = {};
+    Object.keys(params).forEach((key) => {
+        const value = params[key];
+        if (value === undefined || typeof value === 'function') {
+            return;
+        }
+        if (value === null) {
+            clone[key] = null;
+        } else if (typeof value === 'object') {
+            clone[key] = cloneDslParams(value);
+        } else {
+            clone[key] = value;
+        }
+    });
+    return clone;
+}
+
+function StrategyParamsForm(options) {
+    this.roleKey = options.roleKey;
+    this.container = options.container || null;
+    this.fieldPrefix = options.fieldPrefix || `${options.roleKey || 'strategy'}-param`;
+    this.onChange = typeof options.onChange === 'function' ? options.onChange : null;
+    this.strategyId = null;
+    this.schema = null;
+    this.fieldDefs = [];
+    this.values = {};
+    this.errors = {};
+}
+
+StrategyParamsForm.prototype.getValues = function getValues() {
+    return { ...this.values };
+};
+
+StrategyParamsForm.prototype.getErrors = function getErrors() {
+    return { ...this.errors };
+};
+
+StrategyParamsForm.prototype.hasErrors = function hasErrors() {
+    return Object.keys(this.errors || {}).length > 0;
+};
+
+StrategyParamsForm.prototype.destroy = function destroy() {
+    if (this.container) {
+        this.container.innerHTML = '';
+    }
+};
+
+StrategyParamsForm.prototype.emitChange = function emitChange() {
+    if (this.onChange) {
+        try {
+            this.onChange({
+                role: this.roleKey,
+                strategyId: this.strategyId,
+                values: this.getValues(),
+                errors: this.getErrors(),
+            });
+        } catch (error) {
+            console.warn('[StrategyForm] onChange callback 失敗', error);
+        }
+    }
+};
+
+StrategyParamsForm.prototype.renderEmpty = function renderEmpty(message) {
+    if (!this.container) return;
+    const hint = message || '此策略無需額外參數。';
+    this.container.innerHTML = `<p class="text-[11px]" style="color: var(--muted-foreground);">${hint}</p>`;
+};
+
+StrategyParamsForm.prototype.render = function render() {
+    if (!this.container) {
+        return;
+    }
+    this.container.innerHTML = '';
+    if (!this.fieldDefs || this.fieldDefs.length === 0) {
+        this.renderEmpty();
+        return;
+    }
+    this.fieldDefs.forEach((field) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'space-y-1';
+
+        const label = document.createElement('label');
+        label.className = 'block text-xs font-medium';
+        label.style.color = 'var(--foreground)';
+        const inputId = `${this.fieldPrefix}-${field.name}`;
+        label.setAttribute('for', inputId);
+        label.textContent = field.label || field.name;
+        wrapper.appendChild(label);
+
+        let input = null;
+        if (field.kind === 'number') {
+            input = document.createElement('input');
+            input.type = 'number';
+            if (field.min !== undefined) input.min = field.min;
+            if (field.max !== undefined) input.max = field.max;
+            if (field.step !== undefined) input.step = field.step;
+            const numericValue = this.values[field.name];
+            input.value = Number.isFinite(numericValue)
+                ? numericValue
+                : (field.defaultValue !== undefined ? field.defaultValue : '');
+        } else if (field.kind === 'boolean') {
+            input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = Boolean(this.values[field.name]);
+        } else if (field.kind === 'enum') {
+            input = document.createElement('select');
+            (field.options || []).forEach((option) => {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                input.appendChild(opt);
+            });
+            const currentValue = this.values[field.name];
+            if (currentValue !== undefined) {
+                input.value = currentValue;
+            }
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+            const textValue = this.values[field.name];
+            input.value = textValue !== undefined ? textValue : (field.defaultValue ?? '');
+        }
+
+        input.id = inputId;
+        input.dataset.paramName = field.name;
+        input.dataset.strategyForm = 'true';
+        input.className = field.kind === 'boolean'
+            ? 'rounded border border-border text-primary focus:ring-ring'
+            : 'w-full px-2 py-1.5 border border-border rounded-md text-sm bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring';
+        const eventName = field.kind === 'boolean' ? 'change' : 'input';
+        input.addEventListener(eventName, (event) => {
+            this.handleInputChange(field, event);
+        });
+        wrapper.appendChild(input);
+
+        const errorCode = this.errors[field.name];
+        if (errorCode) {
+            const hint = document.createElement('p');
+            hint.className = 'text-[11px] text-destructive/90';
+            hint.textContent = resolveStrategyParamErrorMessage(errorCode);
+            wrapper.appendChild(hint);
+        }
+
+        this.container.appendChild(wrapper);
+    });
+};
+
+StrategyParamsForm.prototype.setStrategy = function setStrategy(strategyId, initialValues) {
+    this.strategyId = strategyId || null;
+    if (!paramsSchemaApi || !this.container) {
+        this.schema = null;
+        this.fieldDefs = [];
+        this.values = {};
+        this.errors = {};
+        if (this.container) {
+            this.container.innerHTML = '';
+        }
+        this.emitChange();
+        return;
+    }
+
+    const meta = getStrategyMeta(strategyId);
+    this.schema = meta?.paramsSchema || null;
+    if (!this.schema || typeof paramsSchemaApi.createFieldDefinitions !== 'function') {
+        this.fieldDefs = [];
+        this.values = {};
+        this.errors = {};
+        this.renderEmpty();
+        this.emitChange();
+        return;
+    }
+
+    const fieldPack = paramsSchemaApi.createFieldDefinitions(this.schema, {
+        labelResolver: (paramName) => resolveStrategyParamPresentation(this.roleKey, strategyId, paramName),
+    });
+    this.fieldDefs = Array.isArray(fieldPack?.fields) ? fieldPack.fields : [];
+    const baseline = initialValues && typeof initialValues === 'object' && Object.keys(initialValues).length > 0
+        ? initialValues
+        : getStrategyDefaultParams(strategyId);
+    const sanitized = paramsSchemaApi.sanitizeValues(this.schema, baseline);
+    this.values = { ...(sanitized?.defaults || {}), ...(sanitized?.values || {}) };
+    this.errors = sanitized?.errors || {};
+
+    if (this.fieldDefs.length === 0) {
+        this.renderEmpty();
+    } else {
+        this.render();
+    }
+    this.emitChange();
+};
+
+StrategyParamsForm.prototype.handleInputChange = function handleInputChange(field, event) {
+    if (!this.schema || !paramsSchemaApi || typeof paramsSchemaApi.sanitizeValues !== 'function') {
+        return;
+    }
+    const focusState = (formFocusApi && typeof formFocusApi.captureFocusState === 'function' && this.container)
+        ? formFocusApi.captureFocusState(this.container)
+        : null;
+    const raw = { ...this.values };
+    if (field.kind === 'boolean') {
+        raw[field.name] = Boolean(event.target.checked);
+    } else if (field.kind === 'number') {
+        raw[field.name] = event.target.value;
+    } else {
+        raw[field.name] = event.target.value;
+    }
+    const sanitized = paramsSchemaApi.sanitizeValues(this.schema, raw);
+    this.values = { ...(sanitized?.defaults || {}), ...(sanitized?.values || {}) };
+    this.errors = sanitized?.errors || {};
+    this.render();
+    if (formFocusApi && typeof formFocusApi.restoreFocusState === 'function' && this.container) {
+        const fallbackSelector = `#${this.fieldPrefix}-${field.name}`;
+        formFocusApi.restoreFocusState(this.container, focusState, { fallbackSelector });
+    }
+    this.emitChange();
+};
+
+const strategyDslDragState = { roleKey: null, fromIndex: null };
+
+function syncPrimaryStrategyNode(roleKey) {
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    const controller = strategyParamsControllers[roleKey];
+    const roleConfig = STRATEGY_OPTION_ROLE_CONFIGS.find((config) => config.type === roleKey);
+    const select = roleConfig ? document.getElementById(roleConfig.selectId) : null;
+    if (!controller || !select) {
+        return;
+    }
+    const { normalizedKey } = ensureSelectUsesNormalizedValue(roleKey, select);
+    const strategyId = normalizedKey || select.value;
+    if (!strategyId) {
+        return;
+    }
+    try {
+        dslStateApi.setPrimaryPlugin(
+            strategyDslState,
+            STRATEGY_DSL_ROLE_KEY[roleKey],
+            strategyId,
+            cloneDslParams(controller.getValues()),
+        );
+    } catch (error) {
+        console.warn('[StrategyDSL] 同步主策略失敗：%s', error && error.message ? error.message : error);
+    }
+}
+
+function updateDslNodeParams(roleKey, index, params) {
+    if (!strategyDslState) {
+        return;
+    }
+    const dslRole = STRATEGY_DSL_ROLE_KEY[roleKey];
+    const roleState = strategyDslState[dslRole];
+    if (!roleState || !Array.isArray(roleState.nodes) || !roleState.nodes[index]) {
+        return;
+    }
+    roleState.nodes[index].params = cloneDslParams(params);
+}
+
+function resetStrategyDslState() {
+    if (!dslStateApi || typeof dslStateApi.createState !== 'function') {
+        return;
+    }
+    strategyDslState = dslStateApi.createState();
+    Object.keys(STRATEGY_DSL_ROLE_KEY).forEach((roleKey) => {
+        const controller = strategyParamsControllers[roleKey];
+        const roleConfig = STRATEGY_OPTION_ROLE_CONFIGS.find((config) => config.type === roleKey);
+        const select = roleConfig ? document.getElementById(roleConfig.selectId) : null;
+        if (!controller || !select) {
+            return;
+        }
+        const { normalizedKey } = ensureSelectUsesNormalizedValue(roleKey, select);
+        const strategyId = normalizedKey || select.value;
+        if (!strategyId) {
+            return;
+        }
+        try {
+            dslStateApi.setPrimaryPlugin(
+                strategyDslState,
+                STRATEGY_DSL_ROLE_KEY[roleKey],
+                strategyId,
+                cloneDslParams(controller.getValues()),
+            );
+        } catch (error) {
+            console.warn('[StrategyDSL] 初始化 %s 節點失敗：%s', roleKey, error && error.message ? error.message : error);
+        }
+    });
+}
+
+function updateStrategyDslValidation() {
+    const validationBox = document.getElementById('strategyDslValidation');
+    if (!validationBox) {
+        return;
+    }
+    const messages = [];
+    Object.keys(strategyParamsControllers).forEach((roleKey) => {
+        const controller = strategyParamsControllers[roleKey];
+        if (controller && controller.hasErrors()) {
+            messages.push(`${STRATEGY_ROLE_LABELS[roleKey]}：參數已自動調整至合法範圍。`);
+        }
+    });
+    Object.keys(strategyDslNodeForms).forEach((roleKey) => {
+        strategyDslNodeForms[roleKey].forEach((form) => {
+            if (form && form.hasErrors && form.hasErrors()) {
+                messages.push(`${STRATEGY_ROLE_LABELS[roleKey]} 組合規則：部分參數已自動調整。`);
+            }
+        });
+    });
+    if (messages.length > 0) {
+        validationBox.textContent = messages.join(' ');
+        validationBox.classList.remove('hidden');
+    } else {
+        validationBox.textContent = '';
+        validationBox.classList.add('hidden');
+    }
+}
+
+function handleDslOperatorChange(roleKey, operator) {
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    try {
+        dslStateApi.setOperator(strategyDslState, STRATEGY_DSL_ROLE_KEY[roleKey], operator);
+        renderStrategyDslEditor();
+    } catch (error) {
+        console.warn('[StrategyDSL] 更新 %s 運算子失敗：%s', roleKey, error && error.message ? error.message : error);
+    }
+}
+
+function handleAddDslNode(roleKey) {
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    const options = getRoleStrategyOptions(roleKey);
+    const preferred = options.find((option) => option.value) || null;
+    const strategyId = preferred ? preferred.value : null;
+    if (!strategyId) {
+        return;
+    }
+    const defaults = getStrategyDefaultParams(strategyId);
+    try {
+        dslStateApi.addNode(strategyDslState, STRATEGY_DSL_ROLE_KEY[roleKey], strategyId, defaults);
+        renderStrategyDslEditor();
+        updateStrategyDslValidation();
+    } catch (error) {
+        console.warn('[StrategyDSL] 新增 %s 節點失敗：%s', roleKey, error && error.message ? error.message : error);
+    }
+}
+
+function handleRemoveDslNode(roleKey, index) {
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    try {
+        dslStateApi.removeNode(strategyDslState, STRATEGY_DSL_ROLE_KEY[roleKey], index);
+        renderStrategyDslEditor();
+        updateStrategyDslValidation();
+    } catch (error) {
+        console.warn('[StrategyDSL] 移除 %s 節點失敗：%s', roleKey, error && error.message ? error.message : error);
+    }
+}
+
+function handleToggleDslNode(roleKey, index) {
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    try {
+        dslStateApi.toggleNegate(strategyDslState, STRATEGY_DSL_ROLE_KEY[roleKey], index);
+        renderStrategyDslEditor();
+    } catch (error) {
+        console.warn('[StrategyDSL] 切換 NOT 失敗：%s', error && error.message ? error.message : error);
+    }
+}
+
+function handleDslNodeStrategyChange(roleKey, index, strategyId) {
+    if (!strategyDslState) {
+        return;
+    }
+    const normalized = normaliseStrategyIdForType(roleKey, strategyId) || strategyId;
+    const defaults = getStrategyDefaultParams(normalized);
+    const dslRole = STRATEGY_DSL_ROLE_KEY[roleKey];
+    const roleState = strategyDslState[dslRole];
+    if (!roleState || !roleState.nodes || !roleState.nodes[index]) {
+        return;
+    }
+    roleState.nodes[index].id = normalized;
+    roleState.nodes[index].params = defaults;
+    renderStrategyDslEditor();
+    updateStrategyDslValidation();
+}
+
+function handleDslDragStart(event, roleKey, index) {
+    if (index === 0) {
+        event.preventDefault();
+        return;
+    }
+    strategyDslDragState.roleKey = roleKey;
+    strategyDslDragState.fromIndex = index;
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', `${roleKey}:${index}`);
+    }
+}
+
+function handleDslDragOver(event) {
+    event.preventDefault();
+    if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+    }
+}
+
+function handleDslDrop(event, roleKey, index) {
+    event.preventDefault();
+    if (!dslStateApi || !strategyDslState) {
+        return;
+    }
+    if (strategyDslDragState.roleKey !== roleKey) {
+        return;
+    }
+    const fromIndex = strategyDslDragState.fromIndex;
+    strategyDslDragState.roleKey = null;
+    strategyDslDragState.fromIndex = null;
+    if (typeof fromIndex !== 'number' || fromIndex === index || fromIndex === 0) {
+        return;
+    }
+    try {
+        dslStateApi.reorderNode(strategyDslState, STRATEGY_DSL_ROLE_KEY[roleKey], fromIndex, index);
+        renderStrategyDslEditor();
+    } catch (error) {
+        console.warn('[StrategyDSL] 調整順序失敗：%s', error && error.message ? error.message : error);
+    }
+}
+
+function handleDslDragEnd() {
+    strategyDslDragState.roleKey = null;
+    strategyDslDragState.fromIndex = null;
+}
+
+function renderStrategyDslRole(wrapper, roleKey) {
+    const roleLabel = STRATEGY_ROLE_LABELS[roleKey] || roleKey;
+    const section = document.createElement('div');
+    section.className = 'border border-border rounded-md p-3 space-y-3 bg-card/60';
+
+    const header = document.createElement('div');
+    header.className = 'flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between';
+    const titleGroup = document.createElement('div');
+    const title = document.createElement('h5');
+    title.className = 'text-xs font-semibold';
+    title.style.color = 'var(--foreground)';
+    title.textContent = roleLabel;
+    titleGroup.appendChild(title);
+    const description = document.createElement('p');
+    description.className = 'text-[11px]';
+    description.style.color = 'var(--muted-foreground)';
+    description.textContent = '依照下列規則與主策略組合，支援 AND / OR / NOT。';
+    titleGroup.appendChild(description);
+    header.appendChild(titleGroup);
+
+    const controls = document.createElement('div');
+    controls.className = 'flex items-center gap-2';
+    const operatorSelect = document.createElement('select');
+    operatorSelect.className = 'text-xs px-2 py-1 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring';
+    const andOption = document.createElement('option');
+    andOption.value = 'AND';
+    andOption.textContent = 'AND';
+    const orOption = document.createElement('option');
+    orOption.value = 'OR';
+    orOption.textContent = 'OR';
+    operatorSelect.append(andOption, orOption);
+
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'px-3 py-1.5 text-xs border border-border rounded-md transition-colors';
+    addButton.style.color = 'var(--primary)';
+    addButton.textContent = '新增規則';
+    addButton.addEventListener('click', () => handleAddDslNode(roleKey));
+
+    controls.appendChild(operatorSelect);
+    controls.appendChild(addButton);
+    header.appendChild(controls);
+    section.appendChild(header);
+
+    strategyDslNodeForms[roleKey].forEach((form) => form.destroy());
+    strategyDslNodeForms[roleKey].clear();
+
+    const dslRole = STRATEGY_DSL_ROLE_KEY[roleKey];
+    const roleState = strategyDslState && strategyDslState[dslRole] ? strategyDslState[dslRole] : { nodes: [], operator: 'AND' };
+    const nodes = Array.isArray(roleState.nodes) ? roleState.nodes : [];
+    operatorSelect.value = roleState.operator === 'OR' ? 'OR' : 'AND';
+    operatorSelect.disabled = nodes.length <= 1;
+    operatorSelect.addEventListener('change', (event) => handleDslOperatorChange(roleKey, event.target.value));
+
+    const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
+    const roleDisabled = (roleKey === 'shortEntry' || roleKey === 'shortExit') && !enableShorting;
+    if (roleDisabled) {
+        operatorSelect.disabled = true;
+        addButton.disabled = true;
+        addButton.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+
+    const list = document.createElement('div');
+    list.className = 'space-y-3';
+
+    nodes.forEach((node, index) => {
+        if (index === 0) {
+            const primaryCard = document.createElement('div');
+            primaryCard.className = 'rounded-md border border-dashed border-border px-3 py-2 bg-muted/30';
+            const primaryHeader = document.createElement('div');
+            primaryHeader.className = 'flex items-center justify-between gap-2 text-xs';
+            const label = document.createElement('span');
+            label.className = 'font-medium';
+            label.style.color = 'var(--foreground)';
+            label.textContent = resolveStrategyDisplayLabel(node.id) || node.id || '未選擇';
+            primaryHeader.appendChild(label);
+            const negateBtn = document.createElement('button');
+            negateBtn.type = 'button';
+            negateBtn.className = 'px-2 py-1 text-[11px] border border-border rounded-md transition-colors';
+            negateBtn.style.color = node.negate ? 'var(--primary)' : 'var(--muted-foreground)';
+            negateBtn.textContent = node.negate ? '已套用 NOT' : '加上 NOT';
+            negateBtn.addEventListener('click', () => handleToggleDslNode(roleKey, index));
+            primaryHeader.appendChild(negateBtn);
+            primaryCard.appendChild(primaryHeader);
+            const hint = document.createElement('p');
+            hint.className = 'text-[11px] mt-1';
+            hint.style.color = 'var(--muted-foreground)';
+            hint.textContent = '參數沿用上方策略表單設定。';
+            primaryCard.appendChild(hint);
+            list.appendChild(primaryCard);
+            return;
+        }
+
+        const nodeCard = document.createElement('div');
+        nodeCard.className = 'rounded-md border border-border px-3 py-3 bg-background shadow-sm';
+        nodeCard.setAttribute('data-dsl-role', roleKey);
+        nodeCard.setAttribute('data-dsl-index', String(index));
+        nodeCard.draggable = true;
+        nodeCard.addEventListener('dragstart', (event) => handleDslDragStart(event, roleKey, index));
+        nodeCard.addEventListener('dragover', handleDslDragOver);
+        nodeCard.addEventListener('drop', (event) => handleDslDrop(event, roleKey, index));
+        nodeCard.addEventListener('dragend', handleDslDragEnd);
+
+        const nodeHeader = document.createElement('div');
+        nodeHeader.className = 'flex items-center justify-between gap-2';
+        const left = document.createElement('div');
+        left.className = 'flex items-center gap-2';
+        const dragHandle = document.createElement('span');
+        dragHandle.className = 'text-muted-foreground cursor-grab text-sm select-none';
+        dragHandle.textContent = '⋮⋮';
+        left.appendChild(dragHandle);
+        const name = document.createElement('span');
+        name.className = 'text-xs font-semibold';
+        name.style.color = 'var(--foreground)';
+        name.textContent = resolveStrategyDisplayLabel(node.id) || node.id || '未選擇';
+        left.appendChild(name);
+        nodeHeader.appendChild(left);
+
+        const nodeActions = document.createElement('div');
+        nodeActions.className = 'flex items-center gap-2';
+        const negateBtn = document.createElement('button');
+        negateBtn.type = 'button';
+        negateBtn.className = 'px-2 py-1 text-[11px] border border-border rounded-md transition-colors';
+        negateBtn.style.color = node.negate ? 'var(--primary)' : 'var(--muted-foreground)';
+        negateBtn.textContent = node.negate ? '取消 NOT' : '套用 NOT';
+        negateBtn.addEventListener('click', () => handleToggleDslNode(roleKey, index));
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'px-2 py-1 text-[11px] border border-border rounded-md transition-colors';
+        removeBtn.style.color = 'var(--destructive)';
+        removeBtn.textContent = '移除';
+        removeBtn.addEventListener('click', () => handleRemoveDslNode(roleKey, index));
+        nodeActions.appendChild(negateBtn);
+        nodeActions.appendChild(removeBtn);
+        nodeHeader.appendChild(nodeActions);
+        nodeCard.appendChild(nodeHeader);
+
+        const strategyRow = document.createElement('div');
+        strategyRow.className = 'mt-3';
+        const strategyLabel = document.createElement('label');
+        strategyLabel.className = 'block text-[11px] text-muted-foreground mb-1';
+        strategyLabel.textContent = '策略';
+        const strategySelect = document.createElement('select');
+        strategySelect.className = 'w-full px-2 py-1.5 border border-border rounded-md text-sm bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring';
+        const options = getRoleStrategyOptions(roleKey);
+        options.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = option.value;
+            opt.textContent = option.label;
+            strategySelect.appendChild(opt);
+        });
+        strategySelect.value = node.id;
+        strategySelect.addEventListener('change', (event) => handleDslNodeStrategyChange(roleKey, index, event.target.value));
+        strategyRow.appendChild(strategyLabel);
+        strategyRow.appendChild(strategySelect);
+        nodeCard.appendChild(strategyRow);
+
+        const paramsContainer = document.createElement('div');
+        paramsContainer.className = 'mt-3 space-y-2';
+        nodeCard.appendChild(paramsContainer);
+
+        const form = new StrategyParamsForm({
+            roleKey,
+            container: paramsContainer,
+            fieldPrefix: `dsl-${roleKey}-${index}`,
+            onChange: ({ values }) => {
+                updateDslNodeParams(roleKey, index, values);
+                updateStrategyDslValidation();
+            },
+        });
+        strategyDslNodeForms[roleKey].set(index, form);
+        form.setStrategy(node.id, node.params);
+
+        list.appendChild(nodeCard);
+    });
+
+    if (nodes.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'text-[11px] italic';
+        empty.style.color = 'var(--muted-foreground)';
+        empty.textContent = roleDisabled
+            ? '未啟用做空交易，啟用後可新增規則。'
+            : '目前僅使用主策略，可新增額外規則強化條件。';
+        list.appendChild(empty);
+    }
+
+    section.appendChild(list);
+    wrapper.appendChild(section);
+}
+
+function renderStrategyDslEditor() {
+    const wrapper = document.getElementById('strategyDslRoleEditors');
+    if (!wrapper) {
+        return;
+    }
+    if (!dslStateApi || !strategyDslState) {
+        wrapper.innerHTML = '<p class="text-[11px]" style="color: var(--muted-foreground);">策略 DSL 尚未就緒。</p>';
+        return;
+    }
+    wrapper.innerHTML = '';
+    Object.keys(STRATEGY_DSL_ROLE_KEY).forEach((roleKey) => {
+        renderStrategyDslRole(wrapper, roleKey);
+    });
+}
+
+function initStrategyParamForms() {
+    if (!paramsSchemaApi) {
+        console.warn('[StrategyForm] paramsSchemaApi 尚未載入，維持舊版表單。');
+        return;
+    }
+    STRATEGY_OPTION_ROLE_CONFIGS.forEach((config) => {
+        const container = document.getElementById(`${config.type}Params`);
+        if (!container) {
+            return;
+        }
+        const controller = new StrategyParamsForm({
+            roleKey: config.type,
+            container,
+            fieldPrefix: `${config.type}Param`,
+            onChange: () => {
+                syncPrimaryStrategyNode(config.type);
+                updateStrategyDslValidation();
+            },
+        });
+        strategyParamsControllers[config.type] = controller;
+        const select = document.getElementById(config.selectId);
+        if (select) {
+            select.addEventListener('change', () => {
+                const { normalizedKey } = ensureSelectUsesNormalizedValue(config.type, select);
+                const currentValues = controller.getValues();
+                controller.setStrategy(normalizedKey || select.value, currentValues);
+                syncPrimaryStrategyNode(config.type);
+                renderStrategyDslEditor();
+                updateStrategyDslValidation();
+            });
+            const { normalizedKey } = ensureSelectUsesNormalizedValue(config.type, select);
+            controller.setStrategy(normalizedKey || select.value, getStrategyDefaultParams(normalizedKey || select.value));
+        } else {
+            controller.setStrategy(null, {});
+        }
+    });
+
+    resetStrategyDslState();
+    renderStrategyDslEditor();
+    updateStrategyDslValidation();
+
+    const shortToggle = document.getElementById('enableShortSelling');
+    if (shortToggle) {
+        shortToggle.addEventListener('change', () => {
+            renderStrategyDslEditor();
+        });
+    }
+
+    const resetButton = document.getElementById('strategyDslResetBtn');
+    if (resetButton) {
+        resetButton.addEventListener('click', () => {
+            resetStrategyDslState();
+            renderStrategyDslEditor();
+            updateStrategyDslValidation();
+        });
+    }
+
+    if (typeof window !== 'undefined') {
+        window.lazybacktestStrategyForms = Object.freeze({
+            __version__: STRATEGY_FORM_VERSION,
+            getController(roleKey) {
+                return strategyParamsControllers[roleKey] || null;
+            },
+            setStrategy(roleKey, strategyId, values) {
+                const controller = strategyParamsControllers[roleKey];
+                if (!controller) {
+                    return;
+                }
+                controller.setStrategy(strategyId, values || controller.getValues());
+                syncPrimaryStrategyNode(roleKey);
+                renderStrategyDslEditor();
+                updateStrategyDslValidation();
+            },
+            getValues(roleKey) {
+                const controller = strategyParamsControllers[roleKey];
+                return controller ? controller.getValues() : {};
+            },
+        });
+    }
+}
+
+function buildStrategyDslFromState() {
+    if (!dslStateApi || !strategyDslState || typeof dslStateApi.serializeAll !== 'function') {
+        return null;
+    }
+    const serialized = dslStateApi.serializeAll(strategyDslState, STRATEGY_DSL_VERSION);
+    if (!serialized) {
+        return null;
+    }
+    const keys = Object.keys(serialized);
+    if (keys.length <= 1 && keys.includes('version')) {
+        return null;
+    }
+    return serialized;
+}
+
 function pickRandomStrategyCandidate(list) {
     if (!Array.isArray(list) || list.length === 0) {
         return null;
@@ -5176,6 +6036,10 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    const controller = strategyParamsControllers?.[type];
+    if (controller && typeof controller.getValues === 'function') {
+        return controller.getValues();
+    }
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5327,17 +6191,28 @@ function getBacktestParams() {
     const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
 
-    const strategyDsl = buildStrategyDslFromParams({
-        entryStrategy,
-        entryParams,
-        exitStrategy,
-        exitParams,
-        enableShorting,
-        shortEntryStrategy,
-        shortEntryParams,
-        shortExitStrategy,
-        shortExitParams,
-    });
+    let strategyDsl = buildStrategyDslFromState();
+    if (!strategyDsl) {
+        strategyDsl = buildStrategyDslFromParams({
+            entryStrategy,
+            entryParams,
+            exitStrategy,
+            exitParams,
+            enableShorting,
+            shortEntryStrategy,
+            shortEntryParams,
+            shortExitStrategy,
+            shortExitParams,
+        });
+    }
+    if (strategyDsl && !enableShorting) {
+        delete strategyDsl.shortEntry;
+        delete strategyDsl.shortExit;
+        const remainingKeys = Object.keys(strategyDsl).filter((key) => key !== 'version');
+        if (remainingKeys.length === 0) {
+            strategyDsl = null;
+        }
+    }
 
     return {
         stockNo,
@@ -5804,6 +6679,8 @@ document.addEventListener('DOMContentLoaded', function() {
         initDates();
 
         initLoadingMascotSanitiser();
+
+        initStrategyParamForms();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();

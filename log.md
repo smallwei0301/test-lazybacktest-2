@@ -1,3 +1,20 @@
+## 2026-09-19 — Patch LB-STRATEGY-FORM-FOCUS-20260919A
+- **Scope**: 策略參數表單焦點維持與測試覆蓋。
+- **Updates**:
+  - 新增 `js/lib/strategy-form-focus.js`，提供表單焦點擷取與復原 API，確保重繪後仍保持輸入位置。
+  - `js/main.js` 導入焦點工具，在 `StrategyParamsForm` 更新時保留使用者焦點與游標範圍。
+  - `index.html` 載入新焦點腳本，`package.json` 測試腳本串聯 `tests/form-focus.test.js`，新測試覆蓋焦點還原邏輯。
+- **Testing**: `npm test`（含 `strategy-form-focus` 新單元測試）。
+
+## 2026-09-18 — Patch LB-STRATEGY-FORM-20260918A
+- **Scope**: 策略參數表單生成器與 DSL 編輯器升級（階段 7）。
+- **Updates**:
+  - 新增 `js/lib/params-schema.js`、`js/lib/strategy-dsl-state.js`，提供 JSON Schema 參數解析、驗證與 DSL 狀態管理 API。
+  - `js/main.js` 導入 `StrategyParamsForm` 控制器、拖拉式 DSL 編輯介面與狀態同步，`index.html` 新增 DSL 區塊與腳本載入。
+  - `js/backtest.js` 改為委派全新表單控制器，避免重複渲染並支援短/多策略同步。
+  - 補強 `tests/params-schema.test.js`、`tests/strategy-dsl-state.test.js` 以覆蓋 schema 解析、AND/OR/NOT 組態與重排序情境。
+- **Testing**: `npm test`（含新單元測試）。
+
 ## 2026-09-16 — Patch LB-STRATEGY-DSL-20260916A
 - **Scope**: 策略 DSL 組合器導入、主執行緒序列化與開發者檢驗工具。
 - **Updates**:
