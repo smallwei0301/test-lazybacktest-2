@@ -1,3 +1,11 @@
+## 2026-09-20 — Patch LB-COVERAGE-TAIWAN-20250701A
+- **Issue recap**: 主執行緒以請求範圍直接擴增 coverage，可能在實際資料缺口仍存在時誤判快取已完整；同時無法在台灣時間下午更新時段自動觸發重新抓取。
+- **Fix**:
+  - `js/backtest.js` 在寫入快取時改以 `computeCoverageFromRows` 依實際資料重建 coverage，並同步更新覆蓋指紋；沿用快取時重新計算 coverage，避免殘留舊範圍。
+  - `js/main.js` 新增台灣時區 14:00 切換邏輯，僅在超過分界且最後一筆資料落後至少一天時觸發重新抓取，並將快取判斷依賴實際資料列範圍。
+  - `netlify/functions/cache-warmer.js` 將排程更新為每日台灣 14:00 執行，確保盤後即刻暖身快取。
+- **Testing**: `npm test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

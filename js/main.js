@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-TAIWAN-20250701A
 
 // 全局變量
 let stockChart = null;
@@ -5447,6 +5448,8 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const TAIWAN_TIMEZONE_OFFSET_MINUTES = 8 * 60;
+const COVERAGE_TAIWAN_CUTOFF_HOUR = 14;
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5514,6 +5517,43 @@ function mergeIsoCoverage(existing, additionalRange) {
         start: utcToISODate(range.start),
         end: utcToISODate(range.end - MAIN_DAY_MS),
     }));
+}
+
+function getTaiwanNowInfo() {
+    const taiwanMs = Date.now() + (TAIWAN_TIMEZONE_OFFSET_MINUTES * 60 * 1000);
+    const taiwanDate = new Date(taiwanMs);
+    return {
+        hour: taiwanDate.getUTCHours(),
+        dayStartMs: Date.UTC(
+            taiwanDate.getUTCFullYear(),
+            taiwanDate.getUTCMonth(),
+            taiwanDate.getUTCDate(),
+        ),
+    };
+}
+
+function shouldRefreshCoverageAfterTaiwanCutoff(entry, cur) {
+    if (!entry || !cur) return false;
+    if (!Array.isArray(entry.data) || entry.data.length === 0) return false;
+    const requestedEndMs = parseISOToUTC(cur.endDate);
+    if (!Number.isFinite(requestedEndMs)) return false;
+    let latestRowMs = null;
+    for (let i = 0; i < entry.data.length; i += 1) {
+        const row = entry.data[i];
+        if (!row || !row.date) continue;
+        const rowMs = parseISOToUTC(row.date);
+        if (Number.isFinite(rowMs) && (latestRowMs === null || rowMs > latestRowMs)) {
+            latestRowMs = rowMs;
+        }
+    }
+    if (!Number.isFinite(latestRowMs)) return false;
+    if (requestedEndMs < latestRowMs) return false;
+    const taiwanNow = getTaiwanNowInfo();
+    if (!taiwanNow || !Number.isFinite(taiwanNow.dayStartMs)) return false;
+    if (taiwanNow.dayStartMs <= latestRowMs) return false;
+    const dayDiff = (taiwanNow.dayStartMs - latestRowMs) / MAIN_DAY_MS;
+    if (dayDiff < 1) return false;
+    return taiwanNow.hour >= COVERAGE_TAIWAN_CUTOFF_HOUR;
 }
 
 function coverageCoversRange(coverage, targetRange) {
@@ -5650,9 +5690,14 @@ function needsDataFetch(cur) {
         ? ensureDatasetCacheEntryFresh(key, cachedDataStore.get(key), normalizedMarket)
         : cachedDataStore.get(key);
     if (!entry) return true;
+    if (!Array.isArray(entry.data) || entry.data.length === 0) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    const targetRange = { start: rangeStart, end: cur.endDate };
+    if (!coverageCoversRange(entry.coverage, targetRange)) {
+        return true;
+    }
+    return shouldRefreshCoverageAfterTaiwanCutoff(entry, cur);
 
 }
 // --- 新增：請求並顯示策略建議 ---

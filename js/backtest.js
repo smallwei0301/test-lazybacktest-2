@@ -18,6 +18,7 @@
 // Patch Tag: LB-SENSITIVITY-ANNUAL-SCORE-20250730A
 // Patch Tag: LB-PERFORMANCE-ANALYSIS-20260730A
 // Patch Tag: LB-STRATEGY-ADVICE-20260730A
+// Patch Tag: LB-COVERAGE-TAIWAN-20250701A
 
 const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
     driftStable: 6,
@@ -4951,15 +4952,10 @@ function runBacktestInternal() {
                      const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
-                     const mergedCoverage = mergeIsoCoverage(
-                        existingEntry?.coverage || [],
-                        fetchedRange && fetchedRange.start && fetchedRange.end
-                            ? { start: fetchedRange.start, end: fetchedRange.end }
-                            : null
-                     );
-                     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
-                     if (dataSource) sourceSet.add(dataSource);
-                     const sourceArray = Array.from(sourceSet);
+                    const mergedCoverage = computeCoverageFromRows(mergedData);
+                    const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
+                    if (dataSource) sourceSet.add(dataSource);
+                    const sourceArray = Array.from(sourceSet);
                      const rawMeta = data.rawMeta || {};
                      const debugSteps = Array.isArray(rawMeta.debugSteps)
                          ? rawMeta.debugSteps
@@ -5081,7 +5077,9 @@ function runBacktestInternal() {
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
                     const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
-                    const updatedCoverage = cachedEntry.coverage || [];
+                    const updatedCoverage = Array.isArray(cachedEntry.data)
+                        ? computeCoverageFromRows(cachedEntry.data)
+                        : [];
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
                         requestedRange: cachedEntry.fetchRange || { start: curSettings.startDate, end: curSettings.endDate },
@@ -5094,6 +5092,7 @@ function runBacktestInternal() {
                         market: curSettings.market,
                         dataSources: updatedArray,
                         dataSource: summariseSourceLabels(updatedArray),
+                        coverage: updatedCoverage,
                         fetchedAt: cachedEntry.fetchedAt || Date.now(),
                         adjustedPrice: params.adjustedPrice,
                         splitAdjustment: params.splitAdjustment,
