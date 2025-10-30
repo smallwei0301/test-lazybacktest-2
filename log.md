@@ -1,3 +1,10 @@
+## 2026-10-30 — Patch LB-BATCH-WORKER-TIMEOUT-20261030A
+- **Scope**: 批量優化 worker 超時計時器管理與除錯紀錄。
+- **Updates**:
+  - `js/batch-optimization.js` 執行回測時建立可清除的 worker 超時計時器，於獲得結果或錯誤訊息後即取消，避免 30 秒後持續輸出逾時警示。
+  - 同步更新批量優化模組版本資訊與 Patch Tag，方便除錯紀錄辨識此次修訂。
+- **Testing**: （待實機）容器無法啟動瀏覽器與 Netlify Proxy，需於部署環境回測 2330 批量優化確認 console 無逾時警示。
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
