@@ -1,5 +1,5 @@
 // --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-MAPPER-20260917B
+// Patch Tag: LB-BATCH-WORKER-TIMEOUT-20261030A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -12,6 +12,7 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
 const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
+const BATCH_WORKER_TIMEOUT_PATCH_TAG = 'LB-BATCH-WORKER-TIMEOUT-20261030A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -3199,6 +3200,23 @@ async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
         combination = normaliseBatchCombination(combination);
         let datasetMeta = {};
+        let hasWorkerSettled = false;
+        let workerTimeoutId = null;
+
+        const settleWorkerRun = (result) => {
+            if (hasWorkerSettled) {
+                return;
+            }
+
+            hasWorkerSettled = true;
+
+            if (workerTimeoutId) {
+                clearTimeout(workerTimeoutId);
+                workerTimeoutId = null;
+            }
+
+            resolve(result);
+        };
         try {
             // 使用現有的回測邏輯
             const baseParamsOverride = options?.baseParamsOverride;
@@ -3279,7 +3297,10 @@ async function executeBacktestForCombination(combination, options = {}) {
 
             rebuildStrategyDslForParams(params);
             const preparedParams = enrichParamsWithLookback(params);
-            datasetMeta = buildBatchDatasetMeta(preparedParams);
+            datasetMeta = {
+                ...buildBatchDatasetMeta(preparedParams),
+                patchTag: BATCH_WORKER_TIMEOUT_PATCH_TAG
+            };
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
             const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
             let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
@@ -3351,6 +3372,10 @@ async function executeBacktestForCombination(combination, options = {}) {
                 const tempWorker = new Worker(workerUrl);
 
                 tempWorker.onmessage = function(e) {
+                    if (hasWorkerSettled) {
+                        return;
+                    }
+
                     if (e.data.type === 'result') {
                         const result = e.data.data;
 
@@ -3370,7 +3395,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                         }, { phase: 'worker', console: false });
 
                         tempWorker.terminate();
-                        resolve(result);
+                        settleWorkerRun(result);
                     } else if (e.data.type === 'error') {
                         console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
                         recordBatchDebug('worker-run-error', {
@@ -3380,11 +3405,15 @@ async function executeBacktestForCombination(combination, options = {}) {
                             ...datasetMeta
                         }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                         tempWorker.terminate();
-                        resolve(null);
+                        settleWorkerRun(null);
                     }
                 };
 
                 tempWorker.onerror = function(error) {
+                    if (hasWorkerSettled) {
+                        return;
+                    }
+
                     console.error('[Batch Optimization] Worker error:', error);
                     recordBatchDebug('worker-run-error', {
                         context: 'executeBacktestForCombination',
@@ -3394,7 +3423,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                         ...datasetMeta
                     }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                     tempWorker.terminate();
-                    resolve(null);
+                    settleWorkerRun(null);
                 };
 
                 tempWorker.postMessage({
@@ -3405,7 +3434,11 @@ async function executeBacktestForCombination(combination, options = {}) {
                 });
 
                 // 設定超時
-                setTimeout(() => {
+                workerTimeoutId = setTimeout(() => {
+                    if (hasWorkerSettled) {
+                        return;
+                    }
+
                     tempWorker.terminate();
                     recordBatchDebug('worker-run-timeout', {
                         context: 'executeBacktestForCombination',
@@ -3413,7 +3446,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                         message: 'Worker execution timed out after 30 seconds.',
                         ...datasetMeta
                     }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
-                    resolve(null);
+                    settleWorkerRun(null);
                 }, 30000); // 30秒超時
             } else {
                 console.warn('[Batch Optimization] Worker URL not available');
@@ -3423,7 +3456,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                     message: 'Worker URL is not available.',
                     ...datasetMeta
                 }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
-                resolve(null);
+                settleWorkerRun(null);
             }
         } catch (error) {
             console.error('[Batch Optimization] Error in executeBacktestForCombination:', error);
@@ -3434,7 +3467,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 stack: error?.stack || null,
                 ...datasetMeta
             }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
-            resolve(null);
+            settleWorkerRun(null);
         }
     });
 }

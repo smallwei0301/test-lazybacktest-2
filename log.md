@@ -1,3 +1,9 @@
+## 2026-10-30 — Patch LB-BATCH-WORKER-TIMEOUT-20261030A
+- **Scope**: 批量優化 worker 超時紀錄誤報修復。
+- **Updates**:
+  - `js/batch-optimization.js` 在 worker 回傳結果或錯誤時清除 30 秒超時計時器，避免已完成的組合仍被記錄為超時，並於除錯訊息附帶補丁代碼以利追蹤。
+- **Testing**: `npm test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
