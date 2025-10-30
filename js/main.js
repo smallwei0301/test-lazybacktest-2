@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-REFRESH-20260917A
 
 // 全局變量
 let stockChart = null;
@@ -5536,6 +5537,100 @@ function coverageCoversRange(coverage, targetRange) {
     return cursor >= targetBounds.end;
 }
 
+const COVERAGE_REFRESH_TW_HOUR = 14;
+const COVERAGE_REFRESH_TIMEZONE = 'Asia/Taipei';
+
+function getTaiwanNowParts(referenceDate = new Date()) {
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: COVERAGE_REFRESH_TIMEZONE,
+            hour12: false,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+        const parts = formatter.formatToParts(referenceDate);
+        const map = {};
+        parts.forEach((part) => {
+            if (part && part.type) {
+                map[part.type] = part.value;
+            }
+        });
+        const year = Number.parseInt(map.year, 10);
+        const month = Number.parseInt(map.month, 10);
+        const day = Number.parseInt(map.day, 10);
+        const hour = Number.parseInt(map.hour, 10);
+        const minute = Number.parseInt(map.minute || '0', 10);
+        if ([year, month, day, hour, minute].some((val) => !Number.isFinite(val))) return null;
+        return { year, month, day, hour, minute };
+    } catch (error) {
+        const offsetMinutes = referenceDate.getTimezoneOffset();
+        const adjusted = new Date(referenceDate.getTime() + ((8 * 60) + offsetMinutes) * 60 * 1000);
+        return {
+            year: adjusted.getUTCFullYear(),
+            month: adjusted.getUTCMonth() + 1,
+            day: adjusted.getUTCDate(),
+            hour: adjusted.getUTCHours(),
+            minute: adjusted.getUTCMinutes(),
+        };
+    }
+}
+
+function computeExpectedLatestCoverageDateISO(now = new Date()) {
+    const parts = getTaiwanNowParts(now);
+    if (!parts) return null;
+    const base = new Date(Date.UTC(parts.year, (parts.month || 1) - 1, parts.day || 1));
+    if (!Number.isFinite(base.getTime())) return null;
+    if (parts.hour < COVERAGE_REFRESH_TW_HOUR) {
+        base.setUTCDate(base.getUTCDate() - 1);
+    }
+    const y = base.getUTCFullYear();
+    const m = String(base.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(base.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function resolveLastCachedDateISO(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    let latest = null;
+    if (Array.isArray(entry.data)) {
+        for (let i = 0; i < entry.data.length; i += 1) {
+            const rowDate = entry.data[i]?.date;
+            if (typeof rowDate === 'string' && (!latest || rowDate > latest)) {
+                latest = rowDate;
+            }
+        }
+    }
+    if (!latest && Array.isArray(entry.coverage)) {
+        entry.coverage.forEach((range) => {
+            if (range && typeof range.end === 'string' && (!latest || range.end > latest)) {
+                latest = range.end;
+            }
+        });
+    }
+    if (!latest && entry.fetchRange && typeof entry.fetchRange.end === 'string') {
+        latest = entry.fetchRange.end;
+    }
+    return latest;
+}
+
+function isLatestCoverageExpiredForTaiwan(entry, coverageOverride) {
+    if (!entry) return false;
+    const coverage = Array.isArray(coverageOverride) ? coverageOverride : entry.coverage;
+    if (!Array.isArray(coverage) || coverage.length === 0) return false;
+    const lastDateISO = resolveLastCachedDateISO({ ...entry, coverage });
+    const expectedISO = computeExpectedLatestCoverageDateISO();
+    if (!lastDateISO || !expectedISO) return false;
+    const lastUTC = parseISOToUTC(lastDateISO);
+    const expectedUTC = parseISOToUTC(expectedISO);
+    if (!Number.isFinite(lastUTC) || !Number.isFinite(expectedUTC)) return false;
+    if (expectedUTC <= lastUTC) return false;
+    const diffDays = Math.floor((expectedUTC - lastUTC) / MAIN_DAY_MS);
+    return diffDays >= 1;
+}
+
 function extractRangeData(data, startISO, endISO) {
     if (!Array.isArray(data)) return [];
     return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
@@ -5650,9 +5745,24 @@ function needsDataFetch(cur) {
         ? ensureDatasetCacheEntryFresh(key, cachedDataStore.get(key), normalizedMarket)
         : cachedDataStore.get(key);
     if (!entry) return true;
-    if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
+    let coverage = Array.isArray(entry.coverage) ? entry.coverage : [];
+    if (typeof computeCoverageFromRows === 'function' && Array.isArray(entry.data) && entry.data.length > 0) {
+        const recomputed = computeCoverageFromRows(entry.data);
+        if (Array.isArray(recomputed) && recomputed.length > 0) {
+            coverage = recomputed;
+            entry.coverage = recomputed;
+            if (typeof computeCoverageFingerprint === 'function') {
+                entry.coverageFingerprint = computeCoverageFingerprint(recomputed);
+            }
+            if (cachedDataStore instanceof Map) {
+                cachedDataStore.set(key, entry);
+            }
+        }
+    }
+    if (!Array.isArray(coverage) || coverage.length === 0) return true;
+    if (isLatestCoverageExpiredForTaiwan(entry, coverage)) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    return !coverageCoversRange(coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
