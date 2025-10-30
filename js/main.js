@@ -14,7 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-COVERAGE-TAIPEI-20250724B
-// Patch Tag: LB-SW-GUARD-20250724A
+// Patch Tag: LB-SW-GUARD-20250725A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
 
 // 全局變量
@@ -4764,12 +4764,16 @@ function initLoadingMascotSanitiser() {
     }
 }
 
-const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250724A';
+const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250725A';
+const SERVICE_WORKER_GUARD_FLAG_KEY = 'LB_SW_GUARD_LAST_RELOAD';
+const SERVICE_WORKER_GUARD_RELOAD_WINDOW_MS = 5 * 60 * 1000;
 
 function initServiceWorkerGuard() {
-    if (typeof navigator === 'undefined' || !navigator.serviceWorker || typeof navigator.serviceWorker.getRegistrations !== 'function') {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
         return;
     }
+
+    const cnmPattern = /\/cnm-sw\.js(?:$|\?)/i;
 
     const cleanupCaches = () => {
         if (typeof window === 'undefined' || !window.caches || typeof window.caches.keys !== 'function') {
@@ -4788,29 +4792,151 @@ function initServiceWorkerGuard() {
             });
     };
 
-    try {
-        navigator.serviceWorker.getRegistrations()
-            .then((registrations) => {
-                if (!Array.isArray(registrations) || registrations.length === 0) return;
-                registrations.forEach((registration) => {
-                    const scriptUrl = (registration && registration.active && registration.active.scriptURL)
-                        || (registration && registration.waiting && registration.waiting.scriptURL)
-                        || (registration && registration.installing && registration.installing.scriptURL)
-                        || '';
-                    if (scriptUrl && /\/cnm-sw\.js(?:$|\?)/i.test(scriptUrl)) {
-                        console.info(`[Main] 偵測到異常 service worker，執行 ${SERVICE_WORKER_GUARD_VERSION} 修復流程。`);
-                        registration.unregister().catch((error) => {
-                            console.warn('[Main] 解除註冊 cnm-sw 失敗：', error);
-                        });
-                        cleanupCaches();
-                    }
-                });
+    const markReload = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage.setItem !== 'function') {
+            return;
+        }
+        try {
+            window.sessionStorage.setItem(SERVICE_WORKER_GUARD_FLAG_KEY, String(Date.now()));
+        } catch (error) {
+            console.warn('[Main] 無法記錄 service worker 防護重新載入時間：', error);
+        }
+    };
+
+    const shouldReload = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage.getItem !== 'function') {
+            return true;
+        }
+        try {
+            const lastReload = Number(window.sessionStorage.getItem(SERVICE_WORKER_GUARD_FLAG_KEY));
+            if (!Number.isFinite(lastReload)) return true;
+            return Date.now() - lastReload > SERVICE_WORKER_GUARD_RELOAD_WINDOW_MS;
+        } catch (error) {
+            console.warn('[Main] 讀取 service worker 防護重新載入時間失敗：', error);
+            return true;
+        }
+    };
+
+    const requestReload = () => {
+        if (!shouldReload()) {
+            return;
+        }
+        markReload();
+        if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+            window.setTimeout(() => {
+                try {
+                    window.location.reload();
+                } catch (error) {
+                    console.warn('[Main] 重新載入頁面時發生錯誤：', error);
+                }
+            }, 60);
+        }
+    };
+
+    const resolveScriptUrl = (registration) => {
+        if (!registration) return '';
+        return (
+            (registration.active && registration.active.scriptURL)
+            || (registration.waiting && registration.waiting.scriptURL)
+            || (registration.installing && registration.installing.scriptURL)
+            || ''
+        );
+    };
+
+    const inspectRegistration = (registration) => {
+        const scriptUrl = resolveScriptUrl(registration);
+        if (!scriptUrl || !cnmPattern.test(scriptUrl)) {
+            return null;
+        }
+        console.info(`[Main] 偵測到異常 service worker，執行 ${SERVICE_WORKER_GUARD_VERSION} 修復流程。`);
+        return registration.unregister()
+            .then((didUnregister) => {
+                if (!didUnregister) {
+                    console.warn('[Main] 解除註冊 cnm-sw 未成功。');
+                    return false;
+                }
+                return true;
             })
             .catch((error) => {
-                console.warn('[Main] 讀取 service worker 註冊資訊失敗：', error);
+                console.warn('[Main] 解除註冊 cnm-sw 失敗：', error);
+                return false;
             });
+    };
+
+    const controllerUrl = (navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL) || '';
+    const controllerMatches = controllerUrl ? cnmPattern.test(controllerUrl) : false;
+
+    const handleResults = (promises) => {
+        if (!promises || promises.length === 0) {
+            if (controllerMatches) {
+                cleanupCaches();
+                requestReload();
+            }
+            return;
+        }
+        Promise.allSettled(promises)
+            .then((results) => {
+                const unregistered = results.some((item) => item.status === 'fulfilled' && item.value === true);
+                if (unregistered || controllerMatches) {
+                    cleanupCaches();
+                }
+                if (controllerMatches || unregistered) {
+                    requestReload();
+                }
+            })
+            .catch((error) => {
+                console.warn('[Main] 等待 service worker 解除註冊結果時失敗：', error);
+                if (controllerMatches) {
+                    cleanupCaches();
+                    requestReload();
+                }
+            });
+    };
+
+    try {
+        const pending = [];
+
+        const collectRegistration = (registration) => {
+            if (!registration) return;
+            const inspection = inspectRegistration(registration);
+            if (inspection) {
+                pending.push(inspection);
+            }
+        };
+
+        const runWithRegistrations = (registrations) => {
+            if (Array.isArray(registrations)) {
+                registrations.forEach((registration) => collectRegistration(registration));
+            } else if (registrations) {
+                collectRegistration(registrations);
+            }
+            handleResults(pending);
+        };
+
+        if (typeof navigator.serviceWorker.getRegistrations === 'function') {
+            navigator.serviceWorker.getRegistrations()
+                .then(runWithRegistrations)
+                .catch((error) => {
+                    console.warn('[Main] 讀取 service worker 註冊資訊失敗：', error);
+                    handleResults(pending);
+                });
+        } else if (typeof navigator.serviceWorker.getRegistration === 'function') {
+            navigator.serviceWorker.getRegistration('/cnm-sw.js')
+                .then((registration) => runWithRegistrations(registration ? [registration] : []))
+                .catch((error) => {
+                    console.warn('[Main] 讀取指定 service worker 註冊資訊失敗：', error);
+                    handleResults(pending);
+                });
+        } else if (controllerMatches) {
+            cleanupCaches();
+            requestReload();
+        }
     } catch (error) {
         console.warn('[Main] 初始化 service worker 防護時發生錯誤：', error);
+        if (controllerMatches) {
+            cleanupCaches();
+            requestReload();
+        }
     }
 }
 

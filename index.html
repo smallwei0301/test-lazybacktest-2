@@ -14,6 +14,28 @@
 
     gtag('config', 'G-VNX2RVHZ5K');
     </script>
+    <!-- Patch Tag: LB-CONSOLE-FILTER-20250725A -->
+    <script>
+        (function () {
+            const FILTER_VERSION = 'LB-CONSOLE-FILTER-20250725A';
+            const originalWarn = console && typeof console.warn === 'function' ? console.warn.bind(console) : null;
+            if (!originalWarn) return;
+            const tailwindPattern = /cdn\.tailwindcss\.com should not be used in production/i;
+            console.warn = function (...args) {
+                try {
+                    if (args && args.length > 0 && typeof args[0] === 'string' && tailwindPattern.test(args[0])) {
+                        if (typeof window !== 'undefined') {
+                            window.__tailwindCdnWarningFiltered = FILTER_VERSION;
+                        }
+                        return;
+                    }
+                } catch (error) {
+                    // 若篩選失敗，回退至原始行為
+                }
+                return originalWarn(...args);
+            };
+        }());
+    </script>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />

@@ -1,3 +1,10 @@
+## 2026-09-19 — Patch LB-SW-GUARD-20250725A
+- **Scope**: 偵測並移除異常 `cnm-sw.js` service worker、避免 Response null body 錯誤重複出現。
+- **Updates**:
+  - `js/main.js`（`LB-SW-GUARD-20250725A`）為 `cnm-sw.js` 加入 sessionStorage reload 防護、重新載入節流與 Promise 版解除註冊流程，確保快取清理後立即換頁脫離異常 service worker 控制。
+  - `index.html`（`LB-CONSOLE-FILTER-20250725A`）在載入 Tailwind CDN 前攔截特定警告訊息，避免瀏覽器 console 重複顯示生產環境警告。
+- **Testing**: `npm run test`
+
 ## 2026-09-18 — Patch LB-COVERAGE-TAIPEI-20250724B / LB-WARMER-TAIPEI-20250724B / LB-SW-GUARD-20250724A
 - **Scope**: 台股資料 coverage 錯誤標記修正、Netlify 預抓排程覆核與異常 service worker 清除。
 - **Updates**:
