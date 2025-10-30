@@ -1,3 +1,32 @@
+## 2026-09-20 — Patch LB-SW-GUARD-20250725B
+- **Scope**: `cnm-sw.js` service worker 清除流程強化，確保異常回應不再重複出現。
+- **Updates**:
+  - `js/main.js`（`LB-SW-GUARD-20250725B`）新增強制重新載入次數上限與重置機制，當頁面仍受 `cnm-sw.js` 控制時可跳過節流即時重整，並於異常解除後自動清除狀態，避免 5 分鐘內停留在壞快取。
+- **Testing**: `npm run test`
+
+## 2026-09-19 — Patch LB-SW-GUARD-20250725A
+- **Scope**: 偵測並移除異常 `cnm-sw.js` service worker、避免 Response null body 錯誤重複出現。
+- **Updates**:
+  - `js/main.js`（`LB-SW-GUARD-20250725A`）為 `cnm-sw.js` 加入 sessionStorage reload 防護、重新載入節流與 Promise 版解除註冊流程，確保快取清理後立即換頁脫離異常 service worker 控制。
+  - `index.html`（`LB-CONSOLE-FILTER-20250725A`）在載入 Tailwind CDN 前攔截特定警告訊息，避免瀏覽器 console 重複顯示生產環境警告。
+- **Testing**: `npm run test`
+
+## 2026-09-18 — Patch LB-COVERAGE-TAIPEI-20250724B / LB-WARMER-TAIPEI-20250724B / LB-SW-GUARD-20250724A
+- **Scope**: 台股資料 coverage 錯誤標記修正、Netlify 預抓排程覆核與異常 service worker 清除。
+- **Updates**:
+  - `js/backtest.js`（`LB-COVERAGE-TAIPEI-20250724B`）所有主執行緒快取寫入路徑皆改以 `computeCoverageFromRows` 重建 coverage 與指紋，並為重播診斷提供一致的 coverage 資訊。
+  - `js/main.js`（`LB-COVERAGE-TAIPEI-20250724B`／`LB-SW-GUARD-20250724A`）沿用 14:00 台北到期判定、加入 `cnm-sw.js` 自動解除註冊與快取清理以排除 Response null body 錯誤。
+  - `netlify/functions/cache-warmer.js`（`LB-WARMER-TAIPEI-20250724B`）確認 Cron 註解同步至最新版本碼。
+- **Testing**: `npm run test`
+
+## 2026-09-17 — Patch LB-COVERAGE-TAIPEI-20250724A / LB-WARMER-TAIPEI-20250724A
+- **Scope**: 調整台股快取覆蓋判定與 Netlify 預抓排程。
+- **Updates**:
+  - `js/backtest.js`（`LB-COVERAGE-TAIPEI-20250724A`）改以實際資料列重建 coverage 與指紋，避免請求範圍直接寫入造成誤判。
+  - `js/main.js`（`LB-COVERAGE-TAIPEI-20250724A`）新增台北時間 14:00 到期檢查，若最後覆蓋日落後隔日午後仍未更新，會要求重新抓取。
+  - `netlify/functions/cache-warmer.js`（`LB-WARMER-TAIPEI-20250724A`）將排程改為每日 14:00（UTC 06:00）預抓資料。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:

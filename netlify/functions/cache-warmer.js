@@ -83,7 +83,7 @@ async function runWarmer() {
 }
 
 export const config = {
-  schedule: '0 18 * * *', // 每日台灣凌晨 (UTC+8 => 02:00)
+  schedule: '0 6 * * *', // Patch Tag: LB-WARMER-TAIPEI-20250724B — 每日台灣 14:00（UTC+8）
 };
 
 export default async () => {

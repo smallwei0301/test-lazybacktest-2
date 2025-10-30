@@ -13,6 +13,8 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-COVERAGE-TAIPEI-20250724B
+// Patch Tag: LB-SW-GUARD-20250725A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
 
 // 全局變量
@@ -4762,6 +4764,272 @@ function initLoadingMascotSanitiser() {
     }
 }
 
+const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250725B';
+const SERVICE_WORKER_GUARD_FLAG_KEY = 'LB_SW_GUARD_LAST_RELOAD';
+const SERVICE_WORKER_GUARD_FORCE_KEY = 'LB_SW_GUARD_FORCE_ATTEMPTS';
+const SERVICE_WORKER_GUARD_RELOAD_WINDOW_MS = 5 * 60 * 1000;
+const SERVICE_WORKER_GUARD_FORCE_LIMIT = 3;
+const SERVICE_WORKER_GUARD_FORCE_RESET_MS = 10 * 60 * 1000;
+
+function initServiceWorkerGuard() {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
+        return;
+    }
+
+    const cnmPattern = /\/cnm-sw\.js(?:$|\?)/i;
+
+    const cleanupCaches = () => {
+        if (typeof window === 'undefined' || !window.caches || typeof window.caches.keys !== 'function') {
+            return;
+        }
+        window.caches.keys()
+            .then((keys) => {
+                keys.filter((key) => /cnm/i.test(key)).forEach((key) => {
+                    window.caches.delete(key).catch((error) => {
+                        console.warn('[Main] 無法刪除 cnm 快取：', error);
+                    });
+                });
+            })
+            .catch((error) => {
+                console.warn('[Main] 取得快取列表時發生錯誤：', error);
+            });
+    };
+
+    const getSessionStorage = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage !== 'object') {
+            return null;
+        }
+        return window.sessionStorage;
+    };
+
+    const markReload = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage.setItem !== 'function') {
+            return;
+        }
+        try {
+            window.sessionStorage.setItem(SERVICE_WORKER_GUARD_FLAG_KEY, String(Date.now()));
+        } catch (error) {
+            console.warn('[Main] 無法記錄 service worker 防護重新載入時間：', error);
+        }
+    };
+
+    const readForceState = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.getItem !== 'function') {
+            return null;
+        }
+        try {
+            const raw = storage.getItem(SERVICE_WORKER_GUARD_FORCE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            const count = Number(parsed.count);
+            const timestamp = Number(parsed.timestamp);
+            if (!Number.isFinite(count) || !Number.isFinite(timestamp)) {
+                return null;
+            }
+            return { count, timestamp };
+        } catch (error) {
+            console.warn('[Main] 讀取 service worker 防護強制重新載入狀態失敗：', error);
+            return null;
+        }
+    };
+
+    const resetForceState = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.removeItem !== 'function') {
+            return;
+        }
+        try {
+            storage.removeItem(SERVICE_WORKER_GUARD_FORCE_KEY);
+        } catch (error) {
+            console.warn('[Main] 清除 service worker 防護強制重新載入狀態失敗：', error);
+        }
+    };
+
+    const recordForceAttempt = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.setItem !== 'function') {
+            return 1;
+        }
+        try {
+            const now = Date.now();
+            const state = readForceState();
+            const isExpired = !state || now - state.timestamp > SERVICE_WORKER_GUARD_FORCE_RESET_MS;
+            const nextCount = (isExpired ? 0 : state.count) + 1;
+            storage.setItem(
+                SERVICE_WORKER_GUARD_FORCE_KEY,
+                JSON.stringify({ count: nextCount, timestamp: now })
+            );
+            return nextCount;
+        } catch (error) {
+            console.warn('[Main] 紀錄 service worker 防護強制重新載入次數失敗：', error);
+            return 1;
+        }
+    };
+
+    const canForceReload = () => {
+        const state = readForceState();
+        if (!state) {
+            return true;
+        }
+        const now = Date.now();
+        if (now - state.timestamp > SERVICE_WORKER_GUARD_FORCE_RESET_MS) {
+            return true;
+        }
+        return state.count < SERVICE_WORKER_GUARD_FORCE_LIMIT;
+    };
+
+    const shouldReload = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage.getItem !== 'function') {
+            return true;
+        }
+        try {
+            const lastReload = Number(window.sessionStorage.getItem(SERVICE_WORKER_GUARD_FLAG_KEY));
+            if (!Number.isFinite(lastReload)) return true;
+            return Date.now() - lastReload > SERVICE_WORKER_GUARD_RELOAD_WINDOW_MS;
+        } catch (error) {
+            console.warn('[Main] 讀取 service worker 防護重新載入時間失敗：', error);
+            return true;
+        }
+    };
+
+    const requestReload = (options = {}) => {
+        const force = Boolean(options.force);
+        if (force && !canForceReload()) {
+            console.warn('[Main] 略過 service worker 強制重新載入：已達保護次數上限。');
+            return;
+        }
+        if (!force && !shouldReload()) {
+            return;
+        }
+        if (force) {
+            recordForceAttempt();
+        } else {
+            resetForceState();
+        }
+        markReload();
+        if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+            window.setTimeout(() => {
+                try {
+                    window.location.reload();
+                } catch (error) {
+                    console.warn('[Main] 重新載入頁面時發生錯誤：', error);
+                }
+            }, 60);
+        }
+    };
+
+    const resolveScriptUrl = (registration) => {
+        if (!registration) return '';
+        return (
+            (registration.active && registration.active.scriptURL)
+            || (registration.waiting && registration.waiting.scriptURL)
+            || (registration.installing && registration.installing.scriptURL)
+            || ''
+        );
+    };
+
+    const inspectRegistration = (registration) => {
+        const scriptUrl = resolveScriptUrl(registration);
+        if (!scriptUrl || !cnmPattern.test(scriptUrl)) {
+            return null;
+        }
+        console.info(`[Main] 偵測到異常 service worker，執行 ${SERVICE_WORKER_GUARD_VERSION} 修復流程。`);
+        return registration.unregister()
+            .then((didUnregister) => {
+                if (!didUnregister) {
+                    console.warn('[Main] 解除註冊 cnm-sw 未成功。');
+                    return false;
+                }
+                return true;
+            })
+            .catch((error) => {
+                console.warn('[Main] 解除註冊 cnm-sw 失敗：', error);
+                return false;
+            });
+    };
+
+    const controllerUrl = (navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL) || '';
+    const controllerMatches = controllerUrl ? cnmPattern.test(controllerUrl) : false;
+    if (!controllerMatches) {
+        resetForceState();
+    }
+
+    const handleResults = (promises) => {
+        if (!promises || promises.length === 0) {
+            if (controllerMatches) {
+                cleanupCaches();
+                requestReload({ force: true });
+            }
+            return;
+        }
+        Promise.allSettled(promises)
+            .then((results) => {
+                const unregistered = results.some((item) => item.status === 'fulfilled' && item.value === true);
+                if (unregistered || controllerMatches) {
+                    cleanupCaches();
+                }
+                if (controllerMatches || unregistered) {
+                    requestReload({ force: controllerMatches });
+                }
+            })
+            .catch((error) => {
+                console.warn('[Main] 等待 service worker 解除註冊結果時失敗：', error);
+                if (controllerMatches) {
+                    cleanupCaches();
+                    requestReload({ force: true });
+                }
+            });
+    };
+
+    try {
+        const pending = [];
+
+        const collectRegistration = (registration) => {
+            if (!registration) return;
+            const inspection = inspectRegistration(registration);
+            if (inspection) {
+                pending.push(inspection);
+            }
+        };
+
+        const runWithRegistrations = (registrations) => {
+            if (Array.isArray(registrations)) {
+                registrations.forEach((registration) => collectRegistration(registration));
+            } else if (registrations) {
+                collectRegistration(registrations);
+            }
+            handleResults(pending);
+        };
+
+        if (typeof navigator.serviceWorker.getRegistrations === 'function') {
+            navigator.serviceWorker.getRegistrations()
+                .then(runWithRegistrations)
+                .catch((error) => {
+                    console.warn('[Main] 讀取 service worker 註冊資訊失敗：', error);
+                    handleResults(pending);
+                });
+        } else if (typeof navigator.serviceWorker.getRegistration === 'function') {
+            navigator.serviceWorker.getRegistration('/cnm-sw.js')
+                .then((registration) => runWithRegistrations(registration ? [registration] : []))
+                .catch((error) => {
+                    console.warn('[Main] 讀取指定 service worker 註冊資訊失敗：', error);
+                    handleResults(pending);
+                });
+        } else if (controllerMatches) {
+            cleanupCaches();
+            requestReload({ force: true });
+        }
+    } catch (error) {
+        console.warn('[Main] 初始化 service worker 防護時發生錯誤：', error);
+        if (controllerMatches) {
+            cleanupCaches();
+            requestReload({ force: true });
+        }
+    }
+}
+
 function setLoadingBaseMessage(message) {
     const el = getLoadingTextElement();
     if (!el) return;
@@ -5536,6 +5804,49 @@ function coverageCoversRange(coverage, targetRange) {
     return cursor >= targetBounds.end;
 }
 
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const TAIWAN_REFRESH_HOUR = 14;
+
+function resolveCoverageLatestUtc(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return NaN;
+    let latest = NaN;
+    for (let i = 0; i < coverage.length; i += 1) {
+        const range = coverage[i];
+        if (!range) continue;
+        const candidateIso = range.end || range.start || null;
+        const candidateMs = parseISOToUTC(candidateIso);
+        if (Number.isFinite(candidateMs) && (!Number.isFinite(latest) || candidateMs > latest)) {
+            latest = candidateMs;
+        }
+    }
+    return latest;
+}
+
+function isTaiwanMarketLike(market) {
+    if (typeof isTaiwanMarket === 'function') {
+        return Boolean(isTaiwanMarket(market));
+    }
+    const normalized = (market || '').toString().toUpperCase();
+    return normalized === 'TWSE' || normalized === 'TPEX' || normalized.endsWith('TW');
+}
+
+function isCoverageExpiredByTaipeiCutoff(coverage, market, options = {}) {
+    if (!isTaiwanMarketLike(market)) return false;
+    const latestUtc = resolveCoverageLatestUtc(coverage);
+    if (!Number.isFinite(latestUtc)) return true;
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const nowTaipei = new Date(nowMs + TAIPEI_OFFSET_MS);
+    const latestTaipei = new Date(latestUtc + TAIPEI_OFFSET_MS);
+    const nowDayStart = Date.UTC(nowTaipei.getUTCFullYear(), nowTaipei.getUTCMonth(), nowTaipei.getUTCDate());
+    const latestDayStart = Date.UTC(latestTaipei.getUTCFullYear(), latestTaipei.getUTCMonth(), latestTaipei.getUTCDate());
+    const dayDiff = Math.floor((nowDayStart - latestDayStart) / MAIN_DAY_MS);
+    if (dayDiff <= 0) return false;
+    if (dayDiff === 1) {
+        return nowTaipei.getUTCHours() >= TAIWAN_REFRESH_HOUR;
+    }
+    return dayDiff > 1;
+}
+
 function extractRangeData(data, startISO, endISO) {
     if (!Array.isArray(data)) return [];
     return data.filter((row) => row && row.date >= startISO && row.date <= endISO);
@@ -5652,7 +5963,13 @@ function needsDataFetch(cur) {
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    if (!coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate })) {
+        return true;
+    }
+    if (isCoverageExpiredByTaipeiCutoff(entry.coverage, normalizedMarket, { nowMs: Date.now() })) {
+        return true;
+    }
+    return false;
 
 }
 // --- 新增：請求並顯示策略建議 ---
@@ -5810,6 +6127,7 @@ document.addEventListener('DOMContentLoaded', function() {
         initDates();
 
         initLoadingMascotSanitiser();
+        initServiceWorkerGuard();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();
