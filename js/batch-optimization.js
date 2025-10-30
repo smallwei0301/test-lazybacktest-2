@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-MAPPER-20260917B
+// --- 批量策略優化功能 - v1.2.9 ---
+// Patch Tag: LB-BATCH-TIMEOUT-20261005A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -11,7 +11,7 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
 
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-TIMEOUT-20261005A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -3350,6 +3350,31 @@ async function executeBacktestForCombination(combination, options = {}) {
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
 
+                let hasSettled = false;
+                let timeoutId = null;
+
+                const finalizeWorkerRun = (result) => {
+                    if (hasSettled) {
+                        return;
+                    }
+                    hasSettled = true;
+                    if (timeoutId !== null) {
+                        clearTimeout(timeoutId);
+                    }
+                    try {
+                        tempWorker.terminate();
+                    } catch (terminateError) {
+                        recordBatchDebug('worker-terminate-failed', {
+                            context: 'executeBacktestForCombination',
+                            combination: summarizeCombination(combination),
+                            message: terminateError?.message || String(terminateError),
+                            stack: terminateError?.stack || null,
+                            ...datasetMeta
+                        }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
+                    }
+                    resolve(result);
+                };
+
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
                         const result = e.data.data;
@@ -3369,8 +3394,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                             ...datasetMeta
                         }, { phase: 'worker', console: false });
 
-                        tempWorker.terminate();
-                        resolve(result);
+                        finalizeWorkerRun(result);
                     } else if (e.data.type === 'error') {
                         console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
                         recordBatchDebug('worker-run-error', {
@@ -3379,8 +3403,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                             message: e.data.data?.message || e.data.error,
                             ...datasetMeta
                         }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
-                        tempWorker.terminate();
-                        resolve(null);
+                        finalizeWorkerRun(null);
                     }
                 };
 
@@ -3393,8 +3416,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                         stack: error?.stack || null,
                         ...datasetMeta
                     }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
-                    tempWorker.terminate();
-                    resolve(null);
+                    finalizeWorkerRun(null);
                 };
 
                 tempWorker.postMessage({
@@ -3405,15 +3427,17 @@ async function executeBacktestForCombination(combination, options = {}) {
                 });
 
                 // 設定超時
-                setTimeout(() => {
-                    tempWorker.terminate();
+                timeoutId = setTimeout(() => {
+                    if (hasSettled) {
+                        return;
+                    }
                     recordBatchDebug('worker-run-timeout', {
                         context: 'executeBacktestForCombination',
                         combination: summarizeCombination(combination),
                         message: 'Worker execution timed out after 30 seconds.',
                         ...datasetMeta
                     }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
-                    resolve(null);
+                    finalizeWorkerRun(null);
                 }, 30000); // 30秒超時
             } else {
                 console.warn('[Batch Optimization] Worker URL not available');
