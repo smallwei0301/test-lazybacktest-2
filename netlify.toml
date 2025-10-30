@@ -34,4 +34,4 @@
 
 [[scheduled_functions]]
   name = "cache-warmer"
-  cron = "40 5 * * *"
+  cron = "0 6 * * *"
