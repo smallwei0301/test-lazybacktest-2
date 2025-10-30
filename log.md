@@ -1,3 +1,9 @@
+## 2026-09-20 — Patch LB-SW-GUARD-20250725B
+- **Scope**: `cnm-sw.js` service worker 清除流程強化，確保異常回應不再重複出現。
+- **Updates**:
+  - `js/main.js`（`LB-SW-GUARD-20250725B`）新增強制重新載入次數上限與重置機制，當頁面仍受 `cnm-sw.js` 控制時可跳過節流即時重整，並於異常解除後自動清除狀態，避免 5 分鐘內停留在壞快取。
+- **Testing**: `npm run test`
+
 ## 2026-09-19 — Patch LB-SW-GUARD-20250725A
 - **Scope**: 偵測並移除異常 `cnm-sw.js` service worker、避免 Response null body 錯誤重複出現。
 - **Updates**:

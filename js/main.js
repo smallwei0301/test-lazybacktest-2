@@ -4764,9 +4764,12 @@ function initLoadingMascotSanitiser() {
     }
 }
 
-const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250725A';
+const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250725B';
 const SERVICE_WORKER_GUARD_FLAG_KEY = 'LB_SW_GUARD_LAST_RELOAD';
+const SERVICE_WORKER_GUARD_FORCE_KEY = 'LB_SW_GUARD_FORCE_ATTEMPTS';
 const SERVICE_WORKER_GUARD_RELOAD_WINDOW_MS = 5 * 60 * 1000;
+const SERVICE_WORKER_GUARD_FORCE_LIMIT = 3;
+const SERVICE_WORKER_GUARD_FORCE_RESET_MS = 10 * 60 * 1000;
 
 function initServiceWorkerGuard() {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
@@ -4792,6 +4795,13 @@ function initServiceWorkerGuard() {
             });
     };
 
+    const getSessionStorage = () => {
+        if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage !== 'object') {
+            return null;
+        }
+        return window.sessionStorage;
+    };
+
     const markReload = () => {
         if (typeof window === 'undefined' || !window.sessionStorage || typeof window.sessionStorage.setItem !== 'function') {
             return;
@@ -4801,6 +4811,73 @@ function initServiceWorkerGuard() {
         } catch (error) {
             console.warn('[Main] 無法記錄 service worker 防護重新載入時間：', error);
         }
+    };
+
+    const readForceState = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.getItem !== 'function') {
+            return null;
+        }
+        try {
+            const raw = storage.getItem(SERVICE_WORKER_GUARD_FORCE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            const count = Number(parsed.count);
+            const timestamp = Number(parsed.timestamp);
+            if (!Number.isFinite(count) || !Number.isFinite(timestamp)) {
+                return null;
+            }
+            return { count, timestamp };
+        } catch (error) {
+            console.warn('[Main] 讀取 service worker 防護強制重新載入狀態失敗：', error);
+            return null;
+        }
+    };
+
+    const resetForceState = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.removeItem !== 'function') {
+            return;
+        }
+        try {
+            storage.removeItem(SERVICE_WORKER_GUARD_FORCE_KEY);
+        } catch (error) {
+            console.warn('[Main] 清除 service worker 防護強制重新載入狀態失敗：', error);
+        }
+    };
+
+    const recordForceAttempt = () => {
+        const storage = getSessionStorage();
+        if (!storage || typeof storage.setItem !== 'function') {
+            return 1;
+        }
+        try {
+            const now = Date.now();
+            const state = readForceState();
+            const isExpired = !state || now - state.timestamp > SERVICE_WORKER_GUARD_FORCE_RESET_MS;
+            const nextCount = (isExpired ? 0 : state.count) + 1;
+            storage.setItem(
+                SERVICE_WORKER_GUARD_FORCE_KEY,
+                JSON.stringify({ count: nextCount, timestamp: now })
+            );
+            return nextCount;
+        } catch (error) {
+            console.warn('[Main] 紀錄 service worker 防護強制重新載入次數失敗：', error);
+            return 1;
+        }
+    };
+
+    const canForceReload = () => {
+        const state = readForceState();
+        if (!state) {
+            return true;
+        }
+        const now = Date.now();
+        if (now - state.timestamp > SERVICE_WORKER_GUARD_FORCE_RESET_MS) {
+            return true;
+        }
+        return state.count < SERVICE_WORKER_GUARD_FORCE_LIMIT;
     };
 
     const shouldReload = () => {
@@ -4817,9 +4894,19 @@ function initServiceWorkerGuard() {
         }
     };
 
-    const requestReload = () => {
-        if (!shouldReload()) {
+    const requestReload = (options = {}) => {
+        const force = Boolean(options.force);
+        if (force && !canForceReload()) {
+            console.warn('[Main] 略過 service worker 強制重新載入：已達保護次數上限。');
             return;
+        }
+        if (!force && !shouldReload()) {
+            return;
+        }
+        if (force) {
+            recordForceAttempt();
+        } else {
+            resetForceState();
         }
         markReload();
         if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
@@ -4865,12 +4952,15 @@ function initServiceWorkerGuard() {
 
     const controllerUrl = (navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL) || '';
     const controllerMatches = controllerUrl ? cnmPattern.test(controllerUrl) : false;
+    if (!controllerMatches) {
+        resetForceState();
+    }
 
     const handleResults = (promises) => {
         if (!promises || promises.length === 0) {
             if (controllerMatches) {
                 cleanupCaches();
-                requestReload();
+                requestReload({ force: true });
             }
             return;
         }
@@ -4881,14 +4971,14 @@ function initServiceWorkerGuard() {
                     cleanupCaches();
                 }
                 if (controllerMatches || unregistered) {
-                    requestReload();
+                    requestReload({ force: controllerMatches });
                 }
             })
             .catch((error) => {
                 console.warn('[Main] 等待 service worker 解除註冊結果時失敗：', error);
                 if (controllerMatches) {
                     cleanupCaches();
-                    requestReload();
+                    requestReload({ force: true });
                 }
             });
     };
@@ -4929,13 +5019,13 @@ function initServiceWorkerGuard() {
                 });
         } else if (controllerMatches) {
             cleanupCaches();
-            requestReload();
+            requestReload({ force: true });
         }
     } catch (error) {
         console.warn('[Main] 初始化 service worker 防護時發生錯誤：', error);
         if (controllerMatches) {
             cleanupCaches();
-            requestReload();
+            requestReload({ force: true });
         }
     }
 }
