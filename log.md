@@ -1,3 +1,11 @@
+## 2026-09-17 — Patch LB-COVERAGE-REFRESH-20260917A / LB-CACHE-WARMER-20260917A
+- **Scope**: 資料覆蓋重建與 Netlify 暖身排程更新。
+- **Updates**:
+  - `js/backtest.js`（`LB-COVERAGE-REFRESH-20260917A`）改以合併後的實際資料列重建 coverage 與指紋，避免僅根據請求範圍判定覆蓋。
+  - `js/main.js`（`LB-COVERAGE-REFRESH-20260917A`）依台灣時間 14:00 檢查最後交易日是否過期，必要時自動觸發重新抓取。
+  - `netlify/functions/cache-warmer.js`（`LB-CACHE-WARMER-20260917A`）將排程調整為每日 14:00 暖身，確保 Netlify 快取同步更新。
+- **Testing**: 容器環境無法連線 Netlify Proxy 與啟動瀏覽器，僅靜態檢查；待部署後以 2330/0050 實測驗證覆蓋與暖身時程。
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
