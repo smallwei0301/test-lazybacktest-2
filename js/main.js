@@ -14,6 +14,7 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-EXPIRY-20250723A
 
 // 全局變量
 let stockChart = null;
@@ -5516,6 +5517,91 @@ function mergeIsoCoverage(existing, additionalRange) {
     }));
 }
 
+function getTaipeiDateInfo(now = new Date()) {
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Taipei',
+            hour12: false,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+        });
+        const parts = formatter.formatToParts(now);
+        const bucket = {};
+        parts.forEach((part) => {
+            bucket[part.type] = part.value;
+        });
+        return {
+            isoDate: bucket.year && bucket.month && bucket.day
+                ? `${bucket.year}-${bucket.month}-${bucket.day}`
+                : null,
+            hour: bucket.hour ? parseInt(bucket.hour, 10) : NaN,
+            minute: bucket.minute ? parseInt(bucket.minute, 10) : NaN,
+            second: bucket.second ? parseInt(bucket.second, 10) : NaN,
+        };
+    } catch (error) {
+        const utcIso = now.toISOString().slice(0, 10);
+        return {
+            isoDate: utcIso,
+            hour: now.getUTCHours(),
+            minute: now.getUTCMinutes(),
+            second: now.getUTCSeconds(),
+        };
+    }
+}
+
+function getPreviousBusinessDayISO(isoDate) {
+    const baseUTC = parseISOToUTC(isoDate);
+    if (!Number.isFinite(baseUTC)) return null;
+    let cursor = baseUTC - MAIN_DAY_MS;
+    let fallback = null;
+    for (let i = 0; i < 7; i += 1) {
+        if (!Number.isFinite(cursor)) break;
+        const currentIso = utcToISODate(cursor);
+        if (!currentIso) break;
+        fallback = currentIso;
+        const weekday = new Date(cursor).getUTCDay();
+        if (weekday !== 0 && weekday !== 6) {
+            return currentIso;
+        }
+        cursor -= MAIN_DAY_MS;
+    }
+    return fallback;
+}
+
+function resolveExpectedCoverageDate(now = new Date()) {
+    const taipeiInfo = getTaipeiDateInfo(now);
+    if (!taipeiInfo.isoDate) return null;
+    const currentUTC = parseISOToUTC(taipeiInfo.isoDate);
+    if (!Number.isFinite(currentUTC)) return null;
+    const weekday = new Date(currentUTC).getUTCDay();
+    if (weekday === 0 || weekday === 6) {
+        return getPreviousBusinessDayISO(taipeiInfo.isoDate);
+    }
+    if (!Number.isFinite(taipeiInfo.hour) || taipeiInfo.hour < 14) {
+        return getPreviousBusinessDayISO(taipeiInfo.isoDate);
+    }
+    return taipeiInfo.isoDate;
+}
+
+function isCoverageStale(coverage, now = new Date()) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return true;
+    let latestISO = null;
+    coverage.forEach((range) => {
+        if (!range || !range.end) return;
+        if (!latestISO || range.end > latestISO) {
+            latestISO = range.end;
+        }
+    });
+    if (!latestISO) return true;
+    const expected = resolveExpectedCoverageDate(now);
+    if (!expected) return true;
+    return latestISO < expected;
+}
+
 function coverageCoversRange(coverage, targetRange) {
     if (!targetRange) return false;
     const targetBounds = normalizeRange(targetRange.start, targetRange.end);
@@ -5651,6 +5737,7 @@ function needsDataFetch(cur) {
         : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
+    if (isCoverageStale(entry.coverage)) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
     return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
 

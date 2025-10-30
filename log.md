@@ -1,3 +1,11 @@
+## 2026-09-17 — Patch LB-COVERAGE-ROW-20250723A
+- **Scope**: 主執行緒 coverage 重建與 Netlify cache-warmer 排程調整。
+- **Updates**:
+  - `js/backtest.js` 依實際資料列重新計算 coverage 並更新 fingerprint，同步整理快取覆蓋診斷來源。
+  - `js/main.js` 新增台灣時區 14:00 規則判定 coverage 是否過期，回測前若逾期會主動觸發資料抓取。
+  - `netlify/functions/cache-warmer.js`、`netlify.toml` 將 cache-warmer 排程改為每日台灣時間 14:00 執行（Cron `0 6 * * *`）。
+- **Testing**: `npm run test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
