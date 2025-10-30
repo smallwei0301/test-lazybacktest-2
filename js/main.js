@@ -13,6 +13,8 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260703A
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-COVERAGE-TAIPEI-20250724B
+// Patch Tag: LB-SW-GUARD-20250724A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
 
 // 全局變量
@@ -4762,6 +4764,56 @@ function initLoadingMascotSanitiser() {
     }
 }
 
+const SERVICE_WORKER_GUARD_VERSION = 'LB-SW-GUARD-20250724A';
+
+function initServiceWorkerGuard() {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker || typeof navigator.serviceWorker.getRegistrations !== 'function') {
+        return;
+    }
+
+    const cleanupCaches = () => {
+        if (typeof window === 'undefined' || !window.caches || typeof window.caches.keys !== 'function') {
+            return;
+        }
+        window.caches.keys()
+            .then((keys) => {
+                keys.filter((key) => /cnm/i.test(key)).forEach((key) => {
+                    window.caches.delete(key).catch((error) => {
+                        console.warn('[Main] 無法刪除 cnm 快取：', error);
+                    });
+                });
+            })
+            .catch((error) => {
+                console.warn('[Main] 取得快取列表時發生錯誤：', error);
+            });
+    };
+
+    try {
+        navigator.serviceWorker.getRegistrations()
+            .then((registrations) => {
+                if (!Array.isArray(registrations) || registrations.length === 0) return;
+                registrations.forEach((registration) => {
+                    const scriptUrl = (registration && registration.active && registration.active.scriptURL)
+                        || (registration && registration.waiting && registration.waiting.scriptURL)
+                        || (registration && registration.installing && registration.installing.scriptURL)
+                        || '';
+                    if (scriptUrl && /\/cnm-sw\.js(?:$|\?)/i.test(scriptUrl)) {
+                        console.info(`[Main] 偵測到異常 service worker，執行 ${SERVICE_WORKER_GUARD_VERSION} 修復流程。`);
+                        registration.unregister().catch((error) => {
+                            console.warn('[Main] 解除註冊 cnm-sw 失敗：', error);
+                        });
+                        cleanupCaches();
+                    }
+                });
+            })
+            .catch((error) => {
+                console.warn('[Main] 讀取 service worker 註冊資訊失敗：', error);
+            });
+    } catch (error) {
+        console.warn('[Main] 初始化 service worker 防護時發生錯誤：', error);
+    }
+}
+
 function setLoadingBaseMessage(message) {
     const el = getLoadingTextElement();
     if (!el) return;
@@ -5859,6 +5911,7 @@ document.addEventListener('DOMContentLoaded', function() {
         initDates();
 
         initLoadingMascotSanitiser();
+        initServiceWorkerGuard();
 
         if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.init === 'function') {
             window.lazybacktestMultiStagePanel.init();

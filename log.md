@@ -1,3 +1,11 @@
+## 2026-09-18 — Patch LB-COVERAGE-TAIPEI-20250724B / LB-WARMER-TAIPEI-20250724B / LB-SW-GUARD-20250724A
+- **Scope**: 台股資料 coverage 錯誤標記修正、Netlify 預抓排程覆核與異常 service worker 清除。
+- **Updates**:
+  - `js/backtest.js`（`LB-COVERAGE-TAIPEI-20250724B`）所有主執行緒快取寫入路徑皆改以 `computeCoverageFromRows` 重建 coverage 與指紋，並為重播診斷提供一致的 coverage 資訊。
+  - `js/main.js`（`LB-COVERAGE-TAIPEI-20250724B`／`LB-SW-GUARD-20250724A`）沿用 14:00 台北到期判定、加入 `cnm-sw.js` 自動解除註冊與快取清理以排除 Response null body 錯誤。
+  - `netlify/functions/cache-warmer.js`（`LB-WARMER-TAIPEI-20250724B`）確認 Cron 註解同步至最新版本碼。
+- **Testing**: `npm run test`
+
 ## 2026-09-17 — Patch LB-COVERAGE-TAIPEI-20250724A / LB-WARMER-TAIPEI-20250724A
 - **Scope**: 調整台股快取覆蓋判定與 Netlify 預抓排程。
 - **Updates**:

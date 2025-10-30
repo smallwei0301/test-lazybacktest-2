@@ -12,7 +12,7 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250909A
 // Patch Tag: LB-REGIME-HMM-20251012A
 // Patch Tag: LB-REGIME-RANGEBOUND-20251013A
-// Patch Tag: LB-COVERAGE-TAIPEI-20250724A
+// Patch Tag: LB-COVERAGE-TAIPEI-20250724B
 // Patch Tag: LB-REGIME-FEATURES-20250718A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-SENSITIVITY-ANNUAL-THRESHOLD-20250716A
@@ -4948,7 +4948,7 @@ function runBacktestInternal() {
                              }
                          });
                      }
-                    const mergedData = Array.from(mergedDataMap.values()).sort((a,b)=>a.date.localeCompare(b.date));
+                    const mergedData = Array.from(mergedDataMap.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                     const fetchedRange = (data?.rawMeta && data.rawMeta.fetchRange && data.rawMeta.fetchRange.start && data.rawMeta.fetchRange.end)
                         ? data.rawMeta.fetchRange
                         : { start: curSettings.startDate, end: curSettings.endDate };
@@ -5076,7 +5076,10 @@ function runBacktestInternal() {
                     const adjustmentChecksMeta = Array.isArray(data?.dataDebug?.adjustmentChecks)
                         ? data.dataDebug.adjustmentChecks
                         : Array.isArray(cachedEntry.adjustmentChecks) ? cachedEntry.adjustmentChecks : [];
-                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch || cachedEntry.fetchDiagnostics || null;
+                    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch
+                        || cachedEntry.lastRemoteFetchDiagnostics
+                        || cachedEntry.fetchDiagnostics
+                        || null;
                     const updatedCoverage = computeCoverageFromRows(Array.isArray(cachedEntry.data) ? cachedEntry.data : []);
                     const updatedDiagnostics = normaliseFetchDiagnosticsForCacheReplay(rawFetchDiagnostics, {
                         source: 'main-memory-cache',
@@ -8563,10 +8566,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         return existingEntry || null;
     }
 
-    const mergedCoverage = mergeIsoCoverage(
-        existingEntry?.coverage || [],
-        fetchedRange && fetchedRange.start && fetchedRange.end ? { start: fetchedRange.start, end: fetchedRange.end } : null,
-    );
+    const mergedCoverage = computeCoverageFromRows(mergedData);
     const sourceSet = new Set(Array.isArray(existingEntry?.dataSources) ? existingEntry.dataSources : []);
     if (dataSource) sourceSet.add(dataSource);
     const sourceArray = Array.from(sourceSet);
@@ -8591,6 +8591,19 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     const adjustmentDebugLogMeta = rawMeta.adjustmentDebugLog || dataDebug.adjustmentDebugLog || existingEntry?.adjustmentDebugLog || null;
     const adjustmentChecksMeta = rawMeta.adjustmentChecks || dataDebug.adjustmentChecks || existingEntry?.adjustmentChecks || null;
 
+    const rawFetchDiagnostics = data?.datasetDiagnostics?.fetch
+        || existingEntry?.lastRemoteFetchDiagnostics
+        || existingEntry?.fetchDiagnostics
+        || null;
+    const fetchDiagnostics = normaliseFetchDiagnosticsForCacheReplay(
+        rawFetchDiagnostics,
+        {
+            source: 'main-memory-cache',
+            requestedRange: fetchedRange || { start: curSettings.startDate, end: curSettings.endDate },
+            coverage: mergedCoverage,
+        },
+    );
+
     const updatedEntry = {
         ...(existingEntry || {}),
         data: mergedData,
@@ -8614,7 +8627,9 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
         effectiveStartDate: curSettings.effectiveStartDate || effectiveStartDate,
         lookbackDays,
         datasetDiagnostics: data?.datasetDiagnostics || existingEntry?.datasetDiagnostics || null,
-        fetchDiagnostics: data?.datasetDiagnostics?.fetch || existingEntry?.fetchDiagnostics || null,
+        fetchDiagnostics,
+        coverageFingerprint: computeCoverageFingerprint(mergedCoverage),
+        lastRemoteFetchDiagnostics: rawFetchDiagnostics,
     };
 
     applyCacheStartMetadata(cacheKey, updatedEntry, curSettings.effectiveStartDate || effectiveStartDate, {
