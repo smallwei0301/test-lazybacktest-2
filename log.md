@@ -448,6 +448,15 @@ NODE`
   - Blob 監控新增寫入摘要卡，揭露本月寫入次數與最近寫入事件；資料來源卡支援顯示主來源與命中資訊。
 - **Testing**: `node - <<'NODE' ...` 檢查主要腳本語法無誤（同既有回歸命令）。
 
+## 2025-10-29 — Patch LB-COVERAGE-TAIWAN-20251029A / LB-CACHE-WARMER-TAIWAN-20251029A
+- **Issue recap**: 主執行緒沿用請求範圍合併 coverage，實際資料仍殘缺卻被判定已滿；Netlify cache-warmer 亦於凌晨執行，無法在台股收盤後立即預抓新資料。
+- **Fix**:
+  - `js/main.js`、`js/backtest.js` 在快取更新與同步時改用 `computeCoverageFromRows` 重建 coverage，並於 `needsDataFetch` 依台灣時間 14:00 判定最後一日是否過期。
+  - `js/backtest.js` 的快取寫入分支同步更新 coverage fingerprint，確保診斷面板與快取索引顯示實際覆蓋範圍。
+  - `netlify/functions/cache-warmer.js` 將排程調整為 UTC 06:00（台灣時間 14:00）執行，收盤後即進行熱門標的預抓。
+- **Testing**: `npm run typecheck`、`npm test`
+
+
 ## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
 - **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
 - **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
