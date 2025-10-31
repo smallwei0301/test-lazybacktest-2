@@ -449,6 +449,12 @@ NODE`
   - 今日建議開發者 log 更新摘要欄位，優先顯示主體訊息並沿用 highlight 值於詳情段落。
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
+## 2025-11-12 — Patch LB-DATA-VOLUME-20251112A
+- **Issue recap**: Worker 日誌在多次回測時重複出現 `volume` 無效筆數與買入持有落後提示，歸因於成交量在正確但小於千張時被四捨五入為 0，導致 00631L 等標的暖身區間被判定為充滿無效資料。
+- **Fix**: 新增 `normalizeVolumeToLots` 將成交量換算為千張時保留最小值 1，避免正確的成交量被歸零；`fetchAdjustedPriceRange` 與 `normalizeProxyRow` 均改用該工具函式以統一處理。
+- **Diagnostics**: 以 00631L 與成交量較低的標的重跑暖身診斷，確認 `datasetSummary.invalidRowsInRange` 不再因 volume=0 擴散，買入持有首筆有效收盤日與暖身起點對齊。
+- **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/backtest.js','js/main.js','js/worker.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
+
 ## 2025-10-30 — Patch LB-UI-REFRESH-20251030A
 - **Scope**: 主頁版面與診斷工具整體調整，強化敏感度與今日建議的可讀性與互動設計。
 - **UI**:
