@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "LazyBacktest with Netlify Functions proxy",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/batch-context.test.js && node tests/batch-mapper.test.js && node tests/strategy-composer.test.js"
+  },
   "dependencies": {
     "@netlify/blobs": "^6.0.0",
     "node-fetch": "^2.6.7"

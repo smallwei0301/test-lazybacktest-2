@@ -1,10 +1,50 @@
 // --- Loader Script ---
+// Patch Tag: LB-SW-RECOVERY-20251030A
 document.addEventListener('DOMContentLoaded', function() {
      console.log("[Loader] DOMContentLoaded event fired.");
      if (typeof workerUrl === 'undefined' || workerUrl === null) {
         workerUrl = 'js/worker.js';
         console.log("[Loader] Set workerUrl to:", workerUrl);
      }
+
+    const SW_RECOVERY_VERSION = 'LB-SW-RECOVERY-20251030A';
+    if (typeof navigator !== 'undefined' && navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+        navigator.serviceWorker.getRegistrations()
+            .then((registrations) => {
+                registrations.forEach((registration) => {
+                    const scriptUrl = registration?.active?.scriptURL
+                        || registration?.waiting?.scriptURL
+                        || registration?.installing?.scriptURL
+                        || '';
+                    if (typeof scriptUrl === 'string' && /\/cnm-sw\.js(?:[?#].*)?$/i.test(scriptUrl)) {
+                        registration.unregister()
+                            .then((didUnregister) => {
+                                if (didUnregister) {
+                                    console.info(`[ServiceWorker] (${SW_RECOVERY_VERSION}) 已移除舊版 cnm-sw.js，以避免 Response 空身體錯誤。`);
+                                }
+                            })
+                            .catch((error) => {
+                                console.warn(`[ServiceWorker] (${SW_RECOVERY_VERSION}) 解除註冊 cnm-sw.js 失敗:`, error);
+                            });
+                    }
+                });
+            })
+            .catch((error) => {
+                console.warn(`[ServiceWorker] (${SW_RECOVERY_VERSION}) 讀取 serviceWorker 註冊資訊失敗:`, error);
+            });
+    }
+
+    if (typeof StrategyPluginRegistry !== 'undefined' && typeof StrategyPluginRegistry.listStrategies === 'function') {
+        try {
+            const manifest = StrategyPluginRegistry.listStrategies();
+            window.lazybacktestStrategyManifest = manifest;
+            console.log('[Loader] 策略清單暖身完成:', manifest.map((item) => item.id).join(', '));
+        } catch (manifestError) {
+            console.error('[Loader] 讀取策略清單失敗', manifestError);
+        }
+    } else {
+        console.warn('[Loader] StrategyPluginRegistry.listStrategies 尚未就緒，略過策略清單暖身。');
+    }
 
     try {
         initDates();
@@ -17,6 +57,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('applyYearsBtn').addEventListener('click', applyRecentYears);
         document.getElementById('backtestBtn').addEventListener('click', runBacktestInternal);
+        // Patch Tag: LB-INDEX-UI-20250727A
+        const quickRunBacktestBtn = document.getElementById('quickRunBacktestBtn');
+        if (quickRunBacktestBtn) {
+            quickRunBacktestBtn.addEventListener('click', runBacktestInternal);
+        }
         document.getElementById('optimizeEntryBtn').addEventListener('click', () => runOptimizationInternal('entry'));
         document.getElementById('optimizeExitBtn').addEventListener('click', () => runOptimizationInternal('exit'));
         document.getElementById('optimizeShortEntryBtn').addEventListener('click', () => runOptimizationInternal('shortEntry'));

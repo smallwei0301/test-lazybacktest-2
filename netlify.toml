@@ -26,6 +26,12 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/index/*"
+  to = "/.netlify/functions/index-proxy"
+  status = 200
+  force = true
+
 [[scheduled_functions]]
   name = "cache-warmer"
-  cron = "0 18 * * *"
+  cron = "0 6 * * *"

@@ -1,12 +1,439 @@
 
+// Patch Tag: LB-AI-ANNS-REPRO-20251224B — Deterministic trade pricing & metadata expansion.
+// Patch Tag: LB-AI-TRADE-RULE-20251229A — Added close-entry metadata for ANN trades.
+// Patch Tag: LB-AI-TRADE-VOLATILITY-20251230A — Multiclass volatility tiers & shared metadata.
+// Patch Tag: LB-AI-LSTM-CLASS-20251230A — LSTM binary/multiclass toggle & probability normalisation.
+// Patch Tag: LB-AI-VOL-QUARTILE-20251231A — Train-set quartile thresholds for volatility tiers.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260105A — Positive/negative quartile separation for volatility tiers.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260110A — Volatility quartile diagnostics for reproducibility.
+// Patch Tag: LB-AI-VOL-QUARTILE-20260111A — Quartile fallback indicators and share diagnostics for AI volatility tiers.
+// Patch Tag: LB-AI-PRECISION-20260118A — Multiclass precision metrics & diagnostics parity.
+// Patch Tag: LB-AI-THRESHOLD-20260122A — Multiclass threshold defaults for deterministic gating.
+// Patch Tag: LB-AI-THRESHOLD-20260124A — Binary default win threshold tuned to 50%.
+// Patch Tag: LB-AI-VIX-FEATURE-20260915A — 美股 ANN 訓練同步抓取 ^VIX 指數作為額外特徵。
+// Patch Tag: LB-AI-VOL-QUARTILE-20260128A — Align ANN class分佈與波動門檻紀錄並回傳實際閾值。
+// Patch Tag: LB-AI-VOL-QUARTILE-20260202A — 傳回類別平均報酬並以預估漲跌幅顯示交易判斷。
+// Patch Tag: LB-AI-SWING-20260210A — 預估漲跌幅移除門檻 fallback，僅保留類別平均值。
+// Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
+// Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
+// Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
 importScripts('shared-lookback.js');
+importScripts('strategy-plugin-contract.js');
+importScripts('strategy-plugin-registry.js');
+importScripts('strategy-plugin-manifest.js');
+importScripts('strategies/composer.js');
 importScripts('config.js');
-try {
-  if (typeof tf === 'undefined') {
-    importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+
+const TFJS_VERSION = '4.20.0';
+const TF_BACKEND_TARGET = 'wasm';
+const ANN_DEFAULT_SEED = 1337;
+const ANN_MODEL_STORAGE_KEY = 'anns_v1_model';
+const ANN_META_MESSAGE = 'ANN_META';
+const ANN_REPRO_VERSION = 'anns_v1';
+const ANN_REPRO_PATCH = 'LB-AI-ANNS-REPRO-20260915A';
+const ANN_DIAGNOSTIC_VERSION = 'LB-AI-ANN-DIAG-20260915A';
+const LSTM_DEFAULT_SEED = 7331;
+const LSTM_MODEL_STORAGE_KEY = 'lstm_v1_model';
+const LSTM_META_MESSAGE = 'LSTM_META';
+const LSTM_REPRO_VERSION = 'lstm_v1';
+const LSTM_REPRO_PATCH = 'LB-AI-LSTM-REPRO-20260118A';
+const LSTM_THRESHOLD = 0.5;
+const DEFAULT_VOLATILITY_THRESHOLDS = { surge: 0.03, drop: 0.03 };
+const CLASSIFICATION_MODES = {
+  BINARY: 'binary',
+  MULTICLASS: 'multiclass',
+};
+
+const legacyRuleResultNormaliser =
+  typeof self !== 'undefined' &&
+  self.LegacyStrategyPluginShim &&
+  typeof self.LegacyStrategyPluginShim.normaliseResult === 'function'
+    ? self.LegacyStrategyPluginShim.normaliseResult.bind(self.LegacyStrategyPluginShim)
+    : null;
+
+function normaliseRuleResultFromLegacy(pluginId, role, candidate, index) {
+  if (legacyRuleResultNormaliser) {
+    return legacyRuleResultNormaliser(pluginId, role, candidate, { index });
   }
-} catch (error) {
-  console.warn('[Worker][AI] 無法載入 TensorFlow.js：', error);
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn(
+      `[StrategyPluginContract] 未載入 LegacyStrategyPluginShim，使用退化布林判斷 (${pluginId || '未知策略'})`,
+    );
+  }
+  if (candidate && typeof candidate === 'object') {
+    const record = /** @type {Record<string, unknown>} */ (candidate);
+    return {
+      enter: role === 'longEntry' ? record.enter === true : false,
+      exit: role === 'longExit' ? record.exit === true : false,
+      short: role === 'shortEntry' ? record.short === true : false,
+      cover: role === 'shortExit' ? record.cover === true : false,
+      stopLossPercent:
+        typeof record.stopLossPercent === 'number' && Number.isFinite(record.stopLossPercent)
+          ? record.stopLossPercent
+          : null,
+      takeProfitPercent:
+        typeof record.takeProfitPercent === 'number' && Number.isFinite(record.takeProfitPercent)
+          ? record.takeProfitPercent
+          : null,
+      meta: {},
+    };
+  }
+  const value = candidate === true;
+  return {
+    enter: role === 'longEntry' ? value : false,
+    exit: role === 'longExit' ? value : false,
+    short: role === 'shortEntry' ? value : false,
+    cover: role === 'shortExit' ? value : false,
+    stopLossPercent: null,
+    takeProfitPercent: null,
+    meta: {},
+  };
+}
+
+const ANN_FEATURE_NAMES = [
+  'SMA30',
+  'WMA15',
+  'EMA12',
+  'Momentum10',
+  'StochK14',
+  'StochD3',
+  'RSI14',
+  'MACDdiff',
+  'MACDsignal',
+  'MACDhist',
+  'CCI20',
+  'WilliamsR14',
+  'VIXClose',
+];
+
+function normalizeClassificationMode(mode) {
+  return mode === CLASSIFICATION_MODES.BINARY ? CLASSIFICATION_MODES.BINARY : CLASSIFICATION_MODES.MULTICLASS;
+}
+
+function getDefaultThresholdForMode(mode) {
+  return normalizeClassificationMode(mode) === CLASSIFICATION_MODES.MULTICLASS ? 0 : 0.5;
+}
+
+function sanitizeVolatilityThresholds(input = {}) {
+  const fallbackSurge = DEFAULT_VOLATILITY_THRESHOLDS.surge;
+  const fallbackDrop = DEFAULT_VOLATILITY_THRESHOLDS.drop;
+  const rawSurge = Number(input?.surge);
+  const rawDrop = Number(input?.drop);
+  const rawLower = Number(input?.lowerQuantile);
+  const rawUpper = Number(input?.upperQuantile);
+
+  let surge = Number.isFinite(rawSurge) && Math.abs(rawSurge) > 0 ? Math.abs(rawSurge) : NaN;
+  let drop = Number.isFinite(rawDrop) && Math.abs(rawDrop) > 0 ? Math.abs(rawDrop) : NaN;
+
+  if (!(surge > 0) && Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+    surge = Math.abs(rawUpper);
+  }
+  if (!(drop > 0) && Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+    drop = Math.abs(rawLower);
+  }
+
+  if (!(surge > 0)) {
+    surge = fallbackSurge;
+  }
+  if (!(drop > 0)) {
+    drop = fallbackDrop;
+  }
+
+  surge = Math.min(Math.max(surge, 0.0001), 0.5);
+  drop = Math.min(Math.max(drop, 0.0001), 0.5);
+
+  let lowerQuantile;
+  if (Number.isFinite(rawLower) && Math.abs(rawLower) > 0) {
+    lowerQuantile = rawLower > 0 ? -Math.abs(rawLower) : Math.max(rawLower, -0.5);
+  } else {
+    lowerQuantile = -drop;
+  }
+
+  let upperQuantile;
+  if (Number.isFinite(rawUpper) && Math.abs(rawUpper) > 0) {
+    upperQuantile = rawUpper < 0 ? Math.abs(rawUpper) : Math.min(rawUpper, 0.5);
+  } else {
+    upperQuantile = surge;
+  }
+
+  upperQuantile = Math.min(Math.max(upperQuantile, 0.0001), 0.5);
+  lowerQuantile = Math.max(Math.min(lowerQuantile, -0.0001), -0.5);
+
+  return {
+    surge,
+    drop,
+    lowerQuantile,
+    upperQuantile,
+  };
+}
+
+function computeQuantileValue(sortedValues, percentile) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) return NaN;
+  const clampedPercentile = Math.min(Math.max(percentile, 0), 1);
+  if (sortedValues.length === 1 || clampedPercentile === 0) {
+    return sortedValues[0];
+  }
+  if (clampedPercentile === 1) {
+    return sortedValues[sortedValues.length - 1];
+  }
+  const position = (sortedValues.length - 1) * clampedPercentile;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.min(lowerIndex + 1, sortedValues.length - 1);
+  const weight = position - lowerIndex;
+  const lowerValue = sortedValues[lowerIndex];
+  const upperValue = sortedValues[upperIndex];
+  if (!Number.isFinite(lowerValue)) return upperValue;
+  if (!Number.isFinite(upperValue)) return lowerValue;
+  return lowerValue + ((upperValue - lowerValue) * weight);
+}
+
+function deriveVolatilityThresholdsFromReturns(values, fallback = DEFAULT_VOLATILITY_THRESHOLDS, diagnosticsRef = null) {
+  const fallbackSanitized = sanitizeVolatilityThresholds(fallback);
+  if (!Array.isArray(values) || values.length === 0) {
+    return fallbackSanitized;
+  }
+  const filtered = values.filter((value) => Number.isFinite(value));
+  if (filtered.length === 0) {
+    return fallbackSanitized;
+  }
+
+  const sorted = filtered.slice().sort((a, b) => a - b);
+  const positives = sorted.filter((value) => value > 0);
+  const negatives = sorted.filter((value) => value < 0);
+  const zeroCount = filtered.length - positives.length - negatives.length;
+
+  const combinedUpperQuartile = computeQuantileValue(sorted, 0.75);
+  const combinedLowerQuartile = computeQuantileValue(sorted, 0.25);
+  const positiveOnlyQuartile = positives.length > 0 ? computeQuantileValue(positives, 0.75) : NaN;
+  const negativeOnlyQuartile = negatives.length > 0 ? computeQuantileValue(negatives, 0.25) : NaN;
+
+  let positiveSource = 'combined';
+  let negativeSource = 'combined';
+
+  let upperCandidate = Number.isFinite(combinedUpperQuartile) ? combinedUpperQuartile : NaN;
+  if (!(upperCandidate > 0)) {
+    if (Number.isFinite(positiveOnlyQuartile) && positiveOnlyQuartile > 0) {
+      upperCandidate = positiveOnlyQuartile;
+      positiveSource = 'positive-only';
+    } else {
+      const fallbackUpper = Number.isFinite(fallbackSanitized.upperQuantile) && fallbackSanitized.upperQuantile > 0
+        ? fallbackSanitized.upperQuantile
+        : (fallbackSanitized.surge > 0 ? fallbackSanitized.surge : NaN);
+      upperCandidate = Number.isFinite(fallbackUpper) ? fallbackUpper : NaN;
+      positiveSource = 'default';
+    }
+  }
+
+  let lowerCandidate = Number.isFinite(combinedLowerQuartile) ? combinedLowerQuartile : NaN;
+  if (!(lowerCandidate < 0)) {
+    if (Number.isFinite(negativeOnlyQuartile) && negativeOnlyQuartile < 0) {
+      lowerCandidate = negativeOnlyQuartile;
+      negativeSource = 'negative-only';
+    } else {
+      const fallbackLower = Number.isFinite(fallbackSanitized.lowerQuantile) && fallbackSanitized.lowerQuantile < 0
+        ? fallbackSanitized.lowerQuantile
+        : (fallbackSanitized.drop > 0 ? -fallbackSanitized.drop : NaN);
+      lowerCandidate = Number.isFinite(fallbackLower) ? fallbackLower : NaN;
+      negativeSource = 'default';
+    }
+  }
+
+  const sanitized = sanitizeVolatilityThresholds({
+    surge: upperCandidate,
+    drop: Math.abs(lowerCandidate),
+    lowerQuantile: lowerCandidate,
+    upperQuantile: upperCandidate,
+  });
+
+  if (diagnosticsRef && typeof diagnosticsRef === 'object') {
+    const positiveThreshold = Number.isFinite(sanitized.upperQuantile)
+      ? sanitized.upperQuantile
+      : (Number.isFinite(sanitized.surge) ? sanitized.surge : NaN);
+    const negativeThreshold = Number.isFinite(sanitized.lowerQuantile)
+      ? sanitized.lowerQuantile
+      : (Number.isFinite(sanitized.drop) ? -sanitized.drop : NaN);
+
+    let positiveExceedCount = 0;
+    let negativeExceedCount = 0;
+    if (Number.isFinite(positiveThreshold) || Number.isFinite(negativeThreshold)) {
+      for (let i = 0; i < filtered.length; i += 1) {
+        const value = filtered[i];
+        if (Number.isFinite(positiveThreshold) && value >= positiveThreshold) {
+          positiveExceedCount += 1;
+        } else if (Number.isFinite(negativeThreshold) && value <= negativeThreshold) {
+          negativeExceedCount += 1;
+        }
+      }
+    }
+
+    let midbandCount = filtered.length - positiveExceedCount - negativeExceedCount;
+    if (!Number.isFinite(midbandCount) || midbandCount < 0) {
+      midbandCount = Math.max(filtered.length - positiveExceedCount - negativeExceedCount, 0);
+    }
+
+    diagnosticsRef.totalSamples = filtered.length;
+    if (!Number.isFinite(diagnosticsRef.expectedTrainSamples)) {
+      diagnosticsRef.expectedTrainSamples = filtered.length;
+    }
+    diagnosticsRef.positiveSamples = positives.length;
+    diagnosticsRef.negativeSamples = negatives.length;
+    diagnosticsRef.zeroSamples = zeroCount;
+    diagnosticsRef.upperQuartile = Number.isFinite(combinedUpperQuartile) ? combinedUpperQuartile : null;
+    diagnosticsRef.lowerQuartile = Number.isFinite(combinedLowerQuartile) ? combinedLowerQuartile : null;
+    diagnosticsRef.combinedUpperQuartile = diagnosticsRef.upperQuartile;
+    diagnosticsRef.combinedLowerQuartile = diagnosticsRef.lowerQuartile;
+    diagnosticsRef.positiveQuartile = diagnosticsRef.upperQuartile;
+    diagnosticsRef.negativeQuartile = diagnosticsRef.lowerQuartile;
+    diagnosticsRef.positiveOnlyQuartile = Number.isFinite(positiveOnlyQuartile) ? positiveOnlyQuartile : null;
+    diagnosticsRef.negativeOnlyQuartile = Number.isFinite(negativeOnlyQuartile) ? negativeOnlyQuartile : null;
+    diagnosticsRef.positiveThreshold = Number.isFinite(positiveThreshold) ? positiveThreshold : null;
+    diagnosticsRef.negativeThreshold = Number.isFinite(negativeThreshold) ? negativeThreshold : null;
+    diagnosticsRef.positiveExceedCount = positiveExceedCount;
+    diagnosticsRef.negativeExceedCount = negativeExceedCount;
+    const positiveExceedShare = positives.length > 0 ? (positiveExceedCount / positives.length) : NaN;
+    const negativeExceedShare = negatives.length > 0 ? (negativeExceedCount / negatives.length) : NaN;
+    const totalPositiveShare = filtered.length > 0 ? (positiveExceedCount / filtered.length) : NaN;
+    const totalNegativeShare = filtered.length > 0 ? (negativeExceedCount / filtered.length) : NaN;
+    const zeroShare = filtered.length > 0 ? (zeroCount / filtered.length) : NaN;
+    const midbandShare = filtered.length > 0 ? (midbandCount / filtered.length) : NaN;
+    diagnosticsRef.positiveExceedShare = Number.isFinite(positiveExceedShare) ? positiveExceedShare : null;
+    diagnosticsRef.negativeExceedShare = Number.isFinite(negativeExceedShare) ? negativeExceedShare : null;
+    diagnosticsRef.totalPositiveShare = Number.isFinite(totalPositiveShare) ? totalPositiveShare : null;
+    diagnosticsRef.totalNegativeShare = Number.isFinite(totalNegativeShare) ? totalNegativeShare : null;
+    diagnosticsRef.zeroShare = Number.isFinite(zeroShare) ? zeroShare : null;
+    diagnosticsRef.midbandCount = midbandCount;
+    diagnosticsRef.midbandShare = Number.isFinite(midbandShare) ? midbandShare : null;
+    diagnosticsRef.usedPositiveFallback = positiveSource !== 'combined';
+    diagnosticsRef.usedNegativeFallback = negativeSource !== 'combined';
+    diagnosticsRef.positiveSource = positiveSource;
+    diagnosticsRef.negativeSource = negativeSource;
+    diagnosticsRef.fallbackUpperQuartile = null;
+    diagnosticsRef.fallbackLowerQuartile = null;
+  }
+
+  return sanitized;
+}
+
+function classifySwingReturn(swingValue, thresholds) {
+  if (!Number.isFinite(swingValue)) {
+    return 1;
+  }
+  const upper = Number.isFinite(thresholds?.upperQuantile) ? thresholds.upperQuantile : thresholds?.surge;
+  const lower = Number.isFinite(thresholds?.lowerQuantile)
+    ? thresholds.lowerQuantile
+    : (Number.isFinite(thresholds?.drop) ? -thresholds.drop : -DEFAULT_VOLATILITY_THRESHOLDS.drop);
+  if (Number.isFinite(upper) && swingValue >= upper) {
+    return 2;
+  }
+  if (Number.isFinite(lower) && swingValue <= lower) {
+    return 0;
+  }
+  const fallbackSurge = Number.isFinite(thresholds?.surge) ? thresholds.surge : DEFAULT_VOLATILITY_THRESHOLDS.surge;
+  const fallbackDrop = Number.isFinite(thresholds?.drop) ? thresholds.drop : DEFAULT_VOLATILITY_THRESHOLDS.drop;
+  if (Number.isFinite(fallbackSurge) && swingValue >= fallbackSurge) {
+    return 2;
+  }
+  if (Number.isFinite(fallbackDrop) && swingValue <= -fallbackDrop) {
+    return 0;
+  }
+  return 1;
+}
+
+function computeExpectedSwing(probabilities, mode, averages) {
+  if (!Array.isArray(probabilities) || probabilities.length === 0) return NaN;
+  const normalizedMode = normalizeClassificationMode(mode);
+  const sums = probabilities.reduce((acc, value) => acc + (Number.isFinite(value) ? value : 0), 0);
+  const normalised = probabilities.map((value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num < 0) return 0;
+    if (sums > 0) {
+      return num / sums;
+    }
+    return 0;
+  });
+  const stats = averages && typeof averages === 'object' ? averages : {};
+  const train = stats.train && typeof stats.train === 'object' ? stats.train : {};
+  const overall = stats.overall && typeof stats.overall === 'object' ? stats.overall : {};
+  const pickAverage = (key, fallbackValue = NaN) => {
+    const trainValue = Number(train[key]);
+    if (Number.isFinite(trainValue)) return trainValue;
+    const overallValue = Number(overall[key]);
+    if (Number.isFinite(overallValue)) return overallValue;
+    return Number.isFinite(fallbackValue) ? fallbackValue : NaN;
+  };
+  if (normalizedMode === CLASSIFICATION_MODES.MULTICLASS) {
+    const dropMean = pickAverage('drop');
+    const flatMean = pickAverage('flat', 0);
+    const surgeMean = pickAverage('surge');
+    const dropProb = normalised[0] ?? 0;
+    const flatProb = normalised[1] ?? 0;
+    const surgeProb = normalised[2] ?? 0;
+    if (!Number.isFinite(dropMean) && !Number.isFinite(flatMean) && !Number.isFinite(surgeMean)) {
+      return NaN;
+    }
+    return (dropProb * dropMean) + (flatProb * flatMean) + (surgeProb * surgeMean);
+  }
+  const downMean = pickAverage('down');
+  const upMean = pickAverage('up');
+  const downProb = normalised[0] ?? 0;
+  const upProb = normalised[2] ?? (normalised[1] ?? 0);
+  if (!Number.isFinite(downMean) && !Number.isFinite(upMean)) {
+    return NaN;
+  }
+  return (downProb * downMean) + (upProb * upMean);
+}
+
+function clampProbability(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+let tfBackendReadyPromise = null;
+
+async function ensureTF() {
+  if (tfBackendReadyPromise) {
+    return tfBackendReadyPromise;
+  }
+  tfBackendReadyPromise = (async () => {
+    try {
+      if (typeof tf === 'undefined') {
+        importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@${TFJS_VERSION}/dist/tf.min.js`);
+      }
+      if (typeof tf !== 'undefined' && typeof tf?.setBackend === 'function') {
+        try {
+          importScripts(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/tf-backend-wasm.min.js`);
+        } catch (wasmError) {
+          console.warn('[Worker][AI] 無法載入 TFJS WASM 後端：', wasmError);
+        }
+        if (tf?.wasm?.setWasmPaths) {
+          tf.wasm.setWasmPaths(`https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@${TFJS_VERSION}/dist/`);
+        }
+        if (typeof tf?.util?.seedrandom === 'function') {
+          tf.util.seedrandom(ANN_DEFAULT_SEED);
+        }
+        try {
+          if (tf.getBackend() !== TF_BACKEND_TARGET) {
+            await tf.setBackend(TF_BACKEND_TARGET);
+          }
+        } catch (backendError) {
+          console.warn(`[Worker][AI] 無法設定 ${TF_BACKEND_TARGET} 後端，退回 CPU：`, backendError);
+          try {
+            await tf.setBackend('cpu');
+          } catch (cpuError) {
+            console.warn('[Worker][AI] 無法切換至 CPU 後端：', cpuError);
+          }
+        }
+        await tf.ready();
+        return tf.getBackend();
+      }
+    } catch (error) {
+      console.warn('[Worker][AI] 無法初始化 TensorFlow.js：', error);
+    }
+    return undefined;
+  })();
+  return tfBackendReadyPromise;
 }
 
 // --- Worker Data Acquisition & Cache (v11.7 - Netlify blob range fast path) ---
@@ -28,7 +455,7 @@ try {
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
 
 // Patch Tag: LB-SENSITIVITY-GRID-20250715A
-// Patch Tag: LB-SENSITIVITY-METRIC-20250729A
+// Patch Tag: LB-SENSITIVITY-METRIC-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250730A
 // Patch Tag: LB-BLOB-CURRENT-20250802B
 // Patch Tag: LB-AI-LSTM-20250929B
@@ -50,12 +477,27 @@ let pendingNextDayTrade = null; // 隔日交易追蹤變數
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
-const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20250715A";
-const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250729A";
+const MONTH_STALE_REVALIDATE_TW_MS = 1000 * 60 * 60 * 18; // 台股/上櫃：約 18 小時內需刷新一次
+const MONTH_STALE_REVALIDATE_US_MS = 1000 * 60 * 60 * 12; // 美股：預設 12 小時內刷新
+const MONTH_STALE_REVALIDATE_DEFAULT_MS = 1000 * 60 * 60 * 18;
+const STALE_RANGE_TOUCH_TOLERANCE_MS = DAY_MS / 2;
+const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20260810A";
+const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+
+const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
+  driftStable: 6,
+  driftCaution: 12,
+});
+
+const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
+  comfortPenaltyMax: 10,
+  cautionPenaltyMax: 30,
+  overflowPenaltySlope: 4,
+});
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -95,16 +537,54 @@ function aiNormaliseSequences(sequences, normaliser) {
   return sequences.map((seq) => seq.map((value) => (value - mean) / divisor));
 }
 
-function aiCreateModel(lookback, learningRate) {
+function aiCreateModel(lookback, learningRate, seed = LSTM_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.BINARY) {
+  const baseSeed = Number.isFinite(seed) ? Math.max(1, Math.round(seed)) : LSTM_DEFAULT_SEED;
+  const buildKernelInitializer = (offset = 0) =>
+    tf.initializers.glorotUniform({ seed: baseSeed + offset });
+  const buildRecurrentInitializer = (offset = 0) =>
+    tf.initializers.orthogonal({ seed: baseSeed + 100 + offset });
+  const biasInitializer = tf.initializers.zeros();
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
+
   const model = tf.sequential();
-  model.add(tf.layers.lstm({ units: 32, returnSequences: true, inputShape: [lookback, 1] }));
-  model.add(tf.layers.dropout({ rate: 0.2 }));
-  model.add(tf.layers.lstm({ units: 16 }));
-  model.add(tf.layers.dropout({ rate: 0.1 }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  model.add(
+    tf.layers.lstm({
+      units: 32,
+      returnSequences: true,
+      inputShape: [lookback, 1],
+      kernelInitializer: buildKernelInitializer(1),
+      recurrentInitializer: buildRecurrentInitializer(1),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.lstm({
+      units: 16,
+      kernelInitializer: buildKernelInitializer(2),
+      recurrentInitializer: buildRecurrentInitializer(2),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: 16,
+      activation: 'relu',
+      kernelInitializer: buildKernelInitializer(3),
+      biasInitializer,
+    }),
+  );
+  model.add(
+    tf.layers.dense({
+      units: isBinary ? 1 : 3,
+      activation: isBinary ? 'sigmoid' : 'softmax',
+      kernelInitializer: buildKernelInitializer(4),
+      biasInitializer,
+    }),
+  );
   const optimizer = tf.train.adam(learningRate);
-  model.compile({ optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
 }
 
@@ -129,18 +609,49 @@ async function handleAITrainLSTMMessage(message) {
     return;
   }
   const payload = message?.payload || {};
+  const overrides = payload.overrides || {};
+  const hyper = payload.hyperparameters || {};
+  const overrideSeed = Number.isFinite(overrides?.seed)
+    ? Math.max(1, Math.round(overrides.seed))
+    : null;
+  const hyperSeed = Number.isFinite(hyper?.seed)
+    ? Math.max(1, Math.round(hyper.seed))
+    : null;
+  const seedToUse = overrideSeed || hyperSeed || LSTM_DEFAULT_SEED;
+
   try {
+    await ensureTF();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
     }
+    if (typeof tf?.util?.seedrandom === 'function') {
+      tf.util.seedrandom(seedToUse);
+    }
+
     const dataset = payload.dataset || {};
     if (!Array.isArray(dataset.sequences) || dataset.sequences.length === 0) {
       throw new Error('缺少有效的訓練樣本。');
     }
-    const hyper = payload.hyperparameters || {};
-    const inferredLookback = Array.isArray(dataset.sequences[0]) ? dataset.sequences[0].length : 20;
-    const lookback = Math.max(5, Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback));
-    const totalSamples = Number.isFinite(hyper.totalSamples) ? hyper.totalSamples : dataset.sequences.length;
+
+    const volatilityThresholds = sanitizeVolatilityThresholds(dataset.volatilityThresholds);
+    let volatilityDiagnostics = dataset.volatilityDiagnostics
+      && typeof dataset.volatilityDiagnostics === 'object'
+        ? { ...dataset.volatilityDiagnostics }
+        : null;
+    const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
+    const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
+    const gatingThreshold = getDefaultThresholdForMode(classificationMode);
+
+    const inferredLookback = Array.isArray(dataset.sequences[0])
+      ? dataset.sequences[0].length
+      : 20;
+    const lookback = Math.max(
+      5,
+      Math.round(Number.isFinite(hyper.lookback) ? hyper.lookback : inferredLookback),
+    );
+    const totalSamples = Number.isFinite(hyper.totalSamples)
+      ? hyper.totalSamples
+      : dataset.sequences.length;
     const rawRatio = Number.isFinite(hyper.trainRatio) ? hyper.trainRatio : 0.8;
     const trainRatio = Math.min(Math.max(rawRatio, 0.6), 0.95);
     const fallbackTrainSize = Math.max(Math.floor(totalSamples * trainRatio), lookback);
@@ -150,12 +661,23 @@ async function handleAITrainLSTMMessage(message) {
     if (boundedTrainSize <= 0 || testSize <= 0) {
       throw new Error('訓練/測試樣本不足，請延長回測期間。');
     }
+
     const epochs = Math.max(1, Math.round(Number.isFinite(hyper.epochs) ? hyper.epochs : 80));
     const learningRate = Number.isFinite(hyper.learningRate) ? hyper.learningRate : 0.005;
-    const batchSize = Math.max(1, Math.min(Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32), boundedTrainSize));
+    const rawBatchSize = Math.max(
+      1,
+      Math.round(Number.isFinite(hyper.batchSize) ? hyper.batchSize : 32),
+    );
+    const batchSize = Math.min(rawBatchSize, boundedTrainSize);
 
     const sequences = Array.isArray(dataset.sequences) ? dataset.sequences : [];
     const labels = Array.isArray(dataset.labels) ? dataset.labels : [];
+    const labelIndices = labels.map((label) => {
+      if (isBinary) {
+        return label > 0 ? 1 : 0;
+      }
+      return Number.isInteger(label) ? Math.max(0, Math.min(2, label)) : 0;
+    });
     if (labels.length !== sequences.length) {
       throw new Error('樣本與標籤數量不一致，無法訓練模型。');
     }
@@ -164,7 +686,13 @@ async function handleAITrainLSTMMessage(message) {
     const normalizedSequences = aiNormaliseSequences(sequences, normaliser);
     const tensorInput = normalizedSequences.map((seq) => seq.map((value) => [value]));
     const xAll = tf.tensor(tensorInput);
-    const yAll = tf.tensor(labels.map((label) => [label]));
+    const yAll = isBinary
+      ? tf.tensor2d(labelIndices.map((value) => [value]), [labelIndices.length, 1])
+      : tf.tensor2d(labelIndices.map((index) => {
+        const arr = [0, 0, 0];
+        arr[index] = 1;
+        return arr;
+      }));
 
     const tensorsToDispose = [xAll, yAll];
     let model = null;
@@ -175,30 +703,40 @@ async function handleAITrainLSTMMessage(message) {
 
     try {
       xTrain = xAll.slice([0, 0, 0], [boundedTrainSize, lookback, 1]);
-      yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
       xTest = xAll.slice([boundedTrainSize, 0, 0], [testSize, lookback, 1]);
-      yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
+      if (isBinary) {
+        yTrain = yAll.slice([0, 0], [boundedTrainSize, 1]);
+        yTest = yAll.slice([boundedTrainSize, 0], [testSize, 1]);
+      } else {
+        yTrain = yAll.slice([0, 0], [boundedTrainSize, 3]);
+        yTest = yAll.slice([boundedTrainSize, 0], [testSize, 3]);
+      }
       tensorsToDispose.push(xTrain, yTrain, xTest, yTest);
 
-      model = aiCreateModel(lookback, learningRate);
+      model = aiCreateModel(lookback, learningRate, seedToUse, classificationMode);
 
       aiPostProgress(id, `訓練中（共 ${epochs} 輪）...`);
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        validationSplit: Math.min(0.2, Math.max(0.1, boundedTrainSize > 50 ? 0.2 : 0.1)),
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
             const accValue = logs.acc ?? logs.accuracy;
-            const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
-            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+            const accPercent = Number.isFinite(accValue)
+              ? `${(accValue * 100).toFixed(2)}%`
+              : '—';
+            aiPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
       });
 
-      const accuracyKey = history.history.acc ? 'acc' : (history.history.accuracy ? 'accuracy' : null);
+      const accuracyKey = history.history.acc
+        ? 'acc'
+        : history.history.accuracy
+          ? 'accuracy'
+          : null;
       const finalTrainAccuracy = accuracyKey
         ? history.history[accuracyKey][history.history[accuracyKey].length - 1]
         : NaN;
@@ -217,53 +755,172 @@ async function handleAITrainLSTMMessage(message) {
       const testAccuracy = evalValues[1] ?? NaN;
 
       const predictionsTensor = model.predict(xTest);
-      const predictionValues = Array.from(await predictionsTensor.data());
+      const rawPredictions = await predictionsTensor.array();
       predictionsTensor.dispose();
 
-      const testLabels = labels.slice(boundedTrainSize, boundedTrainSize + predictionValues.length);
+      const predictionArray = rawPredictions.map((row) => {
+        if (isBinary) {
+          const rawValue = Array.isArray(row) ? row[0] : row;
+          const probUp = clampProbability(Number(rawValue));
+          const probDown = clampProbability(1 - probUp);
+          return [probDown, 0, probUp];
+        }
+        const source = Array.isArray(row) ? row : [Number(row) || 0];
+        const pDown = clampProbability(source[0]);
+        const pFlat = clampProbability(source[1]);
+        const pUp = clampProbability(source[2]);
+        const sum = pDown + pFlat + pUp;
+        if (sum > 0) {
+          return [pDown / sum, pFlat / sum, pUp / sum];
+        }
+        return [0, 0, 0];
+      });
+
+      const testLabels = labelIndices.slice(boundedTrainSize, boundedTrainSize + predictionArray.length);
+      let TP = 0;
+      let TN = 0;
+      let FP = 0;
+      let FN = 0;
       let correctPredictions = 0;
-      for (let i = 0; i < predictionValues.length; i += 1) {
-        const predictedLabel = predictionValues[i] >= 0.5 ? 1 : 0;
-        if (predictedLabel === testLabels[i]) {
+      let positivePredictions = 0;
+      let positiveHits = 0;
+      let positiveActuals = 0;
+      const threshold = LSTM_THRESHOLD;
+      const predictedLabels = predictionArray.map((row) => {
+        if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
+        if (isBinary) {
+          return row[2] >= threshold ? 1 : 0;
+        }
+        let maxIndex = 0;
+        let maxValue = row[0];
+        for (let idx = 1; idx < row.length; idx += 1) {
+          if (row[idx] > maxValue) {
+            maxValue = row[idx];
+            maxIndex = idx;
+          }
+        }
+        return maxIndex;
+      });
+      for (let i = 0; i < predictedLabels.length; i += 1) {
+        const predictedLabel = predictedLabels[i];
+        const actual = isBinary ? (testLabels[i] > 0 ? 1 : 0) : testLabels[i];
+        if (predictedLabel === (isBinary ? actual : actual)) {
           correctPredictions += 1;
         }
+        if (isBinary) {
+          if (actual === 1) positiveActuals += 1;
+          if (predictedLabel === 1) {
+            positivePredictions += 1;
+            if (actual === 1) positiveHits += 1;
+          }
+          if (actual === 1 && predictedLabel === 1) TP += 1;
+          else if (actual === 0 && predictedLabel === 0) TN += 1;
+          else if (actual === 0 && predictedLabel === 1) FP += 1;
+          else if (actual === 1 && predictedLabel === 0) FN += 1;
+        } else {
+          if (actual === 2) positiveActuals += 1;
+          if (predictedLabel === 2) {
+            positivePredictions += 1;
+            if (actual === 2) positiveHits += 1;
+          }
+          if (actual === 2 && predictedLabel === 2) TP += 1;
+          else if (actual !== 2 && predictedLabel !== 2) TN += 1;
+          else if (actual !== 2 && predictedLabel === 2) FP += 1;
+          else if (actual === 2 && predictedLabel !== 2) FN += 1;
+        }
       }
-      const manualAccuracy = predictionValues.length > 0 ? correctPredictions / predictionValues.length : 0;
-      const resolvedTestAccuracy = Number.isFinite(testAccuracy) ? testAccuracy : manualAccuracy;
+      const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
+      const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
+      const positiveF1 = (Number.isFinite(positivePrecision)
+        && Number.isFinite(positiveRecall)
+        && (positivePrecision + positiveRecall) > 0)
+        ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
+        : NaN;
+      const deterministicTestAccuracy = isBinary
+        ? (predictedLabels.length > 0 ? correctPredictions / predictedLabels.length : NaN)
+        : positivePrecision;
+      const resolvedTestAccuracy = (isBinary && Number.isFinite(testAccuracy))
+        ? testAccuracy
+        : deterministicTestAccuracy;
+      const confusion = { TP, TN, FP, FN };
 
       const trainingOdds = aiComputeTrainingOdds(dataset.returns, boundedTrainSize);
       const testMeta = Array.isArray(dataset.meta) ? dataset.meta.slice(boundedTrainSize) : [];
-      const testReturns = Array.isArray(dataset.returns) ? dataset.returns.slice(boundedTrainSize) : [];
+      const testReturns = Array.isArray(dataset.returns)
+        ? dataset.returns.slice(boundedTrainSize)
+        : [];
 
       let nextDayForecast = null;
       if (Array.isArray(dataset.returns) && dataset.returns.length >= lookback) {
         const tailWindow = dataset.returns.slice(dataset.returns.length - lookback);
         if (tailWindow.length === lookback) {
-          const normalizedTail = tailWindow.map((value) => (value - normaliser.mean) / (normaliser.std || 1));
+          const normalizedTail = tailWindow.map(
+            (value) => (value - normaliser.mean) / (normaliser.std || 1),
+          );
           const forecastInput = tf.tensor([normalizedTail.map((value) => [value])]);
           const forecastTensor = model.predict(forecastInput);
-          const forecastArray = Array.from(await forecastTensor.data());
+          const forecastArray = await forecastTensor.array();
+          let forecastRow = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : forecastArray?.[0];
+          let forecastProbs;
+          if (isBinary) {
+            const rawValue = Array.isArray(forecastRow) ? forecastRow[0] : forecastRow;
+            const probUp = clampProbability(Number(rawValue));
+            const probDown = clampProbability(1 - probUp);
+            forecastProbs = [probDown, 0, probUp];
+          } else {
+            const pDown = clampProbability(Array.isArray(forecastRow) ? forecastRow[0] : Number(forecastRow) || 0);
+            const pFlat = clampProbability(Array.isArray(forecastRow) ? forecastRow[1] : 0);
+            const pUp = clampProbability(Array.isArray(forecastRow) ? forecastRow[2] : 0);
+            const sum = pDown + pFlat + pUp;
+            forecastProbs = sum > 0 ? [pDown / sum, pFlat / sum, pUp / sum] : [0, 0, 0];
+          }
+          let forecastClass = 0;
+          let forecastProb = forecastProbs[2] ?? 0;
+          let maxValue = forecastProbs[0];
+          for (let idx = 1; idx < forecastProbs.length; idx += 1) {
+            if (forecastProbs[idx] > maxValue) {
+              maxValue = forecastProbs[idx];
+              forecastClass = idx;
+            }
+          }
+          if (isBinary) {
+            forecastClass = forecastProb >= LSTM_THRESHOLD ? 2 : 0;
+          }
           nextDayForecast = {
-            probability: forecastArray[0],
+            probability: forecastProb,
             referenceDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
               ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
               : null,
+            probabilities: forecastProbs,
+            predictedClass: forecastClass,
+            classificationMode,
           };
+          const lastClose = Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+            ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close)
+            : null;
+          if (Number.isFinite(lastClose)) {
+            nextDayForecast.buyPrice = lastClose;
+          }
           forecastTensor.dispose();
           forecastInput.dispose();
         }
       }
 
+      const trainRatioUsed = boundedTrainSize / totalSamples;
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
         testAccuracy: resolvedTestAccuracy,
         testLoss,
-        totalPredictions: predictionValues.length,
+        totalPredictions: predictedLabels.length,
       };
 
+      if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
+        volatilityDiagnostics.expectedTrainSamples = boundedTrainSize;
+      }
+
       const predictionsPayload = {
-        predictions: predictionValues,
+        predictions: predictionArray,
         meta: testMeta,
         returns: testReturns,
         trainingOdds,
@@ -271,16 +928,96 @@ async function handleAITrainLSTMMessage(message) {
         datasetLastDate: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
           ? dataset.baseRows[dataset.baseRows.length - 1]?.date || null
           : null,
+        lastClose: Array.isArray(dataset.baseRows) && dataset.baseRows.length > 0
+          ? Number(dataset.baseRows[dataset.baseRows.length - 1]?.close) || null
+          : null,
         hyperparameters: {
           lookback,
           epochs,
           batchSize,
           learningRate,
-          trainRatio,
+          trainRatio: trainRatioUsed,
+          splitIndex: boundedTrainSize,
+          threshold: gatingThreshold,
+          volatility: volatilityThresholds,
+          seed: seedToUse,
+          classificationMode,
         },
+        predictedLabels,
+        volatilityThresholds,
+        classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
       };
 
-      aiPostResult(id, { trainingMetrics, predictionsPayload });
+      const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
+      const runMeta = {
+        version: LSTM_REPRO_VERSION,
+        patch: LSTM_REPRO_PATCH,
+        seed: seedToUse,
+        backend: backendInUse,
+        tfjs: TFJS_VERSION,
+        lookback,
+        epochs,
+        batchSize,
+        trainRatio: trainRatioUsed,
+        splitIndex: boundedTrainSize,
+        threshold: gatingThreshold,
+        mean: normaliser.mean,
+        std: normaliser.std,
+        totalSamples,
+        trainSamples: boundedTrainSize,
+        testSamples: testSize,
+        volatility: volatilityThresholds,
+        classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+      };
+      workerLastMeta = runMeta;
+
+      try {
+        self.postMessage({ type: LSTM_META_MESSAGE, payload: runMeta });
+      } catch (metaError) {
+        console.warn('[Worker][AI] 回傳 LSTM 執行資訊失敗：', metaError);
+      }
+
+      try {
+        await model.save(`indexeddb://${LSTM_MODEL_STORAGE_KEY}`);
+      } catch (saveError) {
+        console.warn('[Worker][AI] 無法保存 LSTM 模型：', saveError);
+      }
+
+      const accuracyLabel = isBinary ? '測試正確率' : '大漲命中率';
+      const accuracyText = Number.isFinite(resolvedTestAccuracy)
+        ? (resolvedTestAccuracy * 100).toFixed(2)
+        : '—';
+      let finalMessage = `完成：${accuracyLabel} ${accuracyText}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+      if (!isBinary) {
+        const precisionText = Number.isFinite(positivePrecision) ? (positivePrecision * 100).toFixed(2) : '—';
+        const recallText = Number.isFinite(positiveRecall) ? (positiveRecall * 100).toFixed(2) : '—';
+        const f1Text = Number.isFinite(positiveF1) ? (positiveF1 * 100).toFixed(2) : '—';
+        finalMessage += `｜Precision ${precisionText}%｜Recall ${recallText}%｜F1 ${f1Text}%`;
+      }
+
+      const hyperparametersUsed = {
+        lookback,
+        epochs,
+        batchSize,
+        learningRate,
+        trainRatio: trainRatioUsed,
+        splitIndex: boundedTrainSize,
+        threshold: gatingThreshold,
+        volatility: volatilityThresholds,
+        seed: seedToUse,
+        modelType: MODEL_TYPES.LSTM,
+        classificationMode,
+      };
+
+      aiPostResult(id, {
+        trainingMetrics,
+        predictionsPayload,
+        confusion,
+        hyperparametersUsed,
+        finalMessage,
+      });
     } finally {
       tensorsToDispose.forEach((tensor) => {
         if (tensor && typeof tensor.dispose === 'function') {
@@ -332,6 +1069,20 @@ function annResolveClose(row) {
     if (Number.isFinite(value) && value > 0) return value;
   }
   return NaN;
+}
+
+function annResolveOpen(row, fallback) {
+  const candidates = [
+    row?.open,
+    row?.adjustedOpen,
+    row?.adjOpen,
+    row?.rawOpen,
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const value = Number(candidates[i]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : NaN;
 }
 
 function annResolveHigh(row, fallback) {
@@ -553,7 +1304,13 @@ function annWilliamsR(high, low, close, period = 14) {
   });
 }
 
-function annPrepareDataset(rows) {
+function annPrepareDataset(
+  rows,
+  volatilityOverrides = DEFAULT_VOLATILITY_THRESHOLDS,
+  classificationOverride = CLASSIFICATION_MODES.MULTICLASS,
+  supplementary = {},
+) {
+  const classificationMode = normalizeClassificationMode(classificationOverride);
   const parsed = Array.isArray(rows)
     ? rows
         .filter((row) => row && typeof row.date === 'string')
@@ -562,6 +1319,7 @@ function annPrepareDataset(rows) {
           return {
             date: row.date,
             close,
+            open: annResolveOpen(row, close),
             high: annResolveHigh(row, close),
             low: annResolveLow(row, close),
           };
@@ -574,6 +1332,75 @@ function annPrepareDataset(rows) {
   const high = parsed.map((row) => row.high);
   const low = parsed.map((row) => row.low);
 
+  const vixRows = Array.isArray(supplementary?.vixRows) ? supplementary.vixRows : [];
+  const vixMap = new Map();
+  for (let i = 0; i < vixRows.length; i += 1) {
+    const entry = vixRows[i];
+    if (!entry || typeof entry.date !== 'string') continue;
+    const closeValue = annResolveClose(entry);
+    if (Number.isFinite(closeValue)) {
+      vixMap.set(entry.date, closeValue);
+    }
+  }
+  const vixSeries = new Array(parsed.length).fill(NaN);
+  let lastVix = NaN;
+  let firstFiniteVixIndex = -1;
+  let vixMatched = 0;
+  for (let i = 0; i < parsed.length; i += 1) {
+    const entry = parsed[i];
+    const direct = vixMap.get(entry.date);
+    let value = Number(direct);
+    if (Number.isFinite(value)) {
+      lastVix = value;
+      if (firstFiniteVixIndex === -1) {
+        firstFiniteVixIndex = i;
+      }
+      vixMatched += 1;
+    } else if (Number.isFinite(lastVix)) {
+      value = lastVix;
+    }
+    if (!Number.isFinite(value)) {
+      value = NaN;
+    }
+    vixSeries[i] = value;
+  }
+  if (firstFiniteVixIndex > 0 && Number.isFinite(vixSeries[firstFiniteVixIndex])) {
+    const fillValue = vixSeries[firstFiniteVixIndex];
+    for (let i = 0; i < firstFiniteVixIndex; i += 1) {
+      vixSeries[i] = fillValue;
+    }
+  }
+  if (vixMatched === 0 && parsed.length > 0) {
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      if (!Number.isFinite(vixSeries[i])) {
+        vixSeries[i] = 0;
+      }
+    }
+  } else {
+    for (let i = 0; i < vixSeries.length; i += 1) {
+      if (!Number.isFinite(vixSeries[i]) && Number.isFinite(lastVix)) {
+        vixSeries[i] = lastVix;
+      }
+    }
+  }
+  const vixDiagnostics = {
+    totalSamples: parsed.length,
+    matchedSamples: vixMatched,
+    coverage: parsed.length > 0 ? vixMatched / parsed.length : 0,
+    lastKnownValue: Number.isFinite(lastVix) ? lastVix : null,
+  };
+
+  const indicatorStats = ANN_FEATURE_NAMES.map((name) => ({
+    name,
+    totalSamples: 0,
+    finiteSamples: 0,
+    min: Infinity,
+    max: -Infinity,
+  }));
+  const classDistribution = classificationMode === CLASSIFICATION_MODES.BINARY
+    ? { up: 0, down: 0 }
+    : { surge: 0, flat: 0, drop: 0 };
+
   const ma = annSma(close, 30);
   const wma = annWma(close, 15);
   const ema = annEma(close, 12);
@@ -583,6 +1410,8 @@ function annPrepareDataset(rows) {
   const mac = annMacd(close, 12, 26, 9);
   const cci = annCci(high, low, close, 20);
   const wr = annWilliamsR(high, low, close, 14);
+
+  const volatilityThresholds = sanitizeVolatilityThresholds(volatilityOverrides);
 
   const X = [];
   const y = [];
@@ -605,7 +1434,19 @@ function annPrepareDataset(rows) {
       mac.hist[i],
       cci[i],
       wr[i],
+      vixSeries[i],
     ];
+    for (let f = 0; f < features.length; f += 1) {
+      const stat = indicatorStats[f];
+      if (!stat) continue;
+      stat.totalSamples += 1;
+      const value = Number(features[f]);
+      if (Number.isFinite(value)) {
+        stat.finiteSamples += 1;
+        if (value < stat.min) stat.min = value;
+        if (value > stat.max) stat.max = value;
+      }
+    }
     if (features.every((value) => Number.isFinite(value))) {
       forecastFeature = features.map(Number);
       forecastDate = parsed[i].date;
@@ -618,18 +1459,93 @@ function annPrepareDataset(rows) {
     }
     const current = parsed[i];
     const next = parsed[i + 1];
-    const change = (next.close - current.close) / current.close;
+    const entryTrigger = current.close;
+    const nextLow = Number.isFinite(next.low) ? next.low : entryTrigger;
+    const nextOpen = Number.isFinite(next.open) ? next.open : entryTrigger;
+    const entryEligible = Number.isFinite(nextLow) && nextLow < entryTrigger;
+    const closeEntryBuyPrice = entryEligible
+      ? (Number.isFinite(nextOpen) && nextOpen < entryTrigger ? nextOpen : entryTrigger)
+      : entryTrigger;
+    const sellPrice = next.close;
+    const closeEntryReturn = entryEligible && Number.isFinite(closeEntryBuyPrice) && closeEntryBuyPrice > 0
+      ? (sellPrice - closeEntryBuyPrice) / closeEntryBuyPrice
+      : 0;
+    const swingReturn = Number.isFinite(next.close) && Number.isFinite(current.close) && current.close > 0
+      ? (next.close - current.close) / current.close
+      : NaN;
+    let classLabel;
+    if (classificationMode === CLASSIFICATION_MODES.BINARY) {
+      classLabel = Number(closeEntryReturn > 0);
+      if (classLabel === 1) classDistribution.up += 1;
+      else classDistribution.down += 1;
+    } else if (Number.isFinite(swingReturn)) {
+      if (swingReturn >= volatilityThresholds.surge) {
+        classLabel = 2;
+        classDistribution.surge += 1;
+      } else if (swingReturn <= -volatilityThresholds.drop) {
+        classLabel = 0;
+        classDistribution.drop += 1;
+      } else {
+        classLabel = 1;
+        classDistribution.flat += 1;
+      }
+    } else {
+      classLabel = 1;
+      classDistribution.flat += 1;
+    }
+    const closeSameDayBuyPrice = Number.isFinite(current.close) && current.close > 0 ? current.close : NaN;
+    const closeSameDayEligible = Number.isFinite(closeSameDayBuyPrice) && closeSameDayBuyPrice > 0
+      && Number.isFinite(sellPrice) && sellPrice > 0;
+    const closeSameDayReturn = closeSameDayEligible
+      ? (sellPrice - closeSameDayBuyPrice) / closeSameDayBuyPrice
+      : 0;
+    const openEntryBuyPrice = Number.isFinite(nextOpen) && nextOpen > 0 ? nextOpen : entryTrigger;
+    const openEntryEligible = Number.isFinite(openEntryBuyPrice) && openEntryBuyPrice > 0 && Number.isFinite(sellPrice);
+    const openEntryReturn = openEntryEligible
+      ? (sellPrice - openEntryBuyPrice) / openEntryBuyPrice
+      : 0;
+    const actualReturn = closeEntryReturn;
     X.push(features.map(Number));
-    y.push(next.close > current.close ? 1 : 0);
+    y.push(classLabel);
     meta.push({
       buyDate: current.date,
       sellDate: next.date,
       tradeDate: next.date,
       buyClose: current.close,
       sellClose: next.close,
+      buyPrice: closeEntryBuyPrice,
+      sellPrice,
+      nextOpen,
+      nextLow,
+      entryEligible,
+      closeEntryEligible: entryEligible,
+      closeEntryBuyPrice,
+      closeEntryReturn,
+      openEntryEligible,
+      openEntryBuyPrice,
+      openEntrySellPrice: sellPrice,
+      openEntryReturn,
+      actualReturn,
+      buyTrigger: entryTrigger,
+      closeSameDayEligible,
+      closeSameDayBuyPrice,
+      closeSameDaySellPrice: sellPrice,
+      closeSameDayReturn,
+      swingReturn,
+      classLabel,
     });
-    returns.push(change);
+    returns.push(actualReturn);
   }
+
+  const indicatorDiagnostics = indicatorStats.map((stat) => ({
+    name: stat.name,
+    totalSamples: stat.totalSamples,
+    finiteSamples: stat.finiteSamples,
+    missingSamples: Math.max(stat.totalSamples - stat.finiteSamples, 0),
+    min: stat.finiteSamples > 0 ? stat.min : null,
+    max: stat.finiteSamples > 0 ? stat.max : null,
+    coverage: stat.totalSamples > 0 ? stat.finiteSamples / stat.totalSamples : 0,
+  }));
 
   return {
     X,
@@ -639,6 +1555,15 @@ function annPrepareDataset(rows) {
     forecastFeature,
     forecastDate,
     datasetLastDate: parsed.length > 0 ? parsed[parsed.length - 1].date : null,
+    datasetLastClose: parsed.length > 0 ? parsed[parsed.length - 1].close : null,
+    volatilityThresholds,
+    classificationMode,
+    indicatorDiagnostics,
+    classDistribution,
+    totalParsedRows: parsed.length,
+    supplementaryDiagnostics: {
+      vix: vixDiagnostics,
+    },
   };
 }
 
@@ -671,9 +1596,12 @@ function annStandardizeVector(vector, mean, std) {
   return vector.map((value, index) => (value - mean[index]) / (std[index] || 1));
 }
 
-function annSplitTrainTest(Z, y, meta, returns, ratio) {
+function annSplitTrainTest(Z, y, meta, returns, ratio, forcedTrainCount = null) {
   const total = Z.length;
-  const trainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const computedTrainCount = Math.min(Math.max(Math.floor(total * ratio), 1), total - 1);
+  const trainCount = Number.isFinite(forcedTrainCount)
+    ? Math.min(Math.max(Math.round(forcedTrainCount), 1), total - 1)
+    : computedTrainCount;
   return {
     Xtr: Z.slice(0, trainCount),
     ytr: y.slice(0, trainCount),
@@ -685,15 +1613,120 @@ function annSplitTrainTest(Z, y, meta, returns, ratio) {
   };
 }
 
-// Patch Tag: LB-AI-ANNS-20251215A — Align ANN optimizer/loss with Chen et al. (2024) and extend MACD features.
-function annBuildModel(inputDim, learningRate = 0.01) {
+function annOneHot(labels, numClasses = 3) {
+  return labels.map((label) => {
+    const index = Number.isInteger(label) ? Math.max(0, Math.min(numClasses - 1, label)) : 0;
+    const arr = new Array(numClasses).fill(0);
+    arr[index] = 1;
+    return arr;
+  });
+}
+
+// Patch Tag: LB-AI-ANNS-REPRO-20251223A — Seeded initialisers & deterministic ANN stack.
+function annBuildModel(inputDim, learningRate = 0.01, seed = ANN_DEFAULT_SEED, classificationMode = CLASSIFICATION_MODES.MULTICLASS) {
   const model = tf.sequential();
-  model.add(tf.layers.dense({ units: 32, activation: 'relu', inputShape: [inputDim] }));
-  model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  const initializerSeed = Number.isFinite(seed) ? seed : ANN_DEFAULT_SEED;
+  const kernelInitializer = tf.initializers.glorotUniform({ seed: initializerSeed });
+  const biasInitializer = tf.initializers.zeros();
+  const normalizedMode = normalizeClassificationMode(classificationMode);
+  const isBinary = normalizedMode === CLASSIFICATION_MODES.BINARY;
+  model.add(tf.layers.dense({
+    units: 32,
+    activation: 'relu',
+    inputShape: [inputDim],
+    kernelInitializer,
+    biasInitializer,
+  }));
+  model.add(tf.layers.dense({
+    units: 16,
+    activation: 'relu',
+    kernelInitializer,
+    biasInitializer,
+  }));
+  model.add(tf.layers.dense({
+    units: isBinary ? 1 : 3,
+    activation: isBinary ? 'sigmoid' : 'softmax',
+    kernelInitializer,
+    biasInitializer,
+  }));
   const optimizer = tf.train.sgd(learningRate);
-  model.compile({ optimizer, loss: 'meanSquaredError', metrics: ['accuracy'] });
+  const loss = isBinary ? 'binaryCrossentropy' : 'categoricalCrossentropy';
+  model.compile({ optimizer, loss, metrics: ['accuracy'] });
   return model;
+}
+
+async function annCollectLayerDiagnostics(model) {
+  if (!model || !Array.isArray(model.layers)) {
+    return [];
+  }
+  const diagnostics = [];
+  for (let index = 0; index < model.layers.length; index += 1) {
+    const layer = model.layers[index];
+    if (!layer) continue;
+    let className = null;
+    try {
+      className = typeof layer.getClassName === 'function' ? layer.getClassName() : null;
+    } catch (error) {
+      className = layer.constructor?.name || null;
+    }
+    let config = {};
+    try {
+      config = typeof layer.getConfig === 'function' ? layer.getConfig() : {};
+    } catch (error) {
+      config = {};
+    }
+    const entry = {
+      index,
+      name: layer.name || `layer_${index}`,
+      className,
+      activation: config.activation || layer.activation?.name || null,
+      units: Number.isFinite(layer.units) ? layer.units : (Number.isFinite(config.units) ? config.units : null),
+      outputShape: Array.isArray(layer.outputShape) ? layer.outputShape : (layer.outputShape || null),
+      weightSummaries: [],
+      hasNaN: false,
+    };
+    const weights = typeof layer.getWeights === 'function' ? layer.getWeights() : [];
+    for (let w = 0; w < weights.length; w += 1) {
+      const tensor = weights[w];
+      if (!tensor || typeof tensor.data !== 'function') continue;
+      let data;
+      try {
+        data = await tensor.data();
+      } catch (error) {
+        data = [];
+      }
+      let finiteCount = 0;
+      let nanCount = 0;
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < data.length; i += 1) {
+        const value = data[i];
+        if (!Number.isFinite(value)) {
+          nanCount += 1;
+          continue;
+        }
+        finiteCount += 1;
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+      if (nanCount > 0) {
+        entry.hasNaN = true;
+      }
+      entry.weightSummaries.push({
+        index: w,
+        size: data.length,
+        finiteCount,
+        nanCount,
+        min: finiteCount > 0 ? min : null,
+        max: finiteCount > 0 ? max : null,
+      });
+      if (tensor && typeof tensor.dispose === 'function') {
+        tensor.dispose();
+      }
+    }
+    diagnostics.push(entry);
+  }
+  return diagnostics;
 }
 
 async function handleAITrainANNMessage(message) {
@@ -704,37 +1737,252 @@ async function handleAITrainANNMessage(message) {
   const payload = message?.payload || {};
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const options = payload.options || {};
+  const overrides = payload.overrides || {};
+  const overrideSeedRaw = Number.isFinite(overrides?.seed) ? overrides.seed : null;
+  const overrideSeed = Number.isFinite(overrideSeedRaw) ? Math.max(1, Math.round(overrideSeedRaw)) : null;
+  const seedToUse = Number.isFinite(overrideSeed) ? overrideSeed : ANN_DEFAULT_SEED;
 
   try {
+    await ensureTF();
     if (typeof tf === 'undefined' || typeof tf.tensor !== 'function') {
       throw new Error('TensorFlow.js 尚未在背景執行緒載入，請重新整理頁面。');
+    }
+    if (typeof tf?.util?.seedrandom === 'function') {
+      tf.util.seedrandom(seedToUse);
     }
     if (!Array.isArray(rows) || rows.length < 60) {
       throw new Error('資料不足（至少 60 根 K 線）');
     }
 
-    const prepared = annPrepareDataset(rows);
+    let vixRows = [];
+    const normalizedMarket = typeof options.marketType === 'string'
+      ? options.marketType.toUpperCase()
+      : null;
+    const shouldAttachVix = normalizedMarket === 'US'
+      || normalizedMarket === 'NASDAQ'
+      || normalizedMarket === 'NYSE';
+    if (shouldAttachVix) {
+      const dateCandidates = Array.isArray(rows)
+        ? rows
+            .filter((row) => row && typeof row.date === 'string')
+            .map((row) => row.date)
+            .sort((a, b) => a.localeCompare(b))
+        : [];
+      if (dateCandidates.length > 0) {
+        const vixStart = dateCandidates[0];
+        const vixEnd = dateCandidates[dateCandidates.length - 1];
+        try {
+          annPostProgress(id, '載入 VIX 波動度指標...');
+        } catch (progressError) {
+          console.warn('[Worker][AI] VIX 進度更新失敗：', progressError);
+        }
+        try {
+          const vixResult = await fetchStockData('^VIX', vixStart, vixEnd, 'INDEX', {
+            adjustedPrice: false,
+            splitAdjustment: false,
+            effectiveStartDate: vixStart,
+            lookbackDays: Number.isFinite(options.lookback) ? options.lookback : null,
+          });
+          if (Array.isArray(vixResult?.data)) {
+            vixRows = vixResult.data;
+          }
+        } catch (vixError) {
+          console.warn('[Worker][AI] 無法載入 ^VIX 資料：', vixError);
+        }
+      }
+    }
+
+    const prepared = annPrepareDataset(
+      rows,
+      options.volatility,
+      options.classificationMode,
+      { vixRows },
+    );
+    const classificationMode = normalizeClassificationMode(options.classificationMode || prepared.classificationMode);
+    const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     if (!Array.isArray(prepared.X) || prepared.X.length < 40) {
       throw new Error('有效樣本不足，請延長資料範圍。');
     }
 
+    const totalSamples = prepared.X.length;
     const trainRatio = annClampTrainRatio(options.trainRatio);
+    const rawTrainCount = Math.min(Math.max(Math.floor(totalSamples * trainRatio), 1), totalSamples - 1);
+    let volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
+    let volatilityDiagnostics = prepared.volatilityDiagnostics
+      && typeof prepared.volatilityDiagnostics === 'object'
+        ? { ...prepared.volatilityDiagnostics }
+        : null;
+    const labels = new Array(totalSamples);
+    const classReturnSumsTrain = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnCountsTrain = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnSumsAll = isBinary ? [0, 0] : [0, 0, 0];
+    const classReturnCountsAll = isBinary ? [0, 0] : [0, 0, 0];
+    if (isBinary) {
+      for (let i = 0; i < totalSamples; i += 1) {
+        const metaItem = prepared.meta[i] || {};
+        const positive = Number(metaItem?.closeEntryReturn ?? prepared.returns[i]) > 0;
+        const label = positive ? 1 : 0;
+        labels[i] = label;
+        if (metaItem) {
+          metaItem.classLabel = label;
+        }
+        let swingValue = Number(metaItem?.closeEntryReturn);
+        if (!Number.isFinite(swingValue)) {
+          swingValue = Number(prepared.returns[i]);
+        }
+        if (!Number.isFinite(swingValue)) {
+          swingValue = Number(metaItem?.actualReturn);
+        }
+        if (Number.isFinite(swingValue)) {
+          classReturnSumsAll[label] += swingValue;
+          classReturnCountsAll[label] += 1;
+          if (i < rawTrainCount) {
+            classReturnSumsTrain[label] += swingValue;
+            classReturnCountsTrain[label] += 1;
+          }
+        }
+      }
+    } else {
+      const trainingSwings = prepared.meta
+        .slice(0, rawTrainCount)
+        .map((item) => Number(item?.swingReturn))
+        .filter((value) => Number.isFinite(value));
+      const diagnosticsPayload = {};
+      volatilityThresholds = deriveVolatilityThresholdsFromReturns(trainingSwings, volatilityThresholds, diagnosticsPayload);
+      diagnosticsPayload.expectedTrainSamples = trainingSwings.length;
+      volatilityDiagnostics = diagnosticsPayload;
+      for (let i = 0; i < totalSamples; i += 1) {
+        const metaItem = prepared.meta[i] || {};
+        const swingValue = Number(metaItem?.swingReturn);
+        const label = classifySwingReturn(swingValue, volatilityThresholds);
+        labels[i] = label;
+        if (metaItem) {
+          metaItem.classLabel = label;
+        }
+        if (Number.isFinite(swingValue)) {
+          classReturnSumsAll[label] += swingValue;
+          classReturnCountsAll[label] += 1;
+          if (i < rawTrainCount) {
+            classReturnSumsTrain[label] += swingValue;
+            classReturnCountsTrain[label] += 1;
+          }
+        }
+      }
+    }
+    prepared.y = labels;
+    prepared.volatilityThresholds = volatilityThresholds;
+    prepared.volatilityDiagnostics = volatilityDiagnostics;
+
+    const computeClassMean = (sums, counts, index) => (counts[index] > 0 ? sums[index] / counts[index] : null);
+    let classReturnAverages = null;
+    if (isBinary) {
+      classReturnAverages = {
+        train: {
+          down: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 0),
+          up: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 1),
+        },
+        overall: {
+          down: computeClassMean(classReturnSumsAll, classReturnCountsAll, 0),
+          up: computeClassMean(classReturnSumsAll, classReturnCountsAll, 1),
+        },
+        trainCounts: { down: classReturnCountsTrain[0], up: classReturnCountsTrain[1] },
+        overallCounts: { down: classReturnCountsAll[0], up: classReturnCountsAll[1] },
+      };
+    } else {
+      classReturnAverages = {
+        train: {
+          drop: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 0),
+          flat: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 1),
+          surge: computeClassMean(classReturnSumsTrain, classReturnCountsTrain, 2),
+        },
+        overall: {
+          drop: computeClassMean(classReturnSumsAll, classReturnCountsAll, 0),
+          flat: computeClassMean(classReturnSumsAll, classReturnCountsAll, 1),
+          surge: computeClassMean(classReturnSumsAll, classReturnCountsAll, 2),
+        },
+        trainCounts: {
+          drop: classReturnCountsTrain[0],
+          flat: classReturnCountsTrain[1],
+          surge: classReturnCountsTrain[2],
+        },
+        overallCounts: {
+          drop: classReturnCountsAll[0],
+          flat: classReturnCountsAll[1],
+          surge: classReturnCountsAll[2],
+        },
+      };
+    }
+    prepared.classReturnAverages = classReturnAverages;
+
+    if (isBinary) {
+      const updatedDistribution = { up: 0, down: 0 };
+      for (let i = 0; i < labels.length; i += 1) {
+        const label = labels[i] > 0 ? 1 : 0;
+        if (label === 1) {
+          updatedDistribution.up += 1;
+        } else {
+          updatedDistribution.down += 1;
+        }
+      }
+      prepared.classDistribution = updatedDistribution;
+      if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
+        volatilityDiagnostics.datasetTotalSamples = labels.length;
+        volatilityDiagnostics.datasetPositiveSamples = updatedDistribution.up;
+        volatilityDiagnostics.datasetNegativeSamples = updatedDistribution.down;
+        volatilityDiagnostics.classReturnAverages = classReturnAverages;
+      }
+    } else {
+      const updatedDistribution = { surge: 0, flat: 0, drop: 0 };
+      for (let i = 0; i < labels.length; i += 1) {
+        const label = labels[i];
+        if (label === 2) {
+          updatedDistribution.surge += 1;
+        } else if (label === 0) {
+          updatedDistribution.drop += 1;
+        } else {
+          updatedDistribution.flat += 1;
+        }
+      }
+      prepared.classDistribution = updatedDistribution;
+      if (volatilityDiagnostics && typeof volatilityDiagnostics === 'object') {
+        volatilityDiagnostics.datasetTotalSamples = labels.length;
+        volatilityDiagnostics.datasetSurgeSamples = updatedDistribution.surge;
+        volatilityDiagnostics.datasetFlatSamples = updatedDistribution.flat;
+        volatilityDiagnostics.datasetDropSamples = updatedDistribution.drop;
+        volatilityDiagnostics.classReturnAverages = classReturnAverages;
+      }
+    }
+
     const { Z, mean, std } = annStandardize(prepared.X);
-    const split = annSplitTrainTest(Z, prepared.y, prepared.meta, prepared.returns, trainRatio);
+    const split = annSplitTrainTest(Z, labels, prepared.meta, prepared.returns, trainRatio, rawTrainCount);
     if (split.Xte.length === 0) {
       throw new Error('訓練/測試樣本不足，請延長資料範圍。');
     }
 
-    const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 60));
-    const batchSizeRaw = Math.max(1, Math.round(Number.isFinite(options.batchSize) ? options.batchSize : 32));
-    const batchSize = Math.min(batchSizeRaw, split.Xtr.length);
+    const epochs = Math.max(1, Math.round(Number.isFinite(options.epochs) ? options.epochs : 200));
     const learningRate = Number.isFinite(options.learningRate) ? options.learningRate : 0.01;
+    const batchSize = split.trainCount;
+    const defaultThreshold = getDefaultThresholdForMode(classificationMode);
+    const threshold = Number.isFinite(options.threshold) ? options.threshold : defaultThreshold;
 
-    const model = annBuildModel(split.Xtr[0].length, learningRate);
+    const model = annBuildModel(split.Xtr[0].length, learningRate, seedToUse, classificationMode);
     const xTrain = tf.tensor2d(split.Xtr);
-    const yTrain = tf.tensor2d(split.ytr, [split.ytr.length, 1]);
-    const xTest = tf.tensor2d(split.Xte);
-    const yTest = tf.tensor2d(split.yte, [split.yte.length, 1]);
+    let yTrain;
+    let xTest;
+    let yTest;
+    if (isBinary) {
+      const yTrainValues = split.ytr.map((label) => (label > 0 ? 1 : 0));
+      const yTestValues = split.yte.map((label) => (label > 0 ? 1 : 0));
+      yTrain = tf.tensor2d(yTrainValues.map((value) => [value]), [yTrainValues.length, 1]);
+      xTest = tf.tensor2d(split.Xte);
+      yTest = tf.tensor2d(yTestValues.map((value) => [value]), [yTestValues.length, 1]);
+    } else {
+      const yTrainArray = annOneHot(split.ytr, 3);
+      const yTestArray = annOneHot(split.yte, 3);
+      yTrain = tf.tensor2d(yTrainArray, [yTrainArray.length, 3]);
+      xTest = tf.tensor2d(split.Xte);
+      yTest = tf.tensor2d(yTestArray, [yTestArray.length, 3]);
+    }
 
     const tensorsToDispose = [xTrain, yTrain, xTest, yTest];
     try {
@@ -742,13 +1990,13 @@ async function handleAITrainANNMessage(message) {
       const history = await model.fit(xTrain, yTrain, {
         epochs,
         batchSize,
-        shuffle: true,
+        shuffle: false,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
             const lossText = Number.isFinite(logs.loss) ? logs.loss.toFixed(4) : '—';
             const accValue = logs.acc ?? logs.accuracy;
             const accPercent = Number.isFinite(accValue) ? `${(accValue * 100).toFixed(2)}%` : '—';
-            annPostProgress(id, `訓練中（${epoch + 1}/${epochs}） Loss ${lossText} / Acc ${accPercent}`);
+            annPostProgress(id, `訓練中（${epoch + 1}/${epochs}）Loss ${lossText} / Acc ${accPercent}`);
           },
         },
       });
@@ -769,13 +2017,111 @@ async function handleAITrainANNMessage(message) {
         tensor.dispose();
       }
       const testLoss = evalValues[0] ?? NaN;
-      const testAccuracy = evalValues[1] ?? NaN;
 
       const predictionsTensor = model.predict(xTest);
-      const predictionValues = Array.from(await predictionsTensor.data());
+      const rawPredictions = await predictionsTensor.array();
       predictionsTensor.dispose();
 
+      const predictionArray = isBinary
+        ? rawPredictions.map((row) => {
+          const rawValue = Array.isArray(row) ? row[0] : row;
+          const probUp = Math.min(Math.max(Number(rawValue) || 0, 0), 1);
+          const probDown = 1 - probUp;
+          return [probDown, 0, probUp];
+        })
+        : rawPredictions.map((row) => (Array.isArray(row) ? row : [Number(row) || 0]));
+
+      const predictedLabels = predictionArray.map((row) => {
+        if (!Array.isArray(row) || row.length === 0) return isBinary ? 0 : 0;
+        if (isBinary) {
+          return row[2] >= threshold ? 1 : 0;
+        }
+        let maxIndex = 0;
+        let maxValue = row[0];
+        for (let idx = 1; idx < row.length; idx += 1) {
+          if (row[idx] > maxValue) {
+            maxValue = row[idx];
+            maxIndex = idx;
+          }
+        }
+        return maxIndex;
+      });
+      const actualLabels = split.yte.map((label) => (isBinary ? (label > 0 ? 1 : 0) : label));
+      let TP = 0;
+      let TN = 0;
+      let FP = 0;
+      let FN = 0;
+      let correct = 0;
+      let positivePredictions = 0;
+      let positiveHits = 0;
+      let positiveActuals = 0;
+      for (let i = 0; i < predictedLabels.length; i += 1) {
+        const predicted = predictedLabels[i];
+        const actual = actualLabels[i];
+        if (predicted === actual) {
+          correct += 1;
+        }
+        if (isBinary) {
+          if (actual === 1) positiveActuals += 1;
+          if (predicted === 1) {
+            positivePredictions += 1;
+            if (actual === 1) positiveHits += 1;
+          }
+          if (actual === 1 && predicted === 1) TP += 1;
+          else if (actual === 0 && predicted === 0) TN += 1;
+          else if (actual === 0 && predicted === 1) FP += 1;
+          else if (actual === 1 && predicted === 0) FN += 1;
+        } else {
+          if (actual === 2) positiveActuals += 1;
+          if (predicted === 2) {
+            positivePredictions += 1;
+            if (actual === 2) positiveHits += 1;
+          }
+          if (actual === 2 && predicted === 2) TP += 1;
+          else if (actual !== 2 && predicted !== 2) TN += 1;
+          else if (actual !== 2 && predicted === 2) FP += 1;
+          else if (actual === 2 && predicted !== 2) FN += 1;
+        }
+      }
+      const deterministicTestAccuracy = isBinary
+        ? (actualLabels.length > 0 ? correct / actualLabels.length : NaN)
+        : (positivePredictions > 0 ? positiveHits / positivePredictions : NaN);
+      const positivePrecision = positivePredictions > 0 ? positiveHits / positivePredictions : NaN;
+      const positiveRecall = positiveActuals > 0 ? positiveHits / positiveActuals : NaN;
+      const positiveF1 = (Number.isFinite(positivePrecision)
+        && Number.isFinite(positiveRecall)
+        && (positivePrecision + positiveRecall) > 0)
+        ? (2 * positivePrecision * positiveRecall) / (positivePrecision + positiveRecall)
+        : NaN;
+      const confusion = { TP, TN, FP, FN };
+
       const trainingOdds = aiComputeTrainingOdds(prepared.returns, split.trainCount);
+      const datasetDiagnostics = {
+        totalParsedRows: Number.isFinite(prepared.totalParsedRows) ? prepared.totalParsedRows : rows.length,
+        usableSamples: totalSamples,
+        trainSamples: split.trainCount,
+        testSamples: split.Xte.length,
+        classificationMode,
+        classDistribution: prepared.classDistribution ? { ...prepared.classDistribution } : null,
+        indicatorDiagnostics: Array.isArray(prepared.indicatorDiagnostics)
+          ? prepared.indicatorDiagnostics.map((entry) => ({ ...entry }))
+          : [],
+        supplementaryDiagnostics: prepared.supplementaryDiagnostics
+          ? { ...prepared.supplementaryDiagnostics }
+          : null,
+      };
+      const performanceDiagnostics = {
+        totalPredictions: actualLabels.length,
+        positivePredictions,
+        positiveHits,
+        positiveActuals,
+        positivePrecision,
+        positiveRecall,
+        positiveF1,
+        confusion: { ...confusion },
+        accuracyLabel: isBinary ? '測試正確率' : '大漲命中率',
+      };
+      const accuracyLabel = performanceDiagnostics.accuracyLabel;
 
       let forecast = null;
       if (Array.isArray(prepared.forecastFeature)) {
@@ -783,11 +2129,45 @@ async function handleAITrainANNMessage(message) {
         if (Array.isArray(standardisedForecast)) {
           const forecastTensor = tf.tensor2d([standardisedForecast]);
           const forecastOutput = model.predict(forecastTensor);
-          const forecastArray = Array.from(await forecastOutput.data());
+          const forecastArray = await forecastOutput.array();
+          const baseForecast = Array.isArray(forecastArray?.[0]) ? forecastArray[0] : [];
+          let forecastProbs;
+          if (isBinary) {
+            const rawValue = Array.isArray(baseForecast) ? baseForecast[0] : baseForecast;
+            const probUp = Math.min(Math.max(Number(rawValue) || 0, 0), 1);
+            const probDown = 1 - probUp;
+            forecastProbs = [probDown, 0, probUp];
+          } else {
+            forecastProbs = baseForecast;
+          }
+          let forecastClass = 0;
+          let forecastProb = isBinary ? forecastProbs[2] : 0;
+          if (forecastProbs.length > 0 && !isBinary) {
+            let maxValue = forecastProbs[0];
+            forecastClass = 0;
+            for (let idx = 1; idx < forecastProbs.length; idx += 1) {
+              if (forecastProbs[idx] > maxValue) {
+                maxValue = forecastProbs[idx];
+                forecastClass = idx;
+              }
+            }
+            forecastProb = forecastProbs[2] ?? 0;
+          } else if (isBinary) {
+            forecastClass = forecastProbs[2] >= threshold ? 2 : 0;
+          }
           forecast = {
-            probability: forecastArray[0],
+            probability: forecastProb,
             referenceDate: prepared.forecastDate || prepared.datasetLastDate || null,
+            probabilities: forecastProbs,
+            predictedClass: forecastClass,
           };
+          const forecastSwing = computeExpectedSwing(forecastProbs, classificationMode, classReturnAverages);
+          if (Number.isFinite(forecastSwing)) {
+            forecast.predictedSwing = forecastSwing;
+          }
+          if (Number.isFinite(prepared.datasetLastClose)) {
+            forecast.buyPrice = prepared.datasetLastClose;
+          }
           forecastOutput.dispose();
           forecastTensor.dispose();
         }
@@ -796,18 +2176,19 @@ async function handleAITrainANNMessage(message) {
       const trainingMetrics = {
         trainAccuracy: finalTrainAccuracy,
         trainLoss: finalTrainLoss,
-        testAccuracy,
+        testAccuracy: deterministicTestAccuracy,
         testLoss,
-        totalPredictions: predictionValues.length,
+        totalPredictions: performanceDiagnostics.totalPredictions,
       };
 
       const predictionsPayload = {
-        predictions: predictionValues,
+        predictions: predictionArray,
         meta: split.metaTe,
         returns: split.returnsTe,
         trainingOdds,
         forecast,
         datasetLastDate: prepared.datasetLastDate,
+        lastClose: Number.isFinite(prepared.datasetLastClose) ? prepared.datasetLastClose : null,
         hyperparameters: {
           lookback: Number.isFinite(options.lookback) ? options.lookback : null,
           epochs,
@@ -815,12 +2196,97 @@ async function handleAITrainANNMessage(message) {
           learningRate,
           trainRatio,
           modelType: MODEL_TYPES.ANNS,
+          splitIndex: split.trainCount,
+          threshold,
+          volatility: volatilityThresholds,
+          seed: seedToUse,
+          classificationMode,
         },
+        predictedLabels,
+        volatilityThresholds,
+        classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
+        datasetDiagnostics,
       };
 
-      const finalMessage = `完成：測試正確率 ${(Number.isFinite(testAccuracy) ? (testAccuracy * 100).toFixed(2) : '—')}%。`;
+      const backendInUse = typeof tf.getBackend === 'function' ? tf.getBackend() : null;
+      const layerDiagnostics = await annCollectLayerDiagnostics(model);
+      const diagnostics = {
+        version: ANN_DIAGNOSTIC_VERSION,
+        timestamp: Date.now(),
+        dataset: datasetDiagnostics,
+        indicatorDiagnostics: datasetDiagnostics.indicatorDiagnostics,
+        supplementaryDiagnostics: datasetDiagnostics.supplementaryDiagnostics,
+        layerDiagnostics,
+        performance: {
+          ...performanceDiagnostics,
+          trainAccuracy: finalTrainAccuracy,
+          trainLoss: finalTrainLoss,
+          testAccuracy: deterministicTestAccuracy,
+          testLoss,
+        },
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
+      };
+      const runMeta = {
+        version: ANN_REPRO_VERSION,
+        patch: ANN_REPRO_PATCH,
+        seed: seedToUse,
+        backend: backendInUse,
+        tfjs: TFJS_VERSION,
+        trainRatio,
+        epochs,
+        batchSize,
+        splitIndex: split.trainCount,
+        threshold,
+        volatility: volatilityThresholds,
+        lookback: Number.isFinite(options.lookback) ? options.lookback : null,
+        mean,
+        std,
+        featureOrder: ['SMA30', 'WMA15', 'EMA12', 'Momentum10', 'StochK14', 'StochD3', 'RSI14', 'MACDdiff', 'MACDsignal', 'MACDhist', 'CCI20', 'WilliamsR14', 'VIXClose'],
+        totalSamples,
+        trainSamples: split.trainCount,
+        testSamples: split.Xte.length,
+        classificationMode,
+        volatilityDiagnostics: volatilityDiagnostics ? { ...volatilityDiagnostics } : null,
+        datasetDiagnostics,
+        diagnosticsVersion: ANN_DIAGNOSTIC_VERSION,
+        classReturnAverages: classReturnAverages ? { ...classReturnAverages } : null,
+        supplementaryDiagnostics: datasetDiagnostics.supplementaryDiagnostics
+          ? { ...datasetDiagnostics.supplementaryDiagnostics }
+          : null,
+      };
+      workerLastMeta = runMeta;
+      try {
+        self.postMessage({ type: ANN_META_MESSAGE, payload: runMeta });
+      } catch (metaError) {
+        console.warn('[Worker][AI] 回傳 ANN 執行資訊失敗：', metaError);
+      }
 
-      annPostResult(id, { trainingMetrics, predictionsPayload, finalMessage });
+      try {
+        await model.save(`indexeddb://${ANN_MODEL_STORAGE_KEY}`);
+      } catch (saveError) {
+        console.warn('[Worker][AI] 無法保存 ANN 模型：', saveError);
+      }
+
+      const finalMessage = `完成：${accuracyLabel} ${(Number.isFinite(deterministicTestAccuracy) ? (deterministicTestAccuracy * 100).toFixed(2) : '—')}%，TP/TN/FP/FN = ${TP}/${TN}/${FP}/${FN}。`;
+
+      const hyperparametersUsed = {
+        epochs,
+        batchSize,
+        learningRate,
+        trainRatio,
+        splitIndex: split.trainCount,
+        threshold,
+        volatility: volatilityThresholds,
+        modelType: MODEL_TYPES.ANNS,
+        lookback: Number.isFinite(options.lookback) ? options.lookback : null,
+        seed: seedToUse,
+        classificationMode,
+      };
+
+      annPostResult(id, { trainingMetrics, predictionsPayload, confusion, hyperparametersUsed, finalMessage, diagnostics });
       model.dispose();
     } finally {
       tensorsToDispose.forEach((tensor) => {
@@ -841,7 +2307,13 @@ function differenceInDays(laterDate, earlierDate) {
   return Math.floor(diff / DAY_MS);
 }
 
+function isIndexSymbol(stockNo) {
+  if (!stockNo) return false;
+  return stockNo.startsWith('^') && stockNo.length > 1;
+}
+
 function getPrimaryForceSource(marketKey, adjusted) {
+  if (marketKey === "INDEX") return "yahoo";
   if (adjusted) {
     if (marketKey === "US") return null;
     return "yahoo";
@@ -852,6 +2324,7 @@ function getPrimaryForceSource(marketKey, adjusted) {
 }
 
 function getFallbackForceSource(marketKey, adjusted) {
+  if (marketKey === "INDEX") return null;
   if (adjusted) return null;
   if (marketKey === "TPEX" || marketKey === "US") return null;
   return "finmind";
@@ -865,6 +2338,18 @@ function getMarketKey(marketType) {
 
 function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
+}
+
+function getMonthlyStaleRevalidateMs(marketKey) {
+  switch (marketKey) {
+    case "US":
+      return MONTH_STALE_REVALIDATE_US_MS;
+    case "TWSE":
+    case "TPEX":
+      return MONTH_STALE_REVALIDATE_TW_MS;
+    default:
+      return MONTH_STALE_REVALIDATE_DEFAULT_MS;
+  }
 }
 
 function buildCacheKey(
@@ -883,6 +2368,24 @@ function buildCacheKey(
   const endKey = endDate || "END-";
   const effectiveKey = effectiveStartDate || "E-";
   return `${marketPrefix}${stockNo}__${dataKey}__${endKey}__${priceModeKey}__${splitFlag}__${effectiveKey}`;
+}
+
+function filterDatasetForWindow(data, warmupStartIso, endIso) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return [];
+  }
+  return data.filter((row) => {
+    if (!row || !row.date) {
+      return false;
+    }
+    if (warmupStartIso && row.date < warmupStartIso) {
+      return false;
+    }
+    if (endIso && row.date > endIso) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function ensureMarketCache(marketKey) {
@@ -2462,7 +3965,12 @@ async function fetchAdjustedPriceRange(
   const normalizedRows = [];
   const toNumber = (value) => {
     if (value === null || value === undefined) return null;
-    const num = Number(value);
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    const normalized = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+    if (normalized === "") return null;
+    const num = Number(normalized);
     return Number.isFinite(num) ? num : null;
   };
 
@@ -2477,7 +3985,21 @@ async function fetchAdjustedPriceRange(
     const high = toNumber(row.high ?? row.High ?? row.max);
     const low = toNumber(row.low ?? row.Low ?? row.min);
     const close = toNumber(row.close ?? row.Close);
-    const volumeRaw = toNumber(row.volume ?? row.Volume ?? row.Trading_Volume ?? 0) || 0;
+    const volumeRaw =
+      toNumber(
+        row.volume ??
+          row.Volume ??
+          row.Trading_Volume ??
+          row.TradingVolume ??
+          row.trade_volume ??
+          row.tradeVolume ??
+          row.total_volume ??
+          row.totalVolume ??
+          row.vol ??
+          row.volume_shares ??
+          row.volumeShares ??
+          0,
+      ) || 0;
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
       row.rawOpen ?? row.raw_open ?? row.baseOpen ?? row.base_open ?? row.referenceOpen,
@@ -2609,26 +4131,92 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         const num = Number(String(val).replace(/,/g, ""));
         return Number.isFinite(num) ? num : null;
       };
-      if (isTpex) {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      } else {
-        volume = parseNumber(item[1]) || 0;
-        open = parseNumber(item[3]);
-        high = parseNumber(item[4]);
-        low = parseNumber(item[5]);
-        close = parseNumber(item[6]);
-      }
+      const resolveArrayVolume = () => {
+        const candidateSet = new Set();
+        if (item.length >= 9) {
+          candidateSet.add(8);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(1);
+        }
+        if (item.length >= 3) {
+          candidateSet.add(2);
+        }
+        if (item.length >= 2) {
+          candidateSet.add(item.length - 1);
+        }
+        let resolved = null;
+        const tryResolve = (index) => {
+          if (index <= 0 || index >= item.length) return null;
+          const raw = item[index];
+          if (raw === null || raw === undefined) return null;
+          if (typeof raw === "string" && /[A-Za-z]/.test(raw)) return null;
+          const parsed = parseNumber(raw);
+          if (parsed === null || parsed < 0) return null;
+          return parsed;
+        };
+        for (const index of candidateSet) {
+          const candidate = tryResolve(index);
+          if (candidate !== null) {
+            resolved = candidate;
+            break;
+          }
+        }
+        if (resolved === null) {
+          for (let i = item.length - 1; i >= 1; i -= 1) {
+            const candidate = tryResolve(i);
+            if (candidate !== null) {
+              resolved = candidate;
+              break;
+            }
+          }
+        }
+        return resolved ?? 0;
+      };
+      volume = resolveArrayVolume();
+      open = parseNumber(item[3]);
+      high = parseNumber(item[4]);
+      low = parseNumber(item[5]);
+      close = parseNumber(item[6]);
     } else if (item && typeof item === "object") {
+      const parseNumber = (val) => {
+        if (val === null || val === undefined) return null;
+        if (typeof val === "number") {
+          return Number.isFinite(val) ? val : null;
+        }
+        const normalized = String(val).replace(/,/g, "").trim();
+        if (!normalized) return null;
+        const num = Number(normalized);
+        return Number.isFinite(num) ? num : null;
+      };
+      const resolveObjectVolume = () => {
+        const candidates = [
+          item.volume,
+          item.Volume,
+          item.Trading_Volume,
+          item.TradingVolume,
+          item.trade_volume,
+          item.tradeVolume,
+          item.total_volume,
+          item.totalVolume,
+          item.vol,
+          item.volume_shares,
+          item.volumeShares,
+        ];
+        for (let i = 0; i < candidates.length; i += 1) {
+          const parsed = parseNumber(candidates[i]);
+          if (parsed !== null && parsed >= 0) {
+            return parsed;
+          }
+        }
+        return 0;
+      };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = Number(item.open ?? item.Open ?? item.Opening ?? null);
-      high = Number(item.high ?? item.High ?? item.max ?? null);
-      low = Number(item.low ?? item.Low ?? item.min ?? null);
-      close = Number(item.close ?? item.Close ?? null);
-      volume = Number(item.volume ?? item.Volume ?? item.Trading_Volume ?? 0);
+      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+      close = parseNumber(item.close ?? item.Close ?? null);
+      volume = resolveObjectVolume();
     } else {
       return null;
     }
@@ -3026,6 +4614,7 @@ async function fetchCurrentMonthGapPatch({
 
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  else if (marketKey === "INDEX") proxyPath = "/api/index/";
   const isTpex = marketKey === "TPEX";
   const aggregatedRows = [];
   const aggregatedSources = new Set();
@@ -3614,8 +5203,11 @@ async function fetchStockData(
   }
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
-  const adjusted = Boolean(options.adjusted || options.adjustedPrice);
-  const split = Boolean(options.splitAdjustment);
+  const indexSymbol = isIndexSymbol(stockNo);
+  const adjusted = indexSymbol
+    ? false
+    : Boolean(options.adjusted || options.adjustedPrice);
+  const split = indexSymbol ? false : Boolean(options.splitAdjustment);
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -3629,7 +5221,7 @@ async function fetchStockData(
   if (startDateObj > endDateObj) {
     throw new Error("開始日期需早於結束日期");
   }
-  const marketKey = getMarketKey(marketType);
+  const marketKey = indexSymbol ? "INDEX" : getMarketKey(marketType);
   const primaryForceSource = getPrimaryForceSource(marketKey, adjusted);
   const fallbackForceSource = getFallbackForceSource(marketKey, adjusted);
   const cacheKey = buildCacheKey(
@@ -3645,6 +5237,7 @@ async function fetchStockData(
   const fetchDiagnostics = {
     stockNo,
     marketKey,
+    indexSymbol,
     adjusted,
     split,
     requested: { start: startDate, end: endDate },
@@ -3985,6 +5578,7 @@ async function fetchStockData(
   let proxyPath = "/api/twse/";
   if (marketKey === "TPEX") proxyPath = "/api/tpex/";
   else if (marketKey === "US") proxyPath = "/api/us/";
+  else if (marketKey === "INDEX") proxyPath = "/api/index/";
   const isTpex = marketKey === "TPEX";
   const isUs = marketKey === "US";
   const concurrencyLimit = isTpex ? 3 : 4;
@@ -4091,6 +5685,8 @@ async function fetchStockData(
       const forcedRangeKeys = new Set(
         forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
       );
+      const targetEndExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
+      const staleRevalidateMs = getMonthlyStaleRevalidateMs(marketKey);
       const monthSourceFlags = new Set(
         monthEntry.sources instanceof Set
           ? Array.from(monthEntry.sources)
@@ -4100,14 +5696,53 @@ async function fetchStockData(
       const forcedSourceUsage = new Set();
       let monthStockName = monthEntry.stockName || "";
       let forcedReloadCompleted = false;
+      let staleReloadTriggered = false;
 
       if (missingRanges.length > 0) {
         for (let i = 0; i < missingRanges.length; i += 1) {
           const missingRange = missingRanges[i];
           const { startISO, endISO } = rangeBoundsToISO(missingRange);
           const rangeKey = `${missingRange.start}-${missingRange.end}`;
-          const shouldForceRange =
+          const nowMs = Date.now();
+          const touchesRangeEnd =
+            Number.isFinite(targetEndExclusive) &&
+            Math.abs(missingRange.end - targetEndExclusive) <=
+              STALE_RANGE_TOUCH_TOLERANCE_MS;
+          const lastUpdatedMs = Number.isFinite(monthEntry.lastUpdated)
+            ? monthEntry.lastUpdated
+            : 0;
+          const lastForcedMs = Number.isFinite(monthEntry.lastForcedReloadAt)
+            ? monthEntry.lastForcedReloadAt
+            : 0;
+          const staleReloadDue =
+            touchesRangeEnd &&
+            staleRevalidateMs > 0 &&
+            lastUpdatedMs > 0 &&
+            nowMs - lastUpdatedMs > staleRevalidateMs &&
+            (!lastForcedMs || nowMs - lastForcedMs > staleRevalidateMs);
+          let shouldForceRange =
             forcedRangeKeys.size > 0 && forcedRangeKeys.has(rangeKey);
+          if (staleReloadDue) {
+            shouldForceRange = true;
+            staleReloadTriggered = true;
+            const ageHours = Math.max(
+              1,
+              Math.round((nowMs - lastUpdatedMs) / (60 * 60 * 1000)),
+            );
+            console.warn(
+              `[Worker] ${stockNo} ${monthInfo.monthKey} 月度快取已 ${ageHours} 小時未更新，重新驗證 ${startISO}~${endISO}。`,
+            );
+            if (!Array.isArray(fetchDiagnostics.staleRevalidations)) {
+              fetchDiagnostics.staleRevalidations = [];
+            }
+            fetchDiagnostics.staleRevalidations.push({
+              monthKey: monthInfo.monthKey,
+              range: { start: startISO, end: endISO },
+              lastUpdatedAt: lastUpdatedMs,
+              ageHours,
+            });
+            monthEntry.lastForcedReloadAt = nowMs;
+          }
           const candidateSources = [];
           if (shouldForceRange) {
             if (primaryForceSource) candidateSources.push(primaryForceSource);
@@ -4272,7 +5907,10 @@ async function fetchStockData(
         monthSourceFlags.add(label);
       });
 
-      if (forcedRepairRanges.length > 0 && forcedReloadCompleted) {
+      if (
+        forcedReloadCompleted &&
+        (forcedRepairRanges.length > 0 || staleReloadTriggered)
+      ) {
         monthEntry.lastForcedReloadAt = Date.now();
       }
 
@@ -4299,6 +5937,7 @@ async function fetchStockData(
           rowsForRange[rowsForRange.length - 1]?.date || null,
         cacheSources: Array.from(monthSourceFlags),
         forcedSources: Array.from(forcedSourceUsage),
+        staleReload: staleReloadTriggered,
         queuePhase: monthInfo.phase || "active",
       };
       return {
@@ -4918,6 +6557,125 @@ function calculateDailyReturns(portfolioValues) {
   return returns;
 }
 
+function computeReturnMomentSums(returns) {
+  if (!Array.isArray(returns) || returns.length === 0) {
+    return {
+      sampleCount: 0,
+      sum1: 0,
+      sum2: 0,
+      sum3: 0,
+      sum4: 0,
+      mean: null,
+      variance: null,
+      stdDev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+
+  let sampleCount = 0;
+  let sum1 = 0;
+  let sum2 = 0;
+  let sum3 = 0;
+  let sum4 = 0;
+
+  for (let i = 0; i < returns.length; i += 1) {
+    const value = returns[i];
+    if (!Number.isFinite(value)) {
+      prevDiff = null;
+      continue;
+    }
+    sampleCount += 1;
+    sum1 += value;
+    const squared = value * value;
+    sum2 += squared;
+    sum3 += squared * value;
+    sum4 += squared * squared;
+  }
+
+  if (sampleCount === 0) {
+    return {
+      sampleCount: 0,
+      sum1: 0,
+      sum2: 0,
+      sum3: 0,
+      sum4: 0,
+      mean: null,
+      variance: null,
+      stdDev: null,
+      skewness: null,
+      kurtosis: null,
+    };
+  }
+
+  const mean = sum1 / sampleCount;
+  let diff2Sum = 0;
+  let diff3Sum = 0;
+  let diff4Sum = 0;
+  let autocovLag1 = 0;
+  let prevDiff = null;
+
+  for (let i = 0; i < returns.length; i += 1) {
+    const value = returns[i];
+    if (!Number.isFinite(value)) continue;
+    const diff = value - mean;
+    const diff2 = diff * diff;
+    diff2Sum += diff2;
+    diff3Sum += diff2 * diff;
+    diff4Sum += diff2 * diff2;
+    if (prevDiff !== null) {
+      autocovLag1 += prevDiff * diff;
+    }
+    prevDiff = diff;
+  }
+
+  const variance = sampleCount > 1 ? diff2Sum / (sampleCount - 1) : 0;
+  const stdDev = variance > 0 ? Math.sqrt(variance) : 0;
+
+  let autocorrLag1 = null;
+  if (sampleCount > 1 && diff2Sum > 0) {
+    const denom = diff2Sum;
+    const normalised = autocovLag1 / denom;
+    if (Number.isFinite(normalised)) {
+      const clamped = Math.max(-0.99, Math.min(0.99, normalised));
+      autocorrLag1 = clamped;
+    }
+  }
+
+  let skewness = null;
+  if (sampleCount > 2 && diff2Sum > 0) {
+    const numerator = Math.sqrt(sampleCount * (sampleCount - 1)) * diff3Sum;
+    const denominator = (sampleCount - 2) * Math.pow(diff2Sum, 1.5);
+    skewness = denominator !== 0 ? numerator / denominator : null;
+  }
+
+  let kurtosis = null;
+  if (sampleCount > 3 && stdDev > 0) {
+    const denominator =
+      (sampleCount - 1) * (sampleCount - 2) * (sampleCount - 3) * Math.pow(stdDev, 4);
+    const correction =
+      (3 * (sampleCount - 1) * (sampleCount - 1)) /
+      ((sampleCount - 2) * (sampleCount - 3));
+    const numerator = sampleCount * (sampleCount + 1) * diff4Sum;
+    const excess = denominator !== 0 ? numerator / denominator - correction : null;
+    kurtosis = excess !== null ? excess + 3 : null;
+  }
+
+  return {
+    sampleCount,
+    sum1,
+    sum2,
+    sum3,
+    sum4,
+    mean,
+    variance,
+    stdDev,
+    lag1Autocorr: autocorrLag1,
+    skewness,
+    kurtosis,
+  };
+}
+
 function calculateSharpeRatio(dailyReturns, annualReturnPct) {
   if (!Array.isArray(dailyReturns) || dailyReturns.length === 0) return 0;
   const riskFreeRate = 0.01;
@@ -5284,7 +7042,52 @@ function calculateAllIndicators(data, params) {
       indic.kShortEntry = kdShortEntryResult.k;
       indic.dShortEntry = kdShortEntryResult.d;
     }
-    indic.volumeAvgEntry = maCalculator(volumes, ep?.period || 20);
+    const normaliseVolumePeriod = (value, fallback) => {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 1) {
+        return Math.floor(num);
+      }
+      const fb = Number(fallback);
+      if (Number.isFinite(fb) && fb >= 1) {
+        return Math.floor(fb);
+      }
+      return 20;
+    };
+    const volumePeriodCache = new Map();
+    const resolveVolumeAverage = (period) => {
+      const key = Number.isFinite(period) && period >= 1 ? Math.floor(period) : 20;
+      if (!volumePeriodCache.has(key)) {
+        volumePeriodCache.set(key, maCalculator(volumes, key));
+      }
+      return volumePeriodCache.get(key);
+    };
+    const volumeEntryPeriod = normaliseVolumePeriod(ep?.period, 20);
+    const volumeExitPeriod = normaliseVolumePeriod(xp?.period, volumeEntryPeriod);
+    const volumeShortEntryPeriod = enableShorting
+      ? normaliseVolumePeriod(sep?.period, volumeExitPeriod)
+      : volumeExitPeriod;
+    const volumeShortExitPeriod = enableShorting
+      ? normaliseVolumePeriod(sxp?.period, volumeShortEntryPeriod)
+      : volumeExitPeriod;
+    indic.volumeAvgEntry = resolveVolumeAverage(volumeEntryPeriod);
+    indic.volumeAvgExit =
+      volumeExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeExitPeriod);
+    indic.volumeAvgShortEntry =
+      volumeShortEntryPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortEntryPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortEntryPeriod);
+    indic.volumeAvgShortExit =
+      volumeShortExitPeriod === volumeShortEntryPeriod
+        ? indic.volumeAvgShortEntry
+        : volumeShortExitPeriod === volumeExitPeriod
+        ? indic.volumeAvgExit
+        : volumeShortExitPeriod === volumeEntryPeriod
+        ? indic.volumeAvgEntry
+        : resolveVolumeAverage(volumeShortExitPeriod);
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -5670,6 +7473,14 @@ const exitIndicatorBuilders = {
         getIndicatorArray(ctx, "dExit"),
         { decimals: 2 },
       ),
+    ];
+  },
+  volume_spike(params, ctx) {
+    const period = Number(params?.period) || 20;
+    const avg = getIndicatorArray(ctx, "volumeAvgExit");
+    return [
+      makeIndicatorColumn(`均量(${period})`, avg, { format: "integer" }),
+      makeIndicatorColumn("量比", ctx.getVolumeRatio(avg), { decimals: 2 }),
     ];
   },
   trailing_stop(params, ctx) {
@@ -6280,6 +8091,253 @@ function runStrategy(data, params, options = {}) {
     throw e;
   }
 
+  const pluginRegistry =
+    typeof self !== 'undefined' && self.StrategyPluginRegistry
+      ? self.StrategyPluginRegistry
+      : null;
+  const pluginCacheStore = new Map();
+  const pluginRuntimeInfo = {
+    warmupStartIndex: Number.isFinite(
+      datasetSummary?.firstRowOnOrAfterWarmupStart?.index,
+    )
+      ? datasetSummary.firstRowOnOrAfterWarmupStart.index
+      : 0,
+    effectiveStartIndex: effectiveStartIdx,
+    length: n,
+  };
+  const pluginSeries = {
+    close: closes,
+    open: opens,
+    high: highs,
+    low: lows,
+    volume: volumes,
+    date: dates,
+  };
+
+  function invokeStrategyPlugin(strategyId, role, index, baseParams, extras) {
+    if (
+      !pluginRegistry ||
+      (typeof pluginRegistry.getStrategyById !== 'function' && typeof pluginRegistry.get !== 'function') ||
+      typeof StrategyPluginContract === 'undefined' ||
+      typeof StrategyPluginContract.ensureRuleResult !== 'function'
+    ) {
+      return null;
+    }
+    let plugin = null;
+    try {
+      if (typeof pluginRegistry.getStrategyById === 'function') {
+        plugin = pluginRegistry.getStrategyById(strategyId);
+      } else {
+        plugin = pluginRegistry.get(strategyId);
+      }
+    } catch (registryError) {
+      console.error(`[StrategyPlugin:${strategyId}] 載入策略時發生錯誤`, registryError);
+      return null;
+    }
+    if (!plugin || typeof plugin.run !== 'function') {
+      if (typeof pluginRegistry.ensureStrategyLoaded === 'function') {
+        try {
+          plugin = pluginRegistry.ensureStrategyLoaded(strategyId) || plugin;
+        } catch (ensureError) {
+          console.error(`[StrategyPlugin:${strategyId}] 載入策略失敗`, ensureError);
+          return null;
+        }
+      }
+    }
+    if (!plugin || typeof plugin.run !== 'function') {
+      return null;
+    }
+    let cache = pluginCacheStore.get(strategyId);
+    if (!cache) {
+      cache = new Map();
+      pluginCacheStore.set(strategyId, cache);
+    }
+    const helpers = {
+      getIndicator(key) {
+        const source = indicators?.[key];
+        return Array.isArray(source) ? source : undefined;
+      },
+      log(message, details) {
+        if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+          if (details) console.debug(`[StrategyPlugin:${strategyId}] ${message}`, details);
+          else console.debug(`[StrategyPlugin:${strategyId}] ${message}`);
+        }
+      },
+      setCache(key, value) {
+        cache.set(key, value);
+      },
+      getCache(key) {
+        return cache.get(key);
+      },
+    };
+    const pluginParams =
+      extras && typeof extras === 'object'
+        ? { ...(baseParams || {}), __runtime: extras }
+        : { ...(baseParams || {}) };
+    try {
+      const rawResult = plugin.run(
+        {
+          role,
+          index,
+          series: pluginSeries,
+          helpers,
+          runtime: pluginRuntimeInfo,
+        },
+        pluginParams,
+      );
+      return StrategyPluginContract.ensureRuleResult(rawResult, {
+        pluginId: strategyId,
+        role,
+        index,
+      });
+    } catch (pluginError) {
+      console.error(`[StrategyPlugin:${strategyId}] 執行失敗`, pluginError);
+      return null;
+    }
+  }
+
+  const strategyDslInput =
+    params && typeof params.strategyDsl === 'object' && params.strategyDsl !== null
+      ? params.strategyDsl
+      : null;
+  const composerApi =
+    typeof self !== 'undefined' && self.lazybacktestStrategyComposer
+      ? self.lazybacktestStrategyComposer
+      : null;
+  const roleStrategyIds = {
+    longEntry: entryStrategy || null,
+    longExit: exitStrategy || null,
+    shortEntry: enableShorting ? shortEntryStrategy || null : null,
+    shortExit: enableShorting ? shortExitStrategy || null : null,
+  };
+  const compositeEvaluators = {
+    longEntry: null,
+    longExit: null,
+    shortEntry: null,
+    shortExit: null,
+  };
+
+  function buildCompositeEvaluator(roleKey, baseParams) {
+    if (!composerApi || typeof composerApi.buildComposite !== 'function') {
+      return null;
+    }
+    if (!strategyDslInput || typeof strategyDslInput !== 'object') {
+      return null;
+    }
+    const node = strategyDslInput[roleKey];
+    if (!node || typeof node !== 'object') {
+      return null;
+    }
+    const role = roleKey;
+    try {
+      const composite = composerApi.buildComposite(node, pluginRegistry, {
+        role,
+        baseParams: baseParams && typeof baseParams === 'object' ? baseParams : null,
+        invoke(invocation) {
+          return invokeStrategyPlugin(
+            invocation.id,
+            invocation.role || role,
+            invocation.index,
+            invocation.params,
+            invocation.extras,
+          );
+        },
+      });
+      if (composite && typeof composite.evaluate === 'function') {
+        return composite;
+      }
+    } catch (error) {
+      console.error(`[StrategyDSL] 無法建立 ${roleKey} 組合策略`, error);
+    }
+    return null;
+  }
+
+  compositeEvaluators.longEntry = buildCompositeEvaluator('longEntry', entryParams);
+  compositeEvaluators.longExit = buildCompositeEvaluator('longExit', exitParams);
+  compositeEvaluators.shortEntry = enableShorting
+    ? buildCompositeEvaluator('shortEntry', shortEntryParams)
+    : null;
+  compositeEvaluators.shortExit = enableShorting
+    ? buildCompositeEvaluator('shortExit', shortExitParams)
+    : null;
+
+  function callStrategyPlugin(strategyId, role, index, baseParams, extras) {
+    const composite = compositeEvaluators[role] || null;
+    const primaryId = roleStrategyIds[role] || null;
+    if (composite && typeof composite.evaluate === 'function') {
+      const shouldUseComposite =
+        !primaryId || !strategyId || strategyId === primaryId || strategyId === 'none';
+      if (shouldUseComposite) {
+        try {
+          const compositeResult = composite.evaluate(index, extras);
+          if (compositeResult) {
+            return compositeResult;
+          }
+        } catch (error) {
+          console.error(`[StrategyDSL] ${role} evaluate 失敗`, error);
+        }
+      }
+    }
+    return invokeStrategyPlugin(strategyId, role, index, baseParams, extras);
+  }
+
+  function collectNumericParamsFromDsl(roleKey, baseParams) {
+    if (!strategyDslInput || typeof strategyDslInput !== 'object') {
+      return [];
+    }
+    const root = strategyDslInput[roleKey];
+    if (!root || typeof root !== 'object') {
+      return [];
+    }
+    const numbers = [];
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') {
+        continue;
+      }
+      const typeRaw =
+        typeof node.type === 'string'
+          ? node.type.toLowerCase()
+          : typeof node.op === 'string'
+            ? node.op.toLowerCase()
+            : typeof node.operator === 'string'
+              ? node.operator.toLowerCase()
+              : null;
+      if (typeRaw === 'plugin' || (!typeRaw && typeof node.id === 'string')) {
+        const paramsSource =
+          node.params && typeof node.params === 'object'
+            ? node.params
+            : baseParams && typeof baseParams === 'object'
+              ? baseParams
+              : null;
+        if (paramsSource && typeof paramsSource === 'object') {
+          Object.values(paramsSource).forEach((value) => {
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              numbers.push(value);
+            } else if (Array.isArray(value)) {
+              value.forEach((item) => {
+                if (typeof item === 'number' && Number.isFinite(item)) {
+                  numbers.push(item);
+                }
+              });
+            }
+          });
+        }
+      }
+      if (Array.isArray(node.nodes)) {
+        node.nodes.forEach((child) => stack.push(child));
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach((child) => stack.push(child));
+      }
+      if (node.node && typeof node.node === 'object') {
+        stack.push(node.node);
+      }
+    }
+    return numbers;
+  }
+
   const check = (v) => v !== null && !isNaN(v) && isFinite(v);
   const warmupSummary = {
     requestedStart: userStartISO,
@@ -6327,8 +8385,20 @@ function runStrategy(data, params, options = {}) {
       shortExitParams?.period,
       shortExitParams?.breakoutPeriod,
       shortExitParams?.signalPeriod,
-      shortExitParams?.percentage,
-    ]);
+    shortExitParams?.percentage,
+  ]);
+  }
+  const compositePeriodValues = []
+    .concat(collectNumericParamsFromDsl('longEntry', entryParams))
+    .concat(collectNumericParamsFromDsl('longExit', exitParams));
+  if (enableShorting) {
+    compositePeriodValues.push(
+      ...collectNumericParamsFromDsl('shortEntry', shortEntryParams),
+      ...collectNumericParamsFromDsl('shortExit', shortExitParams),
+    );
+  }
+  if (compositePeriodValues.length > 0) {
+    allPeriods = allPeriods.concat(compositePeriodValues);
   }
   const validPeriods = allPeriods.filter(
     (p) => typeof p === "number" && p > 0 && isFinite(p),
@@ -6640,7 +8710,7 @@ function runStrategy(data, params, options = {}) {
       );
       const averageEntryPrice =
         totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      return {
+      const aggregated = {
         type: "buy",
         date: currentLongEntryBreakdown[0]?.date || null,
         price: averageEntryPrice,
@@ -6653,6 +8723,36 @@ function runStrategy(data, params, options = {}) {
         stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
         positionId: currentLongPositionId,
       };
+      const metaSource = currentLongEntryBreakdown.find(
+        (stage) =>
+          stage &&
+          typeof stage === "object" &&
+          (stage.indicatorValues || stage.kdValues || stage.macdValues),
+      );
+      if (metaSource) {
+        if (metaSource.indicatorValues && typeof metaSource.indicatorValues === "object") {
+          try {
+            aggregated.indicatorValues = JSON.parse(
+              JSON.stringify(metaSource.indicatorValues),
+            );
+          } catch (cloneError) {
+            aggregated.indicatorValues = metaSource.indicatorValues;
+          }
+        }
+        if (metaSource.kdValues && typeof metaSource.kdValues === "object") {
+          aggregated.kdValues = { ...metaSource.kdValues };
+        }
+        if (metaSource.macdValues && typeof metaSource.macdValues === "object") {
+          aggregated.macdValues = { ...metaSource.macdValues };
+        }
+        if (metaSource.triggeringStrategy) {
+          aggregated.triggeringStrategy = metaSource.triggeringStrategy;
+        }
+        if (metaSource.stageTrigger) {
+          aggregated.stageTrigger = metaSource.stageTrigger;
+        }
+      }
+      return aggregated;
     };
 
     const computeExitStagePlan = (totalShares) => {
@@ -6875,30 +8975,86 @@ function runStrategy(data, params, options = {}) {
         let exitKDValues = null,
           exitMACDValues = null,
           exitIndicatorValues = null;
+        let exitRuleResult = null;
         switch (exitStrategy) {
+          case "volume_spike_exit":
+            {
+              const pluginResult = callStrategyPlugin(
+                "volume_spike_exit",
+                "longExit",
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgVolume =
+                Array.isArray(indicators.volumeAvgExit)
+                  ? indicators.volumeAvgExit[i]
+                  : undefined;
+              const multiplierRaw = Number(exitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              sellSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgExit?.[i - 1] ?? null,
+                    avgVolume,
+                    indicators.volumeAvgExit?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_cross":
+          case "ma_cross_exit":
           case "ema_cross":
-            sellSignal =
-              check(indicators.maShortExit[i]) &&
-              check(indicators.maLongExit[i]) &&
-              check(indicators.maShortExit[i - 1]) &&
-              check(indicators.maLongExit[i - 1]) &&
-              indicators.maShortExit[i] < indicators.maLongExit[i] &&
-              indicators.maShortExit[i - 1] >= indicators.maLongExit[i - 1];
-            if (sellSignal)
-              exitIndicatorValues = {
-                短SMA: [
-                  indicators.maShortExit[i - 1],
-                  indicators.maShortExit[i],
-                  indicators.maShortExit[i + 1] ?? null,
-                ],
-                長SMA: [
-                  indicators.maLongExit[i - 1],
-                  indicators.maLongExit[i],
-                  indicators.maLongExit[i + 1] ?? null,
-                ],
-              };
-            break;
+            {
+              const pluginResult = callStrategyPlugin(
+                exitStrategy,
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              sellSignal =
+                check(indicators.maShortExit[i]) &&
+                check(indicators.maLongExit[i]) &&
+                check(indicators.maShortExit[i - 1]) &&
+                check(indicators.maLongExit[i - 1]) &&
+                indicators.maShortExit[i] < indicators.maLongExit[i] &&
+                indicators.maShortExit[i - 1] >= indicators.maLongExit[i - 1];
+              if (sellSignal)
+                exitIndicatorValues = {
+                  短SMA: [
+                    indicators.maShortExit[i - 1],
+                    indicators.maShortExit[i],
+                    indicators.maShortExit[i + 1] ?? null,
+                  ],
+                  長SMA: [
+                    indicators.maLongExit[i - 1],
+                    indicators.maLongExit[i],
+                    indicators.maLongExit[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "ma_below":
             sellSignal =
               check(indicators.maExit[i]) &&
@@ -6917,16 +9073,33 @@ function runStrategy(data, params, options = {}) {
               };
             break;
           case "rsi_overbought":
-            const rX = indicators.rsiExit[i],
-              rPX = indicators.rsiExit[i - 1],
-              rThX = exitParams.threshold || 70;
-            sellSignal = check(rX) && check(rPX) && rX < rThX && rPX >= rThX;
-            if (sellSignal)
-              exitIndicatorValues = {
-                RSI: [rPX, rX, indicators.rsiExit[i + 1] ?? null],
-              };
-            break;
+            {
+              const pluginResult = callStrategyPlugin(
+                'rsi_overbought',
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const rX = indicators.rsiExit[i],
+                rPX = indicators.rsiExit[i - 1],
+                rThX = exitParams.threshold || 70;
+              sellSignal = check(rX) && check(rPX) && rX < rThX && rPX >= rThX;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  RSI: [rPX, rX, indicators.rsiExit[i + 1] ?? null],
+                };
+              break;
+            }
           case "macd_cross":
+          case "macd_cross_exit":
             const difX = indicators.macdExit[i],
               deaX = indicators.macdSignalExit[i],
               difPX = indicators.macdExit[i - 1],
@@ -6949,64 +9122,120 @@ function runStrategy(data, params, options = {}) {
               };
             break;
           case "bollinger_reversal":
-            const midX = indicators.bollingerMiddleExit[i];
-            const midPX = indicators.bollingerMiddleExit[i - 1];
-            sellSignal =
-              check(midX) &&
-              check(prevC) &&
-              check(midPX) &&
-              curC < midX &&
-              prevC >= midPX;
-            if (sellSignal)
-              exitIndicatorValues = {
-                收盤價: [prevC, curC, closes[i + 1] ?? null],
-                中軌: [
-                  midPX,
-                  midX,
-                  indicators.bollingerMiddleExit[i + 1] ?? null,
-                ],
-              };
-            break;
-          case "k_d_cross":
-            const kX = indicators.kExit[i],
-              dX = indicators.dExit[i],
-              kPX = indicators.kExit[i - 1],
-              dPX = indicators.dExit[i - 1],
-              thY = exitParams.thresholdY || 70;
-            sellSignal =
-              check(kX) &&
-              check(dX) &&
-              check(kPX) &&
-              check(dPX) &&
-              kX < dX &&
-              kPX >= dPX &&
-              dX > thY;
-            if (sellSignal)
-              exitKDValues = {
-                kPrev: kPX,
-                dPrev: dPX,
-                kNow: kX,
-                dNow: dX,
-                kNext: indicators.kExit[i + 1] ?? null,
-                dNext: indicators.dExit[i + 1] ?? null,
-              };
-            break;
-          case "trailing_stop":
-            const trailP = exitParams.percentage || 5;
-            if (check(curH) && lastBuyP > 0) {
-              curPeakP = Math.max(curPeakP, curH);
-              sellSignal = curC < curPeakP * (1 - trailP / 100);
+            {
+              const pluginResult = callStrategyPlugin(
+                'bollinger_reversal',
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const midX = indicators.bollingerMiddleExit[i];
+              const midPX = indicators.bollingerMiddleExit[i - 1];
+              sellSignal =
+                check(midX) &&
+                check(prevC) &&
+                check(midPX) &&
+                curC < midX &&
+                prevC >= midPX;
+              if (sellSignal)
+                exitIndicatorValues = {
+                  收盤價: [prevC, curC, closes[i + 1] ?? null],
+                  中軌: [
+                    midPX,
+                    midX,
+                    indicators.bollingerMiddleExit[i + 1] ?? null,
+                  ],
+                };
+              break;
             }
-            if (sellSignal)
-              exitIndicatorValues = {
-                收盤價: [null, curC, null],
-                觸發價: [
-                  null,
-                  (curPeakP * (1 - trailP / 100)).toFixed(2),
-                  null,
-                ],
-              };
-            break;
+          case "k_d_cross":
+          case "k_d_cross_exit":
+            {
+              const pluginId =
+                exitStrategy === "k_d_cross" ? "k_d_cross_exit" : exitStrategy;
+              const pluginResult = callStrategyPlugin(
+                pluginId,
+                'longExit',
+                i,
+                exitParams,
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitKDValues && meta.kdValues) exitKDValues = meta.kdValues;
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const kX = indicators.kExit[i],
+                dX = indicators.dExit[i],
+                kPX = indicators.kExit[i - 1],
+                dPX = indicators.dExit[i - 1],
+                thY = exitParams.thresholdY || 70;
+              sellSignal =
+                check(kX) &&
+                check(dX) &&
+                check(kPX) &&
+                check(dPX) &&
+                kX < dX &&
+                kPX >= dPX &&
+                dX > thY;
+              if (sellSignal)
+                exitKDValues = {
+                  kPrev: kPX,
+                  dPrev: dPX,
+                  kNow: kX,
+                  dNow: dX,
+                  kNext: indicators.kExit[i + 1] ?? null,
+                  dNext: indicators.dExit[i + 1] ?? null,
+                };
+              break;
+            }
+          case "trailing_stop":
+            {
+              if (check(curH) && lastBuyP > 0) {
+                curPeakP = Math.max(curPeakP, curH);
+              }
+              const pluginResult = callStrategyPlugin(
+                'trailing_stop',
+                'longExit',
+                i,
+                exitParams,
+                { currentPrice: curC, referencePrice: curPeakP },
+              );
+              if (pluginResult) {
+                sellSignal = pluginResult.exit === true;
+                exitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!exitIndicatorValues && meta.indicatorValues)
+                  exitIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const trailP = exitParams.percentage || 5;
+              if (check(curH) && lastBuyP > 0) {
+                curPeakP = Math.max(curPeakP, curH);
+                sellSignal = curC < curPeakP * (1 - trailP / 100);
+              }
+              if (sellSignal)
+                exitIndicatorValues = {
+                  收盤價: [null, curC, null],
+                  觸發價: [
+                    null,
+                    (curPeakP * (1 - trailP / 100)).toFixed(2),
+                    null,
+                  ],
+                };
+              break;
+            }
           case "price_breakdown":
             const bpX = exitParams.period || 20;
             if (i >= bpX) {
@@ -7060,6 +9289,18 @@ function runStrategy(data, params, options = {}) {
             sellSignal = false;
             break;
         }
+        const finalExitRule =
+          exitRuleResult ||
+          normaliseRuleResultFromLegacy(exitStrategy, 'longExit', { exit: sellSignal }, i);
+        sellSignal = finalExitRule.exit === true;
+        const exitMeta = finalExitRule.meta;
+        if (!exitIndicatorValues && exitMeta && exitMeta.indicatorValues)
+          exitIndicatorValues = exitMeta.indicatorValues;
+        if (!exitKDValues && exitMeta && exitMeta.kdValues)
+          exitKDValues = exitMeta.kdValues;
+        if (!exitMACDValues && exitMeta && exitMeta.macdValues)
+          exitMACDValues = exitMeta.macdValues;
+
         if (!sellSignal && globalSL > 0 && lastBuyP > 0) {
           if (curC <= lastBuyP * (1 - globalSL / 100)) slTrig = true;
         }
@@ -7309,30 +9550,47 @@ function runStrategy(data, params, options = {}) {
         let coverKDValues = null,
           coverMACDValues = null,
           coverIndicatorValues = null;
+        let shortExitRuleResult = null;
         switch (shortExitStrategy) {
           case "cover_ma_cross":
           case "cover_ema_cross":
-            coverSignal =
-              check(indicators.maShortCover[i]) &&
-              check(indicators.maLongCover[i]) &&
-              check(indicators.maShortCover[i - 1]) &&
-              check(indicators.maLongCover[i - 1]) &&
-              indicators.maShortCover[i] > indicators.maLongCover[i] &&
-              indicators.maShortCover[i - 1] <= indicators.maLongCover[i - 1];
-            if (coverSignal)
-              coverIndicatorValues = {
-                短SMA: [
-                  indicators.maShortCover[i - 1],
-                  indicators.maShortCover[i],
-                  indicators.maShortCover[i + 1] ?? null,
-                ],
-                長SMA: [
-                  indicators.maLongCover[i - 1],
-                  indicators.maLongCover[i],
-                  indicators.maLongCover[i + 1] ?? null,
-                ],
-              };
-            break;
+            {
+              const pluginResult = callStrategyPlugin(
+                shortExitStrategy,
+                'shortExit',
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              coverSignal =
+                check(indicators.maShortCover[i]) &&
+                check(indicators.maLongCover[i]) &&
+                check(indicators.maShortCover[i - 1]) &&
+                check(indicators.maLongCover[i - 1]) &&
+                indicators.maShortCover[i] > indicators.maLongCover[i] &&
+                indicators.maShortCover[i - 1] <= indicators.maLongCover[i - 1];
+              if (coverSignal)
+                coverIndicatorValues = {
+                  短SMA: [
+                    indicators.maShortCover[i - 1],
+                    indicators.maShortCover[i],
+                    indicators.maShortCover[i + 1] ?? null,
+                  ],
+                  長SMA: [
+                    indicators.maLongCover[i - 1],
+                    indicators.maLongCover[i],
+                    indicators.maLongCover[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
           case "cover_ma_above":
             coverSignal =
               check(indicators.maExit[i]) &&
@@ -7351,15 +9609,31 @@ function runStrategy(data, params, options = {}) {
               };
             break;
           case "cover_rsi_oversold":
-            const rC = indicators.rsiCover[i],
-              rPC = indicators.rsiCover[i - 1],
-              rThC = shortExitParams.threshold || 30;
-            coverSignal = check(rC) && check(rPC) && rC > rThC && rPC <= rThC;
-            if (coverSignal)
-              coverIndicatorValues = {
-                RSI: [rPC, rC, indicators.rsiCover[i + 1] ?? null],
-              };
-            break;
+            {
+              const pluginResult = callStrategyPlugin(
+                'cover_rsi_oversold',
+                'shortExit',
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const rC = indicators.rsiCover[i],
+                rPC = indicators.rsiCover[i - 1],
+                rThC = shortExitParams.threshold || 30;
+              coverSignal = check(rC) && check(rPC) && rC > rThC && rPC <= rThC;
+              if (coverSignal)
+                coverIndicatorValues = {
+                  RSI: [rPC, rC, indicators.rsiCover[i + 1] ?? null],
+                };
+              break;
+            }
           case "cover_macd_cross":
             const difC = indicators.macdCover[i],
               deaC = indicators.macdSignalCover[i],
@@ -7383,38 +9657,70 @@ function runStrategy(data, params, options = {}) {
               };
             break;
           case "cover_bollinger_breakout":
-            const upperC = indicators.bollingerUpperCover[i];
-            const upperPC = indicators.bollingerUpperCover[i - 1];
-            coverSignal =
-              check(upperC) &&
-              check(prevC) &&
-              check(upperPC) &&
-              curC > upperC &&
-              prevC <= upperPC;
-            if (coverSignal)
-              coverIndicatorValues = {
-                收盤價: [prevC, curC, closes[i + 1] ?? null],
-                上軌: [
-                  upperPC,
-                  upperC,
-                  indicators.bollingerUpperCover[i + 1] ?? null,
-                ],
-              };
-            break;
-          case "cover_k_d_cross":
-            const kC = indicators.kCover[i],
-              dC = indicators.dCover[i],
-              kPC = indicators.kCover[i - 1],
-              dPC = indicators.dCover[i - 1],
-              thXC = shortExitParams.thresholdX || 30;
-            coverSignal =
-              check(kC) &&
-              check(dC) &&
-              check(kPC) &&
-              check(dPC) &&
-              kC > dC &&
-              kPC <= dPC &&
-              dC < thXC;
+            {
+              const pluginResult = callStrategyPlugin(
+                'cover_bollinger_breakout',
+                'shortExit',
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const upperC = indicators.bollingerUpperCover[i];
+              const upperPC = indicators.bollingerUpperCover[i - 1];
+              coverSignal =
+                check(upperC) &&
+                check(prevC) &&
+                check(upperPC) &&
+                curC > upperC &&
+                prevC <= upperPC;
+              if (coverSignal)
+                coverIndicatorValues = {
+                  收盤價: [prevC, curC, closes[i + 1] ?? null],
+                  上軌: [
+                    upperPC,
+                    upperC,
+                    indicators.bollingerUpperCover[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
+        case "cover_k_d_cross":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_k_d_cross',
+              'shortExit',
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverKDValues && meta.kdValues) coverKDValues = meta.kdValues;
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const kC = indicators.kCover[i],
+                dC = indicators.dCover[i],
+                kPC = indicators.kCover[i - 1],
+                dPC = indicators.dCover[i - 1],
+                thXC = shortExitParams.thresholdX || 30;
+              coverSignal =
+                check(kC) &&
+                check(dC) &&
+                check(kPC) &&
+                check(dPC) &&
+                kC > dC &&
+                kPC <= dPC &&
+                dC < thXC;
             if (coverSignal)
               coverKDValues = {
                 kPrev: kPC,
@@ -7425,8 +9731,47 @@ function runStrategy(data, params, options = {}) {
                 dNext: indicators.dCover[i + 1] ?? null,
               };
             break;
-          case "cover_price_breakout":
-            const bpC = shortExitParams.period || 20;
+          }
+        case "cover_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'cover_volume_spike',
+              'shortExit',
+              i,
+              shortExitParams,
+            );
+            if (pluginResult) {
+              coverSignal = pluginResult.cover === true;
+              shortExitRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!coverIndicatorValues && meta.indicatorValues)
+                coverIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortExit)
+                ? indicators.volumeAvgShortExit[i]
+                : undefined;
+            const multiplierRaw = Number(shortExitParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            coverSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (coverSignal)
+              coverIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortExit?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortExit?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
+        case "cover_price_breakout":
+          const bpC = shortExitParams.period || 20;
             if (i >= bpC) {
               const hsC = highs.slice(i - bpC, i).filter((h) => check(h));
               if (hsC.length > 0) {
@@ -7475,26 +9820,63 @@ function runStrategy(data, params, options = {}) {
             }
             break;
           case "cover_trailing_stop":
-            const shortTrailP = shortExitParams.percentage || 5;
-            if (check(curL) && lastShortP > 0) {
-              currentLowSinceShort = Math.min(currentLowSinceShort, curL);
-              coverSignal =
-                curC > currentLowSinceShort * (1 + shortTrailP / 100);
+            {
+              if (check(curL) && lastShortP > 0) {
+                currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+              }
+              const pluginResult = callStrategyPlugin(
+                'cover_trailing_stop',
+                'shortExit',
+                i,
+                shortExitParams,
+                { currentPrice: curC, referencePrice: currentLowSinceShort },
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const shortTrailP = shortExitParams.percentage || 5;
+              if (check(curL) && lastShortP > 0) {
+                currentLowSinceShort = Math.min(currentLowSinceShort, curL);
+                coverSignal =
+                  curC > currentLowSinceShort * (1 + shortTrailP / 100);
+              }
+              if (coverSignal)
+                coverIndicatorValues = {
+                  收盤價: [null, curC, null],
+                  觸發價: [
+                    null,
+                    (currentLowSinceShort * (1 + shortTrailP / 100)).toFixed(2),
+                    null,
+                  ],
+                };
+              break;
             }
-            if (coverSignal)
-              coverIndicatorValues = {
-                收盤價: [null, curC, null],
-                觸發價: [
-                  null,
-                  (currentLowSinceShort * (1 + shortTrailP / 100)).toFixed(2),
-                  null,
-                ],
-              };
-            break;
           case "cover_fixed_stop_loss":
             coverSignal = false;
             break;
         }
+        const finalShortExitRule =
+          shortExitRuleResult ||
+          normaliseRuleResultFromLegacy(
+            shortExitStrategy,
+            'shortExit',
+            { cover: coverSignal },
+            i,
+          );
+        coverSignal = finalShortExitRule.cover === true;
+        const shortExitMeta = finalShortExitRule.meta;
+        if (!coverIndicatorValues && shortExitMeta && shortExitMeta.indicatorValues)
+          coverIndicatorValues = shortExitMeta.indicatorValues;
+        if (!coverKDValues && shortExitMeta && shortExitMeta.kdValues)
+          coverKDValues = shortExitMeta.kdValues;
+        if (!coverMACDValues && shortExitMeta && shortExitMeta.macdValues)
+          coverMACDValues = shortExitMeta.macdValues;
+
         if (!coverSignal && globalSL > 0 && lastShortP > 0) {
           if (curC >= lastShortP * (1 + globalSL / 100)) shortSlTrig = true;
         }
@@ -7589,9 +9971,24 @@ function runStrategy(data, params, options = {}) {
       let entryKDValues = null,
         entryMACDValues = null,
         entryIndicatorValues = null;
+      let entryRuleResult = null;
       switch (entryStrategy) {
         case "ma_cross":
-        case "ema_cross":
+        case "ema_cross": {
+          const pluginResult = callStrategyPlugin(
+            entryStrategy,
+            'longEntry',
+            i,
+            entryParams,
+          );
+          if (pluginResult) {
+            buySignal = pluginResult.enter === true;
+            entryRuleResult = pluginResult;
+            const meta = pluginResult.meta || {};
+            if (!entryIndicatorValues && meta.indicatorValues)
+              entryIndicatorValues = meta.indicatorValues;
+            break;
+          }
           buySignal =
             check(indicators.maShort[i]) &&
             check(indicators.maLong[i]) &&
@@ -7613,6 +10010,7 @@ function runStrategy(data, params, options = {}) {
               ],
             };
           break;
+        }
         case "ma_above":
           buySignal =
             check(indicators.maExit[i]) &&
@@ -7631,15 +10029,31 @@ function runStrategy(data, params, options = {}) {
             };
           break;
         case "rsi_oversold":
-          const rE = indicators.rsiEntry[i],
-            rPE = indicators.rsiEntry[i - 1],
-            rThE = entryParams.threshold || 30;
-          buySignal = check(rE) && check(rPE) && rE > rThE && rPE <= rThE;
-          if (buySignal)
-            entryIndicatorValues = {
-              RSI: [rPE, rE, indicators.rsiEntry[i + 1] ?? null],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'rsi_oversold',
+              'longEntry',
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const rE = indicators.rsiEntry[i],
+              rPE = indicators.rsiEntry[i - 1],
+              rThE = entryParams.threshold || 30;
+            buySignal = check(rE) && check(rPE) && rE > rThE && rPE <= rThE;
+            if (buySignal)
+              entryIndicatorValues = {
+                RSI: [rPE, rE, indicators.rsiEntry[i + 1] ?? null],
+              };
+            break;
+          }
         case "macd_cross":
           const difE = indicators.macdEntry[i],
             deaE = indicators.macdSignalEntry[i],
@@ -7663,60 +10077,114 @@ function runStrategy(data, params, options = {}) {
             };
           break;
         case "bollinger_breakout":
-          buySignal =
-            check(indicators.bollingerUpperEntry[i]) &&
-            check(prevC) &&
-            check(indicators.bollingerUpperEntry[i - 1]) &&
-            curC > indicators.bollingerUpperEntry[i] &&
-            prevC <= indicators.bollingerUpperEntry[i - 1];
-          if (buySignal)
-            entryIndicatorValues = {
-              收盤價: [prevC, curC, closes[i + 1] ?? null],
-              上軌: [
-                indicators.bollingerUpperEntry[i - 1],
-                indicators.bollingerUpperEntry[i],
-                indicators.bollingerUpperEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'bollinger_breakout',
+              'longEntry',
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            buySignal =
+              check(indicators.bollingerUpperEntry[i]) &&
+              check(prevC) &&
+              check(indicators.bollingerUpperEntry[i - 1]) &&
+              curC > indicators.bollingerUpperEntry[i] &&
+              prevC <= indicators.bollingerUpperEntry[i - 1];
+            if (buySignal)
+              entryIndicatorValues = {
+                收盤價: [prevC, curC, closes[i + 1] ?? null],
+                上軌: [
+                  indicators.bollingerUpperEntry[i - 1],
+                  indicators.bollingerUpperEntry[i],
+                  indicators.bollingerUpperEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "k_d_cross":
-          const kE = indicators.kEntry[i],
-            dE = indicators.dEntry[i],
-            kPE = indicators.kEntry[i - 1],
-            dPE = indicators.dEntry[i - 1],
-            thX = entryParams.thresholdX || 30;
-          buySignal =
-            check(kE) &&
-            check(dE) &&
-            check(kPE) &&
-            check(dPE) &&
-            kE > dE &&
-            kPE <= dPE &&
-            dE < thX;
-          if (buySignal)
-            entryKDValues = {
-              kPrev: kPE,
-              dPrev: dPE,
-              kNow: kE,
-              dNow: dE,
-              kNext: indicators.kEntry[i + 1] ?? null,
-              dNext: indicators.dEntry[i + 1] ?? null,
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'k_d_cross',
+              'longEntry',
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryKDValues && meta.kdValues) entryKDValues = meta.kdValues;
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const kE = indicators.kEntry[i],
+              dE = indicators.dEntry[i],
+              kPE = indicators.kEntry[i - 1],
+              dPE = indicators.dEntry[i - 1],
+              thX = entryParams.thresholdX || 30;
+            buySignal =
+              check(kE) &&
+              check(dE) &&
+              check(kPE) &&
+              check(dPE) &&
+              kE > dE &&
+              kPE <= dPE &&
+              dE < thX;
+            if (buySignal)
+              entryKDValues = {
+                kPrev: kPE,
+                dPrev: dPE,
+                kNow: kE,
+                dNow: dE,
+                kNext: indicators.kEntry[i + 1] ?? null,
+                dNext: indicators.dEntry[i + 1] ?? null,
+              };
+            break;
+          }
         case "volume_spike":
-          const vAE = indicators.volumeAvgEntry[i],
-            vME = entryParams.multiplier || 2;
-          buySignal = check(vAE) && check(curV) && curV > vAE * vME;
-          if (buySignal)
-            entryIndicatorValues = {
-              成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-              均量: [
-                indicators.volumeAvgEntry[i - 1] ?? null,
-                vAE,
-                indicators.volumeAvgEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              "volume_spike",
+              "longEntry",
+              i,
+              entryParams,
+            );
+            if (pluginResult) {
+              buySignal = pluginResult.enter === true;
+              entryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!entryIndicatorValues && meta.indicatorValues)
+                entryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume = indicators.volumeAvgEntry[i];
+            const multiplierRaw = Number(entryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            buySignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (buySignal)
+              entryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgEntry[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "price_breakout":
           const bpE = entryParams.period || 20;
           if (i >= bpE) {
@@ -7762,7 +10230,18 @@ function runStrategy(data, params, options = {}) {
           }
           break;
       }
-        let shouldEnterStage = false;
+      const finalEntryRule =
+        entryRuleResult ||
+        normaliseRuleResultFromLegacy(entryStrategy, 'longEntry', { enter: buySignal }, i);
+      buySignal = finalEntryRule.enter === true;
+      const entryMeta = finalEntryRule.meta;
+      if (!entryIndicatorValues && entryMeta && entryMeta.indicatorValues)
+        entryIndicatorValues = entryMeta.indicatorValues;
+      if (!entryKDValues && entryMeta && entryMeta.kdValues)
+        entryKDValues = entryMeta.kdValues;
+      if (!entryMACDValues && entryMeta && entryMeta.macdValues)
+        entryMACDValues = entryMeta.macdValues;
+      let shouldEnterStage = false;
         let stageTriggerType = null;
         if (buySignal) {
           shouldEnterStage = true;
@@ -7852,31 +10331,48 @@ function runStrategy(data, params, options = {}) {
       let shortEntryKDValues = null,
         shortEntryMACDValues = null,
         shortEntryIndicatorValues = null;
+      let shortEntryRuleResult = null;
       switch (shortEntryStrategy) {
         case "short_ma_cross":
         case "short_ema_cross":
-          shortSignal =
-            check(indicators.maShortShortEntry[i]) &&
-            check(indicators.maLongShortEntry[i]) &&
-            check(indicators.maShortShortEntry[i - 1]) &&
-            check(indicators.maLongShortEntry[i - 1]) &&
-            indicators.maShortShortEntry[i] < indicators.maLongShortEntry[i] &&
-            indicators.maShortShortEntry[i - 1] >=
-              indicators.maLongShortEntry[i - 1];
-          if (shortSignal)
-            shortEntryIndicatorValues = {
-              短SMA: [
-                indicators.maShortShortEntry[i - 1],
-                indicators.maShortShortEntry[i],
-                indicators.maShortShortEntry[i + 1] ?? null,
-              ],
-              長SMA: [
-                indicators.maLongShortEntry[i - 1],
-                indicators.maLongShortEntry[i],
-                indicators.maLongShortEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              shortEntryStrategy,
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            shortSignal =
+              check(indicators.maShortShortEntry[i]) &&
+              check(indicators.maLongShortEntry[i]) &&
+              check(indicators.maShortShortEntry[i - 1]) &&
+              check(indicators.maLongShortEntry[i - 1]) &&
+              indicators.maShortShortEntry[i] < indicators.maLongShortEntry[i] &&
+              indicators.maShortShortEntry[i - 1] >=
+                indicators.maLongShortEntry[i - 1];
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                短SMA: [
+                  indicators.maShortShortEntry[i - 1],
+                  indicators.maShortShortEntry[i],
+                  indicators.maShortShortEntry[i + 1] ?? null,
+                ],
+                長SMA: [
+                  indicators.maLongShortEntry[i - 1],
+                  indicators.maLongShortEntry[i],
+                  indicators.maLongShortEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "short_ma_below":
           shortSignal =
             check(indicators.maExit[i]) &&
@@ -7895,16 +10391,32 @@ function runStrategy(data, params, options = {}) {
             };
           break;
         case "short_rsi_overbought":
-          const rSE = indicators.rsiShortEntry[i],
-            rPSE = indicators.rsiShortEntry[i - 1],
-            rThSE = shortEntryParams.threshold || 70;
-          shortSignal =
-            check(rSE) && check(rPSE) && rSE < rThSE && rPSE >= rThSE;
-          if (shortSignal)
-            shortEntryIndicatorValues = {
-              RSI: [rPSE, rSE, indicators.rsiShortEntry[i + 1] ?? null],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_rsi_overbought',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const rSE = indicators.rsiShortEntry[i],
+              rPSE = indicators.rsiShortEntry[i - 1],
+              rThSE = shortEntryParams.threshold || 70;
+            shortSignal =
+              check(rSE) && check(rPSE) && rSE < rThSE && rPSE >= rThSE;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                RSI: [rPSE, rSE, indicators.rsiShortEntry[i + 1] ?? null],
+              };
+            break;
+          }
         case "short_macd_cross":
           const difSE = indicators.macdShortEntry[i],
             deaSE = indicators.macdSignalShortEntry[i],
@@ -7928,48 +10440,120 @@ function runStrategy(data, params, options = {}) {
             };
           break;
         case "short_bollinger_reversal":
-          const midSE = indicators.bollingerMiddleShortEntry[i];
-          const midPSE = indicators.bollingerMiddleShortEntry[i - 1];
-          shortSignal =
-            check(midSE) &&
-            check(prevC) &&
-            check(midPSE) &&
-            curC < midSE &&
-            prevC >= midPSE;
-          if (shortSignal)
-            shortEntryIndicatorValues = {
-              收盤價: [prevC, curC, closes[i + 1] ?? null],
-              中軌: [
-                midPSE,
-                midSE,
-                indicators.bollingerMiddleShortEntry[i + 1] ?? null,
-              ],
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_bollinger_reversal',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const midSE = indicators.bollingerMiddleShortEntry[i];
+            const midPSE = indicators.bollingerMiddleShortEntry[i - 1];
+            shortSignal =
+              check(midSE) &&
+              check(prevC) &&
+              check(midPSE) &&
+              curC < midSE &&
+              prevC >= midPSE;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                收盤價: [prevC, curC, closes[i + 1] ?? null],
+                中軌: [
+                  midPSE,
+                  midSE,
+                  indicators.bollingerMiddleShortEntry[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "short_k_d_cross":
-          const kSE = indicators.kShortEntry[i],
-            dSE = indicators.dShortEntry[i],
-            kPSE = indicators.kShortEntry[i - 1],
-            dPSE = indicators.dShortEntry[i - 1],
-            thY = shortEntryParams.thresholdY || 70;
-          shortSignal =
-            check(kSE) &&
-            check(dSE) &&
-            check(kPSE) &&
-            check(dPSE) &&
-            kSE < dSE &&
-            kPSE >= dPSE &&
-            dSE > thY;
-          if (shortSignal)
-            shortEntryKDValues = {
-              kPrev: kPSE,
-              dPrev: dPSE,
-              kNow: kSE,
-              dNow: dSE,
-              kNext: indicators.kShortEntry[i + 1] ?? null,
-              dNext: indicators.dShortEntry[i + 1] ?? null,
-            };
-          break;
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_k_d_cross',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryKDValues && meta.kdValues)
+                shortEntryKDValues = meta.kdValues;
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const kSE = indicators.kShortEntry[i],
+              dSE = indicators.dShortEntry[i],
+              kPSE = indicators.kShortEntry[i - 1],
+              dPSE = indicators.dShortEntry[i - 1],
+              thY = shortEntryParams.thresholdY || 70;
+            shortSignal =
+              check(kSE) &&
+              check(dSE) &&
+              check(kPSE) &&
+              check(dPSE) &&
+              kSE < dSE &&
+              kPSE >= dPSE &&
+              dSE > thY;
+            if (shortSignal)
+              shortEntryKDValues = {
+                kPrev: kPSE,
+                dPrev: dPSE,
+                kNow: kSE,
+                dNow: dSE,
+                kNext: indicators.kShortEntry[i + 1] ?? null,
+                dNext: indicators.dShortEntry[i + 1] ?? null,
+              };
+            break;
+          }
+        case "short_volume_spike":
+          {
+            const pluginResult = callStrategyPlugin(
+              'short_volume_spike',
+              'shortEntry',
+              i,
+              shortEntryParams,
+            );
+            if (pluginResult) {
+              shortSignal = pluginResult.short === true;
+              shortEntryRuleResult = pluginResult;
+              const meta = pluginResult.meta || {};
+              if (!shortEntryIndicatorValues && meta.indicatorValues)
+                shortEntryIndicatorValues = meta.indicatorValues;
+              break;
+            }
+            const avgVolume =
+              Array.isArray(indicators.volumeAvgShortEntry)
+                ? indicators.volumeAvgShortEntry[i]
+                : undefined;
+            const multiplierRaw = Number(shortEntryParams?.multiplier);
+            const multiplier =
+              Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                ? multiplierRaw
+                : 2;
+            shortSignal =
+              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+            if (shortSignal)
+              shortEntryIndicatorValues = {
+                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                均量: [
+                  indicators.volumeAvgShortEntry?.[i - 1] ?? null,
+                  avgVolume,
+                  indicators.volumeAvgShortEntry?.[i + 1] ?? null,
+                ],
+              };
+            break;
+          }
         case "short_price_breakdown":
           const bpSE = shortEntryParams.period || 20;
           if (i >= bpSE) {
@@ -8020,6 +10604,22 @@ function runStrategy(data, params, options = {}) {
             };
           break;
       }
+      const finalShortEntryRule =
+        shortEntryRuleResult ||
+        normaliseRuleResultFromLegacy(
+          shortEntryStrategy,
+          'shortEntry',
+          { short: shortSignal },
+          i,
+        );
+      shortSignal = finalShortEntryRule.short === true;
+      const shortEntryMeta = finalShortEntryRule.meta;
+      if (!shortEntryIndicatorValues && shortEntryMeta && shortEntryMeta.indicatorValues)
+        shortEntryIndicatorValues = shortEntryMeta.indicatorValues;
+      if (!shortEntryKDValues && shortEntryMeta && shortEntryMeta.kdValues)
+        shortEntryKDValues = shortEntryMeta.kdValues;
+      if (!shortEntryMACDValues && shortEntryMeta && shortEntryMeta.macdValues)
+        shortEntryMACDValues = shortEntryMeta.macdValues;
       if (shortSignal) {
         if (tradeTiming === "close") {
           tradePrice = curC;
@@ -8607,6 +11207,7 @@ function runStrategy(data, params, options = {}) {
     );
     const sharpeR = calculateSharpeRatio(dailyR, annualR);
     const sortinoR = calculateSortinoRatio(dailyR, annualR);
+    const oosMomentSums = computeReturnMomentSums(dailyR);
 
     let annReturnHalf1 = null,
       sharpeHalf1 = null,
@@ -8679,26 +11280,31 @@ function runStrategy(data, params, options = {}) {
         sharpeHalf2 = annStdDev2 !== 0 ? annExcessReturn2 / annStdDev2 : 0;
       }
     }
+    // Patch Tag: LB-PERF-TABLE-20240829A
     const subPeriodResults = {};
     const overallEndDate = new Date(lastDateStr || params.endDate);
     const overallStartDate = new Date(firstDateStr || params.startDate);
     const totalDurationMillis = overallEndDate - overallStartDate;
-    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
     const totalDaysApprox = Math.max(
       1,
       totalDurationMillis / (1000 * 60 * 60 * 24),
     );
+    const totalYears = totalDurationMillis / (1000 * 60 * 60 * 24 * 365.25);
+    const requestedYearsRaw =
+      Number.isFinite(params?.recentYears) && params.recentYears > 0
+        ? Math.min(params.recentYears, 50)
+        : null;
+    const fallbackYears = Math.floor(totalYears);
+    const yearLimit = requestedYearsRaw || Math.max(1, fallbackYears);
     const periodsToCalculate = {};
-    if (totalDaysApprox >= 30) periodsToCalculate["1M"] = 1;
-    if (totalDaysApprox >= 180) periodsToCalculate["6M"] = 6;
-    if (totalYears >= 1) {
-      for (let y = 1; y <= Math.floor(totalYears); y++) {
-        periodsToCalculate[`${y}Y`] = y * 12;
-      }
+    if (totalDaysApprox >= 30) {
+      periodsToCalculate["1M"] = 1;
     }
-    const floorTotalYears = Math.floor(totalYears);
-    if (floorTotalYears >= 1 && !periodsToCalculate[`${floorTotalYears}Y`]) {
-      periodsToCalculate[`${floorTotalYears}Y`] = floorTotalYears * 12;
+    if (totalDaysApprox >= 180) {
+      periodsToCalculate["6M"] = 6;
+    }
+    for (let y = 1; y <= yearLimit; y += 1) {
+      periodsToCalculate[`${y}Y`] = y * 12;
     }
     let bhReturnsFull = Array(n).fill(null);
     const bhBaselineIdx = firstValidPriceIdxBH;
@@ -8745,6 +11351,24 @@ function runStrategy(data, params, options = {}) {
       }
       if (subStartIdx <= lastIdx) {
         const subEndIdx = lastIdx;
+        const coverageStartStr = dates[subStartIdx] || null;
+        let hasCoverage = false;
+        if (coverageStartStr) {
+          const coverageStartDate = new Date(coverageStartStr);
+          if (!Number.isNaN(coverageStartDate)) {
+            const coverageYears =
+              (overallEndDate - coverageStartDate) /
+              (1000 * 60 * 60 * 24 * 365.25);
+            const requiredYears = months / 12;
+            hasCoverage =
+              Number.isFinite(coverageYears) &&
+              coverageYears + 0.01 >= requiredYears;
+          }
+        }
+        if (!hasCoverage) {
+          subPeriodResults[label] = null;
+          continue;
+        }
         const subPortfolioVals = portfolioVal
           .slice(subStartIdx, subEndIdx + 1)
           .filter((v) => check(v));
@@ -8773,19 +11397,46 @@ function runStrategy(data, params, options = {}) {
             subPortfolioVals,
             subDates,
           );
-          const subAnnualizedReturn = 0;
+          let subAnnualizedReturn = null;
+          const firstSubDate = subDates[0] ? new Date(subDates[0]) : null;
+          const lastSubDate = subDates[subDates.length - 1]
+            ? new Date(subDates[subDates.length - 1])
+            : null;
+          const periodMillis =
+            firstSubDate && lastSubDate ? lastSubDate - firstSubDate : 0;
+          const periodDays = Number.isFinite(periodMillis)
+            ? periodMillis / (1000 * 60 * 60 * 24)
+            : 0;
+          const periodYears = periodDays > 0 ? periodDays / 365.25 : months / 12;
+          if (Number.isFinite(periodYears) && periodYears > 0 && subStartVal !== 0) {
+            const ratio = subEndVal / subStartVal;
+            if (ratio > 0) {
+              subAnnualizedReturn = (Math.pow(ratio, 1 / periodYears) - 1) * 100;
+            } else if (ratio === 0) {
+              subAnnualizedReturn = -100;
+            } else {
+              const totalReturnDecimal = (subEndVal - subStartVal) / subStartVal;
+              const safeDays = periodDays > 0 ? periodDays : months * 30;
+              subAnnualizedReturn =
+                totalReturnDecimal * (365.25 / Math.max(1, safeDays)) * 100;
+            }
+          }
+          if (!Number.isFinite(subAnnualizedReturn)) {
+            subAnnualizedReturn = null;
+          }
           const subSharpe = calculateSharpeRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subSortino = calculateSortinoRatio(
             subDailyReturns,
-            subAnnualizedReturn,
+            subAnnualizedReturn ?? 0,
           );
           const subMaxDD = calculateMaxDrawdown(subPortfolioVals);
           subPeriodResults[label] = {
             totalReturn: subTotalReturn,
             totalBuyHoldReturn: subBHTotalReturn,
+            annualizedReturn: subAnnualizedReturn,
             sharpeRatio: subSharpe,
             sortinoRatio: subSortino,
             maxDrawdown: subMaxDD,
@@ -8984,6 +11635,7 @@ function runStrategy(data, params, options = {}) {
       diagnostics: runtimeDiagnostics,
       parameterSensitivity: sensitivityAnalysis,
       sensitivityAnalysis,
+      oosDailyStats: oosMomentSums,
     };
     if (captureFinalState) {
       result.finalEvaluation = finalEvaluation;
@@ -9001,11 +11653,40 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
       score: null,
       driftPenalty: null,
       sharpePenalty: null,
+      driftPenaltyBand: null,
     };
   }
-  const driftPenalty = Number.isFinite(averageDrift)
-    ? Math.max(0, averageDrift)
-    : 0;
+
+  let driftPenalty = 0;
+  let driftPenaltyBand = null;
+  if (Number.isFinite(averageDrift)) {
+    const driftAbs = Math.max(0, Math.abs(averageDrift));
+    const { driftStable, driftCaution } = ANNUALIZED_SENSITIVITY_THRESHOLDS;
+    const {
+      comfortPenaltyMax,
+      cautionPenaltyMax,
+      overflowPenaltySlope,
+    } = ANNUALIZED_SENSITIVITY_SCORING;
+
+    if (driftStable > 0 && driftAbs <= driftStable) {
+      const comfortRatio = driftStable === 0 ? 1 : driftAbs / driftStable;
+      driftPenalty = comfortRatio * comfortPenaltyMax;
+      driftPenaltyBand = "comfort";
+    } else if (driftAbs <= driftCaution) {
+      const span = Math.max(1, driftCaution - driftStable);
+      const ratio = driftStable === driftCaution
+        ? 1
+        : (driftAbs - driftStable) / span;
+      const scaled = ratio * (cautionPenaltyMax - comfortPenaltyMax);
+      driftPenalty = comfortPenaltyMax + scaled;
+      driftPenaltyBand = "caution";
+    } else {
+      const overflow = Math.max(0, driftAbs - driftCaution);
+      driftPenalty = cautionPenaltyMax + overflow * overflowPenaltySlope;
+      driftPenaltyBand = "critical";
+    }
+  }
+
   const sharpePenaltyRaw = Number.isFinite(averageSharpeDrop)
     ? Math.max(0, averageSharpeDrop) * 100
     : 0;
@@ -9016,7 +11697,21 @@ function evaluateSensitivityStability(averageDrift, averageSharpeDrop) {
     score,
     driftPenalty,
     sharpePenalty,
+    driftPenaltyBand,
   };
+}
+
+function resolveAnnualizedReturnValue(source) {
+  if (!source || typeof source !== "object" || source === null) {
+    return null;
+  }
+  if (Number.isFinite(source.annualizedReturn)) {
+    return source.annualizedReturn;
+  }
+  if (Number.isFinite(source.returnRate)) {
+    return source.returnRate;
+  }
+  return null;
 }
 
 function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
@@ -9028,9 +11723,10 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
     return null;
   }
 
-  const baselineReturn = Number.isFinite(baselineMetrics?.returnRate)
+  const baselineAnnualizedReturn = resolveAnnualizedReturnValue(baselineMetrics);
+  const baselineReturnRate = Number.isFinite(baselineMetrics?.returnRate)
     ? baselineMetrics.returnRate
-    : 0;
+    : baselineAnnualizedReturn;
   const baselineSharpe = Number.isFinite(baselineMetrics?.sharpeRatio)
     ? baselineMetrics.sharpeRatio
     : null;
@@ -9050,7 +11746,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         context: ctx,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualizedReturn,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -9113,6 +11809,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
         version: SENSITIVITY_SCORE_VERSION,
         driftPenalty: stabilityComponents.driftPenalty,
         sharpePenalty: stabilityComponents.sharpePenalty,
+        driftPenaltyBand: stabilityComponents.driftPenaltyBand,
       },
       positiveDriftPercent: summaryPositive,
       negativeDriftPercent: summaryNegative,
@@ -9121,10 +11818,12 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
       scenarioCount: summaryAccumulator.scenarioCount,
     },
     baseline: {
-      returnRate: baselineReturn,
+      returnRate: Number.isFinite(baselineReturnRate)
+        ? baselineReturnRate
+        : null,
       annualizedReturn: Number.isFinite(baselineMetrics?.annualizedReturn)
         ? baselineMetrics.annualizedReturn
-        : null,
+        : baselineAnnualizedReturn,
       sharpeRatio: baselineSharpe,
     },
     groups,
@@ -9135,7 +11834,7 @@ function buildSensitivityGroup({
   context,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualizedReturn,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -9154,7 +11853,7 @@ function buildSensitivityGroup({
         baseValue: entry.value,
         data,
         baseParams,
-        baselineReturn,
+        baselineAnnualizedReturn,
         baselineSharpe,
         summaryAccumulator,
       }),
@@ -9239,6 +11938,7 @@ function buildSensitivityGroup({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: groupStabilityComponents.driftPenalty,
       sharpePenalty: groupStabilityComponents.sharpePenalty,
+      driftPenaltyBand: groupStabilityComponents.driftPenaltyBand,
     },
     parameters,
   };
@@ -9250,7 +11950,7 @@ function evaluateSensitivityParameter({
   baseValue,
   data,
   baseParams,
-  baselineReturn,
+  baselineAnnualizedReturn,
   baselineSharpe,
   summaryAccumulator,
 }) {
@@ -9290,12 +11990,17 @@ function evaluateSensitivityParameter({
       const scenarioReturn = Number.isFinite(scenarioResult.returnRate)
         ? scenarioResult.returnRate
         : null;
-      const deltaReturn =
-        Number.isFinite(scenarioReturn) && Number.isFinite(baselineReturn)
-          ? scenarioReturn - baselineReturn
-          : null;
-      const driftPercent =
-        Number.isFinite(deltaReturn) ? Math.abs(deltaReturn) : null;
+      const scenarioAnnualized = resolveAnnualizedReturnValue(scenarioResult);
+      const deltaAnnualizedReturn = Number.isFinite(scenarioAnnualized)
+        ? Number.isFinite(baselineAnnualizedReturn)
+          ? scenarioAnnualized - baselineAnnualizedReturn
+          : scenarioAnnualized
+        : Number.isFinite(baselineAnnualizedReturn)
+        ? -baselineAnnualizedReturn
+        : null;
+      const driftPercent = Number.isFinite(deltaAnnualizedReturn)
+        ? Math.abs(deltaAnnualizedReturn)
+        : null;
       const scenarioSharpe = Number.isFinite(scenarioResult.sharpeRatio)
         ? scenarioResult.sharpeRatio
         : null;
@@ -9316,13 +12021,13 @@ function evaluateSensitivityParameter({
         summaryAccumulator.driftValues.push(driftPercent);
         summaryAccumulator.scenarioCount += 1;
       }
-      if (Number.isFinite(deltaReturn)) {
-        if (deltaReturn >= 0) {
-          positiveDeltas.push(deltaReturn);
-          summaryAccumulator.positive.push(deltaReturn);
+      if (Number.isFinite(deltaAnnualizedReturn)) {
+        if (deltaAnnualizedReturn >= 0) {
+          positiveDeltas.push(deltaAnnualizedReturn);
+          summaryAccumulator.positive.push(deltaAnnualizedReturn);
         } else {
-          negativeDeltas.push(deltaReturn);
-          summaryAccumulator.negative.push(deltaReturn);
+          negativeDeltas.push(deltaAnnualizedReturn);
+          summaryAccumulator.negative.push(deltaAnnualizedReturn);
         }
       }
       if (Number.isFinite(deltaSharpe)) {
@@ -9341,7 +12046,9 @@ function evaluateSensitivityParameter({
         type: adjustment.type,
         direction: adjustment.direction,
         value: adjustment.value,
-        deltaReturn,
+        deltaReturn: Number.isFinite(deltaAnnualizedReturn)
+          ? deltaAnnualizedReturn
+          : null,
         driftPercent,
         deltaSharpe,
         run: {
@@ -9421,6 +12128,7 @@ function evaluateSensitivityParameter({
       version: SENSITIVITY_SCORE_VERSION,
       driftPenalty: stabilityComponents.driftPenalty,
       sharpePenalty: stabilityComponents.sharpePenalty,
+      driftPenaltyBand: stabilityComponents.driftPenaltyBand,
     },
   };
 }
@@ -9727,6 +12435,12 @@ function formatAbsoluteLabel(value) {
 
 // --- 參數優化邏輯 ---
 const SINGLE_PARAMETER_OPTIMIZER_VERSION = "LB-SINGLE-OPT-20251115A";
+const OPTIMIZATION_ROLE_TO_DSL = Object.freeze({
+  entry: "longEntry",
+  exit: "longExit",
+  shortEntry: "shortEntry",
+  shortExit: "shortExit",
+});
 
 function buildOptimizationValueSweep(range) {
   const safeRange = range && typeof range === "object" ? range : {};
@@ -9801,6 +12515,20 @@ function createOptimizationParamTemplate(baseParams = {}) {
       ) {
         return;
       }
+      if (key === "strategyDsl" && baseParams.strategyDsl) {
+        try {
+          template.base.strategyDsl = JSON.parse(
+            JSON.stringify(baseParams.strategyDsl),
+          );
+        } catch (cloneError) {
+          console.warn(
+            "[Worker Opt] strategyDsl 深拷貝失敗，將沿用原始參考。",
+            cloneError,
+          );
+          template.base.strategyDsl = baseParams.strategyDsl;
+        }
+        return;
+      }
       template.base[key] = baseParams[key];
     });
     template.entryParams =
@@ -9839,6 +12567,19 @@ function createOptimizationParamTemplate(baseParams = {}) {
 
 function instantiateOptimizationParams(template) {
   const params = { ...template.base };
+  if (template.base && typeof template.base.strategyDsl === "object") {
+    try {
+      params.strategyDsl = JSON.parse(
+        JSON.stringify(template.base.strategyDsl),
+      );
+    } catch (cloneError) {
+      console.warn(
+        "[Worker Opt] strategyDsl 實例化深拷貝失敗，沿用參考。",
+        cloneError,
+      );
+      params.strategyDsl = template.base.strategyDsl;
+    }
+  }
   if (template.entryParams) {
     params.entryParams = { ...template.entryParams };
   }
@@ -9862,6 +12603,53 @@ function instantiateOptimizationParams(template) {
     );
   }
   return params;
+}
+
+function updateStrategyDslParam(strategyDsl, roleKey, targetIds, paramName, value) {
+  if (!strategyDsl || typeof strategyDsl !== "object") return;
+  const root = strategyDsl[roleKey];
+  if (!root || typeof root !== "object") return;
+  const ids = Array.isArray(targetIds) ? targetIds.filter(Boolean) : [];
+
+  const shouldUpdateNode = (pluginId) => {
+    if (!ids.length) return true;
+    return ids.includes(pluginId);
+  };
+
+  const traverse = (node) => {
+    if (!node || typeof node !== "object") return;
+    const typeRaw =
+      typeof node.type === "string"
+        ? node.type.toLowerCase()
+        : typeof node.op === "string"
+          ? node.op.toLowerCase()
+          : typeof node.operator === "string"
+            ? node.operator.toLowerCase()
+            : null;
+    const isPluginNode =
+      typeRaw === "plugin" || (!typeRaw && typeof node.id === "string");
+    if (isPluginNode) {
+      const pluginId = typeof node.id === "string" ? node.id : null;
+      if (pluginId && shouldUpdateNode(pluginId) && node.params) {
+        if (typeof node.params === "object" && node.params !== null) {
+          if (paramName in node.params) {
+            node.params = { ...node.params, [paramName]: value };
+          }
+        }
+      }
+    }
+    if (Array.isArray(node.nodes)) {
+      node.nodes.forEach(traverse);
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach(traverse);
+    }
+    if (node.node && typeof node.node === "object") {
+      traverse(node.node);
+    }
+  };
+
+  traverse(root);
 }
 
 async function runOptimization(
@@ -9981,6 +12769,31 @@ async function runOptimization(
       message: `測試 ${optParamName}=${curVal}`,
     });
     const testParams = instantiateOptimizationParams(template);
+    const baseEffectiveStart =
+      baseParams?.effectiveStartDate || baseParams?.startDate || null;
+    const baseDataStart =
+      baseParams?.dataStartDate || baseEffectiveStart || baseParams?.startDate || null;
+    const baseLookback =
+      Number.isFinite(baseParams?.lookbackDays) && baseParams.lookbackDays > 0
+        ? baseParams.lookbackDays
+        : null;
+    if (baseParams?.startDate && !testParams.originalStartDate) {
+      testParams.originalStartDate = baseParams.startDate;
+    }
+    if (baseEffectiveStart) {
+      testParams.startDate = baseEffectiveStart;
+      testParams.effectiveStartDate = baseEffectiveStart;
+    } else if (testParams.effectiveStartDate) {
+      testParams.startDate = testParams.effectiveStartDate;
+    }
+    if (baseDataStart) {
+      testParams.dataStartDate = baseDataStart;
+    } else if (!testParams.dataStartDate && testParams.startDate) {
+      testParams.dataStartDate = testParams.startDate;
+    }
+    if (baseLookback !== null) {
+      testParams.lookbackDays = baseLookback;
+    }
     testParams.__optimizationParam = optParamName;
     testParams.__optimizationValue = curVal;
     if (optimizeTargetStrategy === "risk") {
@@ -10011,6 +12824,26 @@ async function runOptimization(
       }
       testParams[targetObjKey][optParamName] = curVal;
       testParams.enableShorting = contextRequiresShorting;
+      const dslRoleKey = OPTIMIZATION_ROLE_TO_DSL[optimizeTargetStrategy];
+      if (dslRoleKey && testParams.strategyDsl) {
+        const strategyIds = [];
+        if (optimizeTargetStrategy === "entry") {
+          strategyIds.push(testParams.entryStrategy);
+        } else if (optimizeTargetStrategy === "exit") {
+          strategyIds.push(testParams.exitStrategy);
+        } else if (optimizeTargetStrategy === "shortEntry") {
+          strategyIds.push(testParams.shortEntryStrategy);
+        } else if (optimizeTargetStrategy === "shortExit") {
+          strategyIds.push(testParams.shortExitStrategy);
+        }
+        updateStrategyDslParam(
+          testParams.strategyDsl,
+          dslRoleKey,
+          strategyIds,
+          optParamName,
+          curVal,
+        );
+      }
     }
     try {
       const result = runStrategy(stockData, testParams, runOptions);
@@ -10137,7 +12970,41 @@ self.onmessage = async function (e) {
     windowDecision?.dataStartDate ||
     params?.dataStartDate ||
     effectiveStartDate ||
-    params?.startDate;
+    params?.startDate ||
+    null;
+  const resolvedEffectiveStart =
+    effectiveStartDate ||
+    params?.effectiveStartDate ||
+    params?.startDate ||
+    null;
+  const resolvedDataStart =
+    dataStartDate ||
+    params?.dataStartDate ||
+    resolvedEffectiveStart ||
+    params?.startDate ||
+    null;
+  const resolvedLookback =
+    Number.isFinite(lookbackDays) && lookbackDays > 0 ? lookbackDays : null;
+  if (params && typeof params === "object") {
+    if (resolvedLookback !== null) {
+      params.lookbackDays = resolvedLookback;
+    }
+    if (resolvedEffectiveStart) {
+      params.effectiveStartDate = resolvedEffectiveStart;
+    }
+    if (resolvedDataStart) {
+      params.dataStartDate = resolvedDataStart;
+    }
+  }
+  if (resolvedLookback !== null) {
+    e.data.lookbackDays = resolvedLookback;
+  }
+  if (resolvedEffectiveStart) {
+    e.data.effectiveStartDate = resolvedEffectiveStart;
+  }
+  if (resolvedDataStart) {
+    e.data.dataStartDate = resolvedDataStart;
+  }
   try {
     if (type === "runBacktest") {
       let dataToUse = null;
@@ -10307,7 +13174,10 @@ self.onmessage = async function (e) {
         return;
       }
 
-      const strategyData = Array.isArray(dataToUse) ? dataToUse : [];
+      const warmupStartISO = dataStartDate || params.startDate || null;
+      const strategyData = Array.isArray(dataToUse)
+        ? filterDatasetForWindow(dataToUse, warmupStartISO, params.endDate || null)
+        : [];
       const startISO = effectiveStartDate || params.startDate || null;
       const endISO = params.endDate || null;
       const visibleStrategyData = Array.isArray(strategyData)

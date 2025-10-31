@@ -457,6 +457,50 @@
                                                     <div id="dataSourceTesterHint" class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);"></div>
                                                     <div id="dataSourceTesterButtons" class="flex flex-wrap gap-2"></div>
                                                     <div id="dataSourceTesterResult" class="text-xs hidden"></div>
+                                                    <div
+                                                        id="dataSourceTesterTableControls"
+                                                        class="hidden flex flex-wrap items-center gap-2 text-[11px]"
+                                                        style="color: var(--muted-foreground);"
+                                                    >
+                                                        <button
+                                                            id="openDataSourceTesterTable"
+                                                            type="button"
+                                                            class="px-3 py-2 text-xs font-medium rounded-md border flex items-center gap-1 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                            aria-expanded="false"
+                                                            aria-controls="dataSourceTesterTableWrapper"
+                                                        >
+                                                            查看資料表格
+                                                        </button>
+                                                        <span id="dataSourceTesterTableSource" class="hidden"></span>
+                                                        <span id="dataSourceTesterTableCount" class="hidden"></span>
+                                                    </div>
+                                                    <div
+                                                        id="dataSourceTesterTableWrapper"
+                                                        class="hidden border rounded-md bg-white/70"
+                                                        style="border-color: var(--border);"
+                                                    >
+                                                        <div class="overflow-x-auto max-h-64">
+                                                            <table class="min-w-full text-[11px]" style="color: var(--foreground);">
+                                                                <thead class="sticky top-0 bg-white">
+                                                                    <tr>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">日期</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">開盤</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">最高</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">最低</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">收盤</th>
+                                                                        <th class="px-3 py-2 text-left font-semibold border-b" style="border-color: var(--border);">成交量</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody id="dataSourceTesterTableBody"></tbody>
+                                                            </table>
+                                                        </div>
+                                                        <div
+                                                            id="dataSourceTesterTableNote"
+                                                            class="px-3 py-2 text-[10px] border-t"
+                                                            style="border-color: var(--border); color: var(--muted-foreground);"
+                                                        ></div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -523,6 +567,212 @@
                                             </div>
                                             <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
                                                 <div id="dataSourceDisplay" class="px-3 py-3 space-y-2 text-[11px]" style="color: var(--foreground);"></div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2" id="batchDebugLogContainer">
+                                            <div class="flex items-center justify-between">
+                                            <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="terminal-square" class="lucide w-4 h-4"></i>
+                                                    批量優化除錯
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="batchDebugRefreshBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        刷新
+                                                    </button>
+                                                    <button
+                                                        id="batchDebugDownloadBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        下載
+                                                    </button>
+                                                    <button
+                                                        id="batchDebugClearBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        清除
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div class="px-3 py-2 border-b" style="border-color: var(--border);">
+                                                    <div id="batchDebugSessionMeta" class="space-y-1 text-[11px]" style="color: var(--foreground);">尚未啟動批量優化除錯。</div>
+                                                </div>
+                                                <div class="px-3 py-3 space-y-2 max-h-64 overflow-y-auto text-[11px]" id="batchDebugLogScroll" style="color: var(--foreground);">
+                                                    <div id="batchDebugEmptyHint" class="text-[11px]" style="color: var(--muted-foreground);">暫無批量優化事件，請先啟動批量優化或滾動測試。</div>
+                                                    <ul id="batchDebugEventList" class="space-y-2 hidden"></ul>
+                                                </div>
+                                                <div class="px-3 pb-3 space-y-2 border-t" style="border-color: var(--border);">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <button
+                                                            id="batchDebugMarkFirstBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            設為紀錄A
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugMarkSecondBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            設為紀錄B
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugCompareBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                        >
+                                                            產生比較
+                                                        </button>
+                                                        <button
+                                                            id="batchDebugCopyBtn"
+                                                            type="button"
+                                                            class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                            style="color: var(--muted-foreground); border-color: var(--border); background-color: var(--background);"
+                                                            disabled
+                                                        >
+                                                            複製比較
+                                                        </button>
+                                                    </div>
+                                                    <div id="batchDebugCompareStatus" class="text-[11px]" style="color: var(--muted-foreground);">尚未選擇比較紀錄。</div>
+                                                    <textarea
+                                                        id="batchDebugCompareOutput"
+                                                        class="w-full text-[11px] rounded-md border px-2 py-2 bg-white/60"
+                                                        style="border-color: var(--border); color: var(--foreground); min-height: 96px;"
+                                                        placeholder="比較結果會顯示在此，可直接複製貼上。"
+                                                        readonly
+                                                    ></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2" id="strategyRegistryVerifierContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="shield-check" class="lucide w-4 h-4"></i>
+                                                    策略註冊驗證
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button
+                                                        id="strategyRegistryVerifyBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        驗證清單
+                                                    </button>
+                                                    <button
+                                                        id="strategyRegistrySampleRunBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        抽樣回測
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div
+                                                    id="strategyRegistryVerifierSummary"
+                                                    class="px-3 py-2 text-[11px]"
+                                                    style="color: var(--muted-foreground);"
+                                                >
+                                                    尚未執行驗證。
+                                                </div>
+                                                <div
+                                                    id="strategyRegistryVerifierList"
+                                                    class="px-3 py-2 space-y-2 hidden"
+                                                    style="color: var(--foreground); border-top: 1px solid var(--border); max-height: 240px; overflow-y: auto; overscroll-behavior: contain;"
+                                                ></div>
+                                                <div
+                                                    id="strategyRegistrySampleStatus"
+                                                    class="px-3 py-2 text-[11px] border-t"
+                                                    style="border-color: var(--border); color: var(--muted-foreground);"
+                                                >
+                                                    抽樣回測結果將顯示於此。
+                                                </div>
+                                                <div
+                                                    id="strategyRegistryVerifierFootnote"
+                                                    class="px-3 py-2 text-[10px] border-t"
+                                                    style="border-color: var(--border); color: var(--muted-foreground);"
+                                                >
+                                                    驗證流程會列出清單中的策略與載入狀態；抽樣回測將隨機挑選多空策略組合與預設參數進行驗證。
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-2" id="manualVerificationContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="clipboard-check" class="lucide w-4 h-4"></i>
+                                                    手動驗證工具
+                                                </div>
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <button
+                                                        id="manualVerifyExitDefaultsBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        檢查出場預設
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifySampleBacktestBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        抽樣回測摘要
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifyLegacyLoadBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        載入舊版策略
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifyBatchFlowBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        批量/滾動檢查
+                                                    </button>
+                                                    <button
+                                                        id="manualVerifyStrategyDslBtn"
+                                                        type="button"
+                                                        class="px-2 py-1 text-[11px] rounded-md border transition-colors"
+                                                        style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    >
+                                                        策略 DSL 檢查
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div
+                                                    id="manualVerificationStatus"
+                                                    class="px-3 py-2 text-[11px]"
+                                                    style="color: var(--muted-foreground);"
+                                                >
+                                                    尚未執行手動驗證。
+                                                </div>
+                                                <div
+                                                    id="manualVerificationLog"
+                                                    class="px-3 py-2 text-[11px] space-y-2 hidden border-t"
+                                                    style="border-color: var(--border); color: var(--foreground); max-height: 240px; overflow-y: auto; overscroll-behavior: contain;"
+                                                ></div>
                                             </div>
                                         </div>
                                         <div class="space-y-2" id="todaySuggestionLogContainer">
@@ -606,7 +856,7 @@
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div>
-                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票代碼 (目前無提供指數)</label>
+                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票與指數代碼 (非即時資訊)</label>
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <div class="flex-1 min-w-[160px] sm:min-w-[200px]">
                                                     <input
@@ -628,6 +878,7 @@
                                                         <option value="TWSE">上市</option>
                                                         <option value="TPEX">上櫃</option>
                                                         <option value="US">美股</option>
+                                                        <option value="INDEX">指數</option>
                                                     </select>
                                                 </div>
                                             </div>
@@ -692,15 +943,27 @@
                                             <button id="applyYearsBtn" title="設定開始日期" class="px-3 py-2 bg-primary hover:bg-primary text-white text-xs rounded-md transition duration-150 ease-in-out whitespace-nowrap" style="background-color: var(--primary);">套用</button>
                                         </div>
                                         <div>
-                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金 (元)</label>
-                                            <input 
-                                                type="number" 
-                                                id="initialCapital" 
-                                                value="100000" 
-                                                step="1000" 
+                                            <label for="initialCapital" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">初始本金-固定金額買入 (元)</label>
+                                            <input
+                                                type="number"
+                                                id="initialCapital"
+                                                value="100000"
+                                                step="1000"
                                                 class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                 style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                             />
+                                        </div>
+                                        <!-- Patch Tag: LB-INDEX-UI-20250727A -->
+                                        <div class="mt-2 flex justify-end">
+                                            <button
+                                                id="quickRunBacktestBtn"
+                                                type="button"
+                                                class="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-xs font-medium rounded-md shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 hover:opacity-90"
+                                                style="background-color: var(--primary);"
+                                            >
+                                                <i data-lucide="zap" class="lucide w-4 h-4"></i>
+                                                立刻回測
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -765,16 +1028,16 @@
                                         <div class="space-y-2">
                                             <label class="tooltip block text-xs font-medium text-foreground" style="color: var(--foreground);">
                                                 部位大小計算基準
-                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金：固定使用最開始設定的本金計算部位大小。<br>- 總資金：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
+                                                <span class="tooltiptext">選擇每次進場時，用於計算投入金額的基準：<br>- 初始本金-固定金額買入：固定使用最開始設定的本金計算部位大小。<br>- 總資金-獲利再投入：使用當下模擬帳戶的總資產 (包含已實現損益) 計算部位大小，部位會隨著獲利放大或虧損縮小 (複利效果)。</span>
                                             </label>
                                             <div class="flex items-center gap-4">
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisInitial" name="positionBasis" value="initialCapital" checked class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金</label>
+                                                    <label for="positionBasisInitial" class="text-xs text-foreground" style="color: var(--foreground);">初始本金-固定金額買入</label>
                                                 </div>
                                                 <div class="flex items-center">
                                                     <input type="radio" id="positionBasisTotal" name="positionBasis" value="totalCapital" class="h-4 w-4 text-accent border-border focus:ring-accent mr-1" style="border-color: var(--border); color: var(--accent);">
-                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金</label>
+                                                    <label for="positionBasisTotal" class="text-xs text-foreground" style="color: var(--foreground);">總資金-獲利再投入</label>
                                                 </div>
                                             </div>
                                         </div>
@@ -933,13 +1196,13 @@
                                                     class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                                                     style="border-color: var(--border); background-color: var(--input); color: var(--foreground);"
                                                 >
-                                                    <option value="ma_cross">均線死亡交叉</option>
+                                                    <option value="ma_cross_exit">均線死亡交叉</option>
                                                     <option value="ma_below">價格跌破均線</option>
                                                     <option value="rsi_overbought">RSI超買</option>
-                                                    <option value="macd_cross">MACD死亡交叉 (DI版)</option>
+                                                    <option value="macd_cross_exit">MACD死亡交叉 (DI版)</option>
                                                     <option value="bollinger_reversal">布林通道反轉</option>
-                                                    <option value="k_d_cross">KD死亡交叉 (D&gt;Y)</option>
-                                                    <option value="volume_spike">成交量暴增</option>
+                                                    <option value="k_d_cross_exit">KD死亡交叉 (D&gt;Y)</option>
+                                                    <option value="volume_spike_exit">成交量暴增</option>
                                                     <option value="price_breakdown">價格跌破前低</option>
                                                     <option value="williams_overbought">威廉指標超買</option>
                                                     <option value="turtle_stop_loss">海龜停損 (N日低)</option>
@@ -975,6 +1238,7 @@
                                                             <option value="short_macd_cross">MACD死亡交叉 (DI版) (做空)</option>
                                                             <option value="short_bollinger_reversal">布林通道反轉 (做空)</option>
                                                             <option value="short_k_d_cross">KD死亡交叉 (D&gt;Y) (做空)</option>
+                                                            <option value="short_volume_spike">成交量暴增 (做空)</option>
                                                             <option value="short_price_breakdown">價格跌破前低 (做空)</option>
                                                             <option value="short_williams_overbought">威廉指標超買 (做空)</option>
                                                             <option value="short_turtle_stop_loss">海龜N日低 (做空)</option>
@@ -995,6 +1259,7 @@
                                                             <option value="cover_macd_cross">MACD黃金交叉 (DI版) (回補)</option>
                                                             <option value="cover_bollinger_breakout">布林通道突破 (回補)</option>
                                                             <option value="cover_k_d_cross">KD黃金交叉 (D&lt;X) (回補)</option>
+                                                            <option value="cover_volume_spike">成交量暴增 (回補)</option>
                                                             <option value="cover_price_breakout">價格突破前高 (回補)</option>
                                                             <option value="cover_williams_oversold">威廉指標超賣 (回補)</option>
                                                             <option value="cover_turtle_breakout">海龜N日高 (回補)</option>
@@ -1127,45 +1392,62 @@
                                     <h3 class="card-title">執行中...</h3>
                                 </div>
                                 <div class="card-content">
-                                    <div class="space-y-3">
-                                        <div class="flex items-center gap-3">
-                                            <div
-                                                class="loading-mascot-wrapper square w-14 h-14 overflow-hidden flex items-center justify-center"
-                                                aria-hidden="true"
-                                            >
-                                                <div
-                                                    id="loadingGif"
-                                                    class="loading-mascot-canvas"
-                                                    data-tenor-id="1718069610368761676"
-                                                    data-tenor-api-key="LIVDSRZULELA"
-                                                    data-tenor-client-key="lazybacktest-progress-mascot"
-                                                    data-tenor-fallback-src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media1.tenor.com/m/1718069610368761676AAAAD/tenor.gif,https://media.tenor.com/ghm6KFFitx4AAAAd/hachiware.gif"
-                                                >
-                                                    <img
-                                                        class="loading-mascot-image"
-                                                        src="https://media.tenor.com/m/1718069610368761676AAAAD/tenor.gif"
-                                                        alt="LazyBacktest 進度吉祥物動畫"
-                                                        decoding="async"
-                                                        loading="eager"
-                                                        referrerpolicy="no-referrer"
-                                                        aria-hidden="true"
-                                                    />
-                                                </div>
-                                            </div>
+                                    <div class="space-y-4">
+                                        <div class="space-y-2">
                                             <p
                                                 id="loadingText"
-                                                class="text-sm text-muted"
+                                                class="text-sm text-muted text-center"
                                                 style="color: var(--muted-foreground);"
                                             >
                                                 準備中...
                                             </p>
+                                            <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                                <div
+                                                    id="progressBar"
+                                                    class="bg-primary h-2 rounded-full transition-all duration-300"
+                                                    style="width: 0%; background-color: var(--primary);"
+                                                ></div>
+                                            </div>
                                         </div>
-                                        <div class="w-full bg-muted rounded-full h-2" style="background-color: var(--muted);">
+                                        <div class="flex justify-center w-full">
                                             <div
-                                                id="progressBar"
-                                                class="bg-primary h-2 rounded-full transition-all duration-300"
-                                                style="width: 0%; background-color: var(--primary);"
-                                            ></div>
+                                                class="loading-mascot-wrapper square"
+                                                aria-hidden="true"
+                                            >
+                                            <div
+                                                id="loadingGif"
+                                                class="loading-mascot-canvas"
+                                                data-lb-mascot-default="https://i.imgur.com/zwj3cZQ.gif"
+                                                data-lb-mascot-mode="image"
+                                                data-lb-mascot-hidden="false"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    class="loading-mascot-toggle"
+                                                    data-lb-mascot-toggle="true"
+                                                    aria-label="隱藏進度吉祥物圖片"
+                                                    aria-pressed="false"
+                                                >
+                                                    -
+                                                </button>
+                                                <div
+                                                    class="loading-mascot-fallback-visual"
+                                                    data-lb-mascot-fallback="true"
+                                                    aria-hidden="true"
+                                                >
+                                                    ⌛
+                                                </div>
+                                                <img
+                                                    class="loading-mascot-image"
+                                                    src="https://i.imgur.com/zwj3cZQ.gif"
+                                                    alt="LazyBacktest 進度吉祥物動畫"
+                                                    decoding="async"
+                                                    loading="eager"
+                                                    referrerpolicy="no-referrer"
+                                                    aria-hidden="false"
+                                                />
+                                            </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1261,6 +1543,13 @@
                                             <button
                                                 class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
                                                 style="color: var(--muted-foreground);"
+                                                data-tab="strategy-compare"
+                                            >
+                                                <i data-lucide="layout-dashboard" class="lucide-sm inline mr-1"></i>策略比較
+                                            </button>
+                                            <button
+                                                class="tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap"
+                                                style="color: var(--muted-foreground);"
                                                 data-tab="ai-prediction"
                                             >
                                                 <i data-lucide="brain-circuit" class="lucide-sm inline mr-1"></i>AI 預測
@@ -1277,19 +1566,19 @@
                                     <div class="card-header pb-4">
                                         <div class="space-y-2">
                                             <div class="flex items-center gap-2">
-                                                <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 28%, transparent); color: var(--muted-foreground);">等待開賽</span>
+                                                <span id="strategy-status-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase" style="background-color: color-mix(in srgb, var(--muted) 28%, transparent); color: var(--muted-foreground);">待啟動</span>
                                                 <span id="strategy-status-diff" class="text-xs font-semibold hidden" style="color: var(--muted-foreground);"></span>
                                             </div>
-                                            <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">策略戰況尚未更新</h3>
+                                            <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">尚未產出策略摘要</h3>
                                             <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                完成回測後，這張戰報會綜合策略與買入持有的差距、指標體檢與建議行動，請優先回到此卡片檢視結果。
+                                                完成第一次回測後，這裡會顯示策略與買入持有的落差、主要指標檢查結果，以及下一步的優先動作。
                                             </p>
                                         </div>
                                     </div>
                                     <div class="card-content space-y-3">
                                         <div id="strategy-status-detail" class="text-sm leading-relaxed space-y-2" style="color: var(--muted-foreground);">
-                                            <p>• 等待您啟動回測，我們會追蹤策略與買入持有的差距並提出指標體檢。</p>
-                                            <p>• 回測完成後，這裡會用條列式寫給散戶看的戰況懶人包。</p>
+                                            <p>• 請先執行回測，系統會自動比對策略與買入持有的差距並完成指標檢查。</p>
+                                            <p>• 回測完成後，此處會列出關鍵觀察、風險提醒與調整建議，方便快速跟進。</p>
                                         </div>
                                     </div>
                                 </div>
@@ -1904,7 +2193,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-content hidden" id="rolling-test-tab">
+                            <div class="tab-content hidden space-y-6" id="rolling-test-tab">
                                 <div class="space-y-6">
                                     <div class="card">
                                         <div class="card-header flex flex-col gap-2">
@@ -1916,52 +2205,135 @@
                                         </div>
                                         <div class="card-content">
                                             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練視窗（月）
-                                                    <input id="rolling-training-months" data-rolling-input type="number" min="6" max="120" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    測試視窗（月）
-                                                    <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="36" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見做法為 6~12 個月，觀察策略換季後的續航力。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    視窗平移（月）
-                                                    <input id="rolling-step-months" data-rolling-input type="number" min="1" max="24" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議設為測試視窗的長度，形成不重疊的 Walk-Forward 迭代。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    測試至少成交筆數
-                                                    <input id="rolling-min-trades" data-rolling-input type="number" min="1" max="200" step="1" value="10" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">若小於門檻，將標註樣本不足。</span>
-                                                </label>
-                                                <fieldset class="flex flex-col gap-2 text-xs" style="color: var(--foreground);">
-                                                    <legend class="font-medium">通過門檻（滾動測試）</legend>
-                                                    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-                                                        <label class="flex items-center gap-2">
-                                                            <span class="min-w-[70px]">年化%</span>
-                                                            <input id="rolling-threshold-ann" data-rolling-input type="number" min="0" max="100" step="0.1" value="8" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                <div class="flex flex-col gap-2">
+                                                    <div class="flex items-start gap-2 justify-between">
+                                                        <label class="flex-1 flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            滾動測試次數
+                                                            <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                         </label>
-                                                        <label class="flex items-center gap-2">
-                                                            <span class="min-w-[70px]">Sharpe</span>
-                                                            <input id="rolling-threshold-sharpe" data-rolling-input type="number" min="0" max="5" step="0.1" value="1" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
-                                                        </label>
-                                                        <label class="flex items-center gap-2">
-                                                            <span class="min-w-[70px]">Sortino</span>
-                                                            <input id="rolling-threshold-sortino" data-rolling-input type="number" min="0" max="6" step="0.1" value="1.2" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
-                                                        </label>
-                                                        <label class="flex items-center gap-2">
-                                                            <span class="min-w-[70px]">MaxDD%</span>
-                                                            <input id="rolling-threshold-maxdd" data-rolling-input type="number" min="1" max="80" step="0.1" value="25" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
-                                                        </label>
-                                                        <label class="flex items-center gap-2">
-                                                            <span class="min-w-[70px]">勝率%</span>
-                                                            <input id="rolling-threshold-win" data-rolling-input type="number" min="0" max="100" step="0.1" value="45" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
-                                                        </label>
+                                                        <button type="button" id="rolling-window-mode-toggle" class="px-3 py-1.5 text-xs font-semibold border border-border rounded-md transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">改用手動視窗</button>
                                                     </div>
-                                                    <p class="text-[11px]" style="color: var(--muted-foreground);">門檻參考 QuantConnect、Tradestation、CME 顧問公司常見的 Walk-Forward 合格標準：Sharpe ≥ 1、Sortino ≥ 1.2、最大回撤 ≤ 25%。</p>
-                                                </fieldset>
+                                                    <div id="rolling-manual-durations" class="hidden space-y-3">
+                                                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                訓練視窗（月）
+                                                                <input id="rolling-training-months" data-rolling-input type="number" min="6" max="180" step="1" value="36" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">多數 CTA 以 24~36 個月作為參數優化的基礎視窗。</span>
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                測試視窗（月）
+                                                                <input id="rolling-testing-months" data-rolling-input type="number" min="3" max="72" step="1" value="12" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">常見 Walk-Forward 會保留至少一年資料驗證參數。</span>
+                                                            </label>
+                                                            <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                視窗平移（月）
+                                                                <input id="rolling-step-months" data-rolling-input type="number" min="1" max="36" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">以 6 個月平移可兼顧樣本覆蓋率與執行頻率。</span>
+                                                            </label>
+                                                        </div>
+                                                        <p class="text-[11px]" style="color: var(--muted-foreground);">手動模式會依上述視窗長度計算 Walk-Forward，視窗次數將依資料涵蓋範圍決定。</p>
+                                                    </div>
+                                                </div>
+                                                <div class="md:col-span-2 xl:col-span-3 flex flex-col gap-3">
+                                                    <button type="button" id="toggle-rolling-advanced" class="self-start text-xs font-semibold inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">
+                                                        顯示進階設定
+                                                    </button>
+                                                    <div id="rolling-advanced-settings" class="hidden space-y-6">
+                                                        <div class="space-y-3">
+                                                            <p class="text-[11px]" style="color: var(--muted-foreground);">如需自行設定訓練／測試／平移長度，可在上方按下「改用手動視窗」切換模式；此處維持原有門檻與優化等進階選項。</p>
+                                                        </div>
+                                                        <fieldset class="flex flex-col gap-3 text-xs" style="color: var(--foreground);">
+                                                            <legend class="font-medium">通過門檻（滾動測試）</legend>
+                                                            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+                                                                <div class="flex items-center gap-2">
+                                                                    <span class="min-w-[70px]">年化%</span>
+                                                                    <span class="text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">自動採用測試期買入持有年化</span>
+                                                                </div>
+                                                                <label class="flex items-center gap-2">
+                                                                    <span class="min-w-[70px]">Sharpe</span>
+                                                                    <input id="rolling-threshold-sharpe" data-rolling-input type="number" min="0" max="5" step="0.1" value="1" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                </label>
+                                                                <label class="flex items-center gap-2">
+                                                                    <span class="min-w-[70px]">Sortino</span>
+                                                                    <input id="rolling-threshold-sortino" data-rolling-input type="number" min="0" max="6" step="0.1" value="1.2" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                </label>
+                                                                <label class="flex items-center gap-2">
+                                                                    <span class="min-w-[70px]">MaxDD%</span>
+                                                                    <input id="rolling-threshold-maxdd" data-rolling-input type="number" min="1" max="80" step="0.1" value="25" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                </label>
+                                                                <label class="flex items-center gap-2">
+                                                                    <span class="min-w-[70px]">勝率%</span>
+                                                                    <input id="rolling-threshold-win" data-rolling-input type="number" min="0" max="100" step="0.1" value="45" class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);" />
+                                                                </label>
+                                                            </div>
+                                                            <p class="text-[11px]" style="color: var(--muted-foreground);">門檻值沿用 QuantConnect Walkforward 指南（Sharpe ≥ 1、Sortino ≥ 1.2、勝率 ≥ 45%、年化報酬 ≥ 8%），並採納 CME Group 管理期貨顧問對 CTA Walk-Forward 稽核常用的最大回撤 ≤ 25%；Walk-Forward Efficiency 以 Pardo (2014)《The Evaluation and Optimization of Trading Strategies》建議的 67% 作為合格基準。</p>
+                                                        </fieldset>
+                                                        <div class="border-t pt-4 space-y-3" id="rolling-optimize-panel">
+                                                            <div class="flex flex-col gap-1">
+                                                                <div class="flex flex-wrap items-center gap-3 justify-between">
+                                                                    <h4 class="text-sm font-semibold" style="color: var(--foreground);">訓練期參數優化</h4>
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">每個視窗會先在訓練資料上搜尋參數，再用相同設定驗證測試期。</span>
+                                                                </div>
+                                                            </div>
+                                                            <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                <input type="checkbox" id="rolling-optimize-enabled" data-rolling-input class="rounded border-border focus:ring-ring" checked />
+                                                                <span>啟用訓練期自動優化</span>
+                                                            </label>
+                                                            <div id="rolling-optimize-settings" class="hidden space-y-3">
+                                                                <div class="grid gap-3 md:grid-cols-2">
+                                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                        優化目標
+                                                                        <select id="rolling-optimize-target" data-rolling-input class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                            <option value="annualizedReturn">年化報酬率</option>
+                                                                            <option value="sharpeRatio">Sharpe Ratio</option>
+                                                                            <option value="sortinoRatio">Sortino Ratio</option>
+                                                                            <option value="winRate">勝率</option>
+                                                                            <option value="maxDrawdown">最大回撤（越小越好）</option>
+                                                                        </select>
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                        單一參數掃描步數
+                                                                        <input id="rolling-optimize-trials" data-rolling-input type="number" min="10" max="400" step="1" value="60" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議維持 40~80，可平衡探索密度與運算時間。</span>
+                                                                    </label>
+                                                                    <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                                        組合迭代上限
+                                                                        <input id="rolling-optimize-iteration-limit" data-rolling-input type="number" min="1" max="100" step="1" value="6" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                        <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">預設與批量優化一致，必要時可調整交替優化輪數。</span>
+                                                                    </label>
+                                                                </div>
+                                                                <div>
+                                                                    <p class="text-xs font-medium mb-2" style="color: var(--foreground);">優化範圍</p>
+                                                                    <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                            <input type="checkbox" id="rolling-optimize-entry" data-rolling-input checked />
+                                                                            <span>做多進場參數</span>
+                                                                        </label>
+                                                                        <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                            <input type="checkbox" id="rolling-optimize-exit" data-rolling-input checked />
+                                                                            <span>做多出場參數</span>
+                                                                        </label>
+                                                                        <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
+                                                                            <input type="checkbox" id="rolling-optimize-short-entry" data-rolling-input />
+                                                                            <span>做空進場參數</span>
+                                                                        </label>
+                                                                        <label class="flex items-center gap-2 text-xs font-medium rolling-optimize-short" style="color: var(--foreground);">
+                                                                            <input type="checkbox" id="rolling-optimize-short-exit" data-rolling-input />
+                                                                            <span>回補出場參數</span>
+                                                                        </label>
+                                                                        <label class="flex items-center gap-2 text-xs font-medium" style="color: var(--foreground);">
+                                                                            <input type="checkbox" id="rolling-optimize-risk" data-rolling-input />
+                                                                            <span>風險管理（停損 / 停利）</span>
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                                <p class="text-[11px]" style="color: var(--muted-foreground);">優化會沿用主回測的暖身推算與快取資料，不會額外觸發 Proxy 抓價，確保 Walk-Forward 過程可快速重播。</p>
+                                                                <p class="text-[11px]" style="color: var(--muted-foreground);">啟用後會直接呼叫批量優化 Batch Optimization Worker，逐一掃描各策略的 <code>optimizeTargets</code> 範圍並套用最佳參數，再重跑訓練與測試期，確保結果與批量優化模組一致。</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -1973,7 +2345,8 @@
                                         <div class="card-content space-y-4">
                                             <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
                                                 <span id="rolling-plan-summary">尚未建立視窗</span>
-                                                <span id="rolling-plan-warning" class="hidden px-2 py-1 rounded bg-amber-100 text-amber-700">請先執行一次主回測以產生快取資料</span>
+                                                <span id="rolling-plan-warning" class="hidden px-2 py-1 rounded bg-amber-100 text-amber-700"></span>
+                                                <span id="rolling-plan-advice" class="hidden px-2 py-1 rounded bg-blue-100 text-blue-700"></span>
                                             </div>
                                             <div class="overflow-x-auto">
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
@@ -1996,7 +2369,11 @@
                                                 <h3 class="text-sm font-semibold" style="color: var(--foreground);">執行 Walk-Forward 測試</h3>
                                                 <p class="text-xs mt-1 max-w-xl" style="color: var(--muted-foreground);">系統會依序重播每個滾動視窗，採用現有策略參數計算訓練期與測試期的報酬、風險與交易密度。過程中請勿關閉頁面。</p>
                                             </div>
-                                            <div class="flex items-center gap-3">
+                                            <div class="flex items-center gap-3 flex-wrap justify-end">
+                                                <label class="flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg border" for="rolling-strict-mode" style="border-color: var(--border); color: var(--muted-foreground); background: color-mix(in srgb, var(--muted) 10%, transparent);">
+                                                    <input id="rolling-strict-mode" type="checkbox" class="rounded border border-border text-primary focus:ring-primary" />
+                                                    嚴格模式
+                                                </label>
                                                 <button id="start-rolling-test" class="btn-primary px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2" style="background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--accent) 60%, var(--primary)));">
                                                     <i data-lucide="shuffle" class="lucide w-4 h-4"></i>
                                                     開始滾動測試
@@ -2031,34 +2408,86 @@
                                             <p id="rolling-report-intro" class="text-xs" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div class="card-content space-y-6">
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="rolling-scoreboard"></div>
-                                            <div class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
-                                                <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">總結</h4>
-                                                <p id="rolling-score-summary" class="text-xs leading-relaxed" style="color: var(--muted-foreground);"></p>
+                                            <div id="rolling-grade-card" class="p-4 border rounded-lg flex flex-col gap-2" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 6%, transparent);">
+                                                <span class="text-xs font-medium" style="color: var(--muted-foreground);">判定等級</span>
+                                                <span id="rolling-grade-label" class="text-2xl font-semibold" style="color: var(--foreground);">—</span>
                                             </div>
+                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" id="rolling-scoreboard"></div>
+                                            <details id="rolling-score-summary" class="p-4 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                <summary class="text-sm font-semibold cursor-pointer" style="color: var(--foreground);">查看整體說明</summary>
+                                                <div id="rolling-score-summary-content" class="mt-2 text-xs leading-relaxed space-y-2" style="color: var(--muted-foreground);"></div>
+                                            </details>
                                             <div>
                                                 <h4 class="text-sm font-semibold mb-2" style="color: var(--foreground);">逐窗指標</h4>
                                                 <div class="overflow-x-auto">
                                                     <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                         <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
-                                                            <tr>
-                                                                <th class="px-3 py-2 text-left font-semibold">迭代</th>
-                                                                <th class="px-3 py-2 text-left font-semibold">測試期間</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">年化%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">Sharpe</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">Sortino</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">MaxDD%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">勝率%</th>
-                                                                <th class="px-3 py-2 text-right font-semibold">交易數</th>
-                                                                <th class="px-3 py-2 text-left font-semibold">評語</th>
-                                                            </tr>
+                                                            <tr id="rolling-window-header"></tr>
                                                         </thead>
                                                         <tbody id="rolling-window-report" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
                                                     </table>
                                                 </div>
                                             </div>
-                                            <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
-                                                <p>評分公式結合多家券商及資產管理公司的 Walk-Forward 檢核：Sharpe 與 Sortino 反映報酬風險比，年化報酬衡量增長速度，最大回撤控制風險敞口，勝率確保樣本可靠性。總分 ≥ 85 為「專業合格」、70~84 屬於「可進一步驗證」、55~69 建議調整參數或加上風控，低於 55 則視為未通過。</p>
+                                            <div class="text-[11px] leading-relaxed space-y-2" style="color: var(--muted-foreground);">
+                                                <p>Walk-Forward 評分遵循 TradeStation® Walk-Forward Optimizer 與 QuantConnect Walkforward 分析的實務門檻，並加入 Pardo (2014) 定義的 Walk-Forward Efficiency（WFE）。公式流程如下：</p>
+                                                <ol class="list-decimal pl-4 space-y-1">
+                                                    <li>OOS 指標正規化：年化報酬、Sharpe、Sortino、勝率與最大回撤分別映射至 0～1，採 0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
+                                                    <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe Ratio，平均後轉為 0.5～1 的 <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。</li>
+                                                    <li>單窗分數：<strong>WindowScore = OOS 品質 × StatWeight</strong>，跨窗取中位數，再以 WFE 中位數（取 0.8～1.2 區間）進行調整取得 Walk-Forward 總分。</li>
+                                                    <li>評級門檻：總分 ≥ 0.70、WFE 中位 ≥ 0.8、PSR≥95% 視窗比 ≥ 50%、DSR 中位 ≥ 0.7 判定「專業合格」；總分 ≥ 0.50、WFE 中位 ≥ 0.6、PSR≥95% 視窗比 ≥ 30% 判定「可進一步觀察」；其餘為「未通過建議調整」。若整體 DSR ≤ 0 會再下修一級。</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-content hidden" id="strategy-compare-tab">
+                                <div class="space-y-6">
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">策略比較設定</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                從已儲存的策略挑選多組組合，並勾選想觀察的績效與穩健度欄位，系統會即時整理成對照表。
+                                            </p>
+                                        </div>
+                                        <div class="card-content space-y-6">
+                                            <div id="strategy-comparison-empty" class="text-sm" style="color: var(--muted-foreground);">
+                                                尚未儲存任何策略。請先於左側執行回測並儲存策略後，再回到此處比較。
+                                            </div>
+                                            <div id="strategy-comparison-controls" class="space-y-6 hidden">
+                                                <section class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <h4 class="text-xs font-medium" style="color: var(--foreground);">選擇要比較的策略</h4>
+                                                        <span class="text-[11px]" style="color: var(--muted-foreground);">（至少勾選一組）</span>
+                                                    </div>
+                                                    <div id="strategy-comparison-strategy-options" class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3"></div>
+                                                </section>
+                                                <section class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <h4 class="text-xs font-medium" style="color: var(--foreground);">選擇要呈現的欄位</h4>
+                                                        <span class="text-[11px]" style="color: var(--muted-foreground);">可以隨時增減，系統會套用到比較表</span>
+                                                    </div>
+                                                    <div id="strategy-comparison-metric-options" class="flex flex-wrap gap-2"></div>
+                                                </section>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-header flex flex-col gap-2">
+                                            <h3 class="card-title text-base">比較結果</h3>
+                                            <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                                                各欄位會帶出儲存時的績效摘要、敏感度與滾動測試評分。如有缺漏，請先執行相關測試後重新儲存策略。
+                                            </p>
+                                        </div>
+                                        <div class="card-content">
+                                            <div id="strategy-comparison-table-empty" class="text-sm" style="color: var(--muted-foreground);">
+                                                請勾選至少一個策略與一個欄位，表格會即時更新。
+                                            </div>
+                                            <div id="strategy-comparison-table-wrapper" class="overflow-x-auto hidden">
+                                                <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
+                                                    <thead id="strategy-comparison-table-head" class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);"></thead>
+                                                    <tbody id="strategy-comparison-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
+                                                </table>
                                             </div>
                                         </div>
                                     </div>
@@ -2095,42 +2524,33 @@
                                                     <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">兩種模型皆使用相同切分比例，並可於訓練時調整。</span>
                                                 </label>
                                             </div>
-                                            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    時間視窗（lookback，日）
-                                                    <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議 10~30 日，可捕捉月內趨勢。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    訓練輪數（epochs）
-                                                    <input id="ai-epochs" type="number" min="10" max="200" step="10" value="80" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">增加輪數可提高擬合度，但須留意過擬合。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    批次大小（batch size）
-                                                    <input id="ai-batch-size" type="number" min="8" max="256" step="8" value="64" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">批次需小於訓練樣本數，以保留梯度穩定性。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
-                                                    學習率
-                                                    <input id="ai-learning-rate" type="number" min="0.0001" max="0.05" step="0.0001" value="0.005" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                    <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">根據金融序列噪音，建議 0.001~0.01。</span>
-                                                </label>
-                                                <label class="flex flex-col gap-2 text-xs font-medium md:col-span-2 xl:col-span-2" style="color: var(--foreground);">
-                                                    資金控管
-                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
-                                                        <label class="inline-flex items-center gap-2 text-xs">
-                                                            <input id="ai-enable-kelly" type="checkbox" class="rounded border-border text-primary focus:ring-primary" />
-                                                            <span>啟用凱利公式估算投入比例（預設根據訓練期勝率與平均盈虧比）</span>
+                                            <details id="ai-advanced-settings" class="rounded-lg border" style="border-color: var(--border);">
+                                                <summary class="px-3 py-2 text-xs font-semibold cursor-pointer" style="color: var(--foreground);">進階訓練參數（預設收合）</summary>
+                                                <div class="px-3 pb-3 pt-1 space-y-3">
+                                                    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            時間視窗（lookback，日）
+                                                            <input id="ai-lookback" type="number" min="5" max="60" step="1" value="20" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">建議 10~30 日，可捕捉月內趨勢。</span>
                                                         </label>
-                                                        <label class="flex items-center gap-2 text-xs">
-                                                            <span class="min-w-[120px]">固定投入比例</span>
-                                                            <input id="ai-fixed-fraction" type="number" min="0.01" max="1" step="0.01" value="0.2" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            訓練輪數（epochs）
+                                                            <input id="ai-epochs" type="number" min="10" max="200" step="10" value="80" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">增加輪數可提高擬合度，但須留意過擬合。</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            批次大小（batch size）
+                                                            <input id="ai-batch-size" type="number" min="8" max="256" step="8" value="64" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">批次需小於訓練樣本數，以保留梯度穩定性。</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
+                                                            學習率
+                                                            <input id="ai-learning-rate" type="number" min="0.0001" max="0.05" step="0.0001" value="0.005" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">根據金融序列噪音，建議 0.001~0.01。</span>
                                                         </label>
                                                     </div>
-                                                </label>
-                                            </div>
+                                                </div>
+                                            </details>
                                             <div class="p-3 border rounded-lg bg-background" style="border-color: var(--border);">
                                                 <div class="flex flex-wrap items-center gap-3 text-xs" style="color: var(--muted-foreground);">
                                                     <span id="ai-dataset-summary">尚未取得資料，請先完成一次主回測。</span>
@@ -2141,34 +2561,110 @@
                                                 <button id="ai-run-button" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors" style="background-color: var(--primary); color: var(--primary-foreground);">
                                                     <i data-lucide="cpu" class="lucide-sm"></i>啟動 AI 預測
                                                 </button>
+                                                <button id="ai-run-fresh-button" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
+                                                    <i data-lucide="refresh-cw" class="lucide-sm"></i>新的預測
+                                                </button>
+                                                <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 12%, transparent); color: var(--secondary-foreground);">
+                                                    <i data-lucide="save" class="lucide-sm"></i>儲存此次結果
+                                                </button>
+                                                <button id="ai-ann-diagnostics" type="button" class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors border opacity-60 cursor-not-allowed" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);" aria-label="尚未產生 ANNS 功能測試報告" disabled>
+                                                    <i data-lucide="clipboard-list" class="lucide-sm"></i>ANNS 測試報告
+                                                </button>
                                                 <div id="ai-status" class="text-xs" style="color: var(--muted-foreground);">尚未開始</div>
                                             </div>
                                             <div class="grid gap-4 md:grid-cols-2">
-                                                <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
-                                                    <div class="flex items-center justify-between">
-                                                        <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
-                                                        <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
-                                                            <i data-lucide="gauge" class="lucide-xs"></i>一鍵最佳報酬
-                                                        </button>
+                                                <div class="flex flex-col gap-4">
+                                                    <div class="flex flex-col gap-3 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--secondary) 6%, transparent);">
+                                                        <div class="flex flex-col gap-2">
+                                                            <div class="flex items-center justify-between flex-wrap gap-2">
+                                                                <span class="text-xs font-medium" style="color: var(--foreground);">勝率門檻（%）</span>
+                                                                <div class="flex flex-wrap items-center gap-2">
+                                                                    <label class="flex items-center gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                                        <span>最佳化目標</span>
+                                                                        <select id="ai-optimize-target" class="px-2 py-1 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-1 focus:ring-ring text-[11px]" style="border-color: var(--border); background-color: var(--input);">
+                                                                            <option value="median">交易報酬中位數</option>
+                                                                            <option value="single">單次平均報酬</option>
+                                                                            <option value="monthly">月平均報酬</option>
+                                                                            <option value="yearly">年平均報酬</option>
+                                                                        </select>
+                                                                    </label>
+                                                                    <label class="flex items-center gap-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                                        <span>最小交易總次數</span>
+                                                                        <input id="ai-optimize-min-trades" type="number" min="0" step="1" value="1" class="w-20 px-2 py-1 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-1 focus:ring-ring text-[11px]" style="border-color: var(--border); background-color: var(--input);" />
+                                                                    </label>
+                                                                    <button id="ai-optimize-threshold" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);">
+                                                                        <i data-lucide="gauge" class="lucide-xs"></i>執行門檻最佳化
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div class="flex items-center gap-2">
+                                                                <input id="ai-win-threshold" type="number" min="0" max="100" step="1" value="0" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                                <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <div class="flex items-center gap-2">
-                                                        <input id="ai-win-threshold" type="number" min="50" max="100" step="1" value="60" class="w-24 px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
-                                                        <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預測上漲機率需高於門檻才會進場，可在不重新訓練的情況下即時重算收益。</span>
+                                                    <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 4%, transparent);">
+                                                        <span class="text-xs font-medium" style="color: var(--foreground);">資金控管</span>
+                                                        <label class="inline-flex items-center gap-2 text-xs">
+                                                            <input id="ai-enable-kelly" type="checkbox" class="rounded border-border text-primary focus:ring-primary" />
+                                                            <span>啟用凱利公式估算投入比例（預設根據訓練期勝率與平均盈虧比）</span>
+                                                        </label>
+                                                        <label class="flex items-center gap-2 text-xs">
+                                                            <span class="min-w-[120px]">固定投入比例（%）</span>
+                                                            <input id="ai-fixed-fraction" type="number" min="1" max="100" step="1" value="100" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <span class="text-[11px]" style="color: var(--muted-foreground);">停用凱利時使用，表示投入現金比例。</span>
+                                                        </label>
+                                                        <label class="flex flex-col gap-1 text-xs">
+                                                            <span class="font-medium" style="color: var(--foreground);">預測分類模式</span>
+                                                            <select id="ai-classification-mode" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="binary">二分類（漲跌）</option>
+                                                                <option value="multiclass">三分類（波動分級）</option>
+                                                            </select>
+                                                        <span class="text-[11px]" style="color: var(--muted-foreground);">二分類沿用漲跌預測；三分類會依訓練集上漲樣本前 25% 與下跌樣本前 25% 的四分位自動決定門檻，下方數值僅供檢視。</span>
+                                                        </label>
+                                                        <div class="flex flex-col gap-1 text-xs">
+                                                            <span class="font-medium" style="color: var(--foreground);">AI 買入規則</span>
+                                                            <select id="ai-trade-rule" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);">
+                                                                <option value="close-trigger">收盤價掛單</option>
+                                                                <option value="close-entry">收盤價買入</option>
+                                                                <option value="open-entry">開盤價買入</option>
+                                                                <option value="volatility-tier">波動分級持有</option>
+                                                            </select>
+                                                            <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">切換買入條件後，交易表與統計會依相同預測結果重新計算。</span>
+                                                            <div class="grid gap-2 md:grid-cols-2 mt-2">
+                                                                <label class="flex flex-col gap-1 opacity-60">
+                                                                    <span style="color: var(--muted-foreground);">大漲定義（%｜訓練集上漲樣本前 25%）</span>
+                                                                    <input id="ai-volatility-surge" type="number" min="0.1" max="50" step="0.1" value="3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集上漲樣本的前 25% 四分位漲幅推導。</span>
+                                                                </label>
+                                                                <label class="flex flex-col gap-1 opacity-60">
+                                                                    <span style="color: var(--muted-foreground);">大跌定義（%｜訓練集中跌幅前 25%｜負值）</span>
+                                                                    <input id="ai-volatility-drop" type="number" min="-50" max="0" step="0.1" value="-3.00" disabled class="px-3 py-2 border border-border rounded-md bg-input text-foreground text-sm cursor-not-allowed" style="border-color: var(--border); background-color: var(--input); cursor: not-allowed;" />
+                                                                    <span class="text-[11px]" style="color: var(--muted-foreground);">固定依訓練集中跌幅的前 25% 四分位跌幅推導，保持負號顯示。</span>
+                                                                </label>
+                                                            </div>
+                                                            <div id="ai-volatility-diagnostics" class="flex flex-col gap-1 mt-2 p-3 border rounded-md text-[11px]" style="border-color: color-mix(in srgb, var(--primary) 35%, transparent); background-color: color-mix(in srgb, var(--primary) 6%, transparent); color: var(--muted-foreground);">
+                                                                <span class="text-xs font-medium" style="color: var(--foreground);">訓練集波動統計</span>
+                                                                <span id="ai-volatility-sample-summary">尚未計算，請完成一次 AI 預測。</span>
+                                                                <span id="ai-volatility-surge-summary"></span>
+                                                                <span id="ai-volatility-drop-summary"></span>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div class="flex flex-col gap-2 p-3 border rounded-lg" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 10%, transparent);">
                                                     <span class="text-xs font-medium" style="color: var(--foreground);">種子管理</span>
-                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="訓練勝率XX.X%｜測試正確率YY.Y%" style="border-color: var(--border); background-color: var(--input);" />
+                                                    <input id="ai-seed-name" type="text" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" placeholder="【ANNS】測試勝率50.0%｜交易報酬中位數5.0%｜單次平均報酬2.5%｜月平均報酬4.0%｜年平均報酬48.0%｜交易次數12" style="border-color: var(--border); background-color: var(--input);" />
                                                     <div class="flex flex-wrap gap-2">
-                                                        <button id="ai-save-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors" style="background-color: var(--secondary); color: var(--secondary-foreground);">
-                                                            <i data-lucide="save" class="lucide-xs"></i>儲存種子
-                                                        </button>
                                                         <button id="ai-load-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: var(--border); color: var(--foreground);">
                                                             <i data-lucide="download" class="lucide-xs"></i>載入選取種子
                                                         </button>
+                                                        <button id="ai-delete-seed" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border" style="border-color: color-mix(in srgb, var(--destructive) 40%, transparent); color: var(--destructive);">
+                                                            <i data-lucide="trash-2" class="lucide-xs"></i>刪除選取種子
+                                                        </button>
                                                     </div>
                                                     <select id="ai-saved-seeds" multiple size="5" class="w-full px-3 py-2 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--border); background-color: var(--input);"></select>
-                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱依訓練勝率與測試正確率生成，可同時選擇多個種子載入，快速比對不同訓練結果。</span>
+                                                    <span class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">預設名稱會自動帶入模型別（【LSTM】或【ANNS】）、測試勝率、交易報酬中位數、單次／月／年平均報酬與交易次數；可同時選擇多筆種子進行載入或刪除，儲存請於上方點選「儲存此次結果」。</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -2186,7 +2682,7 @@
                                                     <p id="ai-train-loss" class="text-[11px]" style="color: var(--muted-foreground);">Loss：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
-                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試期預測正確率</p>
+                                                    <p id="ai-test-accuracy-label" class="font-medium text-[13px]" style="color: var(--muted-foreground);">測試期預測正確率</p>
                                                     <p id="ai-test-accuracy" class="text-lg font-semibold">—</p>
                                                     <p id="ai-test-loss" class="text-[11px]" style="color: var(--muted-foreground);">Loss：—</p>
                                                 </div>
@@ -2196,17 +2692,23 @@
                                                     <p id="ai-hit-rate" class="text-[11px]" style="color: var(--muted-foreground);">命中率：—</p>
                                                 </div>
                                                 <div class="p-3 border rounded-lg" style="border-color: var(--border);">
-                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（交易報酬% 中位數）</p>
+                                                    <p class="font-medium text-[13px]" style="color: var(--muted-foreground);">AI 策略報酬評估（中位數與平均指標）</p>
                                                     <p id="ai-total-return" class="text-lg font-semibold">—</p>
-                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">平均報酬%・標準差</p>
+                                                    <p id="ai-average-profit" class="text-[11px]" style="color: var(--muted-foreground);">AI勝率・單次／月／年平均報酬%・買入持有年化報酬%・標準差</p>
                                                 </div>
                                             </div>
                                             <div class="overflow-x-auto">
                                                 <table class="min-w-full divide-y divide-border text-xs" style="border-color: var(--border);">
                                                     <thead class="bg-muted/40" style="background-color: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--foreground);">
                                                         <tr>
-                                                            <th class="px-3 py-2 text-left font-semibold">交易日</th>
-                                                            <th class="px-3 py-2 text-right font-semibold">預測上漲機率</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">買入日</th>
+                                                            <th class="px-3 py-2 text-left font-semibold">賣出日</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">預測機率／分類</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">預測漲跌幅%</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">大漲門檻%</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">大跌門檻%</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">買入價格</th>
+                                                            <th class="px-3 py-2 text-right font-semibold">賣出價格</th>
                                                             <th class="px-3 py-2 text-right font-semibold">實際報酬%</th>
                                                             <th class="px-3 py-2 text-right font-semibold">投入比例</th>
                                                             <th class="px-3 py-2 text-right font-semibold">交易報酬%</th>
@@ -2215,9 +2717,15 @@
                                                     <tbody id="ai-trade-table-body" class="divide-y divide-border" style="border-color: var(--border);"></tbody>
                                                 </table>
                                             </div>
+                                            <div class="flex justify-end mt-2">
+                                                <button id="ai-toggle-all-trades" type="button" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border opacity-60 cursor-not-allowed" style="border-color: var(--border); background-color: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary);" aria-pressed="false" disabled>
+                                                    顯示全部預測紀錄
+                                                </button>
+                                            </div>
                                             <div class="text-[11px] leading-relaxed" style="color: var(--muted-foreground);">
                                                 <p id="ai-trade-summary">尚未生成交易結果。</p>
                                                 <p id="ai-next-day-forecast" class="mt-1">尚未計算隔日預測。</p>
+                                                <p id="ai-trade-rules" class="mt-1">買入邏輯：隔日預測上漲且隔日最低價跌破當日收盤價時，若隔日開盤價低於當日收盤價則以開盤價成交，否則以當日收盤價成交，並於隔日收盤價出場。</p>
                                             </div>
                                         </div>
                                     </div>
@@ -2299,11 +2807,19 @@
     </div>
 
     <script src="js/shared-lookback.js"></script>
+    <script src="js/strategy-plugin-contract.js"></script>
+    <script src="js/strategy-plugin-registry.js"></script>
+    <script src="js/strategy-plugin-manifest.js"></script>
+    <script src="js/strategies/composer.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/backtest-runner.js"></script>
+    <script src="js/loading-mascot-sources.js"></script>
     <script src="js/main.js"></script>
     <script src="js/backtest.js"></script>
     <script src="js/ai-prediction.js"></script>
     <script src="js/loader.js"></script>
+    <script src="js/lib/batch-strategy-mapper.js"></script>
+    <script src="js/lib/batch-strategy-context.js"></script>
     <script src="js/batch-optimization.js"></script>
     <script src="js/rolling-test.js"></script>
     
@@ -2745,10 +3261,14 @@
                         btn.className = 'tab py-4 px-1 border-b-2 border-transparent text-muted hover:text-foreground font-medium text-xs whitespace-nowrap';
                         btn.style.color = 'var(--muted-foreground)';
                         btn.style.borderColor = 'transparent';
+                        btn.style.transform = 'none';
+                        btn.removeAttribute('aria-current');
                     });
                     this.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap';
                     this.style.color = 'var(--primary)';
                     this.style.borderColor = 'var(--primary)';
+                    this.style.transform = 'scale(0.94)';
+                    this.setAttribute('aria-current', 'page');
                     
                     // Show corresponding content
                     document.querySelectorAll('.tab-content').forEach(tab => {
@@ -2823,6 +3343,8 @@
                 defaultTabButton.className = 'tab py-4 px-1 border-b-2 border-primary text-primary font-medium text-xs whitespace-nowrap';
                 defaultTabButton.style.color = 'var(--primary)';
                 defaultTabButton.style.borderColor = 'var(--primary)';
+                defaultTabButton.style.transform = 'scale(0.94)';
+                defaultTabButton.setAttribute('aria-current', 'page');
             }
             
             const defaultTabContent = document.getElementById('summary-tab');

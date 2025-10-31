@@ -9,6 +9,12 @@
 // Patch Tag: LB-TODAY-SUGGESTION-DIAG-20250907A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116A
 // Patch Tag: LB-PROGRESS-PIPELINE-20251116B
+// Patch Tag: LB-PROGRESS-MASCOT-20260310A
+// Patch Tag: LB-PROGRESS-MASCOT-20260703A
+// Patch Tag: LB-PROGRESS-MASCOT-20260705A
+// Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-TAIWAN-20251029A
 
 // 全局變量
 let stockChart = null;
@@ -18,6 +24,22 @@ let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
+const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';
+const LOADING_MASCOT_ROTATION_INTERVAL = 4000;
+const loadingMascotState = {
+    lastSource: null,
+    rotation: {
+        fingerprint: '',
+        queue: [],
+        timerId: null,
+        lastTotalSources: 0,
+    },
+    visibility: {
+        hidden: false,
+    },
+};
+
+const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -26,6 +48,7 @@ let sortState = { key: 'annualizedReturn', direction: 'desc' };
 let lastOverallResult = null; // 儲存最近一次的完整回測結果
 let lastSubPeriodResults = null; // 儲存子週期結果
 let preOptimizationResult = null; // 儲存優化前的回測結果，用於對比顯示
+let batchDebugLogUnsubscribe = null;
 // SAVED_STRATEGIES_KEY, strategyDescriptions, longEntryToCoverMap, longExitToShortMap, globalOptimizeTargets 移至 config.js
 
 // --- Utility Functions ---
@@ -434,7 +457,97 @@ window.lazybacktestMultiStagePanel = {
 const dataSourceTesterState = {
     open: false,
     busy: false,
+    tableOpen: false,
+    lastRows: [],
+    lastSourceLabel: '',
 };
+
+const DATA_SOURCE_TESTER_TABLE_LIMIT = 120;
+
+const strategyRegistryVerificationState = {
+    running: false,
+    results: [],
+    error: null,
+    lastRunAt: null,
+    sampleRunning: false,
+    sampleStatus: null,
+    sampleSelectionSummary: '',
+};
+
+const strategyRegistrySampleCandidates = {
+    longEntry: [
+        { strategyId: 'ma_cross', configKey: 'ma_cross' },
+        { strategyId: 'ma_above', configKey: 'ma_above' },
+        { strategyId: 'rsi_oversold', configKey: 'rsi_oversold' },
+        { strategyId: 'macd_cross', configKey: 'macd_cross' },
+        { strategyId: 'bollinger_breakout', configKey: 'bollinger_breakout' },
+        { strategyId: 'k_d_cross', configKey: 'k_d_cross' },
+        { strategyId: 'volume_spike', configKey: 'volume_spike' },
+        { strategyId: 'price_breakout', configKey: 'price_breakout' },
+        { strategyId: 'williams_oversold', configKey: 'williams_oversold' },
+        { strategyId: 'turtle_breakout', configKey: 'turtle_breakout' },
+    ],
+    longExit: [
+        { strategyId: 'ma_cross_exit', configKey: 'ma_cross_exit' },
+        { strategyId: 'ma_below', configKey: 'ma_below' },
+        { strategyId: 'rsi_overbought', configKey: 'rsi_overbought' },
+        { strategyId: 'macd_cross_exit', configKey: 'macd_cross_exit' },
+        { strategyId: 'bollinger_reversal', configKey: 'bollinger_reversal' },
+        { strategyId: 'k_d_cross_exit', configKey: 'k_d_cross_exit' },
+        { strategyId: 'price_breakdown', configKey: 'price_breakdown' },
+        { strategyId: 'williams_overbought', configKey: 'williams_overbought' },
+        { strategyId: 'turtle_stop_loss', configKey: 'turtle_stop_loss' },
+        { strategyId: 'trailing_stop', configKey: 'trailing_stop' },
+        { strategyId: 'fixed_stop_loss', configKey: 'fixed_stop_loss' },
+    ],
+    shortEntry: [
+        { strategyId: 'short_ma_cross', configKey: 'short_ma_cross' },
+        { strategyId: 'short_ma_below', configKey: 'short_ma_below' },
+        { strategyId: 'short_rsi_overbought', configKey: 'short_rsi_overbought' },
+        { strategyId: 'short_macd_cross', configKey: 'short_macd_cross' },
+        { strategyId: 'short_bollinger_reversal', configKey: 'short_bollinger_reversal' },
+        { strategyId: 'short_k_d_cross', configKey: 'short_k_d_cross' },
+        { strategyId: 'short_price_breakdown', configKey: 'short_price_breakdown' },
+        { strategyId: 'short_williams_overbought', configKey: 'short_williams_overbought' },
+        { strategyId: 'short_turtle_stop_loss', configKey: 'short_turtle_stop_loss' },
+    ],
+    shortExit: [
+        { strategyId: 'cover_ma_cross', configKey: 'cover_ma_cross' },
+        { strategyId: 'cover_ma_above', configKey: 'cover_ma_above' },
+        { strategyId: 'cover_rsi_oversold', configKey: 'cover_rsi_oversold' },
+        { strategyId: 'cover_macd_cross', configKey: 'cover_macd_cross' },
+        { strategyId: 'cover_bollinger_breakout', configKey: 'cover_bollinger_breakout' },
+        { strategyId: 'cover_k_d_cross', configKey: 'cover_k_d_cross' },
+        { strategyId: 'cover_price_breakout', configKey: 'cover_price_breakout' },
+        { strategyId: 'cover_williams_oversold', configKey: 'cover_williams_oversold' },
+        { strategyId: 'cover_turtle_breakout', configKey: 'cover_turtle_breakout' },
+        { strategyId: 'cover_trailing_stop', configKey: 'cover_trailing_stop' },
+        { strategyId: 'cover_fixed_stop_loss', configKey: 'cover_fixed_stop_loss' },
+    ],
+};
+
+const STRATEGY_OPTION_ROLE_CONFIGS = [
+    { type: 'entry', selectId: 'entryStrategy', label: '做多進場' },
+    { type: 'exit', selectId: 'exitStrategy', label: '做多出場' },
+    { type: 'shortEntry', selectId: 'shortEntryStrategy', label: '做空進場' },
+    { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
+];
+
+function pickRandomStrategyCandidate(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+        return null;
+    }
+    const index = Math.floor(Math.random() * list.length);
+    return list[index];
+}
+
+function cloneDefaultStrategyParams(configKey) {
+    const descriptor = strategyDescriptions?.[configKey];
+    if (!descriptor || !descriptor.defaultParams) {
+        return {};
+    }
+    return JSON.parse(JSON.stringify(descriptor.defaultParams));
+}
 
 // Patch Tag: LB-DATASOURCE-20250328A
 // Patch Tag: LB-DATASOURCE-20250402A
@@ -483,6 +596,274 @@ function formatTesterFieldHints(fields) {
             return numeric ? `${key}=${raw}（解析後 ${numeric}）` : `${key}=${raw}`;
         })
         .join('、');
+}
+
+function normalizeTesterNumber(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.replace(/,/g, '').trim();
+        if (!trimmed || trimmed === '--' || trimmed === '-') return null;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'bigint') {
+        return Number(value);
+    }
+    return null;
+}
+
+function normalizeTesterDate(value) {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().split('T')[0];
+    }
+    const raw = String(value).trim();
+    if (!raw) return '';
+    if (/^\d{3}\/\d{1,2}\/\d{1,2}$/.test(raw)) {
+        return rocToIsoDate(raw) || '';
+    }
+    if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(raw)) {
+        const normalized = raw.replace(/\//g, '-');
+        const [y, m, d] = normalized.split('-');
+        return `${y.padStart(4, '0')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    if (/^\d{8}$/.test(raw)) {
+        return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    }
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+        if (raw.length === 8) {
+            return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+        }
+        if (numeric > 1e11) {
+            const fromMs = new Date(numeric);
+            if (!Number.isNaN(fromMs.getTime())) return fromMs.toISOString().split('T')[0];
+        }
+        if (numeric > 1e9) {
+            const fromSeconds = new Date(numeric * 1000);
+            if (!Number.isNaN(fromSeconds.getTime())) return fromSeconds.toISOString().split('T')[0];
+        }
+    }
+    return raw;
+}
+
+function resolveTesterValue(row, keys) {
+    if (!row || typeof row !== 'object' || !Array.isArray(keys)) return null;
+    for (const key of keys) {
+        if (key in row) {
+            const numeric = normalizeTesterNumber(row[key]);
+            if (numeric !== null) return numeric;
+        }
+    }
+    return null;
+}
+
+function normalizeTesterRows(payload, parseMode) {
+    const rows = [];
+    const pushRow = (rawDate, rawOpen, rawHigh, rawLow, rawClose, rawVolume) => {
+        const date = normalizeTesterDate(rawDate);
+        const open = normalizeTesterNumber(rawOpen);
+        const high = normalizeTesterNumber(rawHigh);
+        const low = normalizeTesterNumber(rawLow);
+        const close = normalizeTesterNumber(rawClose);
+        const volume = normalizeTesterNumber(rawVolume);
+        if (!date) return;
+        const hasValue = [open, high, low, close, volume].some((value) => value !== null);
+        if (!hasValue) return;
+        rows.push({ date, open, high, low, close, volume });
+    };
+
+    if (parseMode === 'adjustedComposer') {
+        const dataRows = Array.isArray(payload?.data) ? payload.data : [];
+        dataRows.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = row.date || row.trade_date || row.tradeDate || row.tradingDate;
+            const open = resolveTesterValue(row, ['open', 'Open', 'openPrice', 'openingPrice', 'opening_price']);
+            const high = resolveTesterValue(row, ['high', 'High', 'max', 'highestPrice', 'highest_price']);
+            const low = resolveTesterValue(row, ['low', 'Low', 'min', 'lowestPrice', 'lowest_price']);
+            const close = resolveTesterValue(row, ['close', 'Close', 'adjClose', 'closingPrice', 'closing_price']);
+            const volume = resolveTesterValue(row, ['volume', 'Volume', 'Trading_Volume', 'tradingVolume', 'rawVolume']);
+            pushRow(date, open, high, low, close, volume);
+        });
+    }
+
+    if (rows.length === 0 && Array.isArray(payload?.aaData)) {
+        payload.aaData.forEach((entry) => {
+            if (!Array.isArray(entry) || entry.length < 9) return;
+            const [rawDate, , , open, high, low, close, , volume] = entry;
+            const date = rocToIsoDate(rawDate) || normalizeTesterDate(rawDate);
+            pushRow(date, open, high, low, close, volume);
+        });
+    }
+
+    if (rows.length === 0 && Array.isArray(payload?.data)) {
+        payload.data.forEach((row) => {
+            if (!row || typeof row !== 'object') return;
+            const date = row.date || row.Date || row.trade_date || row.trading_date;
+            const open = resolveTesterValue(row, ['open', 'Open', 'open_price', 'first_price', 'opening_price']);
+            const high = resolveTesterValue(row, ['high', 'High', 'max', 'highest_price']);
+            const low = resolveTesterValue(row, ['low', 'Low', 'min', 'lowest_price']);
+            const close = resolveTesterValue(row, ['close', 'Close', 'price', 'closing_price', 'adj_close']);
+            const volume = resolveTesterValue(row, [
+                'volume',
+                'Volume',
+                'Trading_Volume',
+                'TradingVolume',
+                'trade_volume',
+                'tradeVolume',
+                'total_volume',
+                'totalVolume',
+                'vol',
+                'volume_shares',
+                'volumeShares',
+            ]);
+            pushRow(date, open, high, low, close, volume);
+        });
+    }
+
+    if (rows.length === 0 && payload?.chart?.result?.[0]) {
+        const result = payload.chart.result[0];
+        const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+        const quote = result?.indicators?.quote?.[0] || {};
+        for (let i = 0; i < timestamps.length; i += 1) {
+            const ts = timestamps[i];
+            if (!Number.isFinite(ts)) continue;
+            const date = normalizeTesterDate(ts * 1000);
+            const open = Array.isArray(quote.open) ? quote.open[i] : null;
+            const high = Array.isArray(quote.high) ? quote.high[i] : null;
+            const low = Array.isArray(quote.low) ? quote.low[i] : null;
+            const close = Array.isArray(quote.close) ? quote.close[i] : null;
+            const volume = Array.isArray(quote.volume) ? quote.volume[i] : null;
+            pushRow(date, open, high, low, close, volume);
+        }
+    }
+
+    return rows;
+}
+
+function formatTesterTablePrice(value) {
+    if (!Number.isFinite(value)) return '—';
+    const fixed = Number(value).toFixed(4).replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1');
+    return fixed;
+}
+
+function formatTesterTableVolume(value) {
+    if (!Number.isFinite(value)) return '—';
+    const rounded = Math.round(Number(value));
+    return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function renderTesterTableRows() {
+    const tbody = document.getElementById('dataSourceTesterTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const rows = Array.isArray(dataSourceTesterState.lastRows) ? dataSourceTesterState.lastRows : [];
+    const limit = Math.min(rows.length, DATA_SOURCE_TESTER_TABLE_LIMIT);
+    for (let i = 0; i < limit; i += 1) {
+        const row = rows[i];
+        const tr = document.createElement('tr');
+        if (i % 2 === 1) {
+            tr.className = 'bg-slate-50/60';
+        }
+        const dateTd = document.createElement('td');
+        dateTd.className = 'px-3 py-1.5 border-b text-left whitespace-nowrap';
+        dateTd.style.borderColor = 'var(--border)';
+        dateTd.textContent = row?.date || '—';
+        tr.appendChild(dateTd);
+
+        const numericValues = [
+            formatTesterTablePrice(row?.open),
+            formatTesterTablePrice(row?.high),
+            formatTesterTablePrice(row?.low),
+            formatTesterTablePrice(row?.close),
+            formatTesterTableVolume(row?.volume),
+        ];
+        numericValues.forEach((text) => {
+            const td = document.createElement('td');
+            td.className = 'px-3 py-1.5 border-b text-right font-mono';
+            td.style.borderColor = 'var(--border)';
+            td.textContent = text;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    }
+}
+
+function updateTesterTableAvailability() {
+    const controls = document.getElementById('dataSourceTesterTableControls');
+    const wrapper = document.getElementById('dataSourceTesterTableWrapper');
+    const toggleBtn = document.getElementById('openDataSourceTesterTable');
+    const countEl = document.getElementById('dataSourceTesterTableCount');
+    const sourceEl = document.getElementById('dataSourceTesterTableSource');
+    const noteEl = document.getElementById('dataSourceTesterTableNote');
+    if (!controls || !wrapper || !toggleBtn || !noteEl) return;
+    const rows = Array.isArray(dataSourceTesterState.lastRows) ? dataSourceTesterState.lastRows : [];
+    const hasRows = rows.length > 0;
+    controls.classList.toggle('hidden', !hasRows);
+    wrapper.classList.toggle('hidden', !hasRows || !dataSourceTesterState.tableOpen);
+    toggleBtn.disabled = dataSourceTesterState.busy || !hasRows;
+    toggleBtn.textContent = dataSourceTesterState.tableOpen ? '隱藏資料表格' : '查看資料表格';
+    toggleBtn.setAttribute('aria-expanded', dataSourceTesterState.tableOpen ? 'true' : 'false');
+
+    if (hasRows) {
+        const total = rows.length;
+        const limit = Math.min(rows.length, DATA_SOURCE_TESTER_TABLE_LIMIT);
+        if (countEl) {
+            countEl.textContent = `共 ${total} 筆`;
+            countEl.classList.remove('hidden');
+        }
+        if (sourceEl) {
+            if (dataSourceTesterState.lastSourceLabel) {
+                sourceEl.textContent = `來源：${dataSourceTesterState.lastSourceLabel}`;
+                sourceEl.classList.remove('hidden');
+            } else {
+                sourceEl.textContent = '';
+                sourceEl.classList.add('hidden');
+            }
+        }
+        noteEl.textContent = total > limit
+            ? `顯示前 ${limit} 筆，總計 ${total} 筆資料。`
+            : `共顯示 ${total} 筆資料。`;
+    } else {
+        if (countEl) {
+            countEl.textContent = '';
+            countEl.classList.add('hidden');
+        }
+        if (sourceEl) {
+            sourceEl.textContent = '';
+            sourceEl.classList.add('hidden');
+        }
+        noteEl.textContent = '';
+    }
+}
+
+function clearTesterTableData() {
+    dataSourceTesterState.lastRows = [];
+    dataSourceTesterState.lastSourceLabel = '';
+    dataSourceTesterState.tableOpen = false;
+    renderTesterTableRows();
+    updateTesterTableAvailability();
+}
+
+function setTesterTableData(rows, sourceLabel) {
+    dataSourceTesterState.lastRows = Array.isArray(rows) ? rows : [];
+    dataSourceTesterState.lastSourceLabel = sourceLabel || '';
+    dataSourceTesterState.tableOpen = false;
+    renderTesterTableRows();
+    updateTesterTableAvailability();
+}
+
+function toggleTesterTable() {
+    if (dataSourceTesterState.busy) return;
+    if (!Array.isArray(dataSourceTesterState.lastRows) || dataSourceTesterState.lastRows.length === 0) return;
+    dataSourceTesterState.tableOpen = !dataSourceTesterState.tableOpen;
+    if (dataSourceTesterState.tableOpen) {
+        renderTesterTableRows();
+    }
+    updateTesterTableAvailability();
 }
 
 function buildTesterDebugStepsHtml(steps) {
@@ -764,6 +1145,11 @@ function getStockNoValue() {
     return (input?.value || '').trim().toUpperCase();
 }
 
+function isIndexSymbol(stockNo) {
+    if (!stockNo) return false;
+    return stockNo.startsWith('^') && stockNo.length > 1;
+}
+
 function normalizeMarketValue(value) {
     const normalized = (value || 'TWSE').toUpperCase();
     if (normalized === 'NASDAQ' || normalized === 'NYSE') return 'US';
@@ -778,13 +1164,14 @@ function getCurrentMarketFromUI() {
 function getMarketLabel(market) {
     if (market === 'TPEX') return '上櫃 (TPEX)';
     if (market === 'US') return '美股 (US)';
+    if (market === 'INDEX') return '指數 (Yahoo)';
     return '上市 (TWSE)';
 }
 
 function applyMarketPreset(market) {
     const adjustedCheckbox = document.getElementById('adjustedPriceCheckbox');
     const splitCheckbox = document.getElementById('splitAdjustmentCheckbox');
-    const disableAdjusted = market === 'US';
+    const disableAdjusted = market === 'US' || market === 'INDEX';
 
     if (adjustedCheckbox) {
         if (disableAdjusted && adjustedCheckbox.checked) {
@@ -866,6 +1253,11 @@ function getTesterSourceConfigs(market, adjusted, splitEnabled) {
                 label: 'Netlify 還原備援',
                 description: netlifyDescription,
             },
+        ];
+    }
+    if (market === 'INDEX') {
+        return [
+            { id: 'yahoo', label: 'Yahoo 指數資料', description: 'Yahoo Finance 指數日線' },
         ];
     }
     if (market === 'US') {
@@ -961,13 +1353,16 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     const { start, end } = getDateRangeFromUI();
     if (!stockNo || !start || !end) {
         showTesterResult('error', '請先輸入股票代碼並設定開始與結束日期。');
+        clearTesterTableData();
         return;
     }
-    const market = getCurrentMarketFromUI();
+    const uiMarket = getCurrentMarketFromUI();
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : uiMarket;
     const adjusted = isAdjustedMode();
     const splitEnabled = isSplitAdjustmentEnabled();
     let requestUrl = '';
     let parseMode = 'proxy';
+    clearTesterTableData();
     if (adjusted) {
         if (sourceId === 'netlifyAdjusted') {
             const params = new URLSearchParams({
@@ -997,6 +1392,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
         let endpoint = '/api/twse/';
         if (market === 'TPEX') endpoint = '/api/tpex/';
         else if (market === 'US') endpoint = '/api/us/';
+        else if (market === 'INDEX') endpoint = '/api/index/';
         const params = new URLSearchParams({
             stockNo,
             start,
@@ -1007,6 +1403,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     }
 
     dataSourceTesterState.busy = true;
+    updateTesterTableAvailability();
     setTesterButtonsDisabled(true);
     showTesterResult('info', `⌛ 正在測試 <span class="font-semibold">${sourceLabel}</span>，請稍候...`);
 
@@ -1026,6 +1423,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             throw new Error(message);
         }
         let detailHtml = '';
+        let tableSourceLabel = sourceLabel;
         const extraSections = [];
         if (parseMode === 'adjustedComposer') {
             const rows = Array.isArray(payload.data) ? payload.data : [];
@@ -1037,6 +1435,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 ? summary.sources.join(' + ')
                 : null;
             const sourceSummary = payload?.dataSource || summarySources || 'Netlify 還原管線';
+            tableSourceLabel = sourceSummary;
             const debugSteps = Array.isArray(payload?.debugSteps) ? payload.debugSteps : [];
             const adjustmentsList = Array.isArray(payload?.adjustments) ? payload.adjustments : [];
             const aggregatedEvents = Array.isArray(payload?.dividendEvents) ? payload.dividendEvents : [];
@@ -1434,6 +1833,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
                 `資料筆數: <span class="font-semibold">${testerEscapeHtml(total)}</span>`,
                 `涵蓋區間: <span class="font-semibold">${testerEscapeHtml(firstDate)} ~ ${testerEscapeHtml(lastDate)}</span>`,
             ];
+            tableSourceLabel = sourcesRaw.join('、');
             if (payload?.fallback?.reason) {
                 const fallbackSource = testerEscapeHtml(payload.dataSource || '備援來源');
                 const fallbackReason = testerEscapeHtml(payload.fallback.reason);
@@ -1441,11 +1841,14 @@ async function runDataSourceTester(sourceId, sourceLabel) {
             }
             detailHtml = detailLines.join('<br>');
         }
+        const normalizedRows = normalizeTesterRows(payload, parseMode);
+        setTesterTableData(normalizedRows, tableSourceLabel);
         showTesterResult(
             'success',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試成功。<br>${detailHtml}`,
         );
     } catch (error) {
+        clearTesterTableData();
         showTesterResult(
             'error',
             `來源 <span class="font-semibold">${sourceLabel}</span> 測試失敗：${error.message || error}`,
@@ -1461,11 +1864,12 @@ function refreshDataSourceTester() {
     const hintEl = document.getElementById('dataSourceTesterHint');
     if (!modeEl || !hintEl) return;
     syncSplitAdjustmentState();
-    const market = getCurrentMarketFromUI();
-    const adjusted = isAdjustedMode();
-    const splitEnabled = isSplitAdjustmentEnabled();
     const { start, end } = getDateRangeFromUI();
     const stockNo = getStockNoValue();
+    const uiMarket = getCurrentMarketFromUI();
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : uiMarket;
+    const adjusted = market === 'INDEX' ? false : isAdjustedMode();
+    const splitEnabled = adjusted && isSplitAdjustmentEnabled();
     const sources = getTesterSourceConfigs(market, adjusted, splitEnabled);
     const missingInputs = !stockNo || !start || !end;
     const modeText = adjusted
@@ -1486,6 +1890,8 @@ function refreshDataSourceTester() {
                 ? '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情、FinMind 配息與股票拆分資訊。'
                 : '還原股價以 Yahoo Finance 為主來源，Netlify 會結合 TWSE/FinMind 原始行情與 FinMind 配息做備援。',
         );
+    } else if (market === 'INDEX') {
+        messageLines.push('Yahoo Finance 為唯一資料來源，支援常見指數（例如 ^TWII、^GSPC）。');
     } else if (market === 'US') {
         messageLines.push('FinMind 為主來源，Yahoo Finance 為備援來源。建議兩者都測試一次並確認 FINMIND_TOKEN 設定。');
     } else if (market === 'TPEX') {
@@ -1507,6 +1913,11 @@ function refreshDataSourceTester() {
 
     hintEl.style.color = messageColor;
     hintEl.innerHTML = messageLines.map((line) => testerEscapeHtml(line)).join('<br>');
+    if (missingInputs) {
+        clearTesterTableData();
+    } else {
+        updateTesterTableAvailability();
+    }
     setTesterButtonsDisabled(dataSourceTesterState.busy || missingInputs);
 }
 
@@ -1535,6 +1946,11 @@ function initDataSourceTester() {
     if (!toggleBtn || !closeBtn) return;
     toggleBtn.addEventListener('click', () => toggleDataSourceTester());
     closeBtn.addEventListener('click', () => toggleDataSourceTester(false));
+
+    const tableToggleBtn = document.getElementById('openDataSourceTesterTable');
+    if (tableToggleBtn) {
+        tableToggleBtn.addEventListener('click', toggleTesterTable);
+    }
 
     const stockNoInput = document.getElementById('stockNo');
     if (stockNoInput) {
@@ -1572,6 +1988,2318 @@ function initDataSourceTester() {
     refreshDataSourceTester();
     window.refreshDataSourceTester = refreshDataSourceTester;
     window.applyMarketPreset = applyMarketPreset;
+}
+
+function formatBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    let date;
+    if (value instanceof Date) {
+        date = value;
+    } else if (typeof value === 'number') {
+        date = new Date(value);
+    } else {
+        date = new Date(String(value));
+    }
+    if (!Number.isFinite(date.getTime())) {
+        return typeof value === 'string' ? value : String(value);
+    }
+    try {
+        return date.toLocaleString('zh-TW', { hour12: false });
+    } catch (error) {
+        return date.toISOString().replace('T', ' ').replace('Z', 'Z');
+    }
+}
+
+function parseBatchDebugTime(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+    }
+    const date = new Date(typeof value === 'number' ? value : String(value));
+    return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatBatchDebugDuration(startValue, endValue) {
+    const startDate = parseBatchDebugTime(startValue);
+    const endDate = parseBatchDebugTime(endValue);
+    if (!startDate || !endDate) {
+        return '';
+    }
+    const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+    if (!Number.isFinite(diffMs) || diffMs <= 0) {
+        return '';
+    }
+    const seconds = diffMs / 1000;
+    if (seconds < 1) {
+        return `${seconds.toFixed(2)} 秒`;
+    }
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)} 秒`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainSeconds = seconds % 60;
+    if (minutes < 60) {
+        return remainSeconds > 0
+            ? `${minutes} 分 ${remainSeconds.toFixed(1)} 秒`
+            : `${minutes} 分鐘`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainMinutes = minutes % 60;
+    return remainMinutes > 0
+        ? `${hours} 小時 ${remainMinutes} 分`
+        : `${hours} 小時`;
+}
+
+const BATCH_DEBUG_LEVEL_PRESETS = {
+    info: {
+        label: '資訊',
+        english: 'INFO',
+        background: 'rgba(8, 145, 178, 0.12)',
+        border: 'rgba(8, 145, 178, 0.28)',
+        color: '#0f766e',
+    },
+    success: {
+        label: '完成',
+        english: 'SUCCESS',
+        background: 'rgba(16, 185, 129, 0.16)',
+        border: 'rgba(16, 185, 129, 0.28)',
+        color: '#047857',
+    },
+    warn: {
+        label: '警示',
+        english: 'WARN',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    warning: {
+        label: '警示',
+        english: 'WARN',
+        background: 'rgba(245, 158, 11, 0.18)',
+        border: 'rgba(245, 158, 11, 0.30)',
+        color: '#b45309',
+    },
+    error: {
+        label: '錯誤',
+        english: 'ERROR',
+        background: 'rgba(220, 38, 38, 0.14)',
+        border: 'rgba(220, 38, 38, 0.30)',
+        color: '#b91c1c',
+    },
+    debug: {
+        label: '偵錯',
+        english: 'DEBUG',
+        background: 'rgba(107, 114, 128, 0.12)',
+        border: 'rgba(107, 114, 128, 0.28)',
+        color: '#374151',
+    },
+    trace: {
+        label: '追蹤',
+        english: 'TRACE',
+        background: 'rgba(59, 130, 246, 0.12)',
+        border: 'rgba(59, 130, 246, 0.30)',
+        color: '#1d4ed8',
+    },
+};
+
+function resolveBatchDebugLevelMeta(level) {
+    const key = typeof level === 'string' ? level.trim().toLowerCase() : '';
+    const preset = key && Object.prototype.hasOwnProperty.call(BATCH_DEBUG_LEVEL_PRESETS, key)
+        ? BATCH_DEBUG_LEVEL_PRESETS[key]
+        : null;
+    const fallbackLabel = typeof level === 'string' && level.trim()
+        ? level.trim().toUpperCase()
+        : '資訊';
+    const englishLabel = preset?.english || fallbackLabel;
+    return {
+        label: preset?.label || fallbackLabel,
+        english: englishLabel,
+        background: preset?.background || 'rgba(148, 163, 184, 0.16)',
+        border: preset?.border || 'rgba(148, 163, 184, 0.26)',
+        color: preset?.color || '#334155',
+    };
+}
+
+const BATCH_DEBUG_PHASE_LABELS = {
+    init: '初始化流程',
+    worker: '回測執行',
+    backtest: '回測流程',
+    optimize: '參數優化',
+    collect: '結果彙整',
+    render: '畫面更新',
+    compare: '結果對拍',
+    headless: '背景作業',
+    summary: '結果摘要',
+    storage: '快取快照'
+};
+
+const BATCH_DEBUG_EVENT_NAME_MAP = {
+    'session-start': '除錯會話啟動',
+    'session-complete': '除錯會話結束',
+    'batch-start': '批量優化啟動',
+    'results-reset': '重設結果列表',
+    'execute-start': '開始執行批量回測',
+    'batch-processing-start': '併發優化啟動',
+    'combo-iteration-start': '組合迭代啟動',
+    'combo-iteration-cycle': '組合迭代進行',
+    'combo-iteration-final': '組合迭代完成',
+    'combo-iteration-error': '組合迭代錯誤',
+    'combination-start': '回測組合啟動',
+    'combination-complete': '回測組合完成',
+    'combination-error': '回測組合錯誤',
+    'combination-no-result': '回測組合無結果',
+    'combination-batch-empty': '本輪無任何回測結果',
+    'batch-results-appended': '寫入批量結果',
+    'cached-data-evaluation': '批量快取診斷',
+    'cached-data-slice-applied': '快取資料裁切',
+    'cached-data-coverage-mismatch': '快取覆蓋異常',
+    'worker-run-start': '啟動回測工作',
+    'worker-run-result': '回測結果返回',
+    'worker-run-error': '回測工作錯誤',
+    'worker-run-timeout': '回測工作逾時',
+    'worker-run-exception': '回測工作異常',
+    'worker-missing-url': '回測 Worker 缺少來源',
+    'param-optimization-complete': '參數優化完成',
+    'param-optimization-error': '參數優化錯誤',
+    'combo-optimize-complete': '組合優化完成',
+    'combo-optimize-error': '組合優化錯誤',
+    'headless-cache-state': '背景快取狀態',
+    'headless-cache-restore': '背景快取還原',
+    'headless-state-snapshot': '背景狀態快照',
+    'headless-state-restore': '背景狀態還原',
+    'headless-compare': '背景結果對拍',
+    'headless-compare-error': '背景對拍錯誤',
+    'headless-result': '背景最佳結果',
+    'dom-sync-pass': '畫面同步通過',
+    'dom-sync-mismatch': '畫面同步差異',
+    'dom-sync-error': '畫面同步錯誤',
+    'best-result-found': '找到最佳結果',
+    'best-result-missing': '最佳結果缺失',
+    'storageRestored': '快取儲存還原',
+    'storagerestored': '快取儲存還原'
+};
+
+const BATCH_DEBUG_SOURCE_LABELS = {
+    'global-cache': '全域快取',
+    override: '覆寫資料',
+    none: '無快取',
+    worker: '即時抓取'
+};
+
+const BATCH_DEBUG_MARKET_LABELS = {
+    TWSE: '台股上市（TWSE）',
+    TPEX: '台股上櫃（TPEX）',
+    OTC: '台股上櫃（OTC）',
+    TPEx: '台股上櫃（TPEX）',
+    US: '美股（US）',
+    HK: '港股（HK）'
+};
+
+const BATCH_DEBUG_PRICE_MODE_LABELS = {
+    adjusted: '還原價',
+    raw: '原始價'
+};
+
+const BATCH_DEBUG_TRADE_TIMING_LABELS = {
+    close: '當日收盤',
+    open: '當日開盤',
+    next_open: '次日開盤',
+    next_close: '次日收盤'
+};
+
+const BATCH_DEBUG_COVERAGE_REASON_LABELS = {
+    ok: '覆蓋符合需求',
+    'dataset-empty': '快取資料為空',
+    'dataset-start-after-required-start': '快取起點晚於需求起點',
+    'dataset-end-before-required-end': '快取終點早於需求終點',
+    'dataset-end-missing': '快取缺少終點資訊',
+    'dataset-start-missing': '快取缺少起點資訊'
+};
+
+const batchDebugEventTimeFormatter = (() => {
+    try {
+        return new Intl.DateTimeFormat('zh-TW', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    } catch (error) {
+        console.warn('[Batch Debug] Intl DateTimeFormat unavailable:', error);
+        return null;
+    }
+})();
+
+const batchDebugNumberFormatter = new Intl.NumberFormat('zh-TW', {
+    maximumFractionDigits: 4
+});
+
+function formatBatchDebugPhaseLabel(phase) {
+    if (!phase) {
+        return '';
+    }
+    if (typeof phase !== 'string') {
+        return String(phase);
+    }
+    const trimmed = phase.trim();
+    if (!trimmed) {
+        return '';
+    }
+    const key = trimmed.toLowerCase();
+    const localized = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PHASE_LABELS, key)
+        ? BATCH_DEBUG_PHASE_LABELS[key]
+        : null;
+    if (!localized) {
+        return trimmed;
+    }
+    return localized.includes(trimmed) ? localized : `${localized}（${trimmed}）`;
+}
+
+function formatBatchDebugEventName(label) {
+    if (label === null || label === undefined) {
+        return '批量優化事件';
+    }
+    const raw = typeof label === 'string' ? label.trim() : String(label);
+    if (!raw) {
+        return '批量優化事件';
+    }
+    const lower = raw.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_NAME_MAP, raw)) {
+        return BATCH_DEBUG_EVENT_NAME_MAP[raw];
+    }
+    if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_NAME_MAP, lower)) {
+        return BATCH_DEBUG_EVENT_NAME_MAP[lower];
+    }
+    return raw;
+}
+
+function formatBatchDebugEventTimeLabel(value) {
+    const date = parseBatchDebugTime(value);
+    if (!date) {
+        return value ? String(value) : '';
+    }
+    if (batchDebugEventTimeFormatter) {
+        try {
+            return batchDebugEventTimeFormatter.format(date);
+        } catch (error) {
+            // ignore and fall back to manual formatting
+        }
+    }
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${m}/${d} ${hh}:${mm}:${ss}`;
+}
+
+function formatBatchDebugDateValue(value) {
+    if (value === null || value === undefined) {
+        return '—';
+    }
+    if (value instanceof Date) {
+        if (!Number.isFinite(value.getTime())) {
+            return '—';
+        }
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (value > 1e12) {
+            const date = new Date(value);
+            return formatBatchDebugDateValue(date);
+        }
+        if (value > 1e5) {
+            const text = String(Math.trunc(value));
+            if (text.length === 8) {
+                return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+            }
+        }
+        const date = new Date(value * 1000);
+        if (Number.isFinite(date.getTime())) {
+            return formatBatchDebugDateValue(date);
+        }
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return '—';
+        }
+        if (/^\d{8}$/.test(trimmed)) {
+            return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
+        }
+        const parsed = parseBatchDebugTime(trimmed);
+        if (parsed) {
+            return formatBatchDebugDateValue(parsed);
+        }
+        return trimmed;
+    }
+    return String(value);
+}
+
+function formatBatchDebugRangeText(range) {
+    if (!range || typeof range !== 'object') {
+        return '—';
+    }
+    const start = range.startDate || range.dataStartDate || range.effectiveStartDate || range.from || null;
+    const end = range.endDate || range.to || null;
+    const startText = formatBatchDebugDateValue(start);
+    const endText = formatBatchDebugDateValue(end);
+    if ((!startText || startText === '—') && (!endText || endText === '—')) {
+        return '—';
+    }
+    if (!start || startText === '—') {
+        return endText;
+    }
+    if (!end || endText === '—') {
+        return startText;
+    }
+    return `${startText} → ${endText}`;
+}
+
+function formatBatchDebugSummaryText(summary) {
+    if (!summary || typeof summary !== 'object') {
+        return '—';
+    }
+    const range = formatBatchDebugRangeText(summary);
+    const lengthLabel = Number.isFinite(summary.length)
+        ? `${formatBatchDebugNumber(summary.length)} 筆`
+        : null;
+    if (lengthLabel && range && range !== '—') {
+        return `${range}｜${lengthLabel}`;
+    }
+    if (range && range !== '—') {
+        return range;
+    }
+    if (lengthLabel) {
+        return lengthLabel;
+    }
+    return '—';
+}
+
+function formatBatchDebugNumber(value, options = {}) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (options.percentage) {
+            const decimals = Number.isFinite(options.decimals) ? options.decimals : 2;
+            return `${(value * 100).toFixed(decimals)}%`;
+        }
+        if (Number.isFinite(options.decimals)) {
+            return value.toFixed(options.decimals);
+        }
+        return batchDebugNumberFormatter.format(value);
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    return String(value);
+}
+
+function formatBatchDebugCoverageText(coverage) {
+    if (!coverage || typeof coverage !== 'object') {
+        return '—';
+    }
+    if (coverage.coverageSatisfied) {
+        return '覆蓋符合需求';
+    }
+    const reasonText = typeof coverage.reason === 'string' ? coverage.reason : '';
+    const reasons = reasonText ? reasonText.split('|') : [];
+    if (reasons.length === 0) {
+        return '覆蓋不足';
+    }
+    const mapped = reasons.map((code) => {
+        const key = code.trim();
+        if (!key) return null;
+        if (Object.prototype.hasOwnProperty.call(BATCH_DEBUG_COVERAGE_REASON_LABELS, key)) {
+            return BATCH_DEBUG_COVERAGE_REASON_LABELS[key];
+        }
+        return key;
+    }).filter(Boolean);
+    const text = mapped.length > 0 ? mapped.join('、') : reasons.join('、');
+    return `覆蓋不足：${text}`;
+}
+
+function formatBatchDebugSourceLabel(source) {
+    if (source === null || source === undefined) {
+        return '—';
+    }
+    const raw = String(source).trim();
+    if (!raw) {
+        return '—';
+    }
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_SOURCE_LABELS, lower)
+        ? BATCH_DEBUG_SOURCE_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_SOURCE_LABELS, raw)
+            ? BATCH_DEBUG_SOURCE_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugPriceModeLabel(mode) {
+    if (!mode) {
+        return '—';
+    }
+    const raw = String(mode).trim();
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PRICE_MODE_LABELS, lower)
+        ? BATCH_DEBUG_PRICE_MODE_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_PRICE_MODE_LABELS, raw)
+            ? BATCH_DEBUG_PRICE_MODE_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugMarketLabel(market) {
+    if (!market) {
+        return '—';
+    }
+    const raw = String(market).trim();
+    const upper = raw.toUpperCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_MARKET_LABELS, upper)
+        ? BATCH_DEBUG_MARKET_LABELS[upper]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_MARKET_LABELS, raw)
+            ? BATCH_DEBUG_MARKET_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${upper}）`;
+}
+
+function formatBatchDebugTradeTimingLabel(value) {
+    if (!value) {
+        return '—';
+    }
+    const raw = String(value).trim();
+    const lower = raw.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_TRADE_TIMING_LABELS, lower)
+        ? BATCH_DEBUG_TRADE_TIMING_LABELS[lower]
+        : Object.prototype.hasOwnProperty.call(BATCH_DEBUG_TRADE_TIMING_LABELS, raw)
+            ? BATCH_DEBUG_TRADE_TIMING_LABELS[raw]
+            : null;
+    if (!mapped) {
+        return raw;
+    }
+    return mapped.includes(raw) ? mapped : `${mapped}（${raw}）`;
+}
+
+function formatBatchDebugScene(detail, event) {
+    if (detail && typeof detail === 'object') {
+        if (detail.scene) return String(detail.scene);
+        if (detail.context) return String(detail.context);
+    }
+    if (event && event.phase) {
+        return formatBatchDebugPhaseLabel(event.phase) || String(event.phase);
+    }
+    return '批量流程';
+}
+
+function extractCombinationDetail(detail) {
+    if (!detail || typeof detail !== 'object') {
+        return null;
+    }
+    if (detail.combination && typeof detail.combination === 'object') {
+        return detail.combination;
+    }
+    if (detail.result && typeof detail.result === 'object') {
+        return detail.result;
+    }
+    return null;
+}
+
+function formatBatchDebugCombinationHeadline(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination) {
+        return '';
+    }
+    const buy = combination.buyStrategy || combination.entryStrategy || '—';
+    const sell = combination.sellStrategy || combination.exitStrategy || '';
+    let base = sell ? `${buy} → ${sell}` : buy;
+    if (combination.metricLabel && typeof combination.metric === 'number') {
+        base = `${base}｜${combination.metricLabel}=${formatBatchDebugNumber(combination.metric)}`;
+    } else if (typeof combination.metric === 'number') {
+        base = `${base}｜指標=${formatBatchDebugNumber(combination.metric)}`;
+    }
+    return base;
+}
+
+function formatBatchDebugParamPairs(params) {
+    if (!params || typeof params !== 'object') {
+        return '';
+    }
+    const entries = Object.entries(params)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => {
+            if (value === null || value === undefined) {
+                return `${key}=—`;
+            }
+            if (typeof value === 'number' && Number.isFinite(value)) {
+                return `${key}=${formatBatchDebugNumber(value)}`;
+            }
+            if (typeof value === 'boolean') {
+                return `${key}=${value ? '是' : '否'}`;
+            }
+            return `${key}=${value}`;
+        });
+    return entries.join('、');
+}
+
+function formatBatchDebugCombinationParams(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination) {
+        return '';
+    }
+    const parts = [];
+    if (combination.buyParams) {
+        const text = formatBatchDebugParamPairs(combination.buyParams);
+        if (text) parts.push(`買入：${text}`);
+    }
+    if (combination.sellParams) {
+        const text = formatBatchDebugParamPairs(combination.sellParams);
+        if (text) parts.push(`出場：${text}`);
+    }
+    return parts.join('｜');
+}
+
+function formatBatchDebugRiskSummary(detail) {
+    const combination = extractCombinationDetail(detail);
+    if (!combination || !combination.riskManagement) {
+        return '';
+    }
+    const parts = Object.entries(combination.riskManagement)
+        .filter(([key]) => typeof key === 'string')
+        .map(([key, value]) => `${key}=${formatBatchDebugNumber(value)}`);
+    return parts.length > 0 ? parts.join('、') : '';
+}
+
+function formatBatchDebugSliceBreakdown(breakdown) {
+    if (!breakdown || typeof breakdown !== 'object') {
+        return '';
+    }
+    const parts = [];
+    if (Number.isFinite(breakdown.beforeStart) && breakdown.beforeStart > 0) {
+        parts.push(`起點之前 ${formatBatchDebugNumber(breakdown.beforeStart)} 筆`);
+    }
+    if (Number.isFinite(breakdown.afterEnd) && breakdown.afterEnd > 0) {
+        parts.push(`終點之後 ${formatBatchDebugNumber(breakdown.afterEnd)} 筆`);
+    }
+    if (Number.isFinite(breakdown.undetermined) && breakdown.undetermined > 0) {
+        parts.push(`未判定 ${formatBatchDebugNumber(breakdown.undetermined)} 筆`);
+    }
+    return parts.join('、');
+}
+
+function buildBatchDebugRow(label, value, options = {}) {
+    if (!label) {
+        return null;
+    }
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    return {
+        key: options.key || label,
+        label,
+        value,
+        allowHtml: Boolean(options.allowHtml)
+    };
+}
+
+function normalizeBatchDebugRow(row) {
+    if (!row || typeof row !== 'object') {
+        return null;
+    }
+    const label = row.label ? String(row.label) : '';
+    if (!label) {
+        return null;
+    }
+    const rawValue = row.value;
+    if (rawValue === null || rawValue === undefined || rawValue === '') {
+        return null;
+    }
+    const value = row.allowHtml ? String(rawValue) : String(rawValue);
+    if (!value) {
+        return null;
+    }
+    return {
+        key: row.key || label,
+        label,
+        value,
+        allowHtml: Boolean(row.allowHtml)
+    };
+}
+
+function buildDefaultBatchDebugPresentation(event) {
+    const detail = event?.detail && typeof event.detail === 'object' ? event.detail : null;
+    const rows = [];
+    if (detail) {
+        Object.entries(detail).forEach(([key, value]) => {
+            if (value === null || value === undefined) {
+                return;
+            }
+            if (typeof value === 'object') {
+                return;
+            }
+            rows.push(buildBatchDebugRow(key, value, { key }));
+        });
+    }
+    return {
+        category: formatBatchDebugEventName(event?.label),
+        highlight: '',
+        rows,
+        showDetailJson: true
+    };
+}
+
+const BATCH_DEBUG_EVENT_TEMPLATES = {
+    'cached-data-evaluation': (event, detail) => {
+        const highlight = detail.useCachedData ? '沿用快取' : '重新抓取資料';
+        const decisionCode = detail.decision
+            || (detail.useCachedData ? 'globalCacheReusable' : 'fetchFreshData');
+        const sliceSummary = detail.sliceSummary || null;
+        const summaryRangeText = formatBatchDebugRangeText(sliceSummary || detail.summary);
+        const datasetLength = Number.isFinite(sliceSummary?.length)
+            ? sliceSummary.length
+            : detail.datasetLength;
+        const rows = [
+            buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+            buildBatchDebugRow('決策', decisionCode, { key: 'decision' }),
+            buildBatchDebugRow('狀態', highlight, { key: 'status' }),
+            buildBatchDebugRow('覆蓋檢查', formatBatchDebugCoverageText(detail.coverage), { key: 'coverage' }),
+            buildBatchDebugRow('來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+            buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' }),
+            buildBatchDebugRow('資料筆數', formatBatchDebugNumber(datasetLength), { key: 'datasetLength' }),
+            buildBatchDebugRow('資料範圍', summaryRangeText, { key: 'summaryRange' })
+        ];
+        if (detail.summary && sliceSummary) {
+            rows.push(buildBatchDebugRow('原範圍', formatBatchDebugRangeText(detail.summary), { key: 'summary' }));
+            rows.push(buildBatchDebugRow('裁切後', formatBatchDebugRangeText(sliceSummary), { key: 'sliceSummary' }));
+        }
+        const extraMessages = [];
+        if (detail.sliceRemovedCount > 0) {
+            extraMessages.push(`快取資料已依需求區間裁切（移除 ${formatBatchDebugNumber(detail.sliceRemovedCount)} 筆）`);
+        }
+        if (detail.sliceRemovedBreakdown) {
+            const breakdown = formatBatchDebugSliceBreakdown(detail.sliceRemovedBreakdown);
+            if (breakdown) {
+                extraMessages.push(`裁切明細：${breakdown}`);
+            }
+        }
+        if (detail.overrideProvided) {
+            rows.push(buildBatchDebugRow('覆寫資料', detail.overrideProvided ? '已提供' : '未提供', { key: 'overrideProvided' }));
+        }
+        const extra = extraMessages.length > 0 ? extraMessages.join('\n') : '';
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight,
+            rows,
+            extra,
+            showDetailJson: false
+        };
+    },
+    'cached-data-slice-applied': (event, detail) => {
+        const removed = Number.isFinite(detail.removedCount) ? detail.removedCount : 0;
+        const highlight = removed > 0
+            ? `裁切 ${formatBatchDebugNumber(removed)} 筆`
+            : '無需裁切資料';
+        const rows = [
+            buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+            buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+            buildBatchDebugRow('裁切前', formatBatchDebugSummaryText(detail.summaryBefore), { key: 'summaryBefore' }),
+            buildBatchDebugRow('裁切後', formatBatchDebugSummaryText(detail.summaryAfter), { key: 'summaryAfter' }),
+            buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' })
+        ];
+        const breakdown = formatBatchDebugSliceBreakdown(detail.removedBreakdown);
+        if (breakdown) {
+            rows.push(buildBatchDebugRow('移除統計', breakdown, { key: 'sliceBreakdown' }));
+        }
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight,
+            rows,
+            showDetailJson: false
+        };
+    },
+    'cached-data-coverage-mismatch': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '覆蓋不足，改以重新抓取資料',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.source), { key: 'source' }),
+                buildBatchDebugRow('需求區間', formatBatchDebugRangeText(detail.requiredRange), { key: 'requiredRange' }),
+                buildBatchDebugRow('現有範圍', formatBatchDebugSummaryText(detail.summary), { key: 'summary' }),
+                buildBatchDebugRow('覆蓋檢查', formatBatchDebugCoverageText(detail.coverage), { key: 'coverage' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-start': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.useCachedData ? '使用快取執行回測' : '重新載入資料執行回測',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.cachedSource || detail.source), { key: 'source' }),
+                buildBatchDebugRow('沿用快取', detail.useCachedData ? '是' : '否', { key: 'useCachedData' }),
+                buildBatchDebugRow('快取筆數', formatBatchDebugNumber(detail.datasetLength), { key: 'datasetLength' }),
+                buildBatchDebugRow('裁切後筆數', formatBatchDebugNumber(detail.sliceLength), { key: 'sliceLength' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-result': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '回測工作完成',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('沿用快取', detail.usedCachedData ? '是' : '否', { key: 'usedCachedData' }),
+                buildBatchDebugRow('年化報酬', detail.result?.annualizedReturn !== undefined ? formatBatchDebugNumber(detail.result.annualizedReturn) : '', { key: 'annualizedReturn' }),
+                buildBatchDebugRow('最大回撤', detail.result?.maxDrawdown !== undefined ? formatBatchDebugNumber(detail.result.maxDrawdown) : '', { key: 'maxDrawdown' }),
+                buildBatchDebugRow('交易次數', detail.result?.tradeCount !== undefined ? formatBatchDebugNumber(detail.result.tradeCount) : '', { key: 'tradeCount' })
+            ],
+            showDetailJson: false
+        };
+    },
+    'worker-run-error': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.message ? `錯誤：${detail.message}` : '回測工作發生錯誤',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' }),
+                buildBatchDebugRow('資料來源', formatBatchDebugSourceLabel(detail.cachedSource || detail.source), { key: 'source' })
+            ],
+            showDetailJson: true
+        };
+    },
+    'worker-run-timeout': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: detail.message || '回測工作逾時',
+            rows: [
+                buildBatchDebugRow('場景', formatBatchDebugScene(detail, event), { key: 'scene' })
+            ],
+            showDetailJson: true
+        };
+    },
+    'param-optimization-complete': (event, detail) => {
+        return {
+            category: formatBatchDebugEventName(event?.label),
+            highlight: '參數優化完成',
+            rows: [
+                buildBatchDebugRow('策略類型', detail.strategyType, { key: 'strategyType' }),
+                buildBatchDebugRow('優化目標', detail.optimizeTarget, { key: 'optimizeTarget' }),
+                buildBatchDebugRow('指標', detail.targetMetric, { key: 'targetMetric' }),
+                buildBatchDebugRow('選定數值', formatBatchDebugNumber(detail.selectedValue), { key: 'selectedValue' }),
+                buildBatchDebugRow('指標數值', formatBatchDebugNumber(detail.metric), { key: 'metric' })
+            ],
+            showDetailJson: false
+        };
+    }
+};
+
+function normalizeBatchDebugPresentation(presentation, event, detail) {
+    const normalized = {
+        category: presentation.category || formatBatchDebugEventName(event?.label),
+        highlight: presentation.highlight ? String(presentation.highlight) : '',
+        rows: Array.isArray(presentation.rows) ? presentation.rows.map(normalizeBatchDebugRow).filter(Boolean) : [],
+        showDetailJson: presentation.showDetailJson === true,
+        extra: presentation.extra ? String(presentation.extra) : ''
+    };
+
+    const usedKeys = new Set(normalized.rows.map((row) => row.key));
+
+    const combinationHeadline = formatBatchDebugCombinationHeadline(detail);
+    if (combinationHeadline && !usedKeys.has('combination')) {
+        const row = normalizeBatchDebugRow({ key: 'combination', label: '策略', value: combinationHeadline });
+        if (row) {
+            normalized.rows.unshift(row);
+            usedKeys.add(row.key);
+        }
+        const paramsText = formatBatchDebugCombinationParams(detail);
+        if (paramsText && !usedKeys.has('combinationParams')) {
+            const paramRow = normalizeBatchDebugRow({ key: 'combinationParams', label: '參數', value: paramsText });
+            if (paramRow) {
+                normalized.rows.splice(1, 0, paramRow);
+                usedKeys.add(paramRow.key);
+            }
+        }
+        const riskText = formatBatchDebugRiskSummary(detail);
+        if (riskText && !usedKeys.has('riskManagement')) {
+            const riskRow = normalizeBatchDebugRow({ key: 'riskManagement', label: '風險管理', value: riskText });
+            if (riskRow) {
+                normalized.rows.push(riskRow);
+                usedKeys.add(riskRow.key);
+            }
+        }
+    }
+
+    const includeRequestRange = !usedKeys.has('requiredRange');
+    const datasetRows = [
+        buildBatchDebugRow('標的代碼', detail?.stockNo, { key: 'stockNo' }),
+        buildBatchDebugRow('市場', formatBatchDebugMarketLabel(detail?.market), { key: 'market' }),
+        buildBatchDebugRow('價格模式', formatBatchDebugPriceModeLabel(detail?.priceMode), { key: 'priceMode' }),
+        buildBatchDebugRow('交易時點', formatBatchDebugTradeTimingLabel(detail?.tradeTiming), { key: 'tradeTiming' }),
+        includeRequestRange
+            ? buildBatchDebugRow('請求區間', formatBatchDebugRangeText({ startDate: detail?.requestStartDate, endDate: detail?.requestEndDate }), { key: 'requestRange' })
+            : null
+    ].filter(Boolean);
+
+    datasetRows.forEach((row) => {
+        const normalizedRow = normalizeBatchDebugRow(row);
+        if (normalizedRow && normalizedRow.value !== '—' && !usedKeys.has(normalizedRow.key)) {
+            normalized.rows.push(normalizedRow);
+            usedKeys.add(normalizedRow.key);
+        }
+    });
+
+    return normalized;
+}
+
+function buildBatchDebugEventPresentation(event) {
+    if (!event || typeof event !== 'object') {
+        return buildDefaultBatchDebugPresentation(event);
+    }
+    const detail = event.detail && typeof event.detail === 'object' ? event.detail : {};
+    const label = typeof event.label === 'string' ? event.label : '';
+    const builder = Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_TEMPLATES, label)
+        ? BATCH_DEBUG_EVENT_TEMPLATES[label]
+        : (label && Object.prototype.hasOwnProperty.call(BATCH_DEBUG_EVENT_TEMPLATES, label.toLowerCase())
+            ? BATCH_DEBUG_EVENT_TEMPLATES[label.toLowerCase()]
+            : null);
+
+    let presentation = null;
+    if (typeof builder === 'function') {
+        try {
+            presentation = builder(event, detail);
+        } catch (error) {
+            console.error('[Batch Debug] Failed to build presentation:', label, error);
+        }
+    }
+    if (!presentation) {
+        presentation = buildDefaultBatchDebugPresentation(event);
+    }
+    const normalized = normalizeBatchDebugPresentation(presentation, event, detail);
+    normalized.detail = detail;
+    return normalized;
+}
+
+function renderBatchDebugEvent(event) {
+    const presentation = buildBatchDebugEventPresentation(event);
+    const levelMeta = resolveBatchDebugLevelMeta(event?.level);
+    const timeLabel = formatBatchDebugEventTimeLabel(event?.iso || event?.ts || Date.now());
+    const phaseLabel = formatBatchDebugPhaseLabel(event?.phase);
+    const badges = [];
+    if (levelMeta.english) {
+        badges.push(`<span class="inline-flex items-center rounded-full border px-2 py-[2px] text-[10px] font-semibold tracking-wide uppercase" style="color: ${levelMeta.color}; border-color: ${levelMeta.color};">${testerEscapeHtml(levelMeta.english)}</span>`);
+    }
+    if (levelMeta.label && levelMeta.label !== levelMeta.english) {
+        badges.push(`<span class="text-[10px] font-medium" style="color: ${levelMeta.color};">${testerEscapeHtml(levelMeta.label)}</span>`);
+    }
+    if (phaseLabel) {
+        badges.push(`<span class="inline-flex items-center rounded-full border border-dashed px-2 py-[1px] text-[10px]" style="color: var(--muted-foreground); border-color: rgba(148, 163, 184, 0.45); background-color: rgba(148, 163, 184, 0.12);">${testerEscapeHtml(phaseLabel)}</span>`);
+    }
+
+    const rowsHtml = presentation.rows.map((row) => {
+        const valueHtml = row.allowHtml ? row.value : testerEscapeHtml(String(row.value));
+        return `<div class="text-[12px] leading-[20px]"><span class="text-[12px]" style="color: var(--muted-foreground);">${testerEscapeHtml(row.label)}：</span><span class="font-medium" style="color: var(--foreground);">${valueHtml}</span></div>`;
+    }).join('');
+
+    const highlightHtml = presentation.highlight
+        ? `<div class="text-[12px] font-semibold" style="color: ${levelMeta.color};">${testerEscapeHtml(presentation.highlight)}</div>`
+        : '';
+
+    const extraHtml = presentation.extra
+        ? `<div class="rounded-md border px-3 py-2 text-[11px] leading-[18px]" style="border-color: ${levelMeta.border}; color: ${levelMeta.color}; background-color: ${levelMeta.background};">${testerEscapeHtml(presentation.extra).replace(/\n/g, '<br />')}</div>`
+        : '';
+
+    let detailJsonHtml = '';
+    if (presentation.showDetailJson && presentation.detail && Object.keys(presentation.detail).length > 0) {
+        detailJsonHtml = `<pre class="text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${testerEscapeHtml(JSON.stringify(presentation.detail, null, 2))}</pre>`;
+    }
+
+    return `
+        <div class="space-y-2 rounded-lg border px-4 py-3" style="background-color: rgba(248, 250, 252, 0.88); border-color: ${levelMeta.border};">
+            <div class="text-[13px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(presentation.category)}</div>
+            ${badges.length > 0 ? `<div class="flex flex-wrap items-center gap-2">${badges.join('')}</div>` : ''}
+            ${highlightHtml}
+            <div class="text-[11px]" style="color: var(--muted-foreground);">${testerEscapeHtml(timeLabel)}</div>
+            ${rowsHtml ? `<div class="space-y-1">${rowsHtml}</div>` : ''}
+            ${extraHtml}
+            ${detailJsonHtml}
+        </div>
+    `;
+}
+
+function initBatchDebugLogPanel() {
+    const container = document.getElementById('batchDebugLogContainer');
+    if (!container) return;
+
+    const metaEl = document.getElementById('batchDebugSessionMeta');
+    const listEl = document.getElementById('batchDebugEventList');
+    const emptyEl = document.getElementById('batchDebugEmptyHint');
+    const refreshBtn = document.getElementById('batchDebugRefreshBtn');
+    const downloadBtn = document.getElementById('batchDebugDownloadBtn');
+    const clearBtn = document.getElementById('batchDebugClearBtn');
+    const markFirstBtn = document.getElementById('batchDebugMarkFirstBtn');
+    const markSecondBtn = document.getElementById('batchDebugMarkSecondBtn');
+    const compareBtn = document.getElementById('batchDebugCompareBtn');
+    const copyBtn = document.getElementById('batchDebugCopyBtn');
+    const compareOutput = document.getElementById('batchDebugCompareOutput');
+    const compareStatus = document.getElementById('batchDebugCompareStatus');
+
+    let comparisonSnapshotA = null;
+    let comparisonSnapshotB = null;
+    let latestComparisonText = '';
+
+    const describeSnapshot = (snapshot) => {
+        if (!snapshot) return '尚未設定';
+        if (window.batchOptimization && typeof window.batchOptimization.formatDebugSnapshotLabel === 'function') {
+            try {
+                const label = window.batchOptimization.formatDebugSnapshotLabel(snapshot);
+                if (label) return label;
+            } catch (error) {
+                console.warn('[Batch Debug] Failed to format snapshot label:', error);
+            }
+        }
+        const eventCount = Array.isArray(snapshot.events) ? snapshot.events.length : 0;
+        const id = snapshot.sessionId ? `#${snapshot.sessionId}` : '紀錄';
+        return `${id}｜事件 ${eventCount}`;
+    };
+
+    const updateCompareStatus = (message = null) => {
+        if (!compareStatus) return;
+        if (message) {
+            compareStatus.textContent = message;
+            compareStatus.style.color = 'var(--foreground)';
+        } else {
+            const parts = [
+                `A：${describeSnapshot(comparisonSnapshotA)}`,
+                `B：${describeSnapshot(comparisonSnapshotB)}`
+            ];
+            compareStatus.textContent = parts.join(' ｜ ');
+            compareStatus.style.color = 'var(--muted-foreground)';
+        }
+
+        if (copyBtn) {
+            copyBtn.disabled = !latestComparisonText;
+            copyBtn.style.color = latestComparisonText ? 'var(--foreground)' : 'var(--muted-foreground)';
+        }
+    };
+
+    if (compareOutput) {
+        compareOutput.value = '';
+    }
+    updateCompareStatus();
+
+    const applySnapshot = (snapshot) => {
+        if (!metaEl || !listEl || !emptyEl) return;
+
+        if (!snapshot) {
+            metaEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">尚未啟動批量優化除錯。</div>';
+            listEl.innerHTML = '';
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '暫無批量優化事件，請先啟動批量優化或滾動測試。';
+            return;
+        }
+
+        const sessionTitleParts = [];
+        if (snapshot.sessionId) sessionTitleParts.push(`會話 #${snapshot.sessionId}`);
+        if (snapshot.version) sessionTitleParts.push(`版本 ${snapshot.version}`);
+        const sessionTitle = sessionTitleParts.join(' ｜ ') || '批量優化除錯會話';
+
+        const statusBadges = [];
+        if (snapshot.outcome?.status) statusBadges.push(`狀態：${snapshot.outcome.status}`);
+        if (Array.isArray(snapshot.events)) statusBadges.push(`事件：${snapshot.events.length} 筆`);
+        if (snapshot.outcome?.message) statusBadges.push(`說明：${snapshot.outcome.message}`);
+
+        const timeBadges = [];
+        if (snapshot.startedAtIso) {
+            timeBadges.push(`開始：${formatBatchDebugTime(snapshot.startedAtIso)}`);
+        }
+        if (snapshot.completedAtIso) {
+            timeBadges.push(`結束：${formatBatchDebugTime(snapshot.completedAtIso)}`);
+        }
+        const durationLabel = formatBatchDebugDuration(snapshot.startedAtIso, snapshot.completedAtIso);
+        if (durationLabel) {
+            timeBadges.push(`耗時：${durationLabel}`);
+        }
+
+        const buildBadges = (items) => items.map((text) => (
+            `<span class="inline-flex items-center rounded-full border px-2 py-[2px] text-[10px]" style="border-color: var(--border); color: var(--foreground); background-color: rgba(255, 255, 255, 0.75);">${testerEscapeHtml(text)}</span>`
+        )).join('<span class="sr-only"> </span>');
+
+        const lines = [
+            `<div class="text-[11px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(sessionTitle)}</div>`,
+        ];
+        if (statusBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(statusBadges)}</div>`);
+        }
+        if (timeBadges.length > 0) {
+            lines.push(`<div class="flex flex-wrap gap-2">${buildBadges(timeBadges)}</div>`);
+        }
+
+        metaEl.innerHTML = lines.join('');
+
+        const events = Array.isArray(snapshot.events)
+            ? snapshot.events.slice(Math.max(snapshot.events.length - 50, 0))
+            : [];
+
+        listEl.innerHTML = '';
+        if (events.length === 0) {
+            listEl.classList.add('hidden');
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = '暫無批量優化事件，請先執行批量優化或滾動測試。';
+        } else {
+            emptyEl.classList.add('hidden');
+            listEl.classList.remove('hidden');
+
+            events.forEach((event) => {
+                const li = document.createElement('li');
+                li.className = 'border rounded-lg px-3 py-3 bg-white/80 shadow-sm';
+                li.style.borderColor = 'var(--border)';
+
+                let content = '';
+                try {
+                    content = renderBatchDebugEvent(event);
+                } catch (error) {
+                    console.error('[Batch Debug] Failed to render event:', event?.label, error);
+                    const fallbackDetail = event && event.detail ? testerEscapeHtml(JSON.stringify(event.detail, null, 2)) : '—';
+                    content = `
+                        <div class="space-y-2">
+                            <div class="text-[12px] font-semibold" style="color: var(--foreground);">${testerEscapeHtml(event?.label || '事件')}</div>
+                            <div class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(formatBatchDebugTime(event?.iso || event?.ts) || '—')}</div>
+                            <div class="text-[10px]" style="color: var(--muted-foreground);">${testerEscapeHtml(event?.message || '渲染失敗')}</div>
+                            <pre class="text-[10px] leading-relaxed whitespace-pre-wrap break-all rounded-md border px-3 py-2" style="background-color: rgba(15, 23, 42, 0.04); border-color: var(--border); color: var(--muted-foreground);">${fallbackDetail}</pre>
+                        </div>
+                    `;
+                }
+
+                li.innerHTML = content;
+                listEl.appendChild(li);
+            });
+        }
+    };
+
+    const getSnapshot = () => {
+        if (window.batchOptimization && typeof window.batchOptimization.getDebugLog === 'function') {
+            return window.batchOptimization.getDebugLog();
+        }
+        return null;
+    };
+
+    const ensureSubscription = () => {
+        if (!window.batchOptimization || typeof window.batchOptimization.subscribeDebugLog !== 'function') {
+            return false;
+        }
+        if (typeof batchDebugLogUnsubscribe === 'function') {
+            batchDebugLogUnsubscribe();
+            batchDebugLogUnsubscribe = null;
+        }
+        batchDebugLogUnsubscribe = window.batchOptimization.subscribeDebugLog((snapshot) => {
+            applySnapshot(snapshot);
+        });
+        applySnapshot(getSnapshot());
+        return true;
+    };
+
+    const attemptSubscription = (retry = 0) => {
+        if (ensureSubscription()) {
+            return;
+        }
+        if (retry < 5) {
+            setTimeout(() => attemptSubscription(retry + 1), 300 * (retry + 1));
+        }
+    };
+
+    refreshBtn?.addEventListener('click', () => {
+        applySnapshot(getSnapshot());
+    });
+
+    downloadBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.downloadDebugLog === 'function') {
+            window.batchOptimization.downloadDebugLog('batch-optimization-debug');
+        }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        if (window.batchOptimization && typeof window.batchOptimization.clearDebugLog === 'function') {
+            window.batchOptimization.clearDebugLog();
+        }
+    });
+
+    markFirstBtn?.addEventListener('click', () => {
+        comparisonSnapshotA = getSnapshot();
+        updateCompareStatus();
+    });
+
+    markSecondBtn?.addEventListener('click', () => {
+        comparisonSnapshotB = getSnapshot();
+        updateCompareStatus();
+    });
+
+    compareBtn?.addEventListener('click', () => {
+        if (!comparisonSnapshotA || !comparisonSnapshotB) {
+            latestComparisonText = '';
+            if (compareOutput) {
+                compareOutput.value = '請先設定紀錄A與紀錄B後再產生比較。';
+            }
+            updateCompareStatus('請先設定紀錄A與紀錄B。');
+            return;
+        }
+
+        if (window.batchOptimization && typeof window.batchOptimization.diffDebugLogs === 'function') {
+            try {
+                const diff = window.batchOptimization.diffDebugLogs(comparisonSnapshotA, comparisonSnapshotB) || {};
+                latestComparisonText = diff.text || '';
+            } catch (error) {
+                console.error('[Batch Debug] Failed to diff logs:', error);
+                latestComparisonText = '';
+            }
+        } else {
+            latestComparisonText = '';
+        }
+
+        if (compareOutput) {
+            compareOutput.value = latestComparisonText || '（比較結果為空）';
+        }
+        updateCompareStatus();
+    });
+
+    copyBtn?.addEventListener('click', async () => {
+        if (!latestComparisonText) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(latestComparisonText);
+            updateCompareStatus('已複製比較結果到剪貼簿。');
+            setTimeout(() => updateCompareStatus(), 2500);
+        } catch (error) {
+            console.error('[Batch Debug] Failed to copy diff:', error);
+            updateCompareStatus('複製失敗，請手動選取文字。');
+            setTimeout(() => updateCompareStatus(), 2500);
+        }
+    });
+
+    applySnapshot(getSnapshot());
+    attemptSubscription();
+}
+
+function strategyRegistryEscapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function resolveStrategyDisplayLabel(strategyId) {
+    if (!strategyId) {
+        return '未命名策略';
+    }
+    try {
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions && strategyDescriptions[strategyId]?.name) {
+            return strategyDescriptions[strategyId].name;
+        }
+    } catch (error) {
+        // ignore lookup errors
+    }
+    const registry = window.StrategyPluginRegistry;
+    if (registry) {
+        try {
+            if (typeof registry.getStrategyMetaById === 'function') {
+                const meta = registry.getStrategyMetaById(strategyId);
+                if (meta?.label) return meta.label;
+            }
+            if (typeof registry.listStrategies === 'function') {
+                const candidates = registry.listStrategies({ includeLazy: true }) || [];
+                const meta = candidates.find((entry) => entry?.id === strategyId);
+                if (meta?.label) return meta.label;
+            }
+        } catch (registryError) {
+            // ignore registry errors
+        }
+    }
+    return strategyId;
+}
+
+function resolveStrategyLabelFromConfigKey(configKey, fallbackId) {
+    if (configKey && typeof strategyDescriptions === 'object' && strategyDescriptions?.[configKey]?.name) {
+        return strategyDescriptions[configKey].name;
+    }
+    if (fallbackId && typeof strategyDescriptions === 'object' && strategyDescriptions?.[fallbackId]?.name) {
+        return strategyDescriptions[fallbackId].name;
+    }
+    if (configKey) {
+        return resolveStrategyDisplayLabel(configKey);
+    }
+    return resolveStrategyDisplayLabel(fallbackId);
+}
+
+function resolveStrategyComparisonAliases(strategyId, roleType) {
+    const aliases = [];
+    if (!strategyId) return aliases;
+    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normalise === 'function') {
+        const migrated = window.LazyStrategyId.normalise(roleType, strategyId);
+        if (migrated && migrated !== strategyId) {
+            aliases.push(migrated);
+        }
+        return aliases;
+    }
+    if (roleType === 'exit' && !strategyId.endsWith('_exit')) {
+        const exitKey = `${strategyId}_exit`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[exitKey]) {
+            aliases.push(exitKey);
+        }
+    } else if (roleType === 'shortEntry' && !strategyId.startsWith('short_')) {
+        const shortKey = `short_${strategyId}`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[shortKey]) {
+            aliases.push(shortKey);
+        }
+    } else if (roleType === 'shortExit' && !strategyId.startsWith('cover_')) {
+        const coverKey = `cover_${strategyId}`;
+        if (typeof strategyDescriptions === 'object' && strategyDescriptions?.[coverKey]) {
+            aliases.push(coverKey);
+        }
+    }
+    return aliases;
+}
+
+function collectStrategyOptionCatalog() {
+    const roles = STRATEGY_OPTION_ROLE_CONFIGS.map((config) => ({
+        type: config.type,
+        selectId: config.selectId,
+        label: config.label,
+        options: [],
+    }));
+    const uniqueIds = new Set();
+    const expandedIds = new Set();
+    const labelIndex = new Map();
+    let totalOptions = 0;
+
+    roles.forEach((role) => {
+        const select = document.getElementById(role.selectId);
+        if (!select || !select.options) {
+            return;
+        }
+        Array.from(select.options).forEach((option) => {
+            const value = option.value;
+            if (!value) return;
+            const optionLabel = option.textContent ? option.textContent.trim() : value;
+            role.options.push({ id: value, label: optionLabel });
+            uniqueIds.add(value);
+            expandedIds.add(value);
+            const aliases = resolveStrategyComparisonAliases(value, role.type);
+            aliases.forEach((alias) => expandedIds.add(alias));
+            if (!labelIndex.has(value)) {
+                labelIndex.set(value, new Map());
+            }
+            labelIndex.get(value).set(role.type, optionLabel);
+            totalOptions += 1;
+        });
+    });
+
+    return { roles, uniqueIds, expandedIds, totalOptions, labelIndex };
+}
+
+function findStrategyOptionLabel(labelIndex, strategyId, preferredRoleType) {
+    if (!strategyId || !labelIndex || typeof labelIndex.get !== 'function') {
+        return null;
+    }
+    const roleMap = labelIndex.get(strategyId);
+    if (!roleMap) {
+        return null;
+    }
+    if (preferredRoleType && typeof roleMap.get === 'function' && roleMap.has(preferredRoleType)) {
+        return roleMap.get(preferredRoleType);
+    }
+    if (typeof roleMap.values === 'function') {
+        const iterator = roleMap.values();
+        const first = iterator.next();
+        if (first && !first.done) {
+            return first.value;
+        }
+    }
+    return null;
+}
+
+function buildStrategySelectionSummary(selection) {
+    if (!selection || typeof selection !== 'object') {
+        return '';
+    }
+    const parts = [];
+    const { longEntry, longExit, shortEntry, shortExit, enableShorting } = selection;
+    if (longEntry) {
+        parts.push(`做多進場：${resolveStrategyLabelFromConfigKey(longEntry.configKey, longEntry.strategyId)}`);
+    } else {
+        parts.push('做多進場：沿用目前設定');
+    }
+    if (longExit) {
+        parts.push(`做多出場：${resolveStrategyLabelFromConfigKey(longExit.configKey, longExit.strategyId)}`);
+    } else {
+        parts.push('做多出場：沿用目前設定');
+    }
+    if (enableShorting) {
+        if (shortEntry) {
+            parts.push(`做空進場：${resolveStrategyLabelFromConfigKey(shortEntry.configKey, shortEntry.strategyId)}`);
+        } else {
+            parts.push('做空進場：沿用目前設定');
+        }
+        if (shortExit) {
+            parts.push(`回補出場：${resolveStrategyLabelFromConfigKey(shortExit.configKey, shortExit.strategyId)}`);
+        } else {
+            parts.push('回補出場：沿用目前設定');
+        }
+    } else {
+        parts.push('做空：未啟用');
+    }
+    return parts.join('／');
+}
+
+function renderStrategyRegistrySampleStatus() {
+    const statusEl = document.getElementById('strategyRegistrySampleStatus');
+    if (!statusEl) return;
+    const defaultMessage = '抽樣回測結果將顯示於此。';
+    if (strategyRegistryVerificationState.sampleRunning) {
+        statusEl.textContent = '抽樣回測執行中…';
+        statusEl.style.color = 'var(--foreground)';
+        return;
+    }
+    const status = strategyRegistryVerificationState.sampleStatus;
+    if (!status) {
+        statusEl.textContent = defaultMessage;
+        statusEl.style.color = 'var(--muted-foreground)';
+        return;
+    }
+    statusEl.textContent = status.message || defaultMessage;
+    let toneColor = 'var(--muted-foreground)';
+    if (status.tone === 'success') toneColor = 'var(--emerald-600, #059669)';
+    else if (status.tone === 'error') toneColor = 'var(--rose-600, #dc2626)';
+    else if (status.tone === 'info') toneColor = 'var(--foreground)';
+    statusEl.style.color = toneColor;
+}
+
+function renderStrategyRegistryVerification() {
+    const summaryEl = document.getElementById('strategyRegistryVerifierSummary');
+    const listEl = document.getElementById('strategyRegistryVerifierList');
+    if (!summaryEl || !listEl) return;
+
+    if (strategyRegistryVerificationState.running) {
+        summaryEl.textContent = '驗證中，請稍候…';
+        summaryEl.style.color = 'var(--muted-foreground)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    if (strategyRegistryVerificationState.error) {
+        summaryEl.textContent = `驗證失敗：${strategyRegistryVerificationState.error}`;
+        summaryEl.style.color = 'var(--rose-600, #dc2626)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    const results = Array.isArray(strategyRegistryVerificationState.results)
+        ? strategyRegistryVerificationState.results
+        : [];
+
+    if (results.length === 0) {
+        summaryEl.textContent = '尚未執行驗證。';
+        summaryEl.style.color = 'var(--muted-foreground)';
+        listEl.classList.add('hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    const successCount = results.filter((entry) => entry.status === 'ok').length;
+    const warningCount = results.filter((entry) => entry.status === 'warning').length;
+    const errorCount = results.filter((entry) => entry.status === 'error').length;
+    const parts = [`總數 ${results.length}`];
+    parts.push(`成功 ${successCount}`);
+    if (warningCount > 0) parts.push(`提醒 ${warningCount}`);
+    if (errorCount > 0) parts.push(`失敗 ${errorCount}`);
+
+    const catalog = collectStrategyOptionCatalog();
+    const registryIds = results
+        .map((entry) => entry.id)
+        .filter((id) => typeof id === 'string' && id.length > 0);
+    const registrySet = new Set(registryIds);
+    const unmatchedRegistryIds = Array.from(new Set(registryIds.filter((id) => !catalog.uniqueIds.has(id))));
+    const missingInRegistry = Array.from(catalog.expandedIds).filter((id) => !registrySet.has(id));
+
+    const roleSummaryText = catalog.roles
+        .map((role) => `${role.label} ${role.options.length}`)
+        .join('／');
+    const strategySummary = catalog.totalOptions > 0
+        ? `策略選單 ${roleSummaryText}（共 ${catalog.totalOptions} 項，唯一策略 ${catalog.expandedIds.size} 項）`
+        : '策略選單資訊未取得';
+
+    const differenceParts = [];
+    if (unmatchedRegistryIds.length > 0) {
+        const formatted = unmatchedRegistryIds.map((id) => {
+            const registeredLabel = resolveStrategyDisplayLabel(id);
+            let canonicalId = id;
+            let preferredRoleType = null;
+            if (id.endsWith('_exit')) {
+                canonicalId = id.replace(/_exit$/, '');
+                preferredRoleType = 'exit';
+            } else if (id.startsWith('short_')) {
+                preferredRoleType = 'shortEntry';
+            } else if (id.startsWith('cover_')) {
+                preferredRoleType = 'shortExit';
+            }
+            let optionLabel = null;
+            if (canonicalId !== id && catalog.uniqueIds.has(canonicalId)) {
+                optionLabel = findStrategyOptionLabel(catalog.labelIndex, canonicalId, preferredRoleType)
+                    || resolveStrategyDisplayLabel(canonicalId);
+                const labelSuffix = optionLabel ? `（${optionLabel}）` : '';
+                return `${registeredLabel}（註冊ID：${id}）↔ 選單值 ${canonicalId}${labelSuffix}`;
+            }
+            optionLabel = findStrategyOptionLabel(catalog.labelIndex, id, preferredRoleType);
+            if (optionLabel) {
+                return `${registeredLabel}（註冊ID：${id}）↔ 選單標籤「${optionLabel}」`;
+            }
+            return `${registeredLabel}（註冊ID：${id}）`;
+        });
+        differenceParts.push(`註冊多出：${formatted.join('、')}`);
+    }
+    if (missingInRegistry.length > 0) {
+        const formattedMissing = missingInRegistry.map((id) => {
+            const label = findStrategyOptionLabel(catalog.labelIndex, id, null) || resolveStrategyDisplayLabel(id);
+            return `${label}（${id}）`;
+        });
+        differenceParts.push(`選單未註冊：${formattedMissing.join('、')}`);
+    }
+    const differenceText = differenceParts.length > 0
+        ? `；差異：${differenceParts.join('；')}`
+        : '；註冊與選單項目一致。';
+
+    let summaryText = `驗證完成：${parts.join('／')}`;
+    if (strategyRegistryVerificationState.lastRunAt instanceof Date) {
+        summaryText += `（${strategyRegistryVerificationState.lastRunAt.toLocaleString('zh-TW')}）`;
+    }
+    summaryText += `；${strategySummary}${differenceText}`;
+    summaryEl.textContent = summaryText;
+    summaryEl.style.color = 'var(--foreground)';
+
+    const statusLabelMap = { ok: '成功', warning: '提醒', error: '失敗' };
+    const statusColorMap = {
+        ok: 'var(--emerald-600, #059669)',
+        warning: 'var(--amber-600, #d97706)',
+        error: 'var(--rose-600, #dc2626)',
+    };
+
+    listEl.innerHTML = results
+        .map((entry) => {
+            const label = entry.label || entry.id || '未命名策略';
+            const statusColor = statusColorMap[entry.status] || 'var(--muted-foreground)';
+            const statusLabel = statusLabelMap[entry.status] || '狀態';
+            const message = entry.message ? strategyRegistryEscapeHtml(entry.message) : '—';
+            const identifier = entry.id ? strategyRegistryEscapeHtml(entry.id) : '';
+            return `
+                <div class="rounded border px-3 py-2 text-[11px]" style="border-color: var(--border); background-color: rgba(255,255,255,0.65);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-semibold" style="color: var(--foreground);">${strategyRegistryEscapeHtml(label)}</span>
+                        <span style="color: ${statusColor};">${statusLabel}</span>
+                    </div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${identifier}</div>
+                    <div class="mt-1 text-[10px]" style="color: var(--muted-foreground);">${message}</div>
+                </div>
+            `;
+        })
+        .join('');
+    listEl.classList.toggle('hidden', results.length === 0);
+}
+
+function runStrategyRegistryVerification() {
+    if (strategyRegistryVerificationState.running) return;
+    strategyRegistryVerificationState.running = true;
+    strategyRegistryVerificationState.error = null;
+    renderStrategyRegistryVerification();
+
+    try {
+        const registry = window.StrategyPluginRegistry;
+        if (!registry || typeof registry.listStrategies !== 'function') {
+            throw new Error('StrategyPluginRegistry 尚未就緒');
+        }
+        const list = registry.listStrategies({ includeLazy: true }) || [];
+        const results = [];
+        list.forEach((meta) => {
+            const entry = {
+                id: meta?.id || '',
+                label: meta?.label || meta?.id || '未命名策略',
+                status: 'ok',
+                message: '載入成功',
+            };
+            if (!entry.id) {
+                entry.status = 'warning';
+                entry.message = '缺少策略 ID';
+            } else {
+                try {
+                    if (typeof registry.ensureStrategyLoaded === 'function') {
+                        registry.ensureStrategyLoaded(entry.id);
+                    } else if (typeof registry.getStrategyById === 'function') {
+                        registry.getStrategyById(entry.id);
+                    }
+                    const plugin = typeof registry.getStrategyById === 'function'
+                        ? registry.getStrategyById(entry.id, { loadIfNeeded: false })
+                        : null;
+                    if (!plugin || typeof plugin.run !== 'function') {
+                        entry.status = 'warning';
+                        entry.message = '已載入但缺少 run(context, params)';
+                    }
+                } catch (error) {
+                    entry.status = 'error';
+                    entry.message = error && error.message ? error.message : String(error);
+                }
+            }
+            results.push(entry);
+        });
+        results.sort((a, b) => a.label.localeCompare(b.label || '', 'zh-Hant'));
+        strategyRegistryVerificationState.results = results;
+        strategyRegistryVerificationState.lastRunAt = new Date();
+    } catch (error) {
+        strategyRegistryVerificationState.results = [];
+        strategyRegistryVerificationState.error = error && error.message ? error.message : String(error);
+    } finally {
+        strategyRegistryVerificationState.running = false;
+        renderStrategyRegistryVerification();
+    }
+}
+
+function runStrategyRegistrySample() {
+    if (strategyRegistryVerificationState.sampleRunning) return;
+    if (!window.BacktestRunner || typeof window.BacktestRunner.run !== 'function') {
+        strategyRegistryVerificationState.sampleSelectionSummary = '';
+        strategyRegistryVerificationState.sampleStatus = {
+            message: 'BacktestRunner 尚未載入，請重新整理或稍後重試。',
+            tone: 'error',
+        };
+        renderStrategyRegistrySampleStatus();
+        return;
+    }
+    let params = null;
+    if (typeof getBacktestParams === 'function') {
+        try {
+            params = getBacktestParams();
+        } catch (error) {
+            console.warn('[Strategy Registry] 讀取當前回測參數失敗', error);
+        }
+    }
+    if (!params || typeof params !== 'object') {
+        strategyRegistryVerificationState.sampleSelectionSummary = '';
+        strategyRegistryVerificationState.sampleStatus = {
+            message: '無法取得目前回測參數，請先在主畫面設定後再試。',
+            tone: 'error',
+        };
+        renderStrategyRegistrySampleStatus();
+        return;
+    }
+    strategyRegistryVerificationState.sampleRunning = true;
+    strategyRegistryVerificationState.sampleSelectionSummary = '';
+
+    const sampleParams = {
+        ...params,
+        entryParams: { ...params.entryParams },
+        exitParams: { ...params.exitParams },
+        shortEntryParams: { ...params.shortEntryParams },
+        shortExitParams: { ...params.shortExitParams },
+    };
+
+    const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+    const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+    if (longEntryCandidate) {
+        sampleParams.entryStrategy = longEntryCandidate.strategyId;
+        sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+    }
+    if (longExitCandidate) {
+        sampleParams.exitStrategy = longExitCandidate.strategyId;
+        sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+    }
+
+    const enableShorting = Math.random() < 0.75;
+    sampleParams.enableShorting = enableShorting;
+    if (enableShorting) {
+        const shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+        const shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+        if (shortEntryCandidate) {
+            sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+            sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+        }
+        if (shortExitCandidate) {
+            sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+            sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+        }
+    } else {
+        sampleParams.shortEntryStrategy = null;
+        sampleParams.shortExitStrategy = null;
+        sampleParams.shortEntryParams = {};
+        sampleParams.shortExitParams = {};
+    }
+
+    const selectionSummary = buildStrategySelectionSummary({
+        longEntry: longEntryCandidate,
+        longExit: longExitCandidate,
+        shortEntry: enableShorting ? shortEntryCandidate : null,
+        shortExit: enableShorting ? shortExitCandidate : null,
+        enableShorting,
+    });
+    strategyRegistryVerificationState.sampleSelectionSummary = selectionSummary;
+    const runningMessage = selectionSummary
+        ? `抽樣回測執行中…（策略：${selectionSummary}）`
+        : '抽樣回測執行中…';
+    strategyRegistryVerificationState.sampleStatus = { message: runningMessage, tone: 'info' };
+    renderStrategyRegistrySampleStatus();
+
+    window.BacktestRunner.run(sampleParams)
+        .then((result) => {
+            const tradeCount = Array.isArray(result?.data?.trades)
+                ? result.data.trades.length
+                : (result?.data?.summary?.overall?.tradeCount
+                    ?? result?.data?.summary?.overall?.totalTrades
+                    ?? null);
+            const coverage = Array.isArray(result?.data?.dates) ? result.data.dates.length : null;
+            const parts = [];
+            if (Number.isFinite(tradeCount)) {
+                parts.push(`交易 ${tradeCount} 筆`);
+            } else if (tradeCount !== null && tradeCount !== undefined) {
+                parts.push(`交易 ${tradeCount}`);
+            }
+            if (Number.isFinite(coverage)) {
+                parts.push(`涵蓋 ${coverage} 日資料`);
+            }
+            const summary = parts.length > 0 ? parts.join('，') : '可於主畫面檢視詳細結果。';
+            const selectionSuffix = selectionSummary ? `；策略：${selectionSummary}` : '';
+            strategyRegistryVerificationState.sampleStatus = {
+                message: `抽樣回測完成：${summary}${selectionSuffix}`,
+                tone: 'success',
+            };
+        })
+        .catch((error) => {
+            const selectionSuffix = selectionSummary ? `；策略：${selectionSummary}` : '';
+            strategyRegistryVerificationState.sampleStatus = {
+                message: `抽樣回測失敗：${error && error.message ? error.message : String(error)}${selectionSuffix}`,
+                tone: 'error',
+            };
+        })
+        .finally(() => {
+            strategyRegistryVerificationState.sampleRunning = false;
+            renderStrategyRegistrySampleStatus();
+        });
+}
+
+function initStrategyRegistryVerification() {
+    const verifyBtn = document.getElementById('strategyRegistryVerifyBtn');
+    const sampleBtn = document.getElementById('strategyRegistrySampleRunBtn');
+    if (!verifyBtn && !sampleBtn) {
+        return;
+    }
+    if (verifyBtn) {
+        verifyBtn.addEventListener('click', () => {
+            runStrategyRegistryVerification();
+        });
+    }
+    if (sampleBtn) {
+        sampleBtn.addEventListener('click', () => {
+            runStrategyRegistrySample();
+        });
+    }
+    renderStrategyRegistryVerification();
+    renderStrategyRegistrySampleStatus();
+}
+
+const manualVerificationState = {
+    busy: false,
+    logEntries: [],
+};
+
+function setManualVerificationBusy(busy) {
+    manualVerificationState.busy = Boolean(busy);
+    const buttonIds = [
+        'manualVerifyExitDefaultsBtn',
+        'manualVerifySampleBacktestBtn',
+        'manualVerifyLegacyLoadBtn',
+        'manualVerifyBatchFlowBtn',
+        'manualVerifyStrategyDslBtn',
+    ];
+    buttonIds.forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = manualVerificationState.busy;
+        btn.classList.toggle('opacity-60', manualVerificationState.busy);
+        btn.classList.toggle('cursor-not-allowed', manualVerificationState.busy);
+    });
+}
+
+function updateManualVerificationStatus(message, tone = 'info') {
+    const statusEl = document.getElementById('manualVerificationStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    let color = 'var(--muted-foreground)';
+    if (tone === 'success') {
+        color = 'var(--primary)';
+    } else if (tone === 'error') {
+        color = 'var(--destructive, #b91c1c)';
+    } else if (tone === 'warning') {
+        color = 'var(--warning, #d97706)';
+    }
+    statusEl.style.color = color;
+}
+
+function renderManualVerificationLog() {
+    const logEl = document.getElementById('manualVerificationLog');
+    if (!logEl) return;
+    if (!manualVerificationState.logEntries || manualVerificationState.logEntries.length === 0) {
+        logEl.classList.add('hidden');
+        logEl.innerHTML = '';
+        return;
+    }
+    logEl.classList.remove('hidden');
+    logEl.innerHTML = manualVerificationState.logEntries
+        .map((entry) => {
+            const timestamp = entry.timestamp?.toLocaleString?.('zh-TW', { hour12: false })
+                || entry.timestamp?.toString?.()
+                || '';
+            const lines = Array.isArray(entry.lines) ? entry.lines : [];
+            const body = lines
+                .map((line) => `<li>${line}</li>`)
+                .join('');
+            return `
+                <div class="space-y-1 pb-2 last:pb-0 border-b last:border-b-0" style="border-color: var(--border);">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-medium">${entry.title}</span>
+                        <span class="text-[10px]" style="color: var(--muted-foreground);">${timestamp}</span>
+                    </div>
+                    <ul class="list-disc pl-5 space-y-1">${body}</ul>
+                </div>
+            `;
+        })
+        .join('');
+}
+
+function appendManualVerificationEntry(title, lines) {
+    const entry = {
+        title,
+        lines: Array.isArray(lines) ? lines : [String(lines ?? '')],
+        timestamp: new Date(),
+    };
+    manualVerificationState.logEntries.unshift(entry);
+    if (manualVerificationState.logEntries.length > 8) {
+        manualVerificationState.logEntries.length = 8;
+    }
+    renderManualVerificationLog();
+}
+
+function compareParamValues(expected, actual) {
+    if (Number.isFinite(expected) && Number.isFinite(actual)) {
+        return Math.abs(expected - actual) <= 1e-6;
+    }
+    return String(expected) === String(actual);
+}
+
+async function runManualVerificationExitDefaults() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查出場／回補預設參數…', 'info');
+
+    const testTargets = [
+        { type: 'exit', selectId: 'exitStrategy', label: '做多出場' },
+        { type: 'shortExit', selectId: 'shortExitStrategy', label: '回補出場' },
+    ];
+    const restoreMap = {};
+    const lines = [];
+    let hasFailure = false;
+
+    try {
+        for (const target of testTargets) {
+            const select = document.getElementById(target.selectId);
+            if (!select) {
+                lines.push(`❌ ${target.label}：找不到選單 #${target.selectId}`);
+                hasFailure = true;
+                continue;
+            }
+            restoreMap[target.selectId] = select.value;
+            const optionResults = [];
+            const options = Array.from(select.options || []);
+            for (const option of options) {
+                const rawValue = option.value;
+                if (!rawValue) continue;
+                select.value = rawValue;
+                if (typeof updateStrategyParams === 'function') {
+                    updateStrategyParams(target.type);
+                }
+                const normalizedId = normaliseStrategyIdForType(target.type, rawValue);
+                const descriptor = strategyDescriptions?.[normalizedId];
+                if (!descriptor?.defaultParams) {
+                    optionResults.push(`⚠️ ${normalizedId}：缺少預設參數設定`);
+                    continue;
+                }
+                const params = getStrategyParams(target.type);
+                const mismatches = [];
+                Object.entries(descriptor.defaultParams).forEach(([paramName, expected]) => {
+                    if (!compareParamValues(expected, params?.[paramName])) {
+                        mismatches.push(`${paramName}=${params?.[paramName] ?? '未填'} (期望 ${expected})`);
+                    }
+                });
+                if (mismatches.length > 0) {
+                    optionResults.push(`❌ ${normalizedId}：${mismatches.join('，')}`);
+                    hasFailure = true;
+                } else {
+                    optionResults.push(`✅ ${normalizedId} 預設參數一致`);
+                }
+            }
+            if (optionResults.length === 0) {
+                optionResults.push('⚠️ 無可檢查的選項');
+            }
+            lines.push(`${target.label}檢查：`);
+            lines.push(...optionResults);
+        }
+
+        const tone = hasFailure ? 'warning' : 'success';
+        const statusMessage = hasFailure
+            ? '出場／回補預設參數檢查完成（部分項目需留意）。'
+            : '出場／回補預設參數檢查完成。';
+        updateManualVerificationStatus(statusMessage, tone);
+        appendManualVerificationEntry('檢查出場預設', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('檢查出場預設', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        Object.entries(restoreMap).forEach(([selectId, value]) => {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            select.value = value;
+            const type = selectId.replace('Strategy', '');
+            if (typeof updateStrategyParams === 'function') {
+                updateStrategyParams(type);
+            }
+        });
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationSampleSummary() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在執行抽樣回測摘要檢查…', 'info');
+
+    try {
+        const params = getBacktestParams();
+        if (!params || typeof params !== 'object') {
+            throw new Error('無法取得目前回測參數');
+        }
+
+        const sampleParams = {
+            ...params,
+            entryParams: { ...params.entryParams },
+            exitParams: { ...params.exitParams },
+            shortEntryParams: { ...params.shortEntryParams },
+            shortExitParams: { ...params.shortExitParams },
+        };
+
+        const longEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longEntry);
+        const longExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.longExit);
+        if (longEntryCandidate) {
+            sampleParams.entryStrategy = longEntryCandidate.strategyId;
+            sampleParams.entryParams = cloneDefaultStrategyParams(longEntryCandidate.configKey);
+        }
+        if (longExitCandidate) {
+            sampleParams.exitStrategy = longExitCandidate.strategyId;
+            sampleParams.exitParams = cloneDefaultStrategyParams(longExitCandidate.configKey);
+        }
+
+        const enableShorting = Math.random() < 0.75;
+        sampleParams.enableShorting = enableShorting;
+        let shortEntryCandidate = null;
+        let shortExitCandidate = null;
+        if (enableShorting) {
+            shortEntryCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortEntry);
+            shortExitCandidate = pickRandomStrategyCandidate(strategyRegistrySampleCandidates.shortExit);
+            if (shortEntryCandidate) {
+                sampleParams.shortEntryStrategy = shortEntryCandidate.strategyId;
+                sampleParams.shortEntryParams = cloneDefaultStrategyParams(shortEntryCandidate.configKey);
+            } else {
+                sampleParams.shortEntryStrategy = null;
+                sampleParams.shortEntryParams = {};
+            }
+            if (shortExitCandidate) {
+                sampleParams.shortExitStrategy = shortExitCandidate.strategyId;
+                sampleParams.shortExitParams = cloneDefaultStrategyParams(shortExitCandidate.configKey);
+            } else {
+                sampleParams.shortExitStrategy = null;
+                sampleParams.shortExitParams = {};
+            }
+        } else {
+            sampleParams.shortEntryStrategy = null;
+            sampleParams.shortExitStrategy = null;
+            sampleParams.shortEntryParams = {};
+            sampleParams.shortExitParams = {};
+        }
+
+        const selectionSummary = buildStrategySelectionSummary({
+            longEntry: longEntryCandidate,
+            longExit: longExitCandidate,
+            shortEntry: enableShorting ? shortEntryCandidate : null,
+            shortExit: enableShorting ? shortExitCandidate : null,
+            enableShorting,
+        }) || '未擷取摘要';
+
+        const summaryLines = [`摘要：${selectionSummary}`];
+        const mismatches = [];
+        const candidates = [
+            { role: '做多進場', candidate: longEntryCandidate },
+            { role: '做多出場', candidate: longExitCandidate },
+            { role: '做空進場', candidate: shortEntryCandidate },
+            { role: '回補出場', candidate: shortExitCandidate },
+        ];
+        candidates.forEach(({ role, candidate }) => {
+            if (!candidate) return;
+            const descriptor = strategyDescriptions?.[candidate.strategyId];
+            const label = resolveStrategyLabelFromConfigKey(candidate.configKey, candidate.strategyId);
+            if (!descriptor) {
+                mismatches.push(`${role}：找不到 ${candidate.strategyId} 的說明`);
+            } else if (descriptor.name !== label) {
+                mismatches.push(`${role}：名稱不符 (${descriptor.name} ≠ ${label})`);
+            }
+            if (candidate.configKey !== candidate.strategyId) {
+                mismatches.push(`${role}：configKey (${candidate.configKey}) 與策略 ID (${candidate.strategyId}) 未同步`);
+            }
+        });
+
+        if (mismatches.length > 0) {
+            summaryLines.push(...mismatches.map((msg) => `❌ ${msg}`));
+        } else {
+            summaryLines.push('✅ 摘要名稱與策略 ID 已對齊');
+        }
+
+        if (window.BacktestRunner && typeof window.BacktestRunner.run === 'function') {
+            try {
+                await window.BacktestRunner.run(sampleParams);
+                summaryLines.push('✅ 抽樣回測執行成功');
+            } catch (runError) {
+                const message = runError && runError.message ? runError.message : String(runError);
+                summaryLines.push(`⚠️ 抽樣回測未完成：${message}`);
+            }
+        } else {
+            summaryLines.push('⚠️ BacktestRunner 未載入，僅檢查摘要對齊');
+        }
+
+        const tone = mismatches.length === 0 ? 'success' : 'warning';
+        updateManualVerificationStatus('抽樣回測摘要檢查完成。', tone);
+        appendManualVerificationEntry('抽樣回測摘要', summaryLines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`抽樣回測摘要檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('抽樣回測摘要', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationLegacyLoad() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在驗證舊版策略載入…', 'info');
+
+    const newStrategyName = `__manual_new_${Date.now()}__`;
+    const legacyStrategyName = `__manual_legacy_${Date.now()}__`;
+    const cleanupNames = [newStrategyName, legacyStrategyName];
+    const lines = [];
+
+    try {
+        const baseSettings = getBacktestParams();
+        if (!baseSettings || typeof baseSettings !== 'object') {
+            throw new Error('無法擷取當前回測設定');
+        }
+
+        const strategies = getSavedStrategies();
+        const metricsVersion = typeof STRATEGY_COMPARISON_VERSION !== 'undefined' ? STRATEGY_COMPARISON_VERSION : 'manual';
+
+        strategies[newStrategyName] = {
+            settings: JSON.parse(JSON.stringify(baseSettings)),
+            metrics: null,
+            metricsVersion,
+        };
+
+        const legacySettings = JSON.parse(JSON.stringify(baseSettings));
+        legacySettings.exitStrategy = 'ma_cross';
+        if (legacySettings.shortExitStrategy) {
+            legacySettings.shortExitStrategy = 'ma_cross';
+        }
+        strategies[legacyStrategyName] = {
+            settings: legacySettings,
+            metrics: null,
+            metricsVersion,
+        };
+
+        localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+        populateSavedStrategiesDropdown();
+
+        const selectElement = document.getElementById('loadStrategySelect');
+        if (!selectElement) {
+            throw new Error('找不到策略載入選單');
+        }
+
+        selectElement.value = legacyStrategyName;
+        loadStrategy();
+
+        const exitSelect = document.getElementById('exitStrategy');
+        const shortExitSelect = document.getElementById('shortExitStrategy');
+        const normalizedExit = exitSelect ? normaliseStrategyIdForType('exit', exitSelect.value) : null;
+        const normalizedShortExit = shortExitSelect ? normaliseStrategyIdForType('shortExit', shortExitSelect.value) : null;
+
+        const paramsAfterLoad = getBacktestParams();
+        const expectedExit = normaliseStrategyIdForType('exit', 'ma_cross');
+        const expectedShortExit = normaliseStrategyIdForType('shortExit', 'ma_cross');
+
+        const exitPass = normalizedExit === expectedExit && paramsAfterLoad.exitStrategy === expectedExit;
+        const shortExitPass = (!paramsAfterLoad.enableShorting)
+            || (normalizedShortExit === expectedShortExit && paramsAfterLoad.shortExitStrategy === expectedShortExit);
+
+        lines.push(exitPass
+            ? `✅ 做多出場載入為 ${normalizedExit}`
+            : `❌ 做多出場載入異常：${normalizedExit} (期望 ${expectedExit})`);
+
+        if (paramsAfterLoad.enableShorting) {
+            lines.push(shortExitPass
+                ? `✅ 回補出場載入為 ${normalizedShortExit}`
+                : `❌ 回補出場載入異常：${normalizedShortExit} (期望 ${expectedShortExit})`);
+        } else {
+            lines.push('⚠️ 當前設定未啟用做空，僅檢查多單出場。');
+        }
+
+        const tone = exitPass && shortExitPass ? 'success' : 'warning';
+        updateManualVerificationStatus('舊版策略載入檢查完成。', tone);
+        appendManualVerificationEntry('載入舊版策略', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`舊版策略載入檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('載入舊版策略', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        try {
+            const strategies = getSavedStrategies();
+            let mutated = false;
+            cleanupNames.forEach((name) => {
+                if (strategies && strategies[name]) {
+                    delete strategies[name];
+                    mutated = true;
+                }
+            });
+            if (mutated) {
+                localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies));
+                populateSavedStrategiesDropdown();
+            }
+        } catch (cleanupError) {
+            console.warn('[Manual Verification] 清除測試策略失敗：', cleanupError);
+        }
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationBatchFlow() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查批量優化／滾動測試映射…', 'info');
+
+    const lines = [];
+    let hasFailure = false;
+
+    try {
+        const resolverAvailable = typeof resolveWorkerStrategyName === 'function';
+        if (!resolverAvailable) {
+            lines.push('⚠️ 找不到批量優化映射函式 resolveWorkerStrategyName。');
+        }
+
+        const batchTests = [
+            { label: '新出場 ID', input: 'ma_cross_exit', expected: 'ma_cross_exit' },
+            { label: '舊出場 ID', input: 'ma_cross', expected: normaliseStrategyIdForType('exit', 'ma_cross') },
+            { label: '新回補 ID', input: 'cover_macd_cross', expected: 'cover_macd_cross' },
+            { label: '做空新 ID', input: 'short_k_d_cross', expected: 'short_k_d_cross' },
+        ];
+
+        if (resolverAvailable) {
+            batchTests.forEach((test) => {
+                const resolved = resolveWorkerStrategyName(test.input);
+                if (resolved === test.expected) {
+                    lines.push(`✅ ${test.label}：${test.input} → ${resolved}`);
+                } else {
+                    hasFailure = true;
+                    lines.push(`❌ ${test.label}：${test.input} → ${resolved} (期望 ${test.expected})`);
+                }
+            });
+        }
+
+        const aliasTests = [
+            { label: '舊做多出場 ID', role: 'exit', input: 'ma_cross', expected: normaliseStrategyIdForType('exit', 'ma_cross') },
+            { label: '舊回補 ID', role: 'shortExit', input: 'ma_cross', expected: normaliseStrategyIdForType('shortExit', 'ma_cross') },
+        ];
+        aliasTests.forEach((test) => {
+            const migrated = normaliseStrategyIdForType(test.role, test.input);
+            if (migrated === test.expected) {
+                lines.push(`✅ ${test.label} 轉為 ${migrated}`);
+            } else {
+                hasFailure = true;
+                lines.push(`❌ ${test.label} 轉換失敗：${migrated} (期望 ${test.expected})`);
+            }
+        });
+
+        const tone = hasFailure ? 'warning' : 'success';
+        updateManualVerificationStatus('批量優化／滾動測試映射檢查完成。', tone);
+        appendManualVerificationEntry('批量／滾動映射', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`批量／滾動檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('批量／滾動映射', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
+async function runManualVerificationStrategyDsl() {
+    if (manualVerificationState.busy) return;
+    setManualVerificationBusy(true);
+    updateManualVerificationStatus('正在檢查策略 DSL 序列化…', 'info');
+
+    const roleLabels = {
+        longEntry: '做多進場',
+        longExit: '做多出場',
+        shortEntry: '放空進場',
+        shortExit: '放空回補',
+    };
+    const lines = [];
+
+    try {
+        const params = getBacktestParams();
+        const dsl = params.strategyDsl;
+        if (!dsl || typeof dsl !== 'object') {
+            lines.push('⚠️ 尚未產生策略 DSL；請確認已選擇策略並儲存參數。');
+            updateManualVerificationStatus('策略 DSL 檢查完成（未產生 DSL）。', 'warning');
+            appendManualVerificationEntry('策略 DSL 檢查', lines);
+            return;
+        }
+
+        Object.keys(roleLabels).forEach((roleKey) => {
+            if (!dsl[roleKey]) return;
+            lines.push(`✅ ${roleLabels[roleKey]} DSL：${JSON.stringify(dsl[roleKey])}`);
+        });
+
+        const composer = window.lazybacktestStrategyComposer;
+        if (composer && typeof composer.buildComposite === 'function') {
+            const registry = window.StrategyPluginRegistry || null;
+            const compositeSummaries = [];
+            const stubResult = {
+                enter: false,
+                exit: false,
+                short: false,
+                cover: false,
+                stopLossPercent: null,
+                takeProfitPercent: null,
+                meta: { manualCheck: true },
+            };
+            const roleBaseParams = {
+                longEntry: params.entryParams,
+                longExit: params.exitParams,
+                shortEntry: params.shortEntryParams,
+                shortExit: params.shortExitParams,
+            };
+            Object.keys(roleLabels).forEach((roleKey) => {
+                if (!dsl[roleKey]) return;
+                try {
+                    const composite = composer.buildComposite(dsl[roleKey], registry, {
+                        role: roleKey,
+                        baseParams: roleBaseParams[roleKey],
+                        invoke() {
+                            return { ...stubResult, meta: { ...stubResult.meta } };
+                        },
+                    });
+                    if (composite && typeof composite.collectPluginIds === 'function') {
+                        const ids = composite.collectPluginIds();
+                        compositeSummaries.push(`✅ ${roleLabels[roleKey]} 組合解析完成（含 ${ids.length} 個節點）`);
+                    } else {
+                        compositeSummaries.push(`⚠️ ${roleLabels[roleKey]} 組合解析結果無節點資訊`);
+                    }
+                } catch (error) {
+                    const message = error && error.message ? error.message : String(error);
+                    compositeSummaries.push(`❌ ${roleLabels[roleKey]} 組合解析失敗：${message}`);
+                }
+            });
+            if (compositeSummaries.length > 0) {
+                lines.push(...compositeSummaries);
+            }
+        } else {
+            lines.push('⚠️ 策略組合建構器尚未載入，僅輸出 DSL JSON。');
+        }
+
+        updateManualVerificationStatus('策略 DSL 檢查完成。', 'success');
+        appendManualVerificationEntry('策略 DSL 檢查', lines);
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        updateManualVerificationStatus(`策略 DSL 檢查失敗：${message}`, 'error');
+        appendManualVerificationEntry('策略 DSL 檢查', [`❌ 發生錯誤：${message}`]);
+    } finally {
+        setManualVerificationBusy(false);
+    }
+}
+
+function initManualVerificationTools() {
+    const exitBtn = document.getElementById('manualVerifyExitDefaultsBtn');
+    const sampleBtn = document.getElementById('manualVerifySampleBacktestBtn');
+    const legacyBtn = document.getElementById('manualVerifyLegacyLoadBtn');
+    const batchBtn = document.getElementById('manualVerifyBatchFlowBtn');
+    const dslBtn = document.getElementById('manualVerifyStrategyDslBtn');
+
+    if (!exitBtn && !sampleBtn && !legacyBtn && !batchBtn && !dslBtn) {
+        return;
+    }
+
+    if (exitBtn) {
+        exitBtn.addEventListener('click', () => {
+            runManualVerificationExitDefaults();
+        });
+    }
+    if (sampleBtn) {
+        sampleBtn.addEventListener('click', () => {
+            runManualVerificationSampleSummary();
+        });
+    }
+    if (legacyBtn) {
+        legacyBtn.addEventListener('click', () => {
+            runManualVerificationLegacyLoad();
+        });
+    }
+    if (batchBtn) {
+        batchBtn.addEventListener('click', () => {
+            runManualVerificationBatchFlow();
+        });
+    }
+    if (dslBtn) {
+        dslBtn.addEventListener('click', () => {
+            runManualVerificationStrategyDsl();
+        });
+    }
 }
 
 function initDeveloperAreaToggle() {
@@ -1615,327 +4343,424 @@ function normaliseLoadingMessage(message) {
     return message.replace(/^⌛\s*/, '').trim() || '處理中...';
 }
 
-function initLoadingMascotSanitiser() {
-    const VERSION = 'LB-PROGRESS-MASCOT-20251205B';
-    const MAX_PRIMARY_ATTEMPTS = 3;
-    const MAX_LEGACY_ATTEMPTS = 2;
-    const RETRY_DELAY_MS = 1200;
+function getLoadingMascotContainer() {
+    return document.getElementById('loadingGif');
+}
 
-    const container = document.getElementById('loadingGif');
+function getLoadingMascotVisibilityState() {
+    if (!loadingMascotState.visibility) {
+        loadingMascotState.visibility = { hidden: false };
+    }
+    return loadingMascotState.visibility;
+}
+
+function isLoadingMascotHidden() {
+    return Boolean(getLoadingMascotVisibilityState().hidden);
+}
+
+function setLoadingMascotHiddenFlag(hidden) {
+    const visibility = getLoadingMascotVisibilityState();
+    visibility.hidden = Boolean(hidden);
+}
+
+function handleLoadingMascotToggle(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const sourceButton = event?.currentTarget || event?.target || null;
+    const containerEl =
+        (sourceButton && sourceButton.closest && sourceButton.closest('.loading-mascot-canvas')) ||
+        getLoadingMascotContainer();
+
+    if (!containerEl) return;
+
+    const nextHidden = !isLoadingMascotHidden();
+    setLoadingMascotHiddenFlag(nextHidden);
+    applyLoadingMascotHiddenState(containerEl, nextHidden);
+
+    if (nextHidden) {
+        cancelLoadingMascotRotation();
+    } else {
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }
+}
+
+function bindLoadingMascotToggle(toggle) {
+    if (!toggle || toggle.dataset.lbMascotToggleBound === 'true') {
+        return;
+    }
+
+    toggle.type = 'button';
+    toggle.classList.add('loading-mascot-toggle');
+    toggle.dataset.lbMascotToggle = 'true';
+    toggle.addEventListener('click', handleLoadingMascotToggle);
+    toggle.dataset.lbMascotToggleBound = 'true';
+}
+
+function ensureLoadingMascotInfrastructure(container) {
+    if (!container) return {};
+
+    let toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (!toggle) {
+        toggle = document.createElement('button');
+        toggle.type = 'button';
+        container.insertBefore(toggle, container.firstChild);
+    }
+
+    bindLoadingMascotToggle(toggle);
+    toggle.setAttribute('aria-label', '隱藏進度吉祥物圖片');
+    toggle.setAttribute('aria-pressed', 'false');
+    if (!toggle.textContent || !toggle.textContent.trim()) {
+        toggle.textContent = '-';
+    }
+
+    let fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (!fallback) {
+        fallback = document.createElement('div');
+        fallback.className = 'loading-mascot-fallback-visual';
+        fallback.textContent = '⌛';
+        container.appendChild(fallback);
+    }
+    fallback.dataset.lbMascotFallback = 'true';
+    if (!fallback.hasAttribute('aria-hidden')) {
+        fallback.setAttribute('aria-hidden', 'true');
+    }
+
+    if (typeof container.dataset.lbMascotMode !== 'string' || !container.dataset.lbMascotMode) {
+        container.dataset.lbMascotMode = 'image';
+    }
+
+    if (container.dataset.lbMascotHidden === 'true') {
+        setLoadingMascotHiddenFlag(true);
+    } else if (container.dataset.lbMascotHidden === 'false') {
+        setLoadingMascotHiddenFlag(false);
+    }
+
+    return { toggle, fallback };
+}
+
+function applyLoadingMascotHiddenState(container, hidden) {
+    if (!container) return;
+    const flag = hidden ? 'true' : 'false';
+    container.dataset.lbMascotHidden = flag;
+    container.classList.toggle('loading-mascot-collapsed', hidden);
+
+    const toggle = container.querySelector('[data-lb-mascot-toggle]');
+    if (toggle) {
+        toggle.dataset.state = hidden ? 'hidden' : 'visible';
+        toggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+        toggle.setAttribute('aria-label', hidden ? '顯示進度吉祥物圖片' : '隱藏進度吉祥物圖片');
+        toggle.textContent = hidden ? '+' : '-';
+    }
+
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        const fallbackVisible = container.dataset.lbMascotMode === 'fallback' && !hidden;
+        fallback.setAttribute('aria-hidden', fallbackVisible ? 'false' : 'true');
+    }
+
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        const imageVisible = container.dataset.lbMascotMode !== 'fallback' && !hidden;
+        img.setAttribute('aria-hidden', imageVisible ? 'false' : 'true');
+    }
+}
+
+function computeLoadingMascotSources(container) {
+    const externalSources = Array.isArray(window.LAZYBACKTEST_LOADING_MASCOT_SOURCES)
+        ? window.LAZYBACKTEST_LOADING_MASCOT_SOURCES
+        : [];
+    const datasetDefaults = typeof container?.dataset?.lbMascotDefault === 'string'
+        ? container.dataset.lbMascotDefault
+              .split(',')
+              .map((src) => src.trim())
+              .filter(Boolean)
+        : [];
+
+    const unique = [];
+    const seen = new Set();
+    for (const raw of [...externalSources, ...datasetDefaults]) {
+        if (typeof raw !== 'string') continue;
+        const src = raw.trim();
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        unique.push(src);
+    }
+
+    return unique;
+}
+
+function getLoadingMascotRotationState() {
+    return loadingMascotState.rotation;
+}
+
+function shuffleMascotSources(sources) {
+    const list = Array.isArray(sources) ? sources.slice() : [];
+    for (let i = list.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = list[i];
+        list[i] = list[j];
+        list[j] = temp;
+    }
+    return list;
+}
+
+function cancelLoadingMascotRotation() {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    if (rotation.timerId) {
+        clearTimeout(rotation.timerId);
+        rotation.timerId = null;
+    }
+}
+
+function scheduleLoadingMascotRotation(totalSources) {
+    const rotation = getLoadingMascotRotationState();
+    if (!rotation) return;
+    cancelLoadingMascotRotation();
+
+    rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+
+    if (isLoadingMascotHidden()) {
+        return;
+    }
+
+    if (!Number.isFinite(LOADING_MASCOT_ROTATION_INTERVAL) || LOADING_MASCOT_ROTATION_INTERVAL <= 0) {
+        return;
+    }
+
+    if (rotation.lastTotalSources <= 0) {
+        return;
+    }
+
+    rotation.timerId = setTimeout(() => {
+        rotation.timerId = null;
+        refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+    }, LOADING_MASCOT_ROTATION_INTERVAL);
+}
+
+function handleLoadingMascotDisplayed(source, totalSources) {
+    loadingMascotState.lastSource = source || null;
+    const rotation = getLoadingMascotRotationState();
+    if (rotation) {
+        rotation.lastTotalSources = Number.isFinite(totalSources) ? totalSources : 0;
+    }
+    if (isLoadingMascotHidden()) {
+        cancelLoadingMascotRotation();
+        return;
+    }
+    scheduleLoadingMascotRotation(totalSources);
+}
+
+function ensureLoadingMascotImageElement(container) {
+    if (!container) return null;
+    ensureLoadingMascotInfrastructure(container);
+    let img = container.querySelector('img.loading-mascot-image');
+    if (!img) {
+        img = document.createElement('img');
+        img.className = 'loading-mascot-image';
+        img.alt = 'LazyBacktest 進度吉祥物動畫';
+        img.decoding = 'async';
+        img.loading = 'eager';
+        img.referrerPolicy = 'no-referrer';
+        img.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
+        container.appendChild(img);
+    }
+    container.classList.remove('loading-mascot-fallback');
+    container.dataset.lbMascotMode = 'image';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.setAttribute('aria-hidden', 'true');
+    }
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
+    return img;
+}
+
+function showMascotHourglassFallback(container) {
+    if (!container) return;
+    ensureLoadingMascotInfrastructure(container);
+    container.classList.add('loading-mascot-fallback');
+    container.dataset.lbMascotSource = 'hourglass';
+    container.dataset.lbMascotCurrent = 'hourglass';
+    container.dataset.lbMascotMode = 'fallback';
+    const fallback = container.querySelector('[data-lb-mascot-fallback]');
+    if (fallback) {
+        fallback.textContent = '⌛';
+        fallback.setAttribute('aria-hidden', isLoadingMascotHidden() ? 'true' : 'false');
+    }
+    const img = container.querySelector('img.loading-mascot-image');
+    if (img) {
+        img.setAttribute('aria-hidden', 'true');
+        img.removeAttribute('src');
+    }
+    loadingMascotState.lastSource = null;
+    applyLoadingMascotHiddenState(container, isLoadingMascotHidden());
+    cancelLoadingMascotRotation();
+}
+
+function refreshLoadingMascotImage(options = {}) {
+    const container = getLoadingMascotContainer();
+    if (!container) {
+        cancelLoadingMascotRotation();
+        return;
+    }
+
+    ensureLoadingMascotInfrastructure(container);
+
+    const hidden = isLoadingMascotHidden();
+    applyLoadingMascotHiddenState(container, hidden);
+
+    const sources = computeLoadingMascotSources(container);
+    const poolSize = Array.isArray(sources) ? sources.length : 0;
+    container.dataset.lbMascotSanitiser = LOADING_MASCOT_VERSION;
+    container.dataset.lbMascotPoolSize = String(poolSize);
+    container.dataset.lbMascotVersion = LOADING_MASCOT_VERSION;
+
+    cancelLoadingMascotRotation();
+
+    if (!Array.isArray(sources) || poolSize === 0) {
+        showMascotHourglassFallback(container);
+        return;
+    }
+
+    if (hidden) {
+        return;
+    }
+
+    const forceNew = Boolean(options.forceNew);
+    const allowSameWhenSingle = options.allowSameWhenSingle !== false;
+
+    const previous = loadingMascotState.lastSource || container.dataset.lbMascotCurrent || null;
+    const rotation = getLoadingMascotRotationState();
+    const fingerprint = sources.join('|');
+
+    if (rotation) {
+        if (rotation.fingerprint !== fingerprint) {
+            rotation.fingerprint = fingerprint;
+            rotation.queue = [];
+        }
+        rotation.lastTotalSources = sources.length;
+    }
+
+    const getNextCandidate = (avoidPreviousFirst = false) => {
+        if (!rotation) return null;
+
+        let refilled = false;
+        if (!Array.isArray(rotation.queue)) {
+            rotation.queue = [];
+        }
+
+        if (rotation.queue.length === 0) {
+            rotation.queue = shuffleMascotSources(sources);
+            refilled = true;
+        }
+
+        if (rotation.queue.length === 0) {
+            return null;
+        }
+
+        const shouldAvoidPrevious = Boolean(previous) && rotation.queue.length > 1 && (avoidPreviousFirst || refilled);
+        if (shouldAvoidPrevious && rotation.queue[0] === previous) {
+            const altIndex = rotation.queue.findIndex((src) => src !== previous);
+            if (altIndex > 0) {
+                const [replacement] = rotation.queue.splice(altIndex, 1);
+                rotation.queue.unshift(replacement);
+            }
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && rotation.queue[0] === previous) {
+            return null;
+        }
+
+        const candidate = rotation.queue.shift();
+        if (!candidate) {
+            return null;
+        }
+
+        if (!allowSameWhenSingle && sources.length === 1 && candidate === previous) {
+            return null;
+        }
+
+        return candidate;
+    };
+
+    const attemptNext = (avoidPreviousFirst = false) => {
+        const candidate = getNextCandidate(avoidPreviousFirst);
+        if (!candidate) {
+            showMascotHourglassFallback(container);
+            return;
+        }
+
+        const img = ensureLoadingMascotImageElement(container);
+        if (!img) {
+            showMascotHourglassFallback(container);
+            return;
+        }
+
+        const finalize = () => {
+            container.classList.remove('loading-mascot-fallback');
+            container.dataset.lbMascotSource = candidate;
+            container.dataset.lbMascotCurrent = candidate;
+            handleLoadingMascotDisplayed(candidate, sources.length);
+        };
+
+        if (img.src === candidate && img.complete && img.naturalWidth > 0) {
+            finalize();
+            return;
+        }
+
+        const handleLoad = () => {
+            cleanup();
+            finalize();
+        };
+
+        const handleError = () => {
+            cleanup();
+            attemptNext(false);
+        };
+
+        const cleanup = () => {
+            img.removeEventListener('error', handleError);
+            img.removeEventListener('load', handleLoad);
+        };
+
+        img.addEventListener('error', handleError);
+        img.addEventListener('load', handleLoad);
+
+        if (img.src === candidate) {
+            img.removeAttribute('src');
+            const rerender =
+                typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+                    ? window.requestAnimationFrame.bind(window)
+                    : (cb) => setTimeout(cb, 16);
+            rerender(() => {
+                img.src = candidate;
+            });
+        } else {
+            img.src = candidate;
+        }
+    };
+
+    attemptNext(forceNew);
+}
+
+function initLoadingMascotSanitiser() {
+    const container = getLoadingMascotContainer();
     if (!container) {
         return;
     }
 
-    if (container.dataset.lbMascotSanitiser === VERSION) {
-        return;
+    refreshLoadingMascotImage({ forceNew: true, allowSameWhenSingle: true });
+
+    if (typeof window === 'object') {
+        const bridge = window.lazybacktestMascot || {};
+        bridge.refresh = (options) => refreshLoadingMascotImage(options || {});
+        bridge.version = LOADING_MASCOT_VERSION;
+        bridge.getSources = () => computeLoadingMascotSources(getLoadingMascotContainer());
+        window.lazybacktestMascot = bridge;
     }
-
-    const postId = container.dataset.tenorId?.trim();
-    const apiKey = container.dataset.tenorApiKey?.trim();
-    const clientKey = container.dataset.tenorClientKey?.trim() || 'lazybacktest-progress-mascot';
-    const declaredFallbacks = (container.dataset.tenorFallbackSrc || '')
-        .split(',')
-        .map((src) => src.trim())
-        .filter(Boolean);
-
-    const existingImage = container.querySelector('img.loading-mascot-image');
-    const inlineSrc = existingImage?.getAttribute('src')?.trim();
-    if (existingImage) {
-        existingImage.loading = 'eager';
-        existingImage.decoding = 'async';
-        existingImage.referrerPolicy = 'no-referrer';
-        existingImage.setAttribute('aria-hidden', 'true');
-        if (typeof existingImage.decode === 'function') {
-            existingImage
-                .decode()
-                .catch(() => {
-                    /* ignore decode failures – the fallback loader will retry */
-                });
-        }
-    }
-
-    const fallbackSources = [];
-    if (inlineSrc) {
-        fallbackSources.push(inlineSrc);
-    }
-    for (const src of declaredFallbacks) {
-        if (!fallbackSources.includes(src)) {
-            fallbackSources.push(src);
-        }
-    }
-    let fallbackIndex = 0;
-
-    let embedObserver = null;
-    let embedSanitiseScheduled = false;
-
-    const markInitialised = () => {
-        container.dataset.lbMascotSanitiser = VERSION;
-    };
-
-    const resetContainer = () => {
-        container.classList.remove('loading-mascot-fallback');
-        if (embedObserver) {
-            embedObserver.disconnect();
-            embedObserver = null;
-        }
-    };
-
-    const ensureImageElement = () => {
-        resetContainer();
-        let img = container.querySelector('img.loading-mascot-image');
-        if (!img) {
-            container.innerHTML = '';
-            img = document.createElement('img');
-            img.className = 'loading-mascot-image';
-            img.alt = 'LazyBacktest 進度吉祥物動畫';
-            img.decoding = 'async';
-            img.loading = 'eager';
-            img.referrerPolicy = 'no-referrer';
-            img.setAttribute('aria-hidden', 'true');
-            container.appendChild(img);
-        } else {
-            const embeds = container.querySelectorAll('.tenor-gif-embed');
-            embeds.forEach((node) => node.remove());
-        }
-        return img;
-    };
-
-    const useFallbackImage = () => {
-        if (fallbackIndex >= fallbackSources.length) {
-            return false;
-        }
-        const img = ensureImageElement();
-        while (fallbackIndex < fallbackSources.length) {
-            const nextSrc = fallbackSources[fallbackIndex++];
-            if (!nextSrc) {
-                continue;
-            }
-
-            const handleError = () => {
-                img.removeEventListener('error', handleError);
-                if (!useFallbackImage()) {
-                    mountTenorEmbedFallback();
-                }
-            };
-            img.addEventListener('error', handleError, { once: true });
-            if (img.src !== nextSrc) {
-                img.src = nextSrc;
-            } else {
-                // If the same src is reused, force a repaint so browsers retry the request.
-                img.removeAttribute('src');
-                const rerender = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-                    ? window.requestAnimationFrame.bind(window)
-                    : (cb) => setTimeout(() => cb(), 16);
-                rerender(() => {
-                    img.src = nextSrc;
-                });
-            }
-            container.dataset.lbMascotSource = `fallback:${nextSrc}`;
-            return true;
-        }
-        return false;
-    };
-
-    const scheduleEmbedSanitise = () => {
-        if (embedSanitiseScheduled) {
-            return;
-        }
-        embedSanitiseScheduled = true;
-        queueMicrotask(() => {
-            embedSanitiseScheduled = false;
-            const anchors = container.querySelectorAll('.tenor-gif-embed > a');
-            anchors.forEach((anchor) => anchor.remove());
-
-            const iframe = container.querySelector('.tenor-gif-embed iframe');
-            if (iframe) {
-                iframe.setAttribute('title', 'LazyBacktest 進度吉祥物動畫');
-                iframe.setAttribute('aria-hidden', 'true');
-                iframe.setAttribute('tabindex', '-1');
-                iframe.style.pointerEvents = 'none';
-                iframe.style.background = 'transparent';
-            }
-        });
-    };
-
-    function mountTenorEmbedFallback() {
-        if (!postId) {
-            return false;
-        }
-
-        container.innerHTML = '';
-        const embed = document.createElement('div');
-        embed.className = 'tenor-gif-embed';
-        embed.dataset.postid = postId;
-        embed.dataset.shareMethod = 'basic';
-        embed.dataset.width = '100%';
-        embed.dataset.aspectRatio = '1';
-        container.appendChild(embed);
-
-        container.dataset.lbMascotSource = 'tenor-embed';
-
-        scheduleEmbedSanitise();
-        embedObserver = new MutationObserver(scheduleEmbedSanitise);
-        embedObserver.observe(container, { childList: true, subtree: true });
-
-        if (!document.querySelector('script[data-tenor-embed]')) {
-            const script = document.createElement('script');
-            script.src = 'https://tenor.com/embed.js';
-            script.async = true;
-            script.dataset.tenorEmbed = 'true';
-            script.referrerPolicy = 'no-referrer';
-            document.body.appendChild(script);
-        } else if (typeof window !== 'undefined' && window.Tenor && typeof window.Tenor.refresh === 'function') {
-            window.Tenor.refresh();
-        }
-
-        return true;
-    }
-
-    const showHourglassFallback = () => {
-        container.classList.add('loading-mascot-fallback');
-        container.textContent = '⌛';
-        container.dataset.lbMascotSource = 'hourglass';
-    };
-
-    const showFallback = () => {
-        if (useFallbackImage()) {
-            markInitialised();
-            return;
-        }
-        if (mountTenorEmbedFallback()) {
-            markInitialised();
-            return;
-        }
-        showHourglassFallback();
-        markInitialised();
-    };
-
-    if (!postId || !apiKey || typeof fetch !== 'function') {
-        showFallback();
-        return;
-    }
-
-    const applyGifSource = (url) => {
-        const img = ensureImageElement();
-        if (img.src !== url) {
-            img.src = url;
-        }
-        container.dataset.lbMascotSource = `tenor:${url}`;
-        markInitialised();
-    };
-
-    const resolveGifUrl = (payload) => {
-        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-        if (!result) {
-            throw new Error('Tenor API 回傳空集合');
-        }
-
-        const formats = result.media_formats || {};
-        const mediaList = Array.isArray(result.media) ? result.media : [];
-        const gifCandidate =
-            formats.gif?.url ||
-            formats.mediumgif?.url ||
-            formats.tinygif?.url ||
-            formats.nanogif?.url ||
-            mediaList.reduce((selected, item) => {
-                if (selected) return selected;
-                if (item?.gif?.url) return item.gif.url;
-                if (item?.mediumgif?.url) return item.mediumgif.url;
-                if (item?.tinygif?.url) return item.tinygif.url;
-                if (item?.nanogif?.url) return item.nanogif.url;
-                return null;
-            }, null);
-
-        if (!gifCandidate) {
-            throw new Error('Tenor API 缺少 GIF 連結');
-        }
-
-        return gifCandidate;
-    };
-
-    const requestLegacy = (attempt = 1) => {
-        const legacyUrl = new URL('https://g.tenor.com/v1/gifs');
-        legacyUrl.searchParams.set('ids', postId);
-        legacyUrl.searchParams.set('key', apiKey);
-        legacyUrl.searchParams.set('client_key', clientKey);
-
-        fetch(legacyUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor Legacy API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => {
-                const result = Array.isArray(payload?.results) ? payload.results[0] : null;
-                if (!result) {
-                    throw new Error('Tenor Legacy API 回傳空集合');
-                }
-
-                const media = result.media || {};
-                const gifCandidate =
-                    media.gif?.url ||
-                    media.mediumgif?.url ||
-                    media.tinygif?.url ||
-                    media.nanogif?.url;
-
-                if (!gifCandidate) {
-                    throw new Error('Tenor Legacy API 缺少 GIF 連結');
-                }
-
-                applyGifSource(gifCandidate);
-            })
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v1，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_LEGACY_ATTEMPTS) {
-                    setTimeout(() => requestLegacy(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    showFallback();
-                }
-            });
-    };
-
-    const requestPrimary = (attempt = 1) => {
-        const requestUrl = new URL('https://tenor.googleapis.com/v2/posts');
-        requestUrl.searchParams.set('ids', postId);
-        requestUrl.searchParams.set('key', apiKey);
-        requestUrl.searchParams.set('client_key', clientKey);
-        requestUrl.searchParams.set('media_filter', 'gif,mediumgif,tinygif,nanogif');
-        requestUrl.searchParams.set('ar_range', 'all');
-
-        fetch(requestUrl.toString(), { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store' })
-            .then((response) => {
-                if (!response.ok) {
-                    const httpError = new Error(`Tenor API HTTP ${response.status}`);
-                    httpError.status = response.status;
-                    throw httpError;
-                }
-                return response.json();
-            })
-            .then((payload) => resolveGifUrl(payload))
-            .then((gifUrl) => applyGifSource(gifUrl))
-            .catch((error) => {
-                console.warn(`[Mascot] 無法載入 Tenor GIF（v2，第 ${attempt} 次）：`, error);
-                if (error?.status === 403) {
-                    showFallback();
-                    return;
-                }
-                if (attempt < MAX_PRIMARY_ATTEMPTS) {
-                    setTimeout(() => requestPrimary(attempt + 1), RETRY_DELAY_MS);
-                } else {
-                    requestLegacy();
-                }
-            });
-    };
-
-    useFallbackImage();
-    requestPrimary();
 }
 
 function setLoadingBaseMessage(message) {
@@ -1957,9 +4782,47 @@ function renderLoadingMessage(percent) {
     }
 }
 
+function scrollElementIntoViewSmooth(element) {
+    if (!element) return;
+
+    const performScroll = () => {
+        let scrolled = false;
+        if (typeof element.scrollIntoView === 'function') {
+            try {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+                scrolled = true;
+            } catch (error) {
+                console.warn('[Loading] scrollIntoView failed, falling back to window scroll:', error);
+            }
+        }
+        if (!scrolled && typeof element.getBoundingClientRect === 'function') {
+            const rect = element.getBoundingClientRect();
+            if (rect && Number.isFinite(rect.top)) {
+                const offsetTop = Math.max(0, (window.scrollY || window.pageYOffset || 0) + rect.top - 24);
+                if (typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+                } else {
+                    window.scrollY = offsetTop;
+                }
+            }
+        }
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(performScroll);
+    } else {
+        setTimeout(performScroll, 16);
+    }
+}
+
 function showLoading(m = "處理中...") {
     const el = document.getElementById("loading");
-    if (el) el.classList.remove("hidden");
+    if (el) {
+        el.classList.remove("hidden");
+        scrollElementIntoViewSmooth(el);
+    }
+
+    refreshLoadingMascotImage({ forceNew: true });
 
     progressAnimator.reset();
     progressAnimator.start();
@@ -2177,7 +5040,235 @@ function createProgressAnimator() {
         },
     };
 }
-function getStrategyParams(type) { const strategySelectId = `${type}Strategy`; const strategySelect = document.getElementById(strategySelectId); if (!strategySelect) { console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`); return {}; } const key = strategySelect.value; let internalKey = key; if (type === 'exit') { if(['ma_cross','macd_cross','k_d_cross','ema_cross'].includes(key)) { internalKey = `${key}_exit`; } } else if (type === 'shortEntry') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_below', 'ema_cross', 'rsi_overbought', 'macd_cross', 'bollinger_reversal', 'k_d_cross', 'price_breakdown', 'williams_overbought', 'turtle_stop_loss'].includes(key)) { internalKey = `short_${key}`; } } else if (type === 'shortExit') { internalKey = key; if (!strategyDescriptions[internalKey] && ['ma_cross', 'ma_above', 'ema_cross', 'rsi_oversold', 'macd_cross', 'bollinger_breakout', 'k_d_cross', 'price_breakout', 'williams_oversold', 'turtle_breakout', 'trailing_stop'].includes(key)) { internalKey = `cover_${key}`; } } const cfg = strategyDescriptions[internalKey]; const prm = {}; if (!cfg?.defaultParams) { return {}; } for (const pName in cfg.defaultParams) { let idSfx = pName.charAt(0).toUpperCase() + pName.slice(1); if (internalKey === 'k_d_cross' && pName === 'thresholdX') idSfx = 'KdThresholdX'; else if (internalKey === 'k_d_cross_exit' && pName === 'thresholdY') idSfx = 'KdThresholdY'; else if (internalKey === 'turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'StopLossPeriod'; else if ((internalKey === 'macd_cross' || internalKey === 'macd_cross_exit') && pName === 'signalPeriod') idSfx = 'SignalPeriod'; else if (internalKey === 'short_k_d_cross' && pName === 'thresholdY') idSfx = 'ShortKdThresholdY'; else if (internalKey === 'cover_k_d_cross' && pName === 'thresholdX') idSfx = 'CoverKdThresholdX'; else if (internalKey === 'short_macd_cross' && pName === 'signalPeriod') idSfx = 'ShortSignalPeriod'; else if (internalKey === 'cover_macd_cross' && pName === 'signalPeriod') idSfx = 'CoverSignalPeriod'; else if (internalKey === 'short_turtle_stop_loss' && pName === 'stopLossPeriod') idSfx = 'ShortStopLossPeriod'; else if (internalKey === 'cover_turtle_breakout' && pName === 'breakoutPeriod') idSfx = 'CoverBreakoutPeriod'; else if (internalKey === 'cover_trailing_stop' && pName === 'percentage') idSfx = 'CoverTrailingStopPercentage'; const id = `${type}${idSfx}`; const inp = document.getElementById(id); if (inp) { prm[pName] = (inp.type === 'number') ? (parseFloat(inp.value) || cfg.defaultParams[pName]) : inp.value; } else { prm[pName] = cfg.defaultParams[pName]; } } return prm; }
+function normaliseStrategyIdForType(type, strategyKey) {
+    if (!strategyKey) {
+        return strategyKey;
+    }
+    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normalise === 'function') {
+        return window.LazyStrategyId.normalise(type, strategyKey);
+    }
+    if (type === 'exit' && ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(strategyKey)) {
+        return `${strategyKey}_exit`;
+    }
+    if (type === 'shortEntry' && !strategyKey.startsWith('short_')) {
+        return `short_${strategyKey}`;
+    }
+    if (type === 'shortExit' && !strategyKey.startsWith('cover_')) {
+        return `cover_${strategyKey}`;
+    }
+    return strategyKey;
+}
+
+function ensureSelectUsesNormalizedValue(type, selectElement) {
+    if (!selectElement) {
+        return { rawKey: null, normalizedKey: null };
+    }
+    const rawKey = selectElement.value;
+    const normalizedKey = normaliseStrategyIdForType(type, rawKey);
+    if (normalizedKey && normalizedKey !== rawKey) {
+        const hasOption = Array.from(selectElement.options || []).some((option) => option.value === normalizedKey);
+        if (hasOption) {
+            selectElement.value = normalizedKey;
+        }
+    }
+    return { rawKey, normalizedKey };
+}
+
+function resolveStrategyParamPresentation(type, strategyId, paramName) {
+    let label = paramName;
+    let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
+
+    if (strategyId === 'k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdX') {
+            label = 'D值上限(X)';
+            idSuffix = 'KdThresholdX';
+        }
+    } else if (strategyId === 'k_d_cross_exit') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdY') {
+            label = 'D值下限(Y)';
+            idSuffix = 'KdThresholdY';
+        }
+    } else if (strategyId === 'turtle_stop_loss' && paramName === 'stopLossPeriod') {
+        label = '停損週期';
+        idSuffix = 'StopLossPeriod';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'signalPeriod') {
+        label = 'DEA週期(x)';
+        idSuffix = 'SignalPeriod';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'shortPeriod') {
+        label = 'DI短EMA(n)';
+    } else if ((strategyId === 'macd_cross' || strategyId === 'macd_cross_exit') && paramName === 'longPeriod') {
+        label = 'DI長EMA(m)';
+    } else if (strategyId === 'short_k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdY') {
+            label = 'D值下限(Y)';
+            idSuffix = 'ShortKdThresholdY';
+        }
+    } else if (strategyId === 'cover_k_d_cross') {
+        if (paramName === 'period') {
+            label = 'KD週期';
+        } else if (paramName === 'thresholdX') {
+            label = 'D值上限(X)';
+            idSuffix = 'CoverKdThresholdX';
+        }
+    } else if (strategyId === 'short_macd_cross') {
+        if (paramName === 'shortPeriod') {
+            label = 'DI短EMA(n)';
+        } else if (paramName === 'longPeriod') {
+            label = 'DI長EMA(m)';
+        } else if (paramName === 'signalPeriod') {
+            label = 'DEA週期(x)';
+            idSuffix = 'ShortSignalPeriod';
+        }
+    } else if (strategyId === 'cover_macd_cross') {
+        if (paramName === 'shortPeriod') {
+            label = 'DI短EMA(n)';
+        } else if (paramName === 'longPeriod') {
+            label = 'DI長EMA(m)';
+        } else if (paramName === 'signalPeriod') {
+            label = 'DEA週期(x)';
+            idSuffix = 'CoverSignalPeriod';
+        }
+    } else if (strategyId === 'short_turtle_stop_loss' && paramName === 'stopLossPeriod') {
+        label = '觀察週期';
+        idSuffix = 'ShortStopLossPeriod';
+    } else if (strategyId === 'cover_turtle_breakout' && paramName === 'breakoutPeriod') {
+        label = '突破週期';
+        idSuffix = 'CoverBreakoutPeriod';
+    } else if (strategyId === 'cover_trailing_stop' && paramName === 'percentage') {
+        label = '百分比(%)';
+        idSuffix = 'CoverTrailingStopPercentage';
+    } else {
+        const baseKey = strategyId.replace('short_', '').replace('cover_', '').replace('_exit', '');
+        if (baseKey === 'ma_cross' || baseKey === 'ema_cross') {
+            if (paramName === 'shortPeriod') {
+                label = '短期SMA';
+            } else if (paramName === 'longPeriod') {
+                label = '長期SMA';
+            }
+        } else if (baseKey === 'ma_above' || baseKey === 'ma_below') {
+            if (paramName === 'period') {
+                label = 'SMA週期';
+            }
+        } else if (paramName === 'period') {
+            label = '週期';
+        } else if (paramName === 'threshold') {
+            label = '閾值';
+        } else if (paramName === 'signalPeriod') {
+            label = '信號週期';
+        } else if (paramName === 'deviations') {
+            label = '標準差';
+        } else if (paramName === 'multiplier') {
+            label = '倍數';
+        } else if (paramName === 'breakoutPeriod') {
+            label = '突破週期';
+        }
+    }
+
+    return {
+        label,
+        inputId: `${type}${idSuffix}`,
+    };
+}
+
+function getStrategyParams(type) {
+    const strategySelectId = `${type}Strategy`;
+    const strategySelect = document.getElementById(strategySelectId);
+    if (!strategySelect) {
+        console.error(`[Main] Cannot find select element with ID: ${strategySelectId}`);
+        return {};
+    }
+
+    const { normalizedKey } = ensureSelectUsesNormalizedValue(type, strategySelect);
+    const strategyId = normalizedKey || strategySelect.value;
+    const descriptor = strategyDescriptions?.[strategyId];
+    if (!descriptor?.defaultParams) {
+        return {};
+    }
+
+    const params = {};
+    Object.entries(descriptor.defaultParams).forEach(([paramName, defaultValue]) => {
+        const { inputId } = resolveStrategyParamPresentation(type, strategyId, paramName);
+        const input = document.getElementById(inputId);
+        if (!input) {
+            params[paramName] = defaultValue;
+            return;
+        }
+        if (input.type === 'number') {
+            const parsed = input.value === '' ? NaN : Number(input.value);
+            params[paramName] = Number.isFinite(parsed) ? parsed : defaultValue;
+        } else if (input.type === 'checkbox') {
+            params[paramName] = Boolean(input.checked);
+        } else {
+            params[paramName] = input.value !== '' ? input.value : defaultValue;
+        }
+    });
+
+    return params;
+}
+function cloneValueForStrategyDsl(value, path = 'value') {
+    if (value === null) return null;
+    if (value === undefined) return undefined;
+    if (typeof value === 'function') return undefined;
+    if (typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+        return value
+            .map((item, index) => cloneValueForStrategyDsl(item, `${path}[${index}]`))
+            .filter((item) => item !== undefined);
+    }
+    const clone = {};
+    Object.keys(value).forEach((key) => {
+        const cloned = cloneValueForStrategyDsl(value[key], `${path}.${key}`);
+        if (cloned !== undefined) {
+            clone[key] = cloned;
+        }
+    });
+    return clone;
+}
+
+function createStrategyDslPluginNode(strategyId, params) {
+    if (typeof strategyId !== 'string') return null;
+    const trimmed = strategyId.trim();
+    if (!trimmed) return null;
+    const node = { type: 'plugin', id: trimmed };
+    if (params && typeof params === 'object') {
+        const sanitized = cloneValueForStrategyDsl(params, `${trimmed}.params`);
+        if (sanitized && typeof sanitized === 'object' && Object.keys(sanitized).length > 0) {
+            node.params = sanitized;
+        }
+    }
+    return node;
+}
+
+function buildStrategyDslFromParams(selection) {
+    if (!selection || typeof selection !== 'object') return null;
+    const dsl = { version: STRATEGY_DSL_VERSION };
+    const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
+    if (entryNode) dsl.longEntry = entryNode;
+    const exitNode = createStrategyDslPluginNode(selection.exitStrategy, selection.exitParams);
+    if (exitNode) dsl.longExit = exitNode;
+    if (selection.enableShorting) {
+        const shortEntryNode = createStrategyDslPluginNode(selection.shortEntryStrategy, selection.shortEntryParams);
+        if (shortEntryNode) dsl.shortEntry = shortEntryNode;
+        const shortExitNode = createStrategyDslPluginNode(selection.shortExitStrategy, selection.shortExitParams);
+        if (shortExitNode) dsl.shortExit = shortExitNode;
+    }
+    return Object.keys(dsl).length > 1 ? dsl : null;
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestStrategyDsl = Object.freeze({
+        version: STRATEGY_DSL_VERSION,
+        buildFromParams: buildStrategyDslFromParams,
+        createNode: createStrategyDslPluginNode,
+    });
+}
+
 function getBacktestParams() {
     const stockInput = document.getElementById('stockNo');
     const stockNo = stockInput?.value.trim().toUpperCase() || '2330';
@@ -2206,8 +5297,15 @@ function getBacktestParams() {
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
     const adjustedPrice = document.getElementById('adjustedPriceCheckbox')?.checked ?? false;
     const splitAdjustment = adjustedPrice && document.getElementById('splitAdjustmentCheckbox')?.checked;
+    const recentYearsInput = document.getElementById('recentYears');
+    const recentYearsValue = recentYearsInput ? Number.parseInt(recentYearsInput.value, 10) : Number.NaN;
+    const recentYears = Number.isFinite(recentYearsValue) && recentYearsValue > 0
+        ? Math.min(recentYearsValue, 50)
+        : null;
     const entryStrategy = document.getElementById('entryStrategy')?.value;
-    const exitStrategy = document.getElementById('exitStrategy')?.value;
+    const exitSelect = document.getElementById('exitStrategy');
+    const { normalizedKey: normalizedExit } = ensureSelectUsesNormalizedValue('exit', exitSelect);
+    const exitStrategy = normalizedExit || exitSelect?.value || null;
     const entryParams = getStrategyParams('entry');
     const exitParams = getStrategyParams('exit');
     const enableShorting = document.getElementById('enableShortSelling')?.checked ?? false;
@@ -2217,8 +5315,12 @@ function getBacktestParams() {
     let shortEntryParams = {};
     let shortExitParams = {};
     if (enableShorting) {
-        shortEntryStrategy = document.getElementById('shortEntryStrategy')?.value;
-        shortExitStrategy = document.getElementById('shortExitStrategy')?.value;
+        const shortEntrySelect = document.getElementById('shortEntryStrategy');
+        const shortExitSelect = document.getElementById('shortExitStrategy');
+        const { normalizedKey: normalizedShortEntry } = ensureSelectUsesNormalizedValue('shortEntry', shortEntrySelect);
+        const { normalizedKey: normalizedShortExit } = ensureSelectUsesNormalizedValue('shortExit', shortExitSelect);
+        shortEntryStrategy = normalizedShortEntry || shortEntrySelect?.value || null;
+        shortExitStrategy = normalizedShortExit || shortExitSelect?.value || null;
         shortEntryParams = getStrategyParams('shortEntry');
         shortExitParams = getStrategyParams('shortExit');
     }
@@ -2227,8 +5329,21 @@ function getBacktestParams() {
     const sellFee = parseFloat(document.getElementById('sellFee')?.value) || 0;
     const positionBasis = document.querySelector('input[name="positionBasis"]:checked')?.value || 'initialCapital';
     const marketSelect = document.getElementById('marketSelect');
-    const market = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const rawMarket = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
+    const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
+
+    const strategyDsl = buildStrategyDslFromParams({
+        entryStrategy,
+        entryParams,
+        exitStrategy,
+        exitParams,
+        enableShorting,
+        shortEntryStrategy,
+        shortEntryParams,
+        shortExitStrategy,
+        shortExitParams,
+    });
 
     return {
         stockNo,
@@ -2258,8 +5373,10 @@ function getBacktestParams() {
         sellFee,
         positionBasis,
         market,
-        marketType: currentMarket,
+        marketType: isIndexSymbol(stockNo) ? 'INDEX' : currentMarket,
         entryStages,
+        strategyDsl,
+        recentYears,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
@@ -2269,6 +5386,9 @@ function validateStockNoByMarket(stockNo, market) {
     if (!stockNo) {
         showError('請輸入有效代碼');
         return false;
+    }
+    if (isIndexSymbol(stockNo)) {
+        return true;
     }
     const normalizedMarket = normalizeMarketValue(market || currentMarket || 'TWSE');
     if (normalizedMarket === 'US') {
@@ -2328,6 +5448,9 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const TAIPEI_UTC_OFFSET_HOURS = 8;
+const TAIPEI_DAILY_CUTOFF_HOUR = 14;
+const TAIPEI_CUTOFF_UTC_HOUR = TAIPEI_DAILY_CUTOFF_HOUR - TAIPEI_UTC_OFFSET_HOURS;
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -2395,6 +5518,43 @@ function mergeIsoCoverage(existing, additionalRange) {
         start: utcToISODate(range.start),
         end: utcToISODate(range.end - MAIN_DAY_MS),
     }));
+}
+
+function getLatestCoverageDateISO(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latestIso = null;
+    let latestUtc = null;
+    coverage.forEach((range) => {
+        if (!range) return;
+        const candidateIso = range.end || range.start || null;
+        if (!candidateIso) return;
+        const candidateUtc = parseISOToUTC(candidateIso);
+        if (!Number.isFinite(candidateUtc)) return;
+        if (latestUtc === null || candidateUtc > latestUtc) {
+            latestUtc = candidateUtc;
+            latestIso = candidateIso;
+        }
+    });
+    return latestIso;
+}
+
+function computeTaipeiCutoffUtcMs(latestIsoDate) {
+    if (!latestIsoDate) return NaN;
+    const parts = latestIsoDate.split('-');
+    if (parts.length !== 3) return NaN;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if ([year, month, day].some((value) => Number.isNaN(value))) return NaN;
+    return Date.UTC(year, (month || 1) - 1, (day || 1) + 1, TAIPEI_CUTOFF_UTC_HOUR, 0, 0, 0);
+}
+
+function isCoverageExpiredByTaipeiCutoff(coverage, nowMs = Date.now()) {
+    const latestIso = getLatestCoverageDateISO(coverage);
+    if (!latestIso) return false;
+    const cutoffUtc = computeTaipeiCutoffUtcMs(latestIso);
+    if (!Number.isFinite(cutoffUtc)) return false;
+    return nowMs >= cutoffUtc;
 }
 
 function coverageCoversRange(coverage, targetRange) {
@@ -2532,8 +5692,10 @@ function needsDataFetch(cur) {
         : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
+    const coverage = entry.coverage;
+    if (isCoverageExpiredByTaipeiCutoff(coverage)) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    return !coverageCoversRange(coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
@@ -2709,6 +5871,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 初始化開發者區域切換
         initDeveloperAreaToggle();
+        initBatchDebugLogPanel();
+        initStrategyRegistryVerification();
+        initManualVerificationTools();
 
         // 初始化頁籤功能
         initTabs();
