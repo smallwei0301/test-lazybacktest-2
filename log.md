@@ -1,3 +1,11 @@
+## 2025-10-01 — Patch LB-SERVICEWORKER-HOTFIX-20251001A
+- **Issue recap**: 瀏覽器主控台持續出現 `Failed to construct 'Response': Response with null body status cannot have body`，追查為外部 `cnm-sw.js` Service Worker 於 304 回應時仍帶入快取主體，導致回測頁面報錯。
+- **Fix**:
+  - `js/main.js` 新增 `LB-SERVICEWORKER-HOTFIX-20251001A` 版本碼的緩解流程，載入時自動掃描並解除註冊 `cnm-sw.js`，同時在控制器釋放後觸發一次性重新整理避免舊 Service Worker 繼續控制頁面。
+  - 針對解除註冊失敗或重新整理旗標儲存例外新增警示 log，協助追蹤後續案例。
+- **Diagnostics**: 重新載入後應看見 `ServiceWorker:LB-SW-HOTFIX-20251001A` 相關資訊，且主控台不再出現 `Response with null body status` 錯誤；如仍看到警示請手動清除離線快取並回報。
+- **Testing**: `npm run typecheck`、`npm test`
+
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
 - **Updates**:
