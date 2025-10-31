@@ -14,9 +14,7 @@
 
     gtag('config', 'G-VNX2RVHZ5K');
     </script>
-    <!-- Tailwind CSS - Moved to local stylesheet for production -->
-    <!-- Production build: Use "npm run build" to regenerate css/tailwind.css -->
-    <!-- CDN removed: Use local build instead to avoid production warnings -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
     <link
@@ -1412,22 +1410,10 @@
                                             </div>
                                         </div>
                                         <div class="flex justify-center w-full">
-                                            <!-- 【修復】可交互的按鈕應放在 aria-hidden 外面 -->
-                                            <button
-                                                type="button"
-                                                class="loading-mascot-toggle"
-                                                data-lb-mascot-toggle="true"
-                                                aria-label="隱藏進度吉祥物圖片"
-                                                aria-pressed="false"
-                                                style="position: absolute; top: 8px; right: 8px; z-index: 10;"
-                                            >
-                                                -
-                                            </button>
-                                            <!-- 【修復】將載入中動畫設為 inert（模式 B），禁止與使用者互動 -->
                                             <div
                                                 class="loading-mascot-wrapper square"
+                                                aria-hidden="false"
                                                 aria-busy="true"
-                                                aria-label="回測進行中"
                                             >
                                             <div
                                                 id="loadingGif"
@@ -1436,6 +1422,15 @@
                                                 data-lb-mascot-mode="image"
                                                 data-lb-mascot-hidden="false"
                                             >
+                                                <button
+                                                    type="button"
+                                                    class="loading-mascot-toggle"
+                                                    data-lb-mascot-toggle="true"
+                                                    aria-label="切換載入動畫顯示"
+                                                    aria-pressed="false"
+                                                >
+                                                    -
+                                                </button>
                                                 <div
                                                     class="loading-mascot-fallback-visual"
                                                     data-lb-mascot-fallback="true"
@@ -1450,7 +1445,7 @@
                                                     decoding="async"
                                                     loading="eager"
                                                     referrerpolicy="no-referrer"
-                                                    aria-hidden="true"
+                                                    aria-hidden="false"
                                                 />
                                             </div>
                                             </div>
