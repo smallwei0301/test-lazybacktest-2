@@ -448,6 +448,24 @@ NODE`
   - Blob 監控新增寫入摘要卡，揭露本月寫入次數與最近寫入事件；資料來源卡支援顯示主來源與命中資訊。
 - **Testing**: `node - <<'NODE' ...` 檢查主要腳本語法無誤（同既有回歸命令）。
 
+## 2025-10-30 — Patch LB-CNM-SW-HOTFIX-20251030A
+- **Issue recap**: 瀏覽器主控台反覆出現「Failed to construct 'Response': Response with null body status cannot have body」錯誤，來源為 `cnm-sw.js` 服務工作者於處理 204/205/304 回應時仍寫入實際內容，導致回測流程雖成功但 console 充滿錯誤訊息。
+- **Fix**:
+  - 新增 `cnm-sw.js` 覆寫舊版服務工作者，針對 101/204/205/304 等「禁止內文」狀態改以空內容重新建立 Response，並清除舊快取命名空間，避免再拋例外。
+  - 建立 `lb-cnm-sw-cache-v20251030a` 快取，只在一般 200 系列回應時才寫入，並於安裝／啟用階段輸出版本資訊協助追蹤部署情況。
+  - 發生網路錯誤時優先回退至快取副本，確保服務工作者仍可離線回應，不再因錯誤跳出未處理例外。
+- **Diagnostics**: 部署後重新載入站台，預期 console 不再出現上述錯誤訊息；於 `chrome://serviceworker-internals` 可看到服務工作者版本號 `LB-CNM-SW-HOTFIX-20251030A`，並確認快取名稱僅剩新版後綴。
+- **Testing**: 待瀏覽器實測確認 console log 恢復乾淨，另執行 `npm run typecheck`、`npm test` 確保既有腳本維持通過。
+
+## 2025-10-29 — Patch LB-COVERAGE-TAIWAN-20251029A / LB-CACHE-WARMER-TAIWAN-20251029A
+- **Issue recap**: 主執行緒沿用請求範圍合併 coverage，實際資料仍殘缺卻被判定已滿；Netlify cache-warmer 亦於凌晨執行，無法在台股收盤後立即預抓新資料。
+- **Fix**:
+  - `js/main.js`、`js/backtest.js` 在快取更新與同步時改用 `computeCoverageFromRows` 重建 coverage，並於 `needsDataFetch` 依台灣時間 14:00 判定最後一日是否過期。
+  - `js/backtest.js` 的快取寫入分支同步更新 coverage fingerprint，確保診斷面板與快取索引顯示實際覆蓋範圍。
+  - `netlify/functions/cache-warmer.js` 將排程調整為 UTC 06:00（台灣時間 14:00）執行，收盤後即進行熱門標的預抓。
+- **Testing**: `npm run typecheck`、`npm test`
+
+
 ## 2025-09-12 — Patch LB-TODAY-SUGGESTION-FINALEVAL-RETURN-20250912A
 - **Issue recap**: 今日建議持續回傳 `no_data`，追查後發現 `runStrategy` 在建構回傳物件時直接 `return { ... }`，導致 `captureFinalState` 模式下的 `finalEvaluation` 永遠未附加，Worker 因而判定今日缺乏最終評估。
 - **Fix**: 將 `runStrategy` 的回傳流程改為建立 `result` 物件後再附加 `finalEvaluation` 與傳回，確保主執行緒能取得最終評估快照並推導當日建議。
