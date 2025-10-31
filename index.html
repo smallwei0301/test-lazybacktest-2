@@ -359,24 +359,317 @@
                             <div class="text-xs text-muted" style="color: var(--muted-foreground);">台股回測系統</div>
                         </div>
                     </div>
-                    <nav class="hidden md:flex items-center space-x-6">
-                        <div class="text-sm text-muted" style="color: var(--muted-foreground);">
-                            鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline hover:text-primary" style="color: var(--foreground);">smallwei0301@gmail.com</a>
-                        </div>
+                    <nav class="hidden md:flex items-center space-x-6 text-sm font-medium">
+                        <a href="#hero" class="transition-colors hover:text-primary" style="color: var(--foreground);">認識 LazyBacktest</a>
+                        <a href="#painpoints" class="transition-colors hover:text-primary" style="color: var(--foreground);">用戶痛點</a>
+                        <a href="#solution" class="transition-colors hover:text-primary" style="color: var(--foreground);">我們的解方</a>
+                        <a href="#features" class="transition-colors hover:text-primary" style="color: var(--foreground);">功能亮點</a>
+                        <a href="#comparison" class="transition-colors hover:text-primary" style="color: var(--foreground);">為什麼選擇</a>
+                        <a href="#testimonials" class="transition-colors hover:text-primary" style="color: var(--foreground);">用戶回饋</a>
+                        <a href="#appExperience" class="transition-colors hover:text-primary" style="color: var(--foreground);">直接體驗</a>
+                        <span class="text-xs text-muted whitespace-nowrap" style="color: var(--muted-foreground);">
+                            Beta 測試回饋：<a href="mailto:smallwei0301@gmail.com" class="underline hover:text-primary" style="color: var(--foreground);">smallwei0301@gmail.com</a>
+                        </span>
                     </nav>
                 </div>
             </header>
 
             <!-- Main Content -->
             <main class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
-                <!-- Hero Section -->
+                <!-- Marketing Homepage -->
+                <!-- Homepage version: LB-HP-20240215 -->
+                <section id="hero" class="bg-gradient-to-b from-white via-primary/5 to-transparent py-20 border-b" style="border-color: var(--border);">
+                    <div class="container mx-auto px-4">
+                        <div class="grid gap-12 lg:grid-cols-2 lg:items-center">
+                            <div class="space-y-6">
+                                <div class="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-semibold" style="color: var(--primary);">
+                                    <i data-lucide="sparkles" class="lucide-sm"></i>
+                                    LazyBacktest 首頁
+                                </div>
+                                <h1 class="text-4xl lg:text-5xl font-bold leading-tight" style="color: var(--foreground);">
+                                    不懂程式？也能找到最穩定、最會賺的股票策略。
+                                </h1>
+                                <p class="text-lg leading-relaxed" style="color: var(--muted-foreground);">
+                                    LazyBacktest 幫你自動測上百組組合，用數據告訴你：「這個方法真的有效」。你不需要是工程師，只要有想法，我們幫你測出結果。
+                                </p>
+                                <div class="flex flex-col sm:flex-row gap-3">
+                                    <a href="#appExperience" class="btn-primary inline-flex items-center justify-center rounded-lg px-8 py-4 text-lg font-semibold transition" style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);">
+                                        <i data-lucide="zap" class="lucide mr-2"></i>
+                                        立即體驗，一鍵找到最強策略
+                                    </a>
+                                    <a href="#painpoints" class="btn-outline inline-flex items-center justify-center rounded-lg px-8 py-4 text-sm font-semibold transition" style="color: var(--foreground); border: 1px solid var(--border); background-color: var(--input);">
+                                        了解我們怎麼解決痛點
+                                    </a>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-6">
+                                    <div class="rounded-xl border bg-white/70 p-4 text-left shadow-sm" style="border-color: var(--border);">
+                                        <div class="text-2xl font-bold" style="color: var(--foreground);">⭐ 2,000+</div>
+                                        <p class="text-sm" style="color: var(--muted-foreground);">位用戶好評見證回測成果</p>
+                                    </div>
+                                    <div class="rounded-xl border bg-white/70 p-4 text-left shadow-sm" style="border-color: var(--border);">
+                                        <div class="text-2xl font-bold" style="color: var(--foreground);">📈 80%</div>
+                                        <p class="text-sm" style="color: var(--muted-foreground);">的投資人發現原本策略其實不穩定</p>
+                                    </div>
+                                    <div class="rounded-xl border bg-white/70 p-4 text-left shadow-sm" style="border-color: var(--border);">
+                                        <div class="text-2xl font-bold" style="color: var(--foreground);">🕒 90%</div>
+                                        <p class="text-sm" style="color: var(--muted-foreground);">平均節省回測時間，再也不用熬夜跑數據</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="space-y-6 rounded-2xl border bg-white/80 p-8 shadow-xl" style="border-color: var(--border);">
+                                <h2 class="text-2xl font-semibold" style="color: var(--foreground);">什麼樣的投資人最需要 LazyBacktest？</h2>
+                                <ul class="space-y-4 text-base" style="color: var(--muted-foreground);">
+                                    <li class="flex items-start gap-3">
+                                        <i data-lucide="search" class="lucide-sm mt-1 text-primary" style="color: var(--primary);"></i>
+                                        想用 RSI、均線、KD 等技術分析指標，卻不知道哪組參數最穩定。
+                                    </li>
+                                    <li class="flex items-start gap-3">
+                                        <i data-lucide="clock" class="lucide-sm mt-1 text-accent" style="color: var(--accent);"></i>
+                                        沒時間一組一組測試，只想快速確認策略到底可不可行。
+                                    </li>
+                                    <li class="flex items-start gap-3">
+                                        <i data-lucide="smile" class="lucide-sm mt-1 text-secondary" style="color: var(--secondary);"></i>
+                                        希望用簡單介面就能看懂報酬、風險與穩定度，不必學寫程式。
+                                    </li>
+                                </ul>
+                                <div class="rounded-xl bg-primary/10 px-6 py-5 text-sm" style="color: var(--foreground);">
+                                    投資不是猜方向，而是用數據說話。LazyBacktest 讓你先驗證，再下單，減少情緒化決策。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="painpoints" class="bg-white py-20">
+                    <div class="container mx-auto px-4 space-y-12">
+                        <div class="max-w-3xl">
+                            <h2 class="text-3xl font-bold mb-4" style="color: var(--foreground);">用戶最常遇到的三大卡關</h2>
+                            <p class="text-lg" style="color: var(--muted-foreground);">我們把散戶的心聲整理成最真實的語氣，因為我們也走過同樣的挫折。</p>
+                        </div>
+                        <div class="grid gap-10 lg:grid-cols-3">
+                            <article class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold" style="color: var(--primary);">
+                                    😩 我只是想知道這招到底有沒有效
+                                </div>
+                                <p style="color: var(--foreground);">很多人一開始接觸股票策略時，都會這樣想：「如果 RSI 低於 30 買、超過 70 賣，是不是會賺？」但當你真的想試著驗證時，就發現——</p>
+                                <ul class="space-y-2 text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                    <li>要去哪裡查資料？</li>
+                                    <li>怎麼設定參數？</li>
+                                    <li>為什麼每次調一點又要重跑？</li>
+                                    <li>那些圖表、勝率數字我根本看不懂啊！</li>
+                                </ul>
+                                <p class="text-sm" style="color: var(--muted-foreground);">結果，一開始的興趣，最後變成滿滿的挫折。</p>
+                            </article>
+                            <article class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="inline-flex items-center gap-2 rounded-full bg-secondary/10 px-3 py-1 text-sm font-semibold" style="color: var(--secondary);">
+                                    💸 別人說回測很重要，但我根本不知道怎麼開始
+                                </div>
+                                <p style="color: var(--foreground);">想跟著財經 Youtuber 說的「要有自己的策略」？一查才發現每個平台都要寫公式、懂 Python 或研究複雜的設定，最後只好繼續用感覺買。</p>
+                                <blockquote class="rounded-xl bg-secondary/5 px-4 py-3 text-sm italic" style="color: var(--muted-foreground);">
+                                    「咦？TradingView 要寫公式？FinLab 那個 Python 太難了吧？XQ 也不知道哪裡設定…」
+                                </blockquote>
+                                <p class="text-sm" style="color: var(--muted-foreground);">事實是，超過 8 成散戶都在用沒驗證過的策略，報酬不但不穩定，還容易越做越虧。</p>
+                            </article>
+                            <article class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="inline-flex items-center gap-2 rounded-full bg-accent/10 px-3 py-1 text-sm font-semibold" style="color: var(--accent);">
+                                    🧱 我不是不想學，只是太難了
+                                </div>
+                                <p style="color: var(--foreground);">量化工具太複雜、太難懂，每次只想測個策略，結果搞半天還不確定結果正不正確。</p>
+                                <p class="text-sm" style="color: var(--muted-foreground);">LazyBacktest 誕生的目的很單純：讓這件事變簡單。一鍵輸入股票代號，我們幫你跑完所有組合，清楚告訴你：哪組報酬最高、哪組風險最低、哪組策略最穩定。</p>
+                            </article>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="solution" class="bg-slate-50/60 py-20">
+                    <div class="container mx-auto px-4 space-y-10">
+                        <div class="max-w-2xl">
+                            <h2 class="text-3xl font-bold mb-4" style="color: var(--foreground);">LazyBacktest 怎麼幫你搞定麻煩事？</h2>
+                            <p class="text-lg" style="color: var(--muted-foreground);">我們把複雜的回測流程拆解成兩欄，左邊是你遇到的困擾，右邊是我們替你完成的事。</p>
+                        </div>
+                        <div class="overflow-hidden rounded-2xl border bg-white shadow-sm" style="border-color: var(--border);">
+                            <table class="min-w-full divide-y" style="border-color: var(--border);">
+                                <thead class="bg-primary/10 text-left text-sm font-semibold" style="color: var(--primary);">
+                                    <tr>
+                                        <th class="px-6 py-4">你遇到的問題</th>
+                                        <th class="px-6 py-4">LazyBacktest 幫你解決</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y" style="border-color: var(--border); color: var(--foreground);">
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">「我不會寫程式」</td>
+                                        <td class="px-6 py-4">完全圖形化操作，像滑 IG 一樣簡單。</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">「不知道怎麼選參數」</td>
+                                        <td class="px-6 py-4">系統自動幫你測全部組合，直接告訴你哪組最好。</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">「報表看不懂」</td>
+                                        <td class="px-6 py-4">用清楚的圖表顯示報酬、虧損、勝率，不用自己算。</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">「測一次太花時間」</td>
+                                        <td class="px-6 py-4">一鍵批量測試，系統同時跑上百組策略。</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">「怕結果不準」</td>
+                                        <td class="px-6 py-4">使用台灣證交所真實歷史資料，數據可靠可重現。</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="features" class="bg-white py-20">
+                    <div class="container mx-auto px-4 space-y-12">
+                        <div class="max-w-3xl">
+                            <h2 class="text-3xl font-bold mb-4" style="color: var(--foreground);">功能亮點：把回測變成日常工具</h2>
+                            <p class="text-lg" style="color: var(--muted-foreground);">我們用貼近日常的方式解釋每個功能，讓你一聽就懂、一用就上手。</p>
+                        </div>
+                        <div class="grid gap-8 lg:grid-cols-2">
+                            <div class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="flex items-center gap-3">
+                                    <i data-lucide="mouse-pointer-click" class="lucide text-primary" style="color: var(--primary);"></i>
+                                    <h3 class="text-xl font-semibold" style="color: var(--foreground);">一鍵回測</h3>
+                                </div>
+                                <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">你只要輸入股票代號，LazyBacktest 幫你把各種進出場條件都試一遍。結果直接用圖表顯示，不用打程式、不用整理 Excel。</p>
+                            </div>
+                            <div class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="flex items-center gap-3">
+                                    <i data-lucide="brain" class="lucide text-accent" style="color: var(--accent);"></i>
+                                    <h3 class="text-xl font-semibold" style="color: var(--foreground);">智能找出最佳策略</h3>
+                                </div>
+                                <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">系統會根據結果自動挑出「最穩定、最會賺」的組合。就像你身邊多了一位專業研究員，幫你分析所有可能。</p>
+                            </div>
+                            <div class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="flex items-center gap-3">
+                                    <i data-lucide="pie-chart" class="lucide text-secondary" style="color: var(--secondary);"></i>
+                                    <h3 class="text-xl font-semibold" style="color: var(--foreground);">報酬與風險自動分析</h3>
+                                </div>
+                                <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">你不必懂統計學，我們幫你計算報酬率、最大虧損、勝率、穩定度，一次看懂，像看健康檢查報告一樣直覺。</p>
+                            </div>
+                            <div class="space-y-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="flex items-center gap-3">
+                                    <i data-lucide="settings-2" class="lucide text-primary" style="color: var(--primary);"></i>
+                                    <h3 class="text-xl font-semibold" style="color: var(--foreground);">批量優化</h3>
+                                </div>
+                                <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);">一次測試 RSI、KD、均線、MACD 全部組合。系統自動排名：誰表現最好、誰最穩定，一目了然。</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="comparison" class="bg-primary/5 py-20">
+                    <div class="container mx-auto px-4 space-y-10">
+                        <div class="max-w-3xl">
+                            <h2 class="text-3xl font-bold mb-4" style="color: var(--foreground);">為什麼大家選 LazyBacktest？</h2>
+                            <p class="text-lg" style="color: var(--muted-foreground);">跟傳統工具比一比，就知道差在哪裡。懶得寫程式、沒空整理報表的人，都能從這裡開始。</p>
+                        </div>
+                        <div class="overflow-hidden rounded-2xl border bg-white shadow-sm" style="border-color: var(--border);">
+                            <table class="min-w-full text-left">
+                                <thead class="bg-primary/10 text-sm font-semibold" style="color: var(--primary);">
+                                    <tr>
+                                        <th class="px-6 py-4">項目</th>
+                                        <th class="px-6 py-4">LazyBacktest</th>
+                                        <th class="px-6 py-4">傳統工具</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y" style="border-color: var(--border); color: var(--foreground);">
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">操作方式</td>
+                                        <td class="px-6 py-4">🟢 點一點就能回測</td>
+                                        <td class="px-6 py-4">🔴 需會寫程式</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">台股支援</td>
+                                        <td class="px-6 py-4">🟢 支援上市櫃全股票</td>
+                                        <td class="px-6 py-4">⚠️ 部分需付費</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">找最佳參數</td>
+                                        <td class="px-6 py-4">🟢 自動找出最優組合</td>
+                                        <td class="px-6 py-4">🔴 需手動一個一個測</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">結果呈現</td>
+                                        <td class="px-6 py-4">🟢 自動生成清楚圖表</td>
+                                        <td class="px-6 py-4">⚠️ 需整理報表</td>
+                                    </tr>
+                                    <tr class="hover:bg-primary/5 transition-colors">
+                                        <td class="px-6 py-4">價格</td>
+                                        <td class="px-6 py-4">🟢 免費使用</td>
+                                        <td class="px-6 py-4">💸 多數收費</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="testimonials" class="bg-white py-20">
+                    <div class="container mx-auto px-4 space-y-12">
+                        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                            <div class="max-w-3xl">
+                                <h2 class="text-3xl font-bold" style="color: var(--foreground);">用戶回饋：真實體驗分享</h2>
+                                <p class="text-lg" style="color: var(--muted-foreground);">每一則心得都來自不同背景的投資人，證明好工具不分專業門檻。</p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-4 text-sm" style="color: var(--muted-foreground);">
+                                <span>📊 4.9 / 5 平均滿意度</span>
+                                <span>👥 2,000+ 用戶已使用</span>
+                                <span>📈 超過 100,000 次回測紀錄</span>
+                            </div>
+                        </div>
+                        <div class="grid gap-8 lg:grid-cols-3">
+                            <div class="flex h-full flex-col gap-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="text-xl">⭐️⭐️⭐️⭐️⭐️</div>
+                                <blockquote class="flex-1 text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                    「我不懂 Python，但我第一次自己回測成功，超爽！」
+                                </blockquote>
+                                <div class="text-sm font-semibold" style="color: var(--foreground);">— 小陳（上班族投資新手）</div>
+                            </div>
+                            <div class="flex h-full flex-col gap-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="text-xl">⭐️⭐️⭐️⭐️⭐️</div>
+                                <blockquote class="flex-1 text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                    「以前要花三天測十個參數，現在十分鐘搞定。系統還幫我自動排出哪組最穩，超方便。」
+                                </blockquote>
+                                <div class="text-sm font-semibold" style="color: var(--foreground);">— May（理財系學生）</div>
+                            </div>
+                            <div class="flex h-full flex-col gap-4 rounded-2xl border bg-white/90 p-6 shadow-sm" style="border-color: var(--border);">
+                                <div class="text-xl">⭐️⭐️⭐️⭐️⭐️</div>
+                                <blockquote class="flex-1 text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                    「用了 LazyBacktest 才知道，我以前那個『神策略』其實根本不穩定。」
+                                </blockquote>
+                                <div class="text-sm font-semibold" style="color: var(--foreground);">— 阿偉（股市愛好者）</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="final-cta" class="bg-gradient-to-r from-primary/10 via-white to-accent/10 py-20 border-t" style="border-color: var(--border);">
+                    <div class="container mx-auto px-4">
+                        <div class="rounded-3xl border bg-white/80 p-10 shadow-xl flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between" style="border-color: var(--border);">
+                            <div class="space-y-4 max-w-3xl">
+                                <h2 class="text-3xl font-bold" style="color: var(--foreground);">投資不是猜方向，而是讓數據說話。</h2>
+                                <p class="text-lg" style="color: var(--muted-foreground);">LazyBacktest 讓你不用寫程式，也能用最簡單的方式驗證策略、學會看數據。從今天起，你的投資決策會更有信心。</p>
+                            </div>
+                            <a href="#appExperience" class="btn-primary inline-flex items-center justify-center rounded-lg px-8 py-4 text-lg font-semibold transition" style="background-color: var(--primary); color: var(--primary-foreground); border: 1px solid var(--primary);">
+                                立即免費體驗，一鍵開始回測
+                            </a>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="appExperience" class="border-t" style="border-color: var(--border);">
+                <!-- App Experience -->
                 <div class="bg-background border-b flex-shrink-0" style="background-color: var(--background); border-color: var(--border);">
                     <div class="container mx-auto px-4 py-12">
                         <div class="text-center flex flex-col items-center gap-8">
                             <div class="space-y-6 max-w-3xl">
-                                <h1 class="text-4xl lg:text-5xl font-bold text-foreground" style="color: var(--foreground);">
+                                <h2 class="text-4xl lg:text-5xl font-bold text-foreground" style="color: var(--foreground);">
                                     股票回測工具
-                                </h1>
+                                </h2>
                                 <p class="text-lg text-muted mx-auto" style="color: var(--muted-foreground);">
                                     透過歷史數據驗證您的交易策略，做出更明智的投資決策
                                 </p>
@@ -2751,6 +3044,7 @@
                         </div>
                     </div>
                 </div>
+                </section>
             </main>
             <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
                 <div class="container mx-auto px-4">
