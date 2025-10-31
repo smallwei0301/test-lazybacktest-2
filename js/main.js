@@ -14,6 +14,8 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-TAIWAN-20251029A
+// Patch Tag: LB-CACHE-NOSTORE-20251030A
 
 // 全局變量
 let stockChart = null;
@@ -1409,6 +1411,7 @@ async function runDataSourceTester(sourceId, sourceLabel) {
     try {
         const response = await fetch(requestUrl, {
             headers: { Accept: 'application/json' },
+            cache: 'no-store',
         });
         const text = await response.text();
         let payload = {};
@@ -5447,6 +5450,9 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const TAIPEI_UTC_OFFSET_HOURS = 8;
+const TAIPEI_DAILY_CUTOFF_HOUR = 14;
+const TAIPEI_CUTOFF_UTC_HOUR = TAIPEI_DAILY_CUTOFF_HOUR - TAIPEI_UTC_OFFSET_HOURS;
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5514,6 +5520,43 @@ function mergeIsoCoverage(existing, additionalRange) {
         start: utcToISODate(range.start),
         end: utcToISODate(range.end - MAIN_DAY_MS),
     }));
+}
+
+function getLatestCoverageDateISO(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latestIso = null;
+    let latestUtc = null;
+    coverage.forEach((range) => {
+        if (!range) return;
+        const candidateIso = range.end || range.start || null;
+        if (!candidateIso) return;
+        const candidateUtc = parseISOToUTC(candidateIso);
+        if (!Number.isFinite(candidateUtc)) return;
+        if (latestUtc === null || candidateUtc > latestUtc) {
+            latestUtc = candidateUtc;
+            latestIso = candidateIso;
+        }
+    });
+    return latestIso;
+}
+
+function computeTaipeiCutoffUtcMs(latestIsoDate) {
+    if (!latestIsoDate) return NaN;
+    const parts = latestIsoDate.split('-');
+    if (parts.length !== 3) return NaN;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if ([year, month, day].some((value) => Number.isNaN(value))) return NaN;
+    return Date.UTC(year, (month || 1) - 1, (day || 1) + 1, TAIPEI_CUTOFF_UTC_HOUR, 0, 0, 0);
+}
+
+function isCoverageExpiredByTaipeiCutoff(coverage, nowMs = Date.now()) {
+    const latestIso = getLatestCoverageDateISO(coverage);
+    if (!latestIso) return false;
+    const cutoffUtc = computeTaipeiCutoffUtcMs(latestIso);
+    if (!Number.isFinite(cutoffUtc)) return false;
+    return nowMs >= cutoffUtc;
 }
 
 function coverageCoversRange(coverage, targetRange) {
@@ -5651,8 +5694,10 @@ function needsDataFetch(cur) {
         : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
+    const coverage = entry.coverage;
+    if (isCoverageExpiredByTaipeiCutoff(coverage)) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    return !coverageCoversRange(coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---

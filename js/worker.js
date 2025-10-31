@@ -17,6 +17,7 @@
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
+// Patch Tag: LB-CACHE-NOSTORE-20251030A — API 請求停用瀏覽器快取避免 service worker 304 例外。
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
@@ -3557,7 +3558,17 @@ function delay(ms) {
 }
 
 async function fetchWithAdaptiveRetry(url, options = {}, attempt = 1) {
-  const response = await fetch(url, options);
+  const headers = options && typeof options.headers === "object"
+    ? { ...options.headers }
+    : {};
+  const fetchOptions = {
+    ...options,
+    headers,
+    cache: options && Object.prototype.hasOwnProperty.call(options, "cache")
+      ? options.cache
+      : "no-store",
+  };
+  const response = await fetch(url, fetchOptions);
   if (!response.ok) {
     if ((response.status === 429 || response.status >= 500) && attempt < 4) {
       const backoff = Math.min(1500, 250 * Math.pow(2, attempt - 1));
@@ -3947,6 +3958,7 @@ async function fetchAdjustedPriceRange(
   }
   const response = await fetch(`/api/adjusted-price/?${params.toString()}`, {
     headers: { Accept: "application/json" },
+    cache: "no-store",
   });
   const rawText = await response.text();
   let payload = {};
@@ -4796,7 +4808,10 @@ async function tryFetchRangeFromBlob({
     }, NETLIFY_BLOB_RANGE_TIMEOUT_MS);
   }
   try {
-    const fetchOptions = { headers: { Accept: "application/json" } };
+    const fetchOptions = {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    };
     if (controller && abortTimer) {
       fetchOptions.signal = controller.signal;
     }
