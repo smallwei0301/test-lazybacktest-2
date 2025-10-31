@@ -17,6 +17,7 @@
     <!-- Tailwind CSS - Moved to local stylesheet for production -->
     <!-- Production build: Use "npm run build" to regenerate css/tailwind.css -->
     <!-- CDN removed: Use local build instead to avoid production warnings -->
+    <link rel="stylesheet" href="css/tailwind.css">
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
     <link
@@ -1411,7 +1412,7 @@
                                                 ></div>
                                             </div>
                                         </div>
-                                        <div class="flex justify-center w-full">
+                                        <div class="flex justify-center w-full relative">
                                             <!-- 【修復】可交互的按鈕應放在 aria-hidden 外面 -->
                                             <button
                                                 type="button"
@@ -1457,8 +1458,6 @@
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- Action Buttons -->
                             <div class="card shadow-lg border-2 border-primary/20" style="border-color: color-mix(in srgb, var(--primary) 20%, transparent);">
                                 <div class="card-header">
                                     <h3 class="card-title flex items-center gap-2 text-primary" style="color: var(--primary);">
