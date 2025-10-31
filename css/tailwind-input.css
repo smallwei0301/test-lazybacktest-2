@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+  NOTE: This file is the input for Tailwind CSS.
+  Generate the compiled CSS by running: npm run build
+  Or use: npx tailwindcss -i ./css/tailwind-input.css -o ./css/tailwind.css
+*/
