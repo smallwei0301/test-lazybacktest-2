@@ -14,6 +14,8 @@
 // Patch Tag: LB-PROGRESS-MASCOT-20260705A
 // Patch Tag: LB-INDEX-YAHOO-20250726A
 // Patch Tag: LB-PLUGIN-VERIFIER-20260816A
+// Patch Tag: LB-COVERAGE-TAIWAN-20251029A
+// Patch Tag: LB-SERVICEWORKER-HOTFIX-20251001A
 
 // 全局變量
 let stockChart = null;
@@ -39,6 +41,9 @@ const loadingMascotState = {
 };
 
 const STRATEGY_DSL_VERSION = 'LB-STRATEGY-DSL-20260916A';
+const SERVICE_WORKER_HOTFIX_VERSION = 'LB-SW-HOTFIX-20251001A';
+const SERVICE_WORKER_TARGET_PATTERN = /\/cnm-sw\.js(?:\?|$)/;
+const SERVICE_WORKER_RELOAD_FLAG = 'LB_SW_HOTFIX_20251001A';
 
 window.cachedDataStore = cachedDataStore;
 let lastFetchSettings = null;
@@ -57,6 +62,95 @@ function formatDate(d) { if(!(d instanceof Date)||isNaN(d))return ''; const y=d.
 function showError(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-times-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-md'; }
 function showSuccess(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-check-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md'; }
 function showInfo(m) { const el=document.getElementById("result"); el.innerHTML=`<i class="fas fa-info-circle mr-2"></i> ${m}`; el.className = 'my-6 p-4 bg-blue-100 border-l-4 border-blue-500 text-blue-700 rounded-md'; }
+
+function mitigateConflictingServiceWorker() {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker || typeof navigator.serviceWorker.getRegistrations !== 'function') {
+        return;
+    }
+
+    const matchesTarget = (scriptURL) => typeof scriptURL === 'string' && SERVICE_WORKER_TARGET_PATTERN.test(scriptURL);
+
+    const unregisterTargets = async () => {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            if (!Array.isArray(registrations) || registrations.length === 0) return;
+            await Promise.all(
+                registrations.map((registration) => {
+                    if (!registration) return Promise.resolve();
+                    const scriptURL =
+                        (registration.active && registration.active.scriptURL) ||
+                        (registration.waiting && registration.waiting.scriptURL) ||
+                        (registration.installing && registration.installing.scriptURL) ||
+                        '';
+                    if (!matchesTarget(scriptURL)) return Promise.resolve();
+                    console.info(`[ServiceWorker:${SERVICE_WORKER_HOTFIX_VERSION}] 偵測到 ${scriptURL}，嘗試解除註冊。`);
+                    return registration.unregister().catch((error) => {
+                        console.warn(`[ServiceWorker:${SERVICE_WORKER_HOTFIX_VERSION}] 解除註冊失敗:`, error);
+                    });
+                })
+            );
+        } catch (error) {
+            console.warn(`[ServiceWorker:${SERVICE_WORKER_HOTFIX_VERSION}] 讀取註冊資訊失敗:`, error);
+        }
+    };
+
+    const maybeReload = () => {
+        if (typeof window === 'undefined') return;
+        try {
+            if (window.sessionStorage && window.sessionStorage.getItem(SERVICE_WORKER_RELOAD_FLAG) === '1') {
+                return;
+            }
+            if (window.sessionStorage) {
+                window.sessionStorage.setItem(SERVICE_WORKER_RELOAD_FLAG, '1');
+            }
+        } catch (error) {
+            console.warn(`[ServiceWorker:${SERVICE_WORKER_HOTFIX_VERSION}] 記錄重新整理旗標失敗:`, error);
+        }
+        if (typeof window.location !== 'undefined' && typeof window.location.reload === 'function') {
+            window.location.reload();
+        }
+    };
+
+    const controller = navigator.serviceWorker.controller;
+    if (controller && matchesTarget(controller.scriptURL)) {
+        const handleControllerChange = () => {
+            const nextController = navigator.serviceWorker.controller;
+            if (!nextController || !matchesTarget(nextController.scriptURL)) {
+                maybeReload();
+            }
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange, { once: true });
+        setTimeout(() => {
+            const current = navigator.serviceWorker.controller;
+            if (current && matchesTarget(current.scriptURL)) {
+                console.warn(`[ServiceWorker:${SERVICE_WORKER_HOTFIX_VERSION}] 異常的離線快取仍在控制頁面，請重新整理以確保功能正常。`);
+            }
+        }, 2000);
+    }
+
+    unregisterTargets();
+    if (typeof navigator.serviceWorker.ready === 'object' && typeof navigator.serviceWorker.ready.then === 'function') {
+        navigator.serviceWorker.ready.then(() => unregisterTargets()).catch(() => {});
+    }
+}
+
+(function scheduleServiceWorkerMitigation() {
+    if (typeof document === 'undefined') {
+        mitigateConflictingServiceWorker();
+        return;
+    }
+    const invoke = () => mitigateConflictingServiceWorker();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', invoke, { once: true });
+    } else {
+        invoke();
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('load', () => {
+            setTimeout(invoke, 0);
+        }, { once: true });
+    }
+})();
 
 // Patch Tag: LB-ENTRY-STAGING-20250623A / LB-STAGED-ENTRY-EXIT-20250626A
 const stagedEntryControls = (() => {
@@ -5447,6 +5541,9 @@ function validateBacktestParams(p) {
 }
 
 const MAIN_DAY_MS = 24 * 60 * 60 * 1000;
+const TAIPEI_UTC_OFFSET_HOURS = 8;
+const TAIPEI_DAILY_CUTOFF_HOUR = 14;
+const TAIPEI_CUTOFF_UTC_HOUR = TAIPEI_DAILY_CUTOFF_HOUR - TAIPEI_UTC_OFFSET_HOURS;
 
 function buildCacheKey(cur) {
     if (!cur) return '';
@@ -5514,6 +5611,43 @@ function mergeIsoCoverage(existing, additionalRange) {
         start: utcToISODate(range.start),
         end: utcToISODate(range.end - MAIN_DAY_MS),
     }));
+}
+
+function getLatestCoverageDateISO(coverage) {
+    if (!Array.isArray(coverage) || coverage.length === 0) return null;
+    let latestIso = null;
+    let latestUtc = null;
+    coverage.forEach((range) => {
+        if (!range) return;
+        const candidateIso = range.end || range.start || null;
+        if (!candidateIso) return;
+        const candidateUtc = parseISOToUTC(candidateIso);
+        if (!Number.isFinite(candidateUtc)) return;
+        if (latestUtc === null || candidateUtc > latestUtc) {
+            latestUtc = candidateUtc;
+            latestIso = candidateIso;
+        }
+    });
+    return latestIso;
+}
+
+function computeTaipeiCutoffUtcMs(latestIsoDate) {
+    if (!latestIsoDate) return NaN;
+    const parts = latestIsoDate.split('-');
+    if (parts.length !== 3) return NaN;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if ([year, month, day].some((value) => Number.isNaN(value))) return NaN;
+    return Date.UTC(year, (month || 1) - 1, (day || 1) + 1, TAIPEI_CUTOFF_UTC_HOUR, 0, 0, 0);
+}
+
+function isCoverageExpiredByTaipeiCutoff(coverage, nowMs = Date.now()) {
+    const latestIso = getLatestCoverageDateISO(coverage);
+    if (!latestIso) return false;
+    const cutoffUtc = computeTaipeiCutoffUtcMs(latestIso);
+    if (!Number.isFinite(cutoffUtc)) return false;
+    return nowMs >= cutoffUtc;
 }
 
 function coverageCoversRange(coverage, targetRange) {
@@ -5651,8 +5785,10 @@ function needsDataFetch(cur) {
         : cachedDataStore.get(key);
     if (!entry) return true;
     if (!Array.isArray(entry.coverage) || entry.coverage.length === 0) return true;
+    const coverage = entry.coverage;
+    if (isCoverageExpiredByTaipeiCutoff(coverage)) return true;
     const rangeStart = cur.dataStartDate || cur.startDate;
-    return !coverageCoversRange(entry.coverage, { start: rangeStart, end: cur.endDate });
+    return !coverageCoversRange(coverage, { start: rangeStart, end: cur.endDate });
 
 }
 // --- 新增：請求並顯示策略建議 ---
