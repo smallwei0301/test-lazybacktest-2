@@ -8012,40 +8012,9 @@ function runStrategy(data, params, options = {}) {
     dataStartDate: params.dataStartDate || null,
     endDate: params.endDate || null,
   });
-  if (
-    Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective) &&
-    datasetSummary.firstValidCloseGapFromEffective > 1
-  ) {
-    console.warn(
-      `[Worker] ${params.stockNo} 於暖身後首個有效收盤價落後 ${datasetSummary.firstValidCloseGapFromEffective} 天。`,
-    );
-  }
-  if (datasetSummary?.invalidRowsInRange?.count > 0) {
-    const reasonText = formatReasonCountMap(
-      datasetSummary.invalidRowsInRange.reasons,
-    );
-    console.warn(
-      `[Worker] ${params.stockNo} 區間內偵測到 ${datasetSummary.invalidRowsInRange.count} 筆無效資料。原因統計: ${reasonText}`,
-    );
-    if (
-      Array.isArray(datasetSummary.invalidRowsInRange.samples) &&
-      datasetSummary.invalidRowsInRange.samples.length > 0 &&
-      typeof console.table === "function"
-    ) {
-      const invalidTable = datasetSummary.invalidRowsInRange.samples.map(
-        (sample) => ({
-          index: sample.index,
-          date: sample.date,
-          reasons: Array.isArray(sample.reasons)
-            ? sample.reasons.join(", ")
-            : sample.reasons,
-          close: sample.close,
-          volume: sample.volume,
-        }),
-      );
-      console.table(invalidTable);
-    }
-  }
+  // 【修改】移除提前警告 - 改在最終驗證時記錄
+  // 這樣可以避免在每次 runStrategy() 調用時都重複列印警告
+  // 警告會在回測結果的 dataWarnings 中回報給主執行緒
   let effectiveStartIdx = 0;
   if (effectiveStartISO) {
     const foundIndex = dates.findIndex(
@@ -11130,38 +11099,8 @@ function runStrategy(data, params, options = {}) {
           count: invalidBeforeCount,
           samples: invalidBeforeSamples,
         };
-        if (
-          Number.isFinite(
-            buyHoldSummary.firstValidPriceGapFromEffective,
-          ) &&
-          buyHoldSummary.firstValidPriceGapFromEffective > 1
-        ) {
-          console.warn(
-            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後暖身起點 ${buyHoldSummary.firstValidPriceGapFromEffective} 天。`,
-          );
-        }
-        if (
-          Number.isFinite(
-            buyHoldSummary.firstValidPriceGapFromRequested,
-          ) &&
-          buyHoldSummary.firstValidPriceGapFromRequested >
-            CRITICAL_START_GAP_TOLERANCE_DAYS
-        ) {
-          buyHoldSummary.exceedsGapTolerance = true;
-          console.warn(
-            `[Worker] ${params.stockNo} 買入持有首筆有效收盤價落後使用者起點 ${buyHoldSummary.firstValidPriceGapFromRequested} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。`,
-          );
-        }
-        if (invalidBeforeCount > 0) {
-          const invalidPreview = invalidBeforeSamples.map((sample) =>
-            `${sample.date || sample.index}: close=${sample.close}, volume=${sample.volume}`,
-          );
-          console.warn(
-            `[Worker] ${params.stockNo} 暖身期內共有 ${invalidBeforeCount} 筆收盤價無效資料，樣本：${invalidPreview
-              .slice(0, 3)
-              .join("；")}`,
-          );
-        }
+        // 【修改】移除提前警告 - 改在最終驗證時記錄
+        // 避免在每次 runStrategy() 調用時都重複列印警告
         const bhYears =
           (lastValidDateBH.getTime() - firstValidDateBH.getTime()) /
           (1000 * 60 * 60 * 24 * 365.25);
@@ -13225,6 +13164,53 @@ self.onmessage = async function (e) {
       backtestResult.adjustmentFallbackApplied = Boolean(
         outcome?.adjustmentFallbackApplied || workerLastMeta?.adjustmentFallbackApplied,
       );
+
+      // 【新增】最終數據充足性驗證 - 只有當無法獲得充足數據時才警告
+      const dataWarnings = [];
+      if (strategyData && Array.isArray(strategyData) && strategyData.length > 0) {
+        const datasetSummary = summariseDatasetRows(strategyData, {
+          requestedStart: params.originalStartDate || params.startDate,
+          effectiveStartDate: effectiveStartDate || params.startDate,
+          warmupStartDate: dataStartDate || params.startDate,
+          dataStartDate: dataStartDate || params.startDate,
+          endDate: params.endDate,
+        });
+
+        // 檢查暖身期後首個有效收盤價的缺失
+        if (
+          Number.isFinite(datasetSummary?.firstValidCloseGapFromEffective) &&
+          datasetSummary.firstValidCloseGapFromEffective > CRITICAL_START_GAP_TOLERANCE_DAYS
+        ) {
+          const gapDays = datasetSummary.firstValidCloseGapFromEffective;
+          dataWarnings.push({
+            type: 'insufficient-warmup-data',
+            severity: 'warning',
+            message: `${params.stockNo} 於暖身後首個有效收盤價落後 ${gapDays} 天，超過容許的 ${CRITICAL_START_GAP_TOLERANCE_DAYS} 天暖身寬限。回測結果可靠性受到影響。`,
+            gap: gapDays,
+            tolerance: CRITICAL_START_GAP_TOLERANCE_DAYS,
+          });
+        }
+
+        // 檢查區間內無效資料
+        if (datasetSummary?.invalidRowsInRange?.count > 0) {
+          const count = datasetSummary.invalidRowsInRange.count;
+          const reasonText = formatReasonCountMap(datasetSummary.invalidRowsInRange.reasons);
+          dataWarnings.push({
+            type: 'invalid-data-in-range',
+            severity: 'warning',
+            message: `${params.stockNo} 區間內偵測到 ${count} 筆無效資料。原因統計: ${reasonText}`,
+            count,
+            reasons: datasetSummary.invalidRowsInRange.reasons,
+          });
+        }
+      }
+
+      backtestResult.dataWarnings = dataWarnings;
+      if (dataWarnings.length > 0) {
+        dataWarnings.forEach((warning) => {
+          console.warn(`[Worker] [Final Data Check] ${warning.message}`);
+        });
+      }
       const fetchDiagnostics =
         outcome?.diagnostics || workerLastMeta?.diagnostics || null;
       backtestResult.datasetDiagnostics = {

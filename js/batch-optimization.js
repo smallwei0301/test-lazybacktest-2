@@ -15,6 +15,7 @@ const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-WORKER-TIMEOUT-20261030A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
+const dataWarningsDeduped = new Map(); // 【新增】用於去重警告訊息
 
 function normaliseBatchStrategyId(role, strategyId) {
     if (!strategyId) {
@@ -3316,17 +3317,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                 ...datasetMeta
             }, { phase: 'worker', console: false });
 
-            if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
-                recordBatchDebug('cached-data-coverage-mismatch', {
-                    context: 'executeBacktestForCombination',
-                    combination: summarizeCombination(combination),
-                    source: cachedSource,
-                    summary: cachedUsage.summary,
-                    requiredRange,
-                    coverage: coverageEvaluation,
-                    ...datasetMeta
-                }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
-            }
+            // 【移除】提前警告已移到 Worker 層的最終驗證中
+            // 只有當 Worker 實際無法獲得充足數據時才警告
 
             let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
 
@@ -3377,6 +3369,27 @@ async function executeBacktestForCombination(combination, options = {}) {
                             usedCachedData: useCachedData,
                             ...datasetMeta
                         }, { phase: 'worker', console: false });
+
+                        // 【新增】收集並記錄 Worker 回報的數據警告 (去重)
+                        if (Array.isArray(result?.dataWarnings) && result.dataWarnings.length > 0) {
+                            result.dataWarnings.forEach((warning) => {
+                                // 建立唯一識別碼，以股號 + 警告類型作為去重鍵
+                                const warningKey = `${combination.stock}|${warning.type}|${warning.gap || warning.count || 'N/A'}`;
+                                
+                                // 只在首次遇到此警告時記錄，之後同樣警告則跳過
+                                if (!dataWarningsDeduped.has(warningKey)) {
+                                    dataWarningsDeduped.set(warningKey, true);
+                                    recordBatchDebug('data-insufficiency-warning', {
+                                        context: 'executeBacktestForCombination',
+                                        combination: summarizeCombination(combination),
+                                        warning: warning.message,
+                                        type: warning.type,
+                                        severity: warning.severity,
+                                        ...datasetMeta
+                                    }, { phase: 'worker', level: warning.severity, consoleLevel: warning.severity });
+                                }
+                            });
+                        }
 
                         tempWorker.terminate();
                         resolve(result);
@@ -3827,18 +3840,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             ...datasetMeta
         }, { phase: 'optimize', console: false });
 
-        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
-            recordBatchDebug('cached-data-coverage-mismatch', {
-                context: 'optimize-single-param',
-                strategyType,
-                optimizeTarget: optimizeTarget.name,
-                source: cachedSource,
-                summary: cachedUsage.summary,
-                requiredRange,
-                coverage: coverageEvaluation,
-                ...datasetMeta
-            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
-        }
+        // 【移除】提前警告已移到 Worker 層的最終驗證中
 
         if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
             useCachedData = false;
@@ -4020,17 +4022,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             ...datasetMeta
         }, { phase: 'optimize', console: false });
 
-        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
-            recordBatchDebug('cached-data-coverage-mismatch', {
-                context: 'optimize-risk-param',
-                optimizeTarget: optimizeTarget.name,
-                source: cachedSource,
-                summary: cachedUsage.summary,
-                requiredRange,
-                coverage: coverageEvaluation,
-                ...datasetMeta
-            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
-        }
+        // 【移除】提前警告已移到 Worker 層的最終驗證中
 
         if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
             useCachedData = false;
