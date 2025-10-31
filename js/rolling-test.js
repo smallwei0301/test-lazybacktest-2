@@ -1,5 +1,5 @@
 // --- 滾動測試模組 - v2.7 ---
-// Patch Tag: LB-ROLLING-TEST-20260709A
+// Patch Tag: LB-ROLLING-TEST-20260709B
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
 (function() {
@@ -18,7 +18,7 @@
             windowIndex: 0,
             stage: '',
         },
-        version: 'LB-ROLLING-TEST-20260709A',
+        version: 'LB-ROLLING-TEST-20260709B',
         batchOptimizerInitialized: false,
         aggregate: null,
         aggregateGeneratedAt: null,
@@ -3139,6 +3139,29 @@
         return clone;
     }
 
+    function applyDefaultOptimizationSeeds(target, plan) {
+        if (!target || typeof target !== 'object') return;
+        if (!plan?.enabled) return;
+        if (!Array.isArray(plan.scopes) || plan.scopes.length === 0) return;
+        if (typeof strategyDescriptions !== 'object' || !strategyDescriptions) return;
+
+        plan.scopes.forEach((scope) => {
+            if (scope === 'risk') return;
+            const definition = OPTIMIZE_SCOPE_DEFINITIONS[scope];
+            if (!definition) return;
+
+            const strategyName = target[definition.strategyKey];
+            if (!strategyName) return;
+
+            const configKey = resolveStrategyConfigKey(strategyName, scope);
+            const strategyInfo = strategyDescriptions?.[configKey];
+            const defaults = strategyInfo?.defaultParams;
+            if (!defaults || typeof defaults !== 'object') return;
+
+            target[definition.paramsKey] = deepClone(defaults);
+        });
+    }
+
     function normalizeWindowBaseParams(target, windowInfo) {
         if (!target || typeof target !== 'object') return;
         if (windowInfo?.trainingStart) target.startDate = windowInfo.trainingStart;
@@ -3199,6 +3222,7 @@
 
         const outputParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(outputParams, windowInfo);
+        applyDefaultOptimizationSeeds(outputParams, plan);
 
         if (!plan?.enabled || !Array.isArray(plan.scopes) || plan.scopes.length === 0) {
             return { params: outputParams, summary };
@@ -3227,6 +3251,7 @@
 
         const workingParams = deepClone(baseWindowParams);
         normalizeWindowBaseParams(workingParams, windowInfo);
+        applyDefaultOptimizationSeeds(workingParams, plan);
 
         const trainingPayload = prepareWorkerPayload(workingParams, windowInfo.trainingStart, windowInfo.trainingEnd);
         const cachedWindowData = selectCachedDataForWindow(trainingPayload?.dataStartDate, windowInfo.trainingEnd);
