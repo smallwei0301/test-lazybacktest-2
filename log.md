@@ -5,6 +5,12 @@
   - `netlify.toml` 將 `cache-warmer` 排程更新為 `0 6 * * *`，與函式內 14:00 台灣時間設定同步，確保熱門標的在收盤後即可預熱資料。
 - **Diagnostics**: 重新整理頁面後確認主控台不再出現 `cnm-sw.js` 相關錯誤，並於 Netlify 後台排程列表確認 Cron 表達式已更新為 `0 6 * * *`。
 - **Testing**: `npm run typecheck`、`npm test`
+## 2026-10-30 — Patch LB-BATCH-WORKER-TIMEOUT-20261030A
+- **Scope**: 批量優化 worker 超時計時器管理與除錯紀錄。
+- **Updates**:
+  - `js/batch-optimization.js` 執行回測時建立可清除的 worker 超時計時器，於獲得結果或錯誤訊息後即取消，避免 30 秒後持續輸出逾時警示。
+  - 同步更新批量優化模組版本資訊與 Patch Tag，方便除錯紀錄辨識此次修訂。
+- **Testing**: （待實機）容器無法啟動瀏覽器與 Netlify Proxy，需於部署環境回測 2330 批量優化確認 console 無逾時警示。
 
 ## 2026-09-09 — Patch LB-VOLUME-SPIKE-BLOCKS-20240909A
 - **Scope**: 成交量暴增策略積木化、空單支援與參數優化整合。
