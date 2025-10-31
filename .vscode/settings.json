@@ -1,8 +1,12 @@
 {
-    "chatgpt.openOnStartup": true,
-<<<<<<< HEAD
-    "chatgpt.commentCodeLensEnabled": true
-=======
-    "chatgpt.commentCodeLensEnabled": false
->>>>>>> ca26d3228a8931b9d5478f03947b49e158f56dfc
+  "chatgpt.openOnStartup": true,
+  "chatgpt.commentCodeLensEnabled": false,
+  "github-copilot:commands.enable": true,
+  "github-copilot.chat.telemetryEnabled": false,
+  "vs-code-ai-agent": {
+    "enabled": true,
+    "systemPromptFile": ".vscode/ai-agent-system-prompt.md",
+    "autoValidation": true,
+    "workflowMode": "complete"
+  }
 }
