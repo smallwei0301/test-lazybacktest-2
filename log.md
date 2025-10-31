@@ -1,3 +1,10 @@
+## 2026-10-31 — Patch LB-HOMEPAGE-20261031A
+- **Scope**: 全新 LazyBacktest 首頁設計與行銷敘事統整。
+- **Updates**:
+  - 新增 `landing/index.html` 首頁版面，整合 Hero、痛點、解方、功能亮點、比較表、用戶回饋與 CTA，提供無須寫程式的清楚流程介紹。
+  - 導入 `LB-HOMEPAGE-20261031A` 版本碼與設計指引，採用 Tailwind CDN 與玻璃擬態卡片呈現品牌色調。
+- **Testing**: 待部署環境以實際頁面檢視互動與 RWD 狀態。
+
 ## 2025-10-30 — Patch LB-SW-RECOVERY-20251030A
 - **Issue recap**: 使用者在瀏覽器主控台遇到 `cnm-sw.js` 產生 `Response with null body status cannot have body` 的錯誤，影響回測流程觀察；同時 Netlify `cache-warmer` 定時任務仍維持舊的 UTC 05:40，與預期的台灣時間 14:00 不符。
 - **Fix**:
