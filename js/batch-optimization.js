@@ -1,5 +1,5 @@
-// --- 批量策略優化功能 - v1.2.8 ---
-// Patch Tag: LB-BATCH-MAPPER-20260917B
+// --- 批量策略優化功能 - v1.2.9 ---
+// Patch Tag: LB-BATCH-WORKER-TIMEOUT-20261030A
 
 let BatchStrategyMapper = (typeof window !== 'undefined' && window.LazyBatchStrategyMapper)
     ? window.LazyBatchStrategyMapper
@@ -11,7 +11,7 @@ const BatchStrategyContext = (typeof window !== 'undefined' && window.LazyBatchC
 
 const DEATH_CROSS_STRATEGIES = new Set(['ma_cross_exit', 'macd_cross_exit', 'k_d_cross_exit']);
 
-const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-MAPPER-20260917B';
+const BATCH_DEBUG_VERSION_TAG = 'LB-BATCH-WORKER-TIMEOUT-20261030A';
 
 let batchDebugSession = null;
 const batchDebugListeners = new Set();
@@ -3328,7 +3328,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 }, { phase: 'worker', level: 'warn', consoleLevel: 'warn' });
             }
 
-            const cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
 
             if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
                 useCachedData = false;
@@ -3349,9 +3349,18 @@ async function executeBacktestForCombination(combination, options = {}) {
             // 創建臨時worker執行回測
             if (workerUrl) {
                 const tempWorker = new Worker(workerUrl);
+                let workerTimeoutHandle = null;
+
+                const clearWorkerTimeout = () => {
+                    if (workerTimeoutHandle !== null) {
+                        clearTimeout(workerTimeoutHandle);
+                        workerTimeoutHandle = null;
+                    }
+                };
 
                 tempWorker.onmessage = function(e) {
                     if (e.data.type === 'result') {
+                        clearWorkerTimeout();
                         const result = e.data.data;
 
                         // 確保結果包含實際使用的停損停利參數
@@ -3372,6 +3381,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                         tempWorker.terminate();
                         resolve(result);
                     } else if (e.data.type === 'error') {
+                        clearWorkerTimeout();
                         console.error('[Batch Optimization] Worker error:', e.data.data?.message || e.data.error);
                         recordBatchDebug('worker-run-error', {
                             context: 'executeBacktestForCombination',
@@ -3385,6 +3395,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 };
 
                 tempWorker.onerror = function(error) {
+                    clearWorkerTimeout();
                     console.error('[Batch Optimization] Worker error:', error);
                     recordBatchDebug('worker-run-error', {
                         context: 'executeBacktestForCombination',
@@ -3405,7 +3416,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                 });
 
                 // 設定超時
-                setTimeout(() => {
+                workerTimeoutHandle = setTimeout(() => {
+                    workerTimeoutHandle = null;
                     tempWorker.terminate();
                     recordBatchDebug('worker-run-timeout', {
                         context: 'executeBacktestForCombination',
