@@ -1,5 +1,6 @@
 // netlify/functions/cache-warmer.js
 // Patch Tag: LB-CACHE-TIER-20250720A
+// Patch Tag: LB-CACHE-WARMER-TAIWAN-20251029A
 import fetch from 'node-fetch';
 
 const POPULAR_TWSE_STOCKS = [
@@ -32,7 +33,12 @@ async function warmYear({ baseUrl, stockNo, marketType, year }) {
   url.searchParams.set('endDate', range.endDate);
   url.searchParams.set('marketType', marketType);
 
-  const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+    },
+  });
   const text = await response.text();
   let payload = null;
   try {
@@ -83,7 +89,7 @@ async function runWarmer() {
 }
 
 export const config = {
-  schedule: '0 18 * * *', // 每日台灣凌晨 (UTC+8 => 02:00)
+  schedule: '0 6 * * *', // 每日台灣時間 14:00 執行（UTC 06:00）
 };
 
 export default async () => {
