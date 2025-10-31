@@ -291,6 +291,13 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+## 2026-07-10 — Patch LB-SEO-SCHEMA-20260710A
+- **Scope**: 首頁 SEO 基礎標籤與結構化資料。
+- **Updates**:
+  - 於 `<head>` 新增 canonical、描述、Open Graph、Twitter Card 與 robots 標籤，補齊社群分享與搜尋引擎必備資訊。
+  - 建立 WebApplication 與 FAQPage JSON-LD 結構化資料，涵蓋功能重點與常見問題，協助搜尋引擎與 AI 理解服務內容。
+- **Testing**: 未進行自動化測試（靜態標記調整）。
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
