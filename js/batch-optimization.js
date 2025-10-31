@@ -344,6 +344,285 @@ function summarizeDatasetRange(rows) {
 }
 
 const DATASET_COVERAGE_TOLERANCE_MS = 48 * 60 * 60 * 1000; // 48 小時容忍，允許時區/假日差異
+const BATCH_CACHE_GAP_PATCH_VERSION = 'LB-CACHE-GAP-20260928A';
+
+function normaliseDateLikeToISO(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+            return trimmed;
+        }
+    }
+
+    const timestamp = normaliseDateLikeToMs(value);
+    if (timestamp === null) {
+        return null;
+    }
+
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    return date.toISOString().slice(0, 10);
+}
+
+function mergeDatasetRows(primaryRows, secondaryRows) {
+    const map = new Map();
+    const fallback = [];
+
+    const insertRows = (rows, preferExisting = false) => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach((row) => {
+            const key = extractRowDateValue(row);
+            if (!key) {
+                fallback.push(row);
+                return;
+            }
+            if (preferExisting && map.has(key)) {
+                return;
+            }
+            map.set(key, row);
+        });
+    };
+
+    insertRows(primaryRows, false);
+    insertRows(secondaryRows, false);
+
+    const datedRows = Array.from(map.entries())
+        .map(([date, row]) => ({ date, row, ts: normaliseDateLikeToMs(date) }))
+        .filter((item) => item.ts !== null)
+        .sort((a, b) => a.ts - b.ts)
+        .map((item) => item.row);
+
+    return [...datedRows, ...fallback];
+}
+
+function shouldAttemptDatasetStartRecovery(evaluation) {
+    if (!evaluation || evaluation.coverageSatisfied) {
+        return false;
+    }
+    const reasonText = typeof evaluation.reason === 'string'
+        ? evaluation.reason
+        : Array.isArray(evaluation.reason)
+            ? evaluation.reason.join('|')
+            : '';
+    if (!reasonText) {
+        return false;
+    }
+    return reasonText.split('|').includes('dataset-start-after-required-start');
+}
+
+function resolveRecoveryRequiredStart(requiredRange) {
+    if (!requiredRange) return null;
+    return normaliseDateLikeToISO(
+        requiredRange.dataStartDate
+        || requiredRange.effectiveStartDate
+        || requiredRange.startDate
+        || null
+    );
+}
+
+function resolveRecoveryMarket(context = {}) {
+    if (context.marketType) {
+        return String(context.marketType).toUpperCase();
+    }
+    if (context.market) {
+        return String(context.market).toUpperCase();
+    }
+    if (typeof currentMarket === 'string' && currentMarket) {
+        return currentMarket.toUpperCase();
+    }
+    return 'TWSE';
+}
+
+function resolveRecoveryPhase(context = {}) {
+    if (context.debugPhase) return context.debugPhase;
+    if (context.phase) return context.phase;
+    return 'worker';
+}
+
+async function requestWorkerRangePatch(params, options = {}) {
+    if (!workerUrl) {
+        return null;
+    }
+
+    const requestId = options.requestId || null;
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 25000;
+
+    return new Promise((resolve) => {
+        let settled = false;
+        let timeoutHandle = null;
+        try {
+            const patchWorker = new Worker(workerUrl);
+
+            const cleanup = () => {
+                if (timeoutHandle) {
+                    clearTimeout(timeoutHandle);
+                    timeoutHandle = null;
+                }
+                if (patchWorker) {
+                    patchWorker.terminate();
+                }
+            };
+
+            timeoutHandle = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(null);
+            }, timeoutMs);
+
+            patchWorker.onmessage = function(e) {
+                const { type, data, requestId: responseId } = e.data || {};
+                if (type === 'fetchRangePatchResult') {
+                    if (requestId && responseId && requestId !== responseId) {
+                        return;
+                    }
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(data || null);
+                } else if (type === 'error' && e.data?.context === 'fetchRangePatch') {
+                    if (requestId && responseId && requestId !== responseId) {
+                        return;
+                    }
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(null);
+                }
+            };
+
+            patchWorker.onerror = function() {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(null);
+            };
+
+            patchWorker.postMessage({
+                type: 'fetchRangePatch',
+                params: { ...params },
+                requestId
+            });
+        } catch (error) {
+            if (!settled) {
+                settled = true;
+                resolve(null);
+            }
+        }
+    });
+}
+
+async function attemptDatasetStartGapRecovery({ cachedRows, requiredRange, summary, context = {} }) {
+    const requiredStartISO = resolveRecoveryRequiredStart(requiredRange);
+    const datasetStartISO = normaliseDateLikeToISO(summary?.startDate || null);
+
+    if (!requiredStartISO || !datasetStartISO) {
+        return null;
+    }
+
+    const requiredStartMs = normaliseDateLikeToMs(requiredStartISO);
+    const datasetStartMs = normaliseDateLikeToMs(datasetStartISO);
+
+    if (requiredStartMs === null || datasetStartMs === null || datasetStartMs <= requiredStartMs) {
+        return null;
+    }
+
+    const stockNo = context.stockNo || null;
+    if (!stockNo) {
+        return null;
+    }
+
+    const marketType = resolveRecoveryMarket(context);
+    const fetchStartISO = requiredStartISO;
+    const fetchEndISO = datasetStartISO;
+    const requestId = `gap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const phase = resolveRecoveryPhase(context);
+
+    recordBatchDebug('cache-gap-fetch-start', {
+        version: BATCH_CACHE_GAP_PATCH_VERSION,
+        stockNo,
+        marketType,
+        range: { start: fetchStartISO, end: fetchEndISO },
+        originalLength: Array.isArray(cachedRows) ? cachedRows.length : 0,
+        reason: context.reason || 'dataset-start-after-required-start'
+    }, { phase, console: false });
+
+    const patchResult = await requestWorkerRangePatch({
+        stockNo,
+        marketType,
+        market: marketType,
+        startDate: fetchStartISO,
+        endDate: fetchEndISO,
+        adjustedPrice: context.adjustedPrice,
+        splitAdjustment: context.splitAdjustment,
+        effectiveStartDate: context.effectiveStartDate || requiredRange?.effectiveStartDate || fetchStartISO,
+        lookbackDays: context.lookbackDays || requiredRange?.lookbackDays || null
+    }, { requestId });
+
+    if (!patchResult || !Array.isArray(patchResult?.data) || patchResult.data.length === 0) {
+        recordBatchDebug('cache-gap-fetch-empty', {
+            version: BATCH_CACHE_GAP_PATCH_VERSION,
+            stockNo,
+            marketType,
+            range: { start: fetchStartISO, end: fetchEndISO }
+        }, { phase, level: 'warn', consoleLevel: 'warn' });
+        return null;
+    }
+
+    const mergedRows = mergeDatasetRows(patchResult.data, Array.isArray(cachedRows) ? cachedRows : []);
+    const patchInfo = {
+        version: BATCH_CACHE_GAP_PATCH_VERSION,
+        requestId,
+        stockNo,
+        marketType,
+        fetchedRows: patchResult.data.length,
+        mergedLength: mergedRows.length,
+        originalLength: Array.isArray(cachedRows) ? cachedRows.length : 0,
+        dataSource: patchResult.dataSource || null,
+        priceSource: patchResult.priceSource || null,
+        fetchRange: patchResult.fetchRange || { start: fetchStartISO, end: fetchEndISO }
+    };
+
+    recordBatchDebug('cache-gap-fetch-success', {
+        ...patchInfo,
+        summaryAfter: summarizeDatasetRange(mergedRows)
+    }, { phase, console: false });
+
+    return { rows: mergedRows, patchInfo };
+}
+
+async function ensureCachedDatasetUsage(cachedRows, requiredRange, context = {}) {
+    let usage = buildCachedDatasetUsage(cachedRows, requiredRange);
+    let rows = cachedRows;
+    let patched = false;
+    let patchInfo = null;
+
+    if (context.enableGapRecovery !== false && shouldAttemptDatasetStartRecovery(usage.evaluation)) {
+        const recovery = await attemptDatasetStartGapRecovery({
+            cachedRows: rows,
+            requiredRange,
+            summary: usage.summary,
+            context
+        });
+        if (recovery && Array.isArray(recovery.rows)) {
+            rows = recovery.rows;
+            patched = true;
+            patchInfo = recovery.patchInfo || null;
+            usage = buildCachedDatasetUsage(rows, requiredRange);
+        }
+    }
+
+    return { ...usage, rows, patched, patchInfo };
+}
 
 function normaliseDateLikeToMs(value) {
     if (value === null || value === undefined) {
@@ -3197,14 +3476,15 @@ async function processStrategyCombinations(combinations, config) {
 // 執行單個策略組合的回測
 async function executeBacktestForCombination(combination, options = {}) {
     return new Promise((resolve) => {
-        combination = normaliseBatchCombination(combination);
-        let datasetMeta = {};
-        try {
-            // 使用現有的回測邏輯
-            const baseParamsOverride = options?.baseParamsOverride;
-            const params = baseParamsOverride
-                ? prepareBaseParamsForOptimization(baseParamsOverride)
-                : getBacktestParams();
+        const run = async () => {
+            combination = normaliseBatchCombination(combination);
+            let datasetMeta = {};
+            try {
+                // 使用現有的回測邏輯
+                const baseParamsOverride = options?.baseParamsOverride;
+                const params = baseParamsOverride
+                    ? prepareBaseParamsForOptimization(baseParamsOverride)
+                    : getBacktestParams();
 
             if (baseParamsOverride) {
                 ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
@@ -3273,7 +3553,7 @@ async function executeBacktestForCombination(combination, options = {}) {
             const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
                 ? options.cachedDataOverride
                 : null;
-            const cachedPayload = overrideData
+            let cachedPayload = overrideData
                 || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
@@ -3281,7 +3561,21 @@ async function executeBacktestForCombination(combination, options = {}) {
             const preparedParams = enrichParamsWithLookback(params);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            const cachedUsage = await ensureCachedDatasetUsage(cachedPayload, requiredRange, {
+                stockNo: preparedParams.stockNo,
+                marketType: preparedParams.marketType || preparedParams.market,
+                adjustedPrice: preparedParams.adjustedPrice,
+                splitAdjustment: preparedParams.splitAdjustment,
+                effectiveStartDate: preparedParams.effectiveStartDate,
+                lookbackDays: preparedParams.lookbackDays,
+                combination: summarizeCombination(combination),
+                source: 'executeBacktestForCombination',
+                debugPhase: 'worker'
+            });
+            cachedPayload = cachedUsage.rows;
+            if (!overrideData && cachedUsage.patched && typeof cachedStockData !== 'undefined') {
+                cachedStockData = cachedUsage.rows;
+            }
             let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
             const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
@@ -3313,6 +3607,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                 sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
                 useCachedData,
                 overrideProvided: Boolean(overrideData),
+                gapPatched: cachedUsage.patched,
+                gapPatchInfo: cachedUsage.patchInfo,
                 ...datasetMeta
             }, { phase: 'worker', console: false });
 
@@ -3437,17 +3733,29 @@ async function executeBacktestForCombination(combination, options = {}) {
                 }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
                 resolve(null);
             }
-        } catch (error) {
-            console.error('[Batch Optimization] Error in executeBacktestForCombination:', error);
+            } catch (error) {
+                console.error('[Batch Optimization] Error in executeBacktestForCombination:', error);
+                recordBatchDebug('worker-run-exception', {
+                    context: 'executeBacktestForCombination',
+                    combination: summarizeCombination(combination),
+                    message: error?.message || String(error),
+                    stack: error?.stack || null,
+                    ...datasetMeta
+                }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
+                resolve(null);
+            }
+        };
+
+        run().catch((error) => {
+            console.error('[Batch Optimization] executeBacktestForCombination unhandled error:', error);
             recordBatchDebug('worker-run-exception', {
                 context: 'executeBacktestForCombination',
-                combination: summarizeCombination(combination),
+                combination: summarizeCombination(normaliseBatchCombination(combination)),
                 message: error?.message || String(error),
-                stack: error?.stack || null,
-                ...datasetMeta
+                stack: error?.stack || null
             }, { phase: 'worker', level: 'error', consoleLevel: 'error' });
             resolve(null);
-        }
+        });
     });
 }
 
@@ -3670,13 +3978,13 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
+        let cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
         const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
-        
+
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
-            
+
             if (type === 'result') {
                 optimizeWorker.terminate();
 
@@ -3772,63 +4080,61 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeWorker.terminate();
             resolve({ value: undefined, metric: -Infinity });
         };
-        
-        // 使用策略配置中的原始步長，不進行動態調整
-        // 修復：批量優化應該使用與單次優化相同的參數範圍和步長，
-        // 以確保搜索空間的一致性，避免跳過最優參數值
-        const range = optimizeTarget.range;
-        const optimizedRange = {
-            from: range.from,
-            to: range.to,
-            step: range.step || 1  // 使用原始步長，確保與單次優化一致
-        };
-        
-        console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
 
-        rebuildStrategyDslForParams(params);
-        const preparedParams = enrichParamsWithLookback(params);
-        const datasetMeta = buildBatchDatasetMeta(preparedParams);
-        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
-        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
-        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
-        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
+        const run = async () => {
+            // 使用策略配置中的原始步長，不進行動態調整
+            // 修復：批量優化應該使用與單次優化相同的參數範圍和步長，
+            // 以確保搜索空間的一致性，避免跳過最優參數值
+            const range = optimizeTarget.range;
+            const optimizedRange = {
+                from: range.from,
+                to: range.to,
+                step: range.step || 1  // 使用原始步長，確保與單次優化一致
+            };
 
-        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
-            recordBatchDebug('cached-data-slice-applied', {
-                context: 'optimize-single-param',
-                strategyType,
+            console.log(`[Batch Optimization] Optimizing ${optimizeTarget.name} with range:`, optimizedRange);
+
+            rebuildStrategyDslForParams(params);
+            const preparedParams = enrichParamsWithLookback(params);
+            let datasetMeta = buildBatchDatasetMeta(preparedParams);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedUsage = await ensureCachedDatasetUsage(cachedPayload, requiredRange, {
+                stockNo: preparedParams.stockNo,
+                marketType: preparedParams.marketType || preparedParams.market,
+                adjustedPrice: preparedParams.adjustedPrice,
+                splitAdjustment: preparedParams.splitAdjustment,
+                effectiveStartDate: preparedParams.effectiveStartDate,
+                lookbackDays: preparedParams.lookbackDays,
                 optimizeTarget: optimizeTarget.name,
-                source: cachedSource,
-                requiredRange,
-                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
-                summaryAfter: sliceSummary,
-                removedCount: cachedUsage.sliceInfo.removedCount,
-                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
-                bounds: cachedUsage.sliceInfo.bounds,
-                ...datasetMeta
-            }, { phase: 'optimize', console: false });
-        }
+                strategyType,
+                source: 'optimize-single-param',
+                debugPhase: 'optimize'
+            });
+            cachedPayload = cachedUsage.rows;
+            if (!overrideData && cachedUsage.patched && typeof cachedStockData !== 'undefined') {
+                cachedStockData = cachedUsage.rows;
+            }
+            let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+            const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
-        recordBatchDebug('cached-data-evaluation', {
-            context: 'optimize-single-param',
-            strategyType,
-            optimizeTarget: optimizeTarget.name,
-            source: cachedSource,
-            summary: cachedUsage.summary,
-            requiredRange,
-            coverage: coverageEvaluation,
-            datasetLength: cachedUsage.summary.length,
-            sliceSummary,
-            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
-            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
-            useCachedData,
-            overrideProvided: Boolean(overrideData),
-            ...datasetMeta
-        }, { phase: 'optimize', console: false });
+            if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+                recordBatchDebug('cached-data-slice-applied', {
+                    context: 'optimize-single-param',
+                    strategyType,
+                    optimizeTarget: optimizeTarget.name,
+                    source: cachedSource,
+                    requiredRange,
+                    summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                    summaryAfter: sliceSummary,
+                    removedCount: cachedUsage.sliceInfo.removedCount,
+                    removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                    bounds: cachedUsage.sliceInfo.bounds,
+                    ...datasetMeta
+                }, { phase: 'optimize', console: false });
+            }
 
-        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
-            recordBatchDebug('cached-data-coverage-mismatch', {
+            recordBatchDebug('cached-data-evaluation', {
                 context: 'optimize-single-param',
                 strategyType,
                 optimizeTarget: optimizeTarget.name,
@@ -3836,31 +4142,67 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
                 summary: cachedUsage.summary,
                 requiredRange,
                 coverage: coverageEvaluation,
+                datasetLength: cachedUsage.summary.length,
+                sliceSummary,
+                sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+                sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+                useCachedData,
+                overrideProvided: Boolean(overrideData),
+                gapPatched: cachedUsage.patched,
+                gapPatchInfo: cachedUsage.patchInfo,
                 ...datasetMeta
-            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
-        }
+            }, { phase: 'optimize', console: false });
 
-        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
-            useCachedData = false;
-            cachedDataForWorker = null;
-        }
+            if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+                recordBatchDebug('cached-data-coverage-mismatch', {
+                    context: 'optimize-single-param',
+                    strategyType,
+                    optimizeTarget: optimizeTarget.name,
+                    source: cachedSource,
+                    summary: cachedUsage.summary,
+                    requiredRange,
+                    coverage: coverageEvaluation,
+                    ...datasetMeta
+                }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+            }
 
-        // 發送優化任務
-        optimizeWorker.postMessage({
-            type: 'runOptimization',
-            params: preparedParams,
-            optimizeTargetStrategy: strategyType,
-            optimizeParamName: optimizeTarget.name,
-            optimizeRange: optimizedRange,
-            useCachedData,
-            cachedData: cachedDataForWorker
-        });
-        
-        // 設定超時
-        setTimeout(() => {
-            optimizeWorker.terminate();
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
+
+            optimizeWorker.postMessage({
+                type: 'runOptimization',
+                params: preparedParams,
+                optimizeTargetStrategy: strategyType,
+                optimizeParamName: optimizeTarget.name,
+                optimizeRange: optimizedRange,
+                useCachedData,
+                cachedData: cachedDataForWorker
+            });
+
+            setTimeout(() => {
+                optimizeWorker.terminate();
+                resolve({ value: undefined, metric: -Infinity });
+            }, 60000);
+        };
+
+        run().catch((error) => {
+            console.error('[Batch Optimization] Failed to prepare optimizeSingleStrategyParameter payload:', error);
+            recordBatchDebug('param-optimization-error', {
+                strategyType,
+                optimizeTarget: optimizeTarget.name,
+                message: error?.message || String(error),
+                stack: error?.stack || null,
+                strategyId
+            }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
+            try {
+                optimizeWorker.terminate();
+            } catch (terminateError) {
+                console.warn('[Batch Optimization] Unable to terminate optimization worker after failure:', terminateError);
+            }
             resolve({ value: undefined, metric: -Infinity });
-        }, 60000); // 60秒超時
+        });
     });
 }
 
@@ -3931,10 +4273,10 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         const overrideData = Array.isArray(options?.cachedDataOverride) && options.cachedDataOverride.length > 0
             ? options.cachedDataOverride
             : null;
-        const cachedPayload = overrideData
+        let cachedPayload = overrideData
             || (typeof cachedStockData !== 'undefined' && Array.isArray(cachedStockData) ? cachedStockData : null);
         const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
-        
+
         optimizeWorker.onmessage = function(e) {
             const { type, data } = e.data;
             
@@ -3980,72 +4322,105 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
             resolve({ value: undefined, metric: -Infinity });
         };
 
-        rebuildStrategyDslForParams(params);
-        const preparedParams = enrichParamsWithLookback(params);
-        const datasetMeta = buildBatchDatasetMeta(preparedParams);
-        const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
-        let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
-        let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
-        const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
-
-        if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
-            recordBatchDebug('cached-data-slice-applied', {
-                context: 'optimize-risk-param',
+        const run = async () => {
+            rebuildStrategyDslForParams(params);
+            const preparedParams = enrichParamsWithLookback(params);
+            let datasetMeta = buildBatchDatasetMeta(preparedParams);
+            const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
+            const cachedUsage = await ensureCachedDatasetUsage(cachedPayload, requiredRange, {
+                stockNo: preparedParams.stockNo,
+                marketType: preparedParams.marketType || preparedParams.market,
+                adjustedPrice: preparedParams.adjustedPrice,
+                splitAdjustment: preparedParams.splitAdjustment,
+                effectiveStartDate: preparedParams.effectiveStartDate,
+                lookbackDays: preparedParams.lookbackDays,
                 optimizeTarget: optimizeTarget.name,
-                source: cachedSource,
-                requiredRange,
-                summaryBefore: cachedUsage.sliceInfo.summaryBefore,
-                summaryAfter: sliceSummary,
-                removedCount: cachedUsage.sliceInfo.removedCount,
-                removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
-                bounds: cachedUsage.sliceInfo.bounds,
-                ...datasetMeta
-            }, { phase: 'optimize', console: false });
-        }
+                source: 'optimize-risk-param',
+                debugPhase: 'optimize'
+            });
+            cachedPayload = cachedUsage.rows;
+            if (!overrideData && cachedUsage.patched && typeof cachedStockData !== 'undefined') {
+                cachedStockData = cachedUsage.rows;
+            }
+            let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
+            let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
+            const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
-        recordBatchDebug('cached-data-evaluation', {
-            context: 'optimize-risk-param',
-            optimizeTarget: optimizeTarget.name,
-            source: cachedSource,
-            summary: cachedUsage.summary,
-            requiredRange,
-            coverage: coverageEvaluation,
-            datasetLength: cachedUsage.summary.length,
-            sliceSummary,
-            sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
-            sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
-            useCachedData,
-            overrideProvided: Boolean(overrideData),
-            ...datasetMeta
-        }, { phase: 'optimize', console: false });
+            if (cachedUsage.sliceInfo && cachedUsage.sliceInfo.removedCount > 0) {
+                recordBatchDebug('cached-data-slice-applied', {
+                    context: 'optimize-risk-param',
+                    optimizeTarget: optimizeTarget.name,
+                    source: cachedSource,
+                    requiredRange,
+                    summaryBefore: cachedUsage.sliceInfo.summaryBefore,
+                    summaryAfter: sliceSummary,
+                    removedCount: cachedUsage.sliceInfo.removedCount,
+                    removedBreakdown: cachedUsage.sliceInfo.removedBreakdown,
+                    bounds: cachedUsage.sliceInfo.bounds,
+                    ...datasetMeta
+                }, { phase: 'optimize', console: false });
+            }
 
-        if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
-            recordBatchDebug('cached-data-coverage-mismatch', {
+            recordBatchDebug('cached-data-evaluation', {
                 context: 'optimize-risk-param',
                 optimizeTarget: optimizeTarget.name,
                 source: cachedSource,
                 summary: cachedUsage.summary,
                 requiredRange,
                 coverage: coverageEvaluation,
+                datasetLength: cachedUsage.summary.length,
+                sliceSummary,
+                sliceRemovedCount: cachedUsage.sliceInfo?.removedCount || 0,
+                sliceRemovedBreakdown: cachedUsage.sliceInfo?.removedBreakdown || null,
+                useCachedData,
+                overrideProvided: Boolean(overrideData),
+                gapPatched: cachedUsage.patched,
+                gapPatchInfo: cachedUsage.patchInfo,
                 ...datasetMeta
-            }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
-        }
+            }, { phase: 'optimize', console: false });
 
-        if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
-            useCachedData = false;
-            cachedDataForWorker = null;
-        }
+            if (!coverageEvaluation.coverageSatisfied && cachedSource !== 'none') {
+                recordBatchDebug('cached-data-coverage-mismatch', {
+                    context: 'optimize-risk-param',
+                    optimizeTarget: optimizeTarget.name,
+                    source: cachedSource,
+                    summary: cachedUsage.summary,
+                    requiredRange,
+                    coverage: coverageEvaluation,
+                    ...datasetMeta
+                }, { phase: 'optimize', level: 'warn', consoleLevel: 'warn' });
+            }
 
-        // 發送優化任務
-        optimizeWorker.postMessage({
-            type: 'runOptimization',
-            params: preparedParams,
-            optimizeTargetStrategy: 'risk',
-            optimizeParamName: optimizeTarget.name,
-            optimizeRange: optimizeTarget.range,
-            useCachedData,
-            cachedData: cachedDataForWorker
+            if (useCachedData && (!Array.isArray(cachedDataForWorker) || cachedDataForWorker.length === 0)) {
+                useCachedData = false;
+                cachedDataForWorker = null;
+            }
+
+            optimizeWorker.postMessage({
+                type: 'runOptimization',
+                params: preparedParams,
+                optimizeTargetStrategy: 'risk',
+                optimizeParamName: optimizeTarget.name,
+                optimizeRange: optimizeTarget.range,
+                useCachedData,
+                cachedData: cachedDataForWorker
+            });
+        };
+
+        run().catch((error) => {
+            console.error('[Batch Optimization] Failed to prepare optimizeSingleRiskParameter payload:', error);
+            recordBatchDebug('param-optimization-error', {
+                strategyType: 'risk',
+                optimizeTarget: optimizeTarget.name,
+                message: error?.message || String(error),
+                stack: error?.stack || null
+            }, { phase: 'optimize', level: 'error', consoleLevel: 'error' });
+            try {
+                optimizeWorker.terminate();
+            } catch (terminateError) {
+                console.warn('[Batch Optimization] Unable to terminate risk optimization worker after failure:', terminateError);
+            }
+            resolve({ value: undefined, metric: -Infinity });
         });
     });
 }

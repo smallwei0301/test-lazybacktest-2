@@ -1737,6 +1737,15 @@ NODE`
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-28 — Patch LB-CACHE-GAP-20260928A
+- **Issue recap**: 批量優化沿用主執行緒快取時，一旦偵測到 `dataset-start-after-required-start` 便直接改以遠端重抓，造成暖身缺口無法即時補齊且後續任務重複下載相同區段。
+- **Fix**:
+  - `js/batch-optimization.js` 新增 `ensureCachedDatasetUsage` 與差異合併邏輯，遇到起點缺口會請求 worker `fetchRangePatch` 補抓缺失區間、合併至 `cachedStockData` 後再重新評估覆蓋範圍。
+  - `executeBacktestForCombination`、`optimizeSingleStrategyParameter`、`optimizeSingleRiskParameter` 皆改為等待補抓結果並以更新後的快取送進 worker，紀錄補抓診斷以利追蹤。
+  - `js/worker.js` 擴充 `fetchRangePatch` 訊息，重用現有 `fetchStockData` 路徑回傳補抓資料與來源摘要。
+- **Diagnostics**: 於批量偵錯日誌確認出現 `cache-gap-fetch-start`／`cache-gap-fetch-success` 與 `gapPatched: true`，並檢查後續 `cached-data-evaluation` 已改為 `coverageSatisfied: true`。
+- **Testing**: 尚未執行（待可連線 Proxy 的環境驗證）。
+
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
 - **Fix**:
