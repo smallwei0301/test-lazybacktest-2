@@ -5889,3 +5889,38 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('[Main] Initialization failed:', error);
     }
 });
+
+// Stage4 局部微調：按鈕事件綁定
+document.addEventListener('DOMContentLoaded', () => {
+    const runButton = document.getElementById('stage4-run');
+    if (!runButton) return;
+    runButton.addEventListener('click', async () => {
+        const button = document.getElementById('stage4-run');
+        const methodSelect = document.getElementById('stage4-method');
+        const method = methodSelect?.value || 'spsa';
+        const originalLabel = button?.textContent || '執行微調';
+        if (button) {
+            button.disabled = true;
+            button.textContent = '執行中…';
+        }
+        try {
+            const runner = window.batchOptimization?.runStage4 || window.runStage4;
+            if (typeof runner === 'function') {
+                await runner(method, {
+                    onProgress: () => {
+                        // 可在此更新進度顯示（預留掛點）
+                    },
+                });
+            } else {
+                console.warn('[Stage4] runStage4 未初始化');
+            }
+        } catch (error) {
+            console.error('Stage4 run error:', error);
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = originalLabel;
+            }
+        }
+    });
+});
