@@ -5074,6 +5074,18 @@ function ensureSelectUsesNormalizedValue(type, selectElement) {
 }
 
 function resolveStrategyParamPresentation(type, strategyId, paramName) {
+    if (typeof window !== 'undefined'
+        && window.lazyStrategyForm
+        && typeof window.lazyStrategyForm.resolveParamPresentation === 'function') {
+        try {
+            const resolved = window.lazyStrategyForm.resolveParamPresentation(type, strategyId, paramName);
+            if (resolved && resolved.label && resolved.inputId) {
+                return resolved;
+            }
+        } catch (error) {
+            console.warn('[Main] resolveParamPresentation 透過 lazyStrategyForm 失敗', error);
+        }
+    }
     let label = paramName;
     let idSuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1);
 
@@ -5176,6 +5188,18 @@ function resolveStrategyParamPresentation(type, strategyId, paramName) {
 }
 
 function getStrategyParams(type) {
+    if (typeof window !== 'undefined'
+        && window.lazyStrategyForm
+        && typeof window.lazyStrategyForm.getParams === 'function') {
+        try {
+            const params = window.lazyStrategyForm.getParams(type);
+            if (params && typeof params === 'object') {
+                return params;
+            }
+        } catch (error) {
+            console.warn('[Main] getStrategyParams 透過 lazyStrategyForm 失敗', error);
+        }
+    }
     const strategySelectId = `${type}Strategy`;
     const strategySelect = document.getElementById(strategySelectId);
     if (!strategySelect) {
@@ -5246,6 +5270,19 @@ function createStrategyDslPluginNode(strategyId, params) {
 
 function buildStrategyDslFromParams(selection) {
     if (!selection || typeof selection !== 'object') return null;
+    if (typeof window !== 'undefined'
+        && window.lazyStrategyForm
+        && typeof window.lazyStrategyForm.getDslDefinition === 'function') {
+        try {
+            const definition = window.lazyStrategyForm.getDslDefinition({ enableShorting: selection.enableShorting });
+            if (definition && typeof definition === 'object' && Object.keys(definition).length > 0) {
+                const customDsl = { version: STRATEGY_DSL_VERSION, ...definition };
+                return Object.keys(customDsl).length > 1 ? customDsl : null;
+            }
+        } catch (error) {
+            console.warn('[Main] getDslDefinition 透過 lazyStrategyForm 失敗', error);
+        }
+    }
     const dsl = { version: STRATEGY_DSL_VERSION };
     const entryNode = createStrategyDslPluginNode(selection.entryStrategy, selection.entryParams);
     if (entryNode) dsl.longEntry = entryNode;
