@@ -1721,6 +1721,14 @@ NODE`
 - **Diagnostics**: 建議於可連線 Proxy 的環境執行批量優化與交叉優化，觀察開發者日誌是否輸出 `strategy-mapper-normalised` 與 `deathcross-zero-metric` 事件，確認死亡交叉策略已可找出非零目標值，同時驗證短線策略是否能被正確映射。
 - **Testing**: `npm test`、`npm run typecheck`
 
+## 2026-09-19 — Patch LB-COVERAGE-TPE-20260919A
+- **Issue recap**: 主執行緒在快取回寫時沿用請求起訖日合併 coverage，導致當日資料尚未就緒時仍被標記為已覆蓋，後續回測無法在 14:00 後自動補抓最新資料；同時 Netlify 暖身排程仍在凌晨執行，與盤後發布時間錯開。
+- **Fix**:
+  - `js/backtest.js` 與 `js/main.js` 以 `computeCoverageFromRows` 依實際資料列重建 coverage 與 fingerprint，並在主執行緒導入台北時間 14:00 的覆蓋期限判斷，確保過期資料會重新抓取。
+  - `netlify/functions/cache-warmer.js` 將排程調整為 UTC 06:00（台北時間 14:00），讓熱門台股預抓流程於盤後兩小時內完成。
+- **Diagnostics**: 於 14:00 後設定結束日期為當日重新回測，預期會重新向 Proxy 補抓資料；檢查快取診斷應顯示依資料列計算的 coverage 區間。
+- **Testing**: `npm test`、`npm run typecheck`
+
 ## 2026-09-18 — Patch LB-BATCH-LEXICAL-20260918A
 - **Issue recap**: 批量優化初始化時 `LazyBatchStrategyMapper` 無法讀取 `config.js` 內以 `const` 宣告的 `strategyDescriptions`，導致所有策略都被視為未知，造成策略選單與 Worker 映射皆為空集合。
 - **Fix**:
