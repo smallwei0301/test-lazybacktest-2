@@ -1,2 +1,25 @@
 # Local Netlify folder
 .netlify
+
+# 備份檔案
+js/*backup*.js
+js/*corrupted*.js
+
+# 測試覆蓋率報告
+coverage/
+
+# Node modules
+node_modules/
+
+# IDE 設定檔案
+.vscode/
+.idea/
+
+# OS 檔案
+.DS_Store
+Thumbs.db
+
+# 臨時檔案
+*.tmp
+*.swp
+*.swo
