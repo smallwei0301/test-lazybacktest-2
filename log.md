@@ -291,6 +291,13 @@ NODE`
 - **Testing**: `node - <<'NODE' const fs=require('fs');const vm=require('vm');['js/rolling-test.js'].forEach((file)=>{const code=fs.readFileSync(file,'utf8');new vm.Script(code,{filename:file});});console.log('scripts compile');NODE`
 
 
+## 2026-07-10 — Patch LB-SEO-METADATA-20260710A
+- **Scope**: 首頁 SEO 基礎標籤與結構化資料增補。
+- **Updates**:
+  - 於 `<head>` 補齊 canonical、描述、Open Graph、Twitter Card 與 robots 等核心 SEO 標籤。
+  - 新增 WebApplication 與 FAQPage JSON-LD 結構化資料，涵蓋平台功能、免費方案與常見問答。
+- **Testing**: `npm run build`（專案目前未定義 build 指令，後續需補齊對應腳本）
+
 ## 2026-07-09 — Patch LB-LOCAL-REFINE-20260709A
 - **Scope**: 批量優化局部微調範圍與進度呈現調整。
 - **Updates**:
