@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>聯絡我們 - LazyBacktest</title>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+      :root {
+        --background: #ffffff;
+        --foreground: #4b5563;
+        --card: #f9fafb;
+        --card-foreground: #374151;
+        --popover: #ffffff;
+        --popover-foreground: #4b5563;
+        --primary: #0891b2;
+        --primary-foreground: #ffffff;
+        --secondary: #f59e0b;
+        --secondary-foreground: #ffffff;
+        --muted: #b0b0b0;
+        --muted-foreground: #4b5563;
+        --accent: #f59e0b;
+        --accent-foreground: #ffffff;
+        --destructive: #dc2626;
+        --destructive-foreground: #ffffff;
+        --border: #e5e7eb;
+        --input: #ffffff;
+        --ring: rgba(8, 145, 178, 0.5);
+        --radius: 0.5rem;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Inter", "Noto Sans", sans-serif;
+      }
+
+      .container-wrapper {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+
+      main {
+        flex: 1;
+      }
+
+      /* Contact Section */
+      .contact-section {
+        background: linear-gradient(135deg, #ffffff 0%, rgba(8, 145, 178, 0.05) 50%, rgba(245, 158, 11, 0.05) 100%);
+        padding: 80px 20px;
+      }
+
+      .contact-container {
+        max-width: 800px;
+        margin: 0 auto;
+      }
+
+      .contact-title {
+        font-size: 40px;
+        font-weight: 900;
+        color: #0f172a;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+
+      .contact-subtitle {
+        font-size: 18px;
+        color: #6b7280;
+        text-align: center;
+        margin-bottom: 50px;
+        line-height: 1.8;
+      }
+
+      .contact-card {
+        background-color: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 40px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        margin-bottom: 30px;
+      }
+
+      .contact-item {
+        margin-bottom: 30px;
+        text-align: center;
+      }
+
+      .contact-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .contact-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 10px;
+      }
+
+      .contact-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 15px;
+      }
+
+      .contact-email-link {
+        display: inline-block;
+        padding: 14px 32px;
+        background-color: #0891b2;
+        color: white;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 16px;
+        transition: background-color 0.3s, transform 0.2s;
+      }
+
+      .contact-email-link:hover {
+        background-color: #0e7490;
+        transform: translateY(-2px);
+      }
+
+      .contact-copy-button {
+        display: inline-block;
+        margin-left: 10px;
+        padding: 10px 16px;
+        background-color: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background-color 0.3s;
+      }
+
+      .contact-copy-button:hover {
+        background-color: #e5e7eb;
+      }
+
+      .contact-description {
+        font-size: 15px;
+        color: #6b7280;
+        line-height: 1.8;
+        margin-bottom: 30px;
+        text-align: center;
+      }
+
+      .info-box {
+        background-color: #f0f9ff;
+        border-left: 4px solid #0891b2;
+        padding: 20px;
+        border-radius: 6px;
+        margin-bottom: 30px;
+      }
+
+      .info-box-title {
+        font-weight: 600;
+        color: #0891b2;
+        margin-bottom: 8px;
+      }
+
+      .info-box-text {
+        color: #4b5563;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .contact-title {
+          font-size: 28px;
+        }
+
+        .contact-subtitle {
+          font-size: 16px;
+        }
+
+        .contact-card {
+          padding: 25px;
+        }
+
+        .contact-value {
+          font-size: 20px;
+        }
+
+        .contact-email-link {
+          display: block;
+          width: 100%;
+          margin-bottom: 10px;
+        }
+
+        .contact-copy-button {
+          display: block;
+          width: 100%;
+          margin-left: 0;
+          margin-top: 10px;
+        }
+      }
+    </style>
+</head>
+<body>
+    <div class="container-wrapper">
+        <!-- Header -->
+        <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm" style="background-color: rgba(255, 255, 255, 0.95); border-color: #e5e7eb;">
+            <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px; display: flex; align-items: center; justify-content: space-between;">
+                <div class="flex items-center space-x-3" style="flex-shrink: 0;">
+                    <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none; flex-shrink: 0;">
+                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <div class="w-5 h-5 flex flex-col justify-between">
+                                <div class="flex justify-between">
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                </div>
+                                <div class="flex justify-between items-end">
+                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="flex-shrink: 0;">
+                            <span class="text-lg font-bold text-foreground" style="color: #4b5563; display: block;">LazyBacktest</span>
+                            <div class="text-xs text-muted" style="color: #4b5563;">台股回測系統</div>
+                        </div>
+                    </a>
+                </div>
+                <nav style="display: flex; gap: 24px; flex-shrink: 0;">
+                    <a href="home.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: #4b5563; white-space: nowrap;">
+                        首頁
+                    </a>
+                    <a href="index.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: #4b5563; white-space: nowrap;">
+                        立即體驗
+                    </a>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Contact Section -->
+            <section class="contact-section">
+                <div class="contact-container">
+                    <h1 class="contact-title">聯絡我們</h1>
+                    <p class="contact-subtitle">
+                        若有任何錯誤、Bug、建議，請與我們聯繫<br>
+                        我們會盡快為您解答
+                    </p>
+
+                    <div class="contact-card">
+                        <div class="info-box">
+                            <div class="info-box-title">我們很樂意聽取您的意見</div>
+                            <div class="info-box-text">
+                                感謝您使用 LazyBacktest！如果您在使用過程中遇到任何問題，或是有任何建議和改進方案，我們都想聽聽您的想法。
+                            </div>
+                        </div>
+
+                        <div class="contact-item">
+                            <div class="contact-label">電子郵件</div>
+                            <div class="contact-value">smallwei0301@gmail.com</div>
+                            <a href="mailto:smallwei0301@gmail.com" class="contact-email-link">
+                                發送電子郵件
+                            </a>
+                            <button class="contact-copy-button" onclick="copyToClipboard('smallwei0301@gmail.com')">
+                                複製信箱
+                            </button>
+                        </div>
+
+                        <div class="contact-item" style="margin-top: 40px; padding-top: 40px; border-top: 1px solid #e5e7eb;">
+                            <div class="contact-label">預期回應時間</div>
+                            <div class="contact-description">
+                                我們通常會在 24 小時內回覆您的郵件
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="contact-card" style="background-color: #f9fafb;">
+                        <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 15px; text-align: center;">
+                            我們關注的事項
+                        </h2>
+                        <ul style="list-style: none; padding: 0; margin: 0;">
+                            <li style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #6b7280; text-align: center;">
+                                ✓ 功能建議與改進意見
+                            </li>
+                            <li style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #6b7280; text-align: center;">
+                                ✓ 使用中遇到的問題與 Bug
+                            </li>
+                            <li style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #6b7280; text-align: center;">
+                                ✓ 用戶體驗反饋
+                            </li>
+                            <li style="padding: 12px 0; color: #6b7280; text-align: center;">
+                                ✓ 合作機會與其他洽詢
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="container mx-auto px-4" style="max-width: 1200px;">
+                <div class="grid md:grid-cols-4 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">台股回測系統</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li>
+                                <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a>
+                            </li>
+                            <li>
+                                <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a>
+                            </li>
+                            <li>
+                                <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="home.html" class="transition-colors" style="color: #6b7280;">首頁</a></li>
+                            <li><a href="index.html" class="transition-colors" style="color: #6b7280;">使用工具</a></li>
+                            <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">聯絡我們</a></li>
+                            <li><a href="#" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="#" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+                            <li><a href="#" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                alert('已複製電子郵件地址到剪貼板！');
+            }, function(err) {
+                alert('複製失敗，請手動複製');
+            });
+        }
+    </script>
+</body>
+</html>
