@@ -248,7 +248,7 @@ export default function StockRecordsPage() {
             </div>
           </div>
           <nav className="hidden md:flex items-center space-x-6">
-            <Link href="/backtest">
+            <Link href="/app/index.html">
               <Button
                 variant="outline"
                 size="sm"

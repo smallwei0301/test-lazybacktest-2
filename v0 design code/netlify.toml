@@ -1,0 +1,53 @@
+# Netlify 配置文件 - LazyBacktest 主應用
+
+# Next.js 構建設置
+[build]
+  command = "npm run build"
+  functions = "netlify/functions"
+  publish = ".next"
+
+# Functions 目錄配置
+[functions]
+  directory = "netlify/functions"
+
+# API 代理設定
+[[redirects]]
+  from = "/api/tpex/*"
+  to = "/.netlify/functions/tpex-proxy"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/twse/*"
+  to = "/.netlify/functions/twse-proxy"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/adjusted-price/*"
+  to = "/.netlify/functions/calculateAdjustedPrice"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/us/*"
+  to = "/.netlify/functions/us-proxy"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/index/*"
+  to = "/.netlify/functions/index-proxy"
+  status = 200
+  force = true
+
+# 靜態 App 路由配置 - 確保 /app 路由指向靜態 HTML 文件
+[[redirects]]
+  from = "/app/*"
+  to = "/app/index.html"
+  status = 200
+
+# 計畫任務 - 緩存預熱
+[[scheduled_functions]]
+  name = "cache-warmer"
+  cron = "0 6 * * *"

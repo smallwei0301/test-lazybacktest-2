@@ -24,6 +24,8 @@ import { useEffect, useState, useRef } from "react"
 export default function HomePage() {
   const [stats, setStats] = useState({ stat1: 0, stat2: 0, stat3: 0 })
   const [isVisible, setIsVisible] = useState(false)
+  const [currentStory, setCurrentStory] = useState(0)
+  const [isAutoPlay, setIsAutoPlay] = useState(true)
   const statsRef = useRef<HTMLDivElement>(null)
   // </CHANGE>
 
@@ -67,6 +69,17 @@ export default function HomePage() {
 
     return () => observer.disconnect()
   }, [isVisible])
+
+  // Carousel effect for pain points
+  useEffect(() => {
+    if (!isAutoPlay) return
+
+    const timer = setInterval(() => {
+      setCurrentStory((prev) => (prev + 1) % 3)
+    }, 15000) // Change every 15 seconds
+
+    return () => clearInterval(timer)
+  }, [isAutoPlay])
   // </CHANGE>
 
   return (
@@ -123,9 +136,9 @@ export default function HomePage() {
                 股票紀錄
               </span>
             </Link>
-            <Link href="/backtest">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">立即免費體驗</Button>
-            </Link>
+            <a href="/app/index.html">
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">進入回測 App</Button>
+            </a>
           </nav>
         </div>
       </header>
@@ -156,15 +169,15 @@ export default function HomePage() {
               LazyBacktest 幫你自動測試上百種參數組合，用台股真實歷史資料，告訴你「這個方法到底有沒有效」。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-              <Link href="/backtest">
+              <a href="/app/index.html">
                 <Button
                   size="lg"
                   className="bg-primary hover:bg-primary/90 text-primary-foreground text-lg px-10 py-7 group shadow-lg"
                 >
-                  立即免費體驗回測
+                  進入回測 App
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Button>
-              </Link>
+              </a>
               <Button
                 variant="outline"
                 size="lg"
@@ -208,99 +221,194 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="max-w-4xl mx-auto space-y-12 mb-20">
-            {/* Story 1 */}
-            {/* CHANGE> 更新痛點卡片圖片尺寸和布局，使用更大的圖片增強視覺效果 */}
-            <Card className="p-8 bg-card border-l-4 border-l-primary hover:shadow-xl transition-shadow">
-              <div className="flex flex-col md:flex-row items-start gap-6">
-                <div className="w-full md:w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
-                  <img
-                    src="/confused-investor-looking-at-complex-stock-market-.jpg"
-                    alt="思考策略"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground mb-4">
-                    「如果 RSI 低於 30 買、超過 70 賣，是不是會賺？」
-                  </h3>
-                  <p className="text-muted-foreground leading-relaxed mb-4">
-                    但當你真的想「認真驗證」時，問題就來了：你不知道去哪裡拿歷史資料、看不懂那些專有名詞、每改一次參數就要重跑一次，跑完還不確定結果是不是可靠。
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed font-medium">
-                    原本只是想知道「這招到底有沒有效」，最後卻變成一堆視窗、一堆報表，還是一頭霧水。
-                  </p>
-                </div>
-              </div>
-            </Card>
+          {/* Carousel Stories */}
+          <div className="max-w-4xl mx-auto">
+            {/* Arrow Controls + Card Container */}
+            <div className="relative flex items-center justify-between gap-4">
+              {/* Previous Button - Left Side */}
+              <button
+                onClick={() => {
+                  setCurrentStory((prev) => (prev - 1 + 3) % 3)
+                  setIsAutoPlay(false)
+                }}
+                className="p-2 rounded-full hover:bg-muted transition-colors flex-shrink-0"
+                aria-label="Previous story"
+              >
+                <ArrowRight className="h-6 w-6 rotate-180 text-muted-foreground hover:text-foreground" />
+              </button>
 
-            {/* Story 2 */}
-            <Card className="p-8 bg-card border-l-4 border-l-accent hover:shadow-xl transition-shadow">
-              <div className="flex flex-col md:flex-row items-start gap-6">
-                <div className="w-full md:w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
-                  <img
-                    src="/complex-programming-code-interface-with-technical-.jpg"
-                    alt="複雜工具"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground mb-4">
-                    你可能也聽過很多人說：「投資要有自己的策略，不要亂跟單。」
-                  </h3>
-                  <p className="text-muted-foreground leading-relaxed mb-4">於是你上網查工具，卻發現：</p>
-                  <div className="space-y-3 mb-4">
-                    <div className="flex items-center gap-3 text-muted-foreground">
-                      <div className="w-2 h-2 bg-accent rounded-full flex-shrink-0"></div>
-                      <span>要寫程式</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-muted-foreground">
-                      <div className="w-2 h-2 bg-accent rounded-full flex-shrink-0"></div>
-                      <span>要自己寫公式</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-muted-foreground">
-                      <div className="w-2 h-2 bg-accent rounded-full flex-shrink-0"></div>
-                      <span>功能很多，但看起來就像是專業券商研究員在用</span>
-                    </div>
-                  </div>
-                  <p className="text-muted-foreground leading-relaxed font-medium">
-                    結果是：你知道回測很重要，但你根本不知道怎麼開始做第一次回測。
-                  </p>
-                </div>
-              </div>
-            </Card>
+              {/* Carousel Container */}
+              <div className="overflow-hidden flex-1">
+                <div
+                  className="transition-opacity duration-500 ease-in-out"
+                  style={{
+                    opacity: 1,
+                  }}
+                >
+                  {currentStory === 0 && (
+                    <Card className="p-8 bg-card border-l-4 border-l-primary hover:shadow-xl transition-shadow animate-in fade-in duration-500">
+                      <div className="flex flex-col md:flex-row items-start gap-6">
+                        <div className="w-full md:w-32 h-32 md:h-auto md:self-stretch rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
+                          <img
+                            src="/confused-investor-looking-at-complex-stock-market-.jpg"
+                            alt="思考策略"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-foreground mb-4">
+                            我只是想知道這招到底有沒有效
+                          </h3>
+                          <p className="text-muted-foreground leading-relaxed mb-3">
+                            很多人一開始接觸股票策略時，都會這樣想：「如果 RSI 低於 30 買、超過 70 賣，是不是會賺？」但當你真的想試著驗證時，就發現——
+                          </p>
+                          <ul className="space-y-2 mb-4">
+                            <li className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-primary font-bold">•</span>
+                              <span>要去哪裡查資料？</span>
+                            </li>
+                            <li className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-primary font-bold">•</span>
+                              <span>怎麼設定參數？</span>
+                            </li>
+                            <li className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-primary font-bold">•</span>
+                              <span>為什麼每次調一點又要重跑？</span>
+                            </li>
+                            <li className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-primary font-bold">•</span>
+                              <span>那些圖表、勝率數字我根本看不懂啊！</span>
+                            </li>
+                          </ul>
+                          <p className="text-muted-foreground leading-relaxed font-medium">
+                            結果，一開始的興趣，最後變成滿滿的挫折。
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
 
-            {/* Story 3 */}
-            <Card className="p-8 bg-card border-l-4 border-l-primary hover:shadow-xl transition-shadow">
-              <div className="flex flex-col md:flex-row items-start gap-6">
-                <div className="w-full md:w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
-                  <img
-                    src="/busy-professional-working-at-desk-with-clock-showi.jpg"
-                    alt="時間有限"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground mb-4">你不是不想學，只是現實很忙</h3>
-                  <p className="text-muted-foreground leading-relaxed mb-4">
-                    白天要上班，下班後還要顧家、處理生活瑣事，真正能坐下來研究股票的時間，其實有限。
-                  </p>
-                  <p className="text-muted-foreground leading-relaxed mb-4">
-                    等你終於有空，卻被一堆複雜的設定、看不懂的程式碼打退堂鼓。心裡可能會想：「如果有一個工具可以幫我把這些都弄好就好了。」
-                  </p>
-                  <div className="bg-primary/5 rounded-lg p-4 border-l-4 border-primary">
-                    <p className="text-foreground font-semibold">
-                      LazyBacktest 想做的，就是這件事：讓「驗證策略」變成一件新手也能輕鬆完成的事情。
-                    </p>
-                  </div>
+                  {currentStory === 1 && (
+                    <Card className="p-8 bg-card border-l-4 border-l-accent hover:shadow-xl transition-shadow animate-in fade-in duration-500">
+                      <div className="flex flex-col md:flex-row items-start gap-6">
+                        <div className="w-full md:w-32 h-32 md:h-auto md:self-stretch rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
+                          <img
+                            src="/complex-programming-code-interface-with-technical-.jpg"
+                            alt="複雜工具"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-foreground mb-4">
+                            別人說回測很重要，但我根本不知道怎麼開始
+                          </h3>
+                          <p className="text-muted-foreground leading-relaxed mb-3">
+                            你也許看過財經 Youtuber 說：「要有自己的策略，不要亂跟單」。但當你真的想回測，發現：
+                          </p>
+                          <div className="space-y-2 mb-4 bg-muted/30 p-4 rounded-lg">
+                            <div className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-accent font-bold">✕</span>
+                              <span>「咦？TradingView 好像要寫公式？」</span>
+                            </div>
+                            <div className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-accent font-bold">✕</span>
+                              <span>「FinLab 那個 Python 太難了吧？」</span>
+                            </div>
+                            <div className="flex items-start gap-2 text-muted-foreground">
+                              <span className="text-accent font-bold">✕</span>
+                              <span>「XQ 也不知道哪裡設定…」</span>
+                            </div>
+                          </div>
+                          <p className="text-muted-foreground leading-relaxed mb-3">
+                            所以多數人最後都放棄，只能繼續「用感覺買」。而事實是，超過 8 成散戶都在用沒驗證過的策略，結果報酬不但不穩定，還容易越做越虧。
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+
+                  {currentStory === 2 && (
+                    <Card className="p-8 bg-card border-l-4 border-l-primary hover:shadow-xl transition-shadow animate-in fade-in duration-500">
+                      <div className="flex flex-col md:flex-row items-start gap-6">
+                        <div className="w-full md:w-32 h-32 md:h-auto md:self-stretch rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
+                          <img
+                            src="/busy-professional-working-at-desk-with-clock-showi.jpg"
+                            alt="時間有限"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-foreground mb-4">我不是不想學，只是太難了</h3>
+                          <p className="text-muted-foreground leading-relaxed mb-4">
+                            你也許有心想學量化、想變成更理性的投資人，但現實是 —— 工具太複雜、太難懂。每次只想測個策略，結果搞半天還不確定結果正不正確。
+                          </p>
+                          <div className="bg-primary/5 rounded-lg p-4 border-l-4 border-primary mb-4">
+                            <p className="text-foreground font-semibold mb-3">
+                              LazyBacktest 誕生的目的很單純：讓這件事變簡單。
+                            </p>
+                            <p className="text-muted-foreground text-sm leading-relaxed mb-3">
+                              一鍵輸入股票代號，我們幫你跑完所有組合，清楚告訴你：
+                            </p>
+                            <ul className="space-y-2">
+                              <li className="flex items-center gap-2 text-foreground text-sm">
+                                <CheckCircle className="h-4 w-4 text-primary flex-shrink-0" />
+                                <span>哪組報酬最高</span>
+                              </li>
+                              <li className="flex items-center gap-2 text-foreground text-sm">
+                                <CheckCircle className="h-4 w-4 text-primary flex-shrink-0" />
+                                <span>哪組風險最低</span>
+                              </li>
+                              <li className="flex items-center gap-2 text-foreground text-sm">
+                                <CheckCircle className="h-4 w-4 text-primary flex-shrink-0" />
+                                <span>哪組策略最穩定</span>
+                              </li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
                 </div>
               </div>
-            </Card>
-            {/* </CHANGE> */}
+
+              {/* Next Button - Right Side */}
+              <button
+                onClick={() => {
+                  setCurrentStory((prev) => (prev + 1) % 3)
+                  setIsAutoPlay(false)
+                }}
+                className="p-2 rounded-full hover:bg-muted transition-colors flex-shrink-0"
+                aria-label="Next story"
+              >
+                <ArrowRight className="h-6 w-6 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+
+            {/* Dots Indicator - Below Carousel */}
+            <div className="flex justify-center gap-2 mt-6">
+              {[0, 1, 2].map((index) => (
+                <button
+                  key={index}
+                  onClick={() => {
+                    setCurrentStory(index)
+                    setIsAutoPlay(false)
+                  }}
+                  className={`h-2 rounded-full transition-all ${
+                    currentStory === index
+                      ? "bg-primary w-6"
+                      : "bg-muted-foreground/30 w-2 hover:bg-muted-foreground/50"
+                  }`}
+                  aria-label={`Go to story ${index + 1}`}
+                />
+              ))}
+            </div>
+            <div className="mt-6 text-center text-sm text-muted-foreground">
+              故事 {currentStory + 1} / 3
+            </div>
           </div>
 
           {/* Statistics */}
-          <div className="max-w-5xl mx-auto" ref={statsRef}>
+          <div className="max-w-5xl mx-auto mt-20" ref={statsRef}>
             <div className="bg-gradient-to-br from-card via-card to-primary/5 rounded-3xl p-12 shadow-xl border-2">
               <div className="text-center mb-12">
                 <h3 className="text-3xl font-bold text-foreground mb-4">您並不孤單</h3>
@@ -341,7 +449,6 @@ export default function HomePage() {
                   <p className="text-muted-foreground font-medium">的交易決策，受到情緒影響而在錯誤時間點進出場</p>
                 </div>
               </div>
-              {/* </CHANGE> */}
               <div className="mt-12 text-center max-w-3xl mx-auto">
                 <p className="text-muted-foreground leading-relaxed">
                   這些情況往往不是因為你不夠認真，而是缺少一個簡單好用的工具，讓你可以在下單之前，就先用數據驗證自己的想法。
@@ -353,9 +460,7 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </section>
-
-      {/* Solution Section - Competitor Comparison */}
+      </section>      {/* Solution Section - Competitor Comparison */}
       <section className="py-24 bg-background">
         <div className="container mx-auto px-4">
           <div className="text-center mb-20">
@@ -1029,12 +1134,12 @@ export default function HomePage() {
             </div>
 
             <div className="mt-16 text-center">
-              <Link href="/backtest">
+              <a href="/app/index.html">
                 <Button size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                  立即體驗回測功能
+                  進入回測 App
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Button>
-              </Link>
+              </a>
             </div>
           </div>
         </div>
@@ -1170,11 +1275,11 @@ export default function HomePage() {
                       <span className="text-sm">風險管理工具</span>
                     </div>
                   </div>
-                  <Link href="/backtest">
+                  <a href="/app/index.html">
                     <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground mt-8">
-                      立即開始使用
+                      進入 App
                     </Button>
-                  </Link>
+                  </a>
                 </CardContent>
               </Card>
 
@@ -1214,11 +1319,11 @@ export default function HomePage() {
                       <span className="text-sm">策略分享與匯出</span>
                     </div>
                   </div>
-                  <Link href="/backtest">
+                  <a href="/app/index.html">
                     <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground mt-8">
-                      免費體驗專業功能
+                      進入 App
                     </Button>
-                  </Link>
+                  </a>
                 </CardContent>
               </Card>
             </div>
@@ -1324,15 +1429,15 @@ export default function HomePage() {
               想給你的，是一個新手也能用的回測工具，讓你在沒有程式背景的情況下，也能走上更理性、數據化的投資方式。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Link href="/backtest">
+              <a href="/app/index.html">
                 <Button
                   size="lg"
                   className="bg-primary hover:bg-primary/90 text-primary-foreground text-xl px-12 py-8 group shadow-xl"
                 >
-                  立即免費體驗回測
+                  進入回測 App
                   <ArrowRight className="ml-2 h-6 w-6 group-hover:translate-x-1 transition-transform" />
                 </Button>
-              </Link>
+              </a>
             </div>
             <p className="text-sm text-muted-foreground mt-6">不用註冊也可以先試跑一個範例策略</p>
           </div>
@@ -1345,94 +1450,59 @@ export default function HomePage() {
           <div className="grid md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center space-x-3 mb-4">
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <BarChart3 className="h-5 w-5 text-primary-foreground" />
+                <div className="w-10 h-10 bg-background rounded-lg flex items-center justify-center shadow-sm">
+                  <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                  </svg>
                 </div>
                 <div>
-                  <span className="text-lg font-bold">LazyBacktest</span>
-                  <div className="text-xs text-muted opacity-80">懶人回測</div>
+                  <span className="text-lg font-bold text-foreground">LazyBacktest</span>
+                  <div className="text-xs text-muted opacity-80">懶人股票回測</div>
                 </div>
               </div>
-              <p className="text-sm text-muted opacity-80">專為股票新手小白設計的智能回測系統</p>
+              <p className="text-sm opacity-80">先恭喜您，投資賺錢！<br /> 如果這個網站幫助您投資順利<br /> 或者單純想支持一下韭菜胖叔叔<br />歡迎斗內讓我可以上車繼續更新<br /> 用奶粉發電，不再用愛發電</p>
             </div>
             <div>
-              <h4 className="font-semibold mb-4 text-background">產品功能</h4>
+              <h4 className="font-semibold mb-4">Donate (斗內/贊助)</h4>
               <ul className="space-y-2 text-sm opacity-80">
                 <li>
-                  <a href="#features" className="hover:text-primary transition-colors">
-                    專業回測引擎
+                  <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
+                    歐付寶
                   </a>
                 </li>
                 <li>
-                  <a href="#features" className="hover:text-primary transition-colors">
-                    參數優化
+                  <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
+                    綠界
                   </a>
                 </li>
                 <li>
-                  <a href="#features" className="hover:text-primary transition-colors">
-                    策略組合
-                  </a>
-                </li>
-                <li>
-                  <a href="#features" className="hover:text-primary transition-colors">
-                    風險管理
-                  </a>
-                </li>
-                <li>
-                  <Link href="/stock-records" className="hover:text-primary transition-colors">
-                    股票紀錄
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4 text-background">支援與幫助</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    使用教學
-                  </a>
-                </li>
-                <li>
-                  <a href="#faq" className="hover:text-primary transition-colors">
-                    常見問題
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    聯絡客服
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    社群討論
+                  <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
+                    PayPal
                   </a>
                 </li>
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4 text-background">法律聲明</h4>
+              <h4 className="font-semibold mb-4">支援與幫助</h4>
               <ul className="space-y-2 text-sm opacity-80">
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    服務條款
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    隱私政策
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-primary transition-colors">
-                    投資風險警告
-                  </a>
-                </li>
+                <li><a href="#" className="hover:text-primary transition-colors">使用教學</a></li>
+                <li><a href="#" className="hover:text-primary transition-colors">常見問題</a></li>
+                <li><a href="#" className="hover:text-primary transition-colors">寄信給我</a></li>
+                <li><a href="#" className="hover:text-primary transition-colors">社群討論</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-4">其他說明</h4>
+              <ul className="space-y-2 text-sm opacity-80">
+                <li><a href="#" className="hover:text-primary transition-colors">隱私政策</a></li>
+                <li><a href="#" className="hover:text-primary transition-colors">免責聲明</a></li>
               </ul>
             </div>
           </div>
-          <div className="border-t border-muted/20 mt-8 pt-8 text-center text-sm opacity-60">
-            <p>© 2024 懶人回測 LazyBacktest. 版權所有. 投資有風險，請謹慎評估。</p>
+
+          <div className="border-t border-muted/20 mt-8 pt-8 text-center text-sm opacity-80">
+            <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" className="underline hover:text-primary transition-colors">smallwei0301@gmail.com</a></p>
+            <p className="text-xs opacity-60 mt-2">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
           </div>
         </div>
       </footer>
