@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LazyBacktest Strategy Parameter Schema",
+  "description": "描述回測頁面中可用策略的參數定義，供 UI 動態生成參數面板與驗證使用。",
+  "type": "object",
+  "properties": {
+    "ma_cross": {
+      "description": "均線黃金/死亡交叉",
+      "type": "object",
+      "properties": {
+        "fast": { "type": "integer", "default": 5, "minimum": 1, "maximum": 200, "description": "短期均線天數" },
+        "slow": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 2,
+          "maximum": 400,
+          "description": "長期均線天數（應 > fast）"
+        },
+        "apply_to": {
+          "type": "string",
+          "default": "close",
+          "enum": ["close", "open", "high", "low"],
+          "description": "價格來源"
+        }
+      },
+      "required": ["fast", "slow"]
+    },
+    "ma_above": {
+      "description": "價格突破均線",
+      "type": "object",
+      "properties": {
+        "period": { "type": "integer", "default": 20, "minimum": 1, "maximum": 400 },
+        "threshold": {
+          "type": "number",
+          "default": 0.0,
+          "minimum": -100,
+          "maximum": 100,
+          "description": "相對於均線的百分比偏移（0 表示突破即進場）"
+        }
+      },
+      "required": ["period"]
+    },
+    "rsi_oversold": {
+      "description": "RSI 超賣/超買 訊號",
+      "type": "object",
+      "properties": {
+        "period": { "type": "integer", "default": 14, "minimum": 2, "maximum": 100 },
+        "threshold": { "type": "integer", "default": 30, "minimum": 1, "maximum": 49 }
+      },
+      "required": ["period", "threshold"]
+    },
+    "rsi_overbought": { "$ref": "#/properties/rsi_oversold" },
+    "macd_cross": {
+      "description": "MACD 黃金/死亡交叉 (DI 版)",
+      "type": "object",
+      "properties": {
+        "fast": { "type": "integer", "default": 12, "minimum": 1, "maximum": 200 },
+        "slow": { "type": "integer", "default": 26, "minimum": 2, "maximum": 400 },
+        "signal": { "type": "integer", "default": 9, "minimum": 1, "maximum": 100 }
+      },
+      "required": ["fast", "slow", "signal"]
+    },
+    "bollinger_breakout": {
+      "type": "object",
+      "properties": {
+        "period": { "type": "integer", "default": 20, "minimum": 1, "maximum": 400 },
+        "std_multiplier": { "type": "number", "default": 2.0, "minimum": 0.1, "maximum": 10 }
+      },
+      "required": ["period"]
+    },
+    "k_d_cross": {
+      "description": "KD 指標交叉 (K/D)",
+      "type": "object",
+      "properties": {
+        "k_period": { "type": "integer", "default": 9, "minimum": 1, "maximum": 100 },
+        "d_period": { "type": "integer", "default": 3, "minimum": 1, "maximum": 100 },
+        "threshold": { "type": "integer", "default": 20, "minimum": 0, "maximum": 100 }
+      },
+      "required": ["k_period", "d_period"]
+    },
+    "volume_spike": {
+      "type": "object",
+      "properties": {
+        "multiplier": {
+          "type": "number",
+          "default": 2.0,
+          "minimum": 1.0,
+          "maximum": 10.0,
+          "description": "相對於平均成交量的倍數"
+        },
+        "lookback": { "type": "integer", "default": 20, "minimum": 1, "maximum": 200 }
+      },
+      "required": ["multiplier"]
+    },
+    "price_breakout": {
+      "type": "object",
+      "properties": {
+        "lookback": { "type": "integer", "default": 20, "minimum": 1, "maximum": 365 }
+      },
+      "required": ["lookback"]
+    },
+    "williams_oversold": {
+      "type": "object",
+      "properties": {
+        "period": { "type": "integer", "default": 14, "minimum": 1, "maximum": 100 },
+        "threshold": { "type": "integer", "default": -80, "minimum": -100, "maximum": 0 }
+      }
+    },
+    "turtle_breakout": {
+      "type": "object",
+      "properties": {
+        "entry_n": { "type": "integer", "default": 20, "minimum": 1, "maximum": 200 },
+        "exit_n": { "type": "integer", "default": 10, "minimum": 1, "maximum": 200 }
+      },
+      "required": ["entry_n"]
+    },
+    "trailing_stop": {
+      "type": "object",
+      "properties": {
+        "percentage": {
+          "type": "number",
+          "default": 3.0,
+          "minimum": 0.1,
+          "maximum": 100,
+          "description": "移動停損百分比"
+        }
+      },
+      "required": ["percentage"]
+    },
+    "fixed_stop_loss": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false }
+      }
+    }
+  },
+  "additionalProperties": false
+}
