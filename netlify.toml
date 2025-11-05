@@ -7,6 +7,9 @@
   functions = "netlify/functions"
   publish = ".next"
 
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 [functions]
   directory = "netlify/functions"
 
@@ -40,7 +43,8 @@
   status = 200
   force = true
 
-# Catch-all redirect for Next.js
+# Catch-all redirect for Next.js - SPA routing
+# CRITICAL: This must be last to apply as fallback for all unmatched routes
 [[redirects]]
   from = "/*"
   to = "/index.html"
