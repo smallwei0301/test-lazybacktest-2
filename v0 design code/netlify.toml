@@ -6,6 +6,10 @@
   functions = "netlify/functions"
   publish = ".next"
 
+# Next.js Netlify 插件，提供動態路由與 SSR 支援
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # Functions 目錄配置
 [functions]
   directory = "netlify/functions"
