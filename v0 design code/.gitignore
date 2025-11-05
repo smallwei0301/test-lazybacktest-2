@@ -1,5 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Archived files - not tracked in git history
+/archived/
+
 # dependencies
 /node_modules
 

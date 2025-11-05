@@ -1,6 +1,9 @@
 # Local Netlify folder
 .netlify
 
+# Archived files - not tracked in git history
+/archived/
+
 # 備份檔案
 js/*backup*.js
 js/*corrupted*.js
