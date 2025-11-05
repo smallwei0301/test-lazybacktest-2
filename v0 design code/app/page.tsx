@@ -1,5 +1,7 @@
 "use client"
 
+// Version: LB-20250214-01
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -136,9 +138,9 @@ export default function HomePage() {
                 股票紀錄
               </span>
             </Link>
-            <a href="/app/index.html">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">進入回測 App</Button>
-            </a>
+            <Button asChild className="bg-primary hover:bg-primary/90 text-primary-foreground">
+              <Link href="/backtest">進入回測 App</Link>
+            </Button>
           </nav>
         </div>
       </header>
@@ -169,15 +171,16 @@ export default function HomePage() {
               LazyBacktest 幫你自動測試上百種參數組合，用台股真實歷史資料，告訴你「這個方法到底有沒有效」。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
-              <a href="/app/index.html">
-                <Button
-                  size="lg"
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground text-lg px-10 py-7 group shadow-lg"
-                >
+              <Button
+                asChild
+                size="lg"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-lg px-10 py-7 group shadow-lg"
+              >
+                <Link href="/backtest">
                   進入回測 App
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </a>
+                </Link>
+              </Button>
               <Button
                 variant="outline"
                 size="lg"
@@ -1134,12 +1137,12 @@ export default function HomePage() {
             </div>
 
             <div className="mt-16 text-center">
-              <a href="/app/index.html">
-                <Button size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground">
+              <Button asChild size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                <Link href="/backtest">
                   進入回測 App
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </a>
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -1275,11 +1278,9 @@ export default function HomePage() {
                       <span className="text-sm">風險管理工具</span>
                     </div>
                   </div>
-                  <a href="/app/index.html">
-                    <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground mt-8">
-                      進入 App
-                    </Button>
-                  </a>
+                  <Button asChild className="w-full bg-primary hover:bg-primary/90 text-primary-foreground mt-8">
+                    <Link href="/backtest">進入 App</Link>
+                  </Button>
                 </CardContent>
               </Card>
 
@@ -1319,11 +1320,9 @@ export default function HomePage() {
                       <span className="text-sm">策略分享與匯出</span>
                     </div>
                   </div>
-                  <a href="/app/index.html">
-                    <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground mt-8">
-                      進入 App
-                    </Button>
-                  </a>
+                  <Button asChild className="w-full bg-accent hover:bg-accent/90 text-accent-foreground mt-8">
+                    <Link href="/backtest">進入 App</Link>
+                  </Button>
                 </CardContent>
               </Card>
             </div>
@@ -1429,15 +1428,16 @@ export default function HomePage() {
               想給你的，是一個新手也能用的回測工具，讓你在沒有程式背景的情況下，也能走上更理性、數據化的投資方式。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <a href="/app/index.html">
-                <Button
-                  size="lg"
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground text-xl px-12 py-8 group shadow-xl"
-                >
+              <Button
+                asChild
+                size="lg"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-xl px-12 py-8 group shadow-xl"
+              >
+                <Link href="/backtest">
                   進入回測 App
                   <ArrowRight className="ml-2 h-6 w-6 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </a>
+                </Link>
+              </Button>
             </div>
             <p className="text-sm text-muted-foreground mt-6">不用註冊也可以先試跑一個範例策略</p>
           </div>
