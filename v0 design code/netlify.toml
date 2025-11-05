@@ -6,6 +6,9 @@
   functions = "netlify/functions"
   publish = ".next"
 
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # Functions 目錄配置
 [functions]
   directory = "netlify/functions"
@@ -40,12 +43,6 @@
   to = "/.netlify/functions/index-proxy"
   status = 200
   force = true
-
-# 靜態 App 路由配置 - 確保 /app 路由指向靜態 HTML 文件
-[[redirects]]
-  from = "/app/*"
-  to = "/app/index.html"
-  status = 200
 
 # 計畫任務 - 緩存預熱
 [[scheduled_functions]]
