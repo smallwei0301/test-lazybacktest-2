@@ -40,6 +40,12 @@
   status = 200
   force = true
 
+# Catch-all redirect for Next.js
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [[scheduled_functions]]
   name = "cache-warmer"
   cron = "0 6 * * *"
