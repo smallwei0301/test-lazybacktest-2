@@ -1,4 +1,12 @@
-# Netlify Proxy 設定
+# Netlify 配置 - LazyBacktest 主應用
+# Next.js 應用位於 v0 design code 目錄
+
+[build]
+  base = "v0 design code"
+  command = "npm run build"
+  functions = "netlify/functions"
+  publish = ".next"
+
 [functions]
   directory = "netlify/functions"
 
