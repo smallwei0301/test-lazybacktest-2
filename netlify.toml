@@ -43,13 +43,6 @@
   status = 200
   force = true
 
-# Catch-all redirect for Next.js - SPA routing
-# CRITICAL: This must be last to apply as fallback for all unmatched routes
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
 [[scheduled_functions]]
   name = "cache-warmer"
   cron = "0 6 * * *"
