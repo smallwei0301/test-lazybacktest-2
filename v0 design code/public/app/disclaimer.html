@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<!-- Version: LB-20240505-FE-005 -->
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>免責聲明 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { margin: 0; font-family: "Inter", "Noto Sans", sans-serif; background-color: #111827; color: #f8fafc; }
+        .container-wrapper { display: flex; flex-direction: column; min-height: 100vh; }
+        main { flex: 1; }
+        .hero { padding: 80px 20px 40px; text-align: center; }
+        .hero h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 900; margin-bottom: 16px; color: #fbbf24; }
+        .hero p { max-width: 760px; margin: 0 auto; line-height: 1.8; color: rgba(248,250,252,0.85); font-size: 18px; }
+        .disclaimer { max-width: 960px; margin: 0 auto 80px; padding: 0 20px; display: grid; gap: 24px; }
+        .disclaimer-card { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.3); border-radius: 20px; padding: 32px; box-shadow: 0 25px 50px -12px rgba(15,23,42,0.7); }
+        .disclaimer-card h2 { margin-top: 0; color: #fbbf24; font-size: 24px; font-weight: 800; }
+        .disclaimer-card p, .disclaimer-card li { color: rgba(248,250,252,0.9); line-height: 1.8; font-size: 16px; }
+        .disclaimer-card ul { margin: 16px 0 0; padding-left: 20px; }
+        .cta { background: linear-gradient(135deg, rgba(250,204,21,0.15), rgba(8,145,178,0.15)); border: 1px solid rgba(251,191,36,0.4); border-radius: 20px; padding: 28px; text-align: center; color: #fef3c7; }
+        .cta a { color: #fcd34d; font-weight: 600; }
+        @media (max-width: 640px) {
+            .disclaimer-card { padding: 24px; }
+            .hero { padding: 60px 16px 32px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur supports-[backdrop-filter]:bg-slate-900/70 sticky top-0 z-50 shadow-sm">
+            <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px; display: flex; align-items: center; justify-content: space-between;">
+                <div class="flex items-center space-x-3" style="flex-shrink: 0;">
+                    <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none; flex-shrink: 0; color: #f8fafc;">
+                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <div class="w-5 h-5 flex flex-col justify-between">
+                                <div class="flex justify-between">
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                </div>
+                                <div class="flex justify-between items-end">
+                                    <div class="w-1 h-2 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-3 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-1 bg-white rounded-sm"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="flex-shrink: 0;">
+                            <span class="text-lg font-bold" style="display: block;">LazyBacktest</span>
+                            <div class="text-xs" style="color: rgba(248,250,252,0.8);">懶人股票回測</div>
+                        </div>
+                    </a>
+                </div>
+                <nav style="display: flex; gap: 24px; flex-wrap: wrap; justify-content: flex-end;">
+                    <a href="home.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">首頁</a>
+                    <a href="tutorial.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">使用教學</a>
+                    <a href="faq.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">常見問題</a>
+                    <a href="index.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">立即體驗</a>
+                    <a href="community.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">社群討論</a>
+                    <a href="contact.html" class="text-sm" style="color: rgba(248,250,252,0.8); text-decoration: none; white-space: nowrap;">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+        <main>
+            <section class="hero">
+                <h1>免責聲明</h1>
+                <p>LazyBacktest 致力於提供可靠的回測工具與教育資源，但所有結果僅供參考，不構成投資建議。使用者在依據本平台內容操作前，請務必完整閱讀下列條款並自行承擔風險。</p>
+            </section>
+            <section class="disclaimer">
+                <article class="disclaimer-card">
+                    <h2>服務性質</h2>
+                    <p>LazyBacktest 提供的功能為歷史資料回測、策略模擬與教學文章。平台不提供：</p>
+                    <ul>
+                        <li>即時證券行情或下單服務。</li>
+                        <li>任何形式的投資建議、代操或保證報酬。</li>
+                        <li>第三方金融商品的推薦與銷售。</li>
+                    </ul>
+                    <p>若你需要實際下單或財務規劃服務，請諮詢持牌的證券商或專業顧問。</p>
+                </article>
+                <article class="disclaimer-card">
+                    <h2>資料來源與限制</h2>
+                    <ul>
+                        <li>歷史數據來源包含台灣證券交易所、櫃買中心等公開資訊，若官方資料更新或異常，結果可能產生誤差。</li>
+                        <li>策略回測結果為過去表現，無法保證未來獲利。市場波動、手續費、稅負等因素都可能影響實際報酬。</li>
+                        <li>若你匯入自行整理的資料，請確認合法使用並對內容負責。</li>
+                    </ul>
+                </article>
+                <article class="disclaimer-card">
+                    <h2>使用者責任</h2>
+                    <ul>
+                        <li>請在操作前先閱讀 <a href="tutorial.html" style="color:#fcd34d; font-weight:600;">使用教學</a>，確保了解功能設定，避免因誤用造成判斷錯誤。</li>
+                        <li>若你在 <a href="community.html" style="color:#fcd34d; font-weight:600;">社群討論</a> 分享內容，請確認不涉及未公開資訊或違反相關法規。</li>
+                        <li>對於因使用本平台造成的任何損失或衍生損害，LazyBacktest 與開發者不承擔賠償責任。</li>
+                    </ul>
+                </article>
+                <article class="disclaimer-card">
+                    <h2>第三方連結</h2>
+                    <p>平台可能提供前往其他網站、工具或服務的連結（例如贊助管道或教學文章）。這些內容由各自的提供者負責，LazyBacktest 無法保證其準確性與合法性。使用者應自行評估並承擔風險。</p>
+                </article>
+                <article class="disclaimer-card">
+                    <h2>政策修訂</h2>
+                    <p>我們會視需求更新免責聲明，並在此頁面公告版本。若有重大調整，會同步於 <a href="community.html" style="color:#fcd34d; font-weight:600;">社群討論</a> 提醒。</p>
+                </article>
+                <div class="cta">
+                    <p>下一步建議先閱讀 <a href="privacy.html">隱私政策</a>，了解資料如何被使用；若有疑問，歡迎直接 <a href="contact.html">寄信給我</a>。</p>
+                </div>
+            </section>
+        </main>
+        <footer class="py-12 mt-16" style="background-color: #0f172a; color: #cbd5f5;">
+            <div class="container mx-auto px-4" style="max-width: 1200px;">
+                <div class="grid md:grid-cols-5 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-slate-800 rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #f8fafc;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #cbd5f5;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #cbd5f5;">遵守免責條款，才能長久經營社群與服務。若發現違規內容，請立即 <a href="contact.html" style="color:#fcd34d;">寄信告知</a>。</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #f8fafc;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" style="color: #cbd5f5;">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" style="color: #cbd5f5;">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" style="color: #cbd5f5;">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #f8fafc;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="tutorial.html" style="color: #cbd5f5;">使用教學</a></li>
+                            <li><a href="faq.html" style="color: #cbd5f5;">常見問題</a></li>
+                            <li><a href="contact.html" style="color: #cbd5f5;">寄信給我</a></li>
+                            <li><a href="community.html" style="color: #cbd5f5;">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #f8fafc;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="privacy.html" style="color: #cbd5f5;">隱私政策</a></li>
+                            <li><a href="disclaimer.html" style="color: #cbd5f5;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #f8fafc;">更多功能</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="/stock-records/" style="color: #cbd5f5;">股票紀錄</a></li>
+                            <li><a href="index.html" style="color: #cbd5f5;">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(248,250,252,0.1); color: #cbd5f5;">
+                    <p>本頁面最後更新：2025-05-05。後續更新將於 <a href="community.html" style="color:#fcd34d;">社群討論</a> 公告。</p>
+                    <p style="color: rgba(203,213,225,0.8);">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

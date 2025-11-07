@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<!-- Version: LB-20240505-FE-004 -->
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隱私政策 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { margin: 0; font-family: "Inter", "Noto Sans", sans-serif; background-color: #f9fafb; color: #1f2937; }
+        .container-wrapper { display: flex; flex-direction: column; min-height: 100vh; }
+        main { flex: 1; }
+        .hero { background: linear-gradient(135deg, rgba(8,145,178,0.12), rgba(14,116,144,0.12)); padding: 80px 20px 60px; text-align: center; }
+        .hero h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 900; color: #0f172a; margin-bottom: 16px; }
+        .hero p { margin: 0 auto; max-width: 760px; line-height: 1.8; color: #4b5563; font-size: 18px; }
+        .policy { max-width: 960px; margin: -40px auto 0; padding: 0 20px 80px; display: grid; gap: 24px; }
+        .policy-card { background: white; border-radius: 18px; border: 1px solid #e2e8f0; box-shadow: 0 20px 40px rgba(15,23,42,0.07); padding: 32px; }
+        .policy-card h2 { margin-top: 0; color: #0f172a; font-size: 24px; font-weight: 800; }
+        .policy-card p, .policy-card li { color: #475569; line-height: 1.8; font-size: 16px; }
+        .policy-card ul { margin: 16px 0 0; padding-left: 20px; }
+        .policy-tag { display: inline-flex; align-items: center; justify-content: center; background: #0891b2; color: white; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; margin-bottom: 16px; }
+        .link-callout { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 16px; padding: 24px; }
+        .link-callout strong { color: #166534; display: block; margin-bottom: 8px; }
+        .link-callout a { color: #0f766e; font-weight: 600; }
+        @media (max-width: 640px) {
+            .policy-card { padding: 24px; }
+            .hero { padding: 60px 16px 48px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm" style="background-color: rgba(255, 255, 255, 0.95); border-color: #e5e7eb;">
+            <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px; display: flex; align-items: center; justify-content: space-between;">
+                <div class="flex items-center space-x-3" style="flex-shrink: 0;">
+                    <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none; flex-shrink: 0;">
+                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <div class="w-5 h-5 flex flex-col justify-between">
+                                <div class="flex justify-between">
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                </div>
+                                <div class="flex justify-between items-end">
+                                    <div class="w-1 h-2 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-3 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-1 bg-white rounded-sm"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="flex-shrink: 0;">
+                            <span class="text-lg font-bold" style="color: #4b5563; display: block;">LazyBacktest</span>
+                            <div class="text-xs" style="color: #4b5563;">懶人股票回測</div>
+                        </div>
+                    </a>
+                </div>
+                <nav style="display: flex; gap: 24px; flex-wrap: wrap; justify-content: flex-end;">
+                    <a href="home.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">首頁</a>
+                    <a href="tutorial.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">使用教學</a>
+                    <a href="faq.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">常見問題</a>
+                    <a href="index.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">立即體驗</a>
+                    <a href="community.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">社群討論</a>
+                    <a href="contact.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+        <main>
+            <section class="hero">
+                <h1>隱私政策</h1>
+                <p>LazyBacktest 重視每位用戶的資料權益。我們依照台灣個人資料保護法及國際雲端服務規範，建立以下政策，確保日均 1 萬次瀏覽與 6000 名活躍使用者的資訊在安全可控範圍內。</p>
+            </section>
+            <section class="policy">
+                <article class="policy-card">
+                    <div class="policy-tag">資料收集方式</div>
+                    <h2>我們收集哪些資訊？</h2>
+                    <ul>
+                        <li>基本網站紀錄：瀏覽頁面、操作時間、裝置類型，用於優化網站效能。</li>
+                        <li>回測設定：包括策略參數、股票代碼等內容，只儲存在你的瀏覽器與登入帳號，不會公開。</li>
+                        <li>社群留言：當你在 <a href="community.html" style="color:#0891b2; font-weight:600;">社群討論</a> 張貼訊息時，留言會儲存於 Netlify 雲端，以提供跨裝置存取。</li>
+                        <li>聯絡資料：透過 <a href="contact.html" style="color:#0891b2; font-weight:600;">寄信給我</a> 提供的電子郵件與訊息，只用於回覆客服需求。</li>
+                    </ul>
+                </article>
+                <article class="policy-card">
+                    <div class="policy-tag">資料使用範圍</div>
+                    <h2>資料如何被使用？</h2>
+                    <ul>
+                        <li>用於計算回測結果、顯示報表與下載檔案，協助你檢視策略表現。</li>
+                        <li>統計匿名使用情況，改善教學與介面。這些數據不會包含個人身份。</li>
+                        <li>社群留言會供所有使用者閱讀，但僅包含你填寫的暱稱與內容，不會顯示其他個資。</li>
+                        <li>若你同意，我們會不定期寄送產品更新或技巧文章，可隨時取消訂閱。</li>
+                    </ul>
+                </article>
+                <article class="policy-card">
+                    <div class="policy-tag">資料保存與安全</div>
+                    <h2>我們如何保護資料？</h2>
+                    <ul>
+                        <li>使用 Netlify 雲端儲存與每日備份，確保在高流量下仍保持穩定。</li>
+                        <li>透過 HTTPS 傳輸所有資料，並採用權限控管避免未授權存取。</li>
+                        <li>本地瀏覽器儲存的回測參數僅供你本人使用，若更換裝置可透過 <a href="/stock-records/" style="color:#0891b2; font-weight:600;">股票紀錄</a> 匯出備份。</li>
+                        <li>所有伺服器存取都會記錄時間與操作人員，降低不當存取風險。</li>
+                    </ul>
+                </article>
+                <article class="policy-card">
+                    <div class="policy-tag">你的權利</div>
+                    <h2>如何行使個資權利？</h2>
+                    <p>你可以隨時透過 <a href="contact.html" style="color:#0891b2; font-weight:600;">寄信給我</a> 提出以下要求：</p>
+                    <ul>
+                        <li>查詢、閱覽或取得你在系統中的資料副本。</li>
+                        <li>更新、補充或刪除回測設定與社群留言。</li>
+                        <li>停止使用或刪除帳號相關資料（刪除後將無法復原）。</li>
+                        <li>反對或限制我們使用你的資料於特定用途。</li>
+                    </ul>
+                </article>
+                <article class="policy-card">
+                    <div class="policy-tag">政策更新</div>
+                    <h2>政策變更通知</h2>
+                    <p>若未來因應法規或服務調整需要修改本政策，我們會在此頁面公告最新版本，並於 <a href="community.html" style="color:#0891b2; font-weight:600;">社群討論</a> 張貼提醒。重大變更將以電子郵件通知已訂閱的使用者。</p>
+                    <div class="link-callout">
+                        <strong>建議操作</strong>
+                        <p>建議至少每季檢視一次本頁內容，並透過 <a href="faq.html">常見問題</a> 追蹤最新系統更新。若你需要詳細教學，可先閱讀 <a href="tutorial.html">使用教學</a> 再進行後續操作。</p>
+                    </div>
+                </article>
+            </section>
+        </main>
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="container mx-auto px-4" style="max-width: 1200px;">
+                <div class="grid md:grid-cols-5 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">想了解更多資料使用方式，歡迎到 <a href="community.html" style="color:#0ea5a4;">社群討論</a> 參與對話。</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" style="color: #6b7280;">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" style="color: #6b7280;">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" style="color: #6b7280;">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="tutorial.html" style="color: #6b7280;">使用教學</a></li>
+                            <li><a href="faq.html" style="color: #6b7280;">常見問題</a></li>
+                            <li><a href="contact.html" style="color: #6b7280;">寄信給我</a></li>
+                            <li><a href="community.html" style="color: #6b7280;">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="privacy.html" style="color: #6b7280;">隱私政策</a></li>
+                            <li><a href="disclaimer.html" style="color: #6b7280;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">更多功能</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="/stock-records/" style="color: #6b7280;">股票紀錄</a></li>
+                            <li><a href="index.html" style="color: #6b7280;">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p>若對資料保護有疑慮，請立即透過 <a href="contact.html" style="color:#374151;">寄信給我</a> 告訴我們。</p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
