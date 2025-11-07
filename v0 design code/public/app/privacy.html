@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<!-- Version: LB-WEB-20250309A -->
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隱私政策｜LazyBacktest 台股回測服務</title>
+    <meta name="description" content="了解 LazyBacktest 如何收集、使用與保護個人資料，符合台灣法規與 Google 廣告政策，包括 Cookie、分析工具、資料保留與聯絡方式。">
+    <meta name="keywords" content="LazyBacktest 隱私政策, 個人資料保護, Google 廣告 Cookie, 台股回測">
+    <meta name="author" content="LazyBacktest">
+    <meta name="robots" content="index,follow">
+    <meta name="geo.region" content="TW">
+    <meta name="geo.placename" content="Taipei, Taiwan">
+    <meta name="geo.position" content="25.0330;121.5654">
+    <meta name="ICBM" content="25.0330, 121.5654">
+    <link rel="canonical" href="https://lazybacktest.tw/privacy">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="LazyBacktest 隱私政策">
+    <meta property="og:description" content="LazyBacktest 如何保護使用者資料、Cookie 管理、第三方服務與在地法規遵循。">
+    <meta property="og:url" content="https://lazybacktest.tw/privacy">
+    <meta property="og:locale" content="zh_TW">
+    <meta property="og:site_name" content="LazyBacktest">
+    <meta property="og:image" content="https://lazybacktest.tw/assets/privacy-cover.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background-color: #ffffff;
+            color: #1f2937;
+        }
+        .container-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            background: linear-gradient(140deg, rgba(8,145,178,0.12) 0%, rgba(79,70,229,0.12) 100%);
+            padding: clamp(64px, 8vw, 96px) 20px;
+        }
+        .hero-inner {
+            max-width: 900px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: clamp(32px, 5.6vw, 46px);
+            color: #0f172a;
+            font-weight: 900;
+            margin-bottom: 16px;
+        }
+        .hero-subtitle {
+            font-size: clamp(18px, 3vw, 22px);
+            color: #4b5563;
+            line-height: 1.8;
+            margin: 0 auto;
+            max-width: 720px;
+        }
+        .policy-section {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: clamp(48px, 7vw, 72px) 20px;
+        }
+        .policy-section h2 {
+            font-size: 24px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 16px;
+        }
+        .policy-section p {
+            line-height: 1.85;
+            color: #4b5563;
+            margin-bottom: 16px;
+        }
+        .policy-section ul {
+            padding-left: 22px;
+            margin-bottom: 16px;
+            color: #4b5563;
+            line-height: 1.85;
+        }
+        .update-note {
+            background-color: rgba(8,145,178,0.1);
+            border-left: 4px solid #0891b2;
+            padding: 18px 20px;
+            border-radius: 12px;
+            margin-bottom: 32px;
+            color: #036a83;
+        }
+        .cta-card {
+            max-width: 900px;
+            margin: 0 auto 72px;
+            background: linear-gradient(120deg, rgba(8,145,178,0.12), rgba(14,116,144,0.08));
+            border-radius: 24px;
+            padding: clamp(40px, 6vw, 60px) 24px;
+            text-align: center;
+        }
+        .cta-card h2 {
+            font-size: clamp(26px, 4.8vw, 34px);
+            color: #0f172a;
+            margin-bottom: 16px;
+            font-weight: 800;
+        }
+        .cta-card p {
+            margin: 0 auto 24px;
+            color: #4b5563;
+            max-width: 560px;
+            line-height: 1.8;
+        }
+        .cta-card a {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 26px;
+            border-radius: 999px;
+            background-color: #0891b2;
+            color: white;
+            font-weight: 700;
+            text-decoration: none;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .cta-card a:hover {
+            background-color: #0e7490;
+            transform: translateY(-2px);
+            box-shadow: 0 12px 20px rgba(8,145,178,0.18);
+        }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "PrivacyPolicy",
+        "@id": "https://lazybacktest.tw/privacy#policy",
+        "inLanguage": "zh-TW",
+        "name": "LazyBacktest 隱私政策",
+        "url": "https://lazybacktest.tw/privacy",
+        "description": "說明 LazyBacktest 如何依據台灣法規與 Google 政策處理個人資料與 Cookie。",
+        "dateModified": "2025-03-09",
+        "publisher": {
+            "@type": "Organization",
+            "name": "LazyBacktest"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 sticky top-0 z-50 shadow-sm" style="border-color: #e5e7eb;">
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex items-center justify-between py-4">
+                    <a href="home.html" class="flex items-center space-x-3" style="color: #0f172a; text-decoration: none;">
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <svg width="24" height="16" viewBox="0 0 24 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect width="24" height="16" rx="4" fill="#0EA5A4" />
+                                <path d="M4 9l3.5-3L10 9l3.5-3L17 9" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold">LazyBacktest</span>
+                            <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                        </div>
+                    </a>
+                    <nav aria-label="主要導覽" class="hidden md:flex items-center space-x-6 text-sm font-medium" style="color: #4b5563;">
+                        <a href="home.html" class="hover:text-[#0891b2] transition-colors">首頁</a>
+                        <a href="index.html" class="hover:text-[#0891b2] transition-colors">股票回測</a>
+                        <a href="tutorial.html" class="hover:text-[#0891b2] transition-colors">使用教學</a>
+                        <a href="faq.html" class="hover:text-[#0891b2] transition-colors">常見問題</a>
+                        <a href="community.html" class="hover:text-[#0891b2] transition-colors">社群討論</a>
+                        <a href="/stock-records" class="hover:text-[#0891b2] transition-colors">股票紀錄</a>
+                        <a href="contact.html" class="hover:text-[#0891b2] transition-colors">寄信給我</a>
+                    </nav>
+                </div>
+            </div>
+        </header>
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <h1 class="hero-title">LazyBacktest 隱私政策</h1>
+                    <p class="hero-subtitle">本頁面說明我們如何依據台灣《個人資料保護法》與 Google 廣告政策處理你的資訊。若政策有重大變更，會於頁面頂部更新時間並另行通知使用者。</p>
+                </div>
+            </section>
+            <section class="policy-section" aria-labelledby="update-note">
+                <div class="update-note" id="update-note">最新更新：2025 年 3 月 9 日。若你在此日期後仍使用服務，代表你已了解並同意本政策內容。</div>
+                <h2>1. 收集哪些資訊？</h2>
+                <p>LazyBacktest 在測試階段僅收集最小必要資訊：</p>
+                <ul>
+                    <li>聯絡資訊：當你透過 <a href="contact.html" style="color:#0891b2; font-weight:600;">寄信給我</a> 表單聯繫時，我們會收到你提供的姓名與電子郵件。</li>
+                    <li>服務使用紀錄：系統會在瀏覽器端儲存策略設定、股票紀錄與回測快照（LocalStorage），不會上傳至伺服器。</li>
+                    <li>網站分析：使用 Google Analytics 4 觀察頁面瀏覽行為，相關資料為匿名化，僅用於改善產品。</li>
+                </ul>
+                <h2>2. 我們如何使用這些資訊？</h2>
+                <ul>
+                    <li>回覆你的問題、提供服務通知與更新資訊。</li>
+                    <li>分析整體使用趨勢，優化回測效能與使用者體驗。</li>
+                    <li>在未來引入 Google 廣告時，根據政策顯示個人化或非個人化廣告，並提供明確的同意選項。</li>
+                </ul>
+                <h2>3. Cookie 與類似技術</h2>
+                <p>LazyBacktest 使用以下 Cookie：</p>
+                <ul>
+                    <li>必要 Cookie：儲存登入狀態（若未來提供會員功能）與語系設定。</li>
+                    <li>分析 Cookie：透過 Google Analytics 收集匿名流量資料。</li>
+                    <li>廣告 Cookie：待申請通過後，將使用 Google AdSense/Ad Manager 提供的 Cookie。你可以在彈出的同意橫幅中選擇允許或拒絕。</li>
+                </ul>
+                <p>你可以在瀏覽器中管理 Cookie，或於日後提供的「隱私中心」隨時調整設定。</p>
+                <h2>4. 資料保留與刪除</h2>
+                <ul>
+                    <li>聯絡記錄：保留 24 個月以追蹤問題處理進度，若你要求刪除會立即處理。</li>
+                    <li>本機資料：股票紀錄與策略快照儲存在你的裝置，可由你自行清除瀏覽器快取。</li>
+                    <li>Analytics 數據：依 Google 預設保留 26 個月，僅用於整體趨勢分析。</li>
+                </ul>
+                <h2>5. 使用者權利</h2>
+                <p>依台灣《個資法》，你可就個人資料行使以下權利：</p>
+                <ul>
+                    <li>查詢或請求閱覽。</li>
+                    <li>請求提供複製本。</li>
+                    <li>請求補充或更正。</li>
+                    <li>請求停止蒐集、處理或利用。</li>
+                    <li>請求刪除。</li>
+                </ul>
+                <p>請寄信至 <a href="mailto:smallwei0301@gmail.com" style="color:#0891b2; font-weight:600;">smallwei0301@gmail.com</a>，我們會在 14 個工作天內回覆。</p>
+                <h2>6. 資料安全</h2>
+                <p>我們採取以下措施保護資料安全：</p>
+                <ul>
+                    <li>採用 HTTPS 加密與 HSTS，防止資料在傳輸過程中遭竊取。</li>
+                    <li>後台權限僅限核心開發人員，所有存取皆有日誌紀錄。</li>
+                    <li>定期檢視第三方套件更新與安全公告，避免已知漏洞。</li>
+                </ul>
+                <h2>7. 第三方服務</h2>
+                <p>LazyBacktest 會與以下第三方合作：</p>
+                <ul>
+                    <li>Google Analytics：網站流量分析。</li>
+                    <li>Netlify：網站託管與 CDN 服務。</li>
+                    <li>未來可能導入的 Google AdSense：廣告投放。</li>
+                </ul>
+                <p>第三方服務僅在提供必要功能時使用，並遵循其隱私政策。</p>
+                <h2>8. 國際傳輸與在地合規</h2>
+                <p>儘管伺服器部署於 Netlify 全球節點，我們僅在必要時將資料傳輸至其他國家，並確保符合台灣與適用地區的個資法規。若有跨境傳輸需求，會事先公告並取得同意。</p>
+                <h2>9. 政策修改</h2>
+                <p>本政策可能因法規、服務調整而更新。若有重大變更，會透過網站公告、電子郵件或社群通知。建議定期回訪本頁了解最新版本。</p>
+            </section>
+            <section class="cta-card" aria-labelledby="privacy-cta">
+                <h2 id="privacy-cta">需要更多隱私協助嗎？</h2>
+                <p>若你對資料保護、Cookie 設定或 Google 廣告合規有任何疑問，歡迎直接與我們聯繫。我們會在 14 個工作天內回覆。</p>
+                <a href="contact.html">
+                    <span aria-hidden="true">📮</span>
+                    寄信給 LazyBacktest
+                </a>
+            </section>
+        </main>
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="container mx-auto px-4">
+                <div class="grid md:grid-cols-4 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="tutorial.html" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+                            <li><a href="faq.html" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                            <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+                            <li><a href="community.html" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+                            <li><a href="/stock-records" class="transition-colors" style="color: #6b7280;">股票紀錄</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="privacy.html" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+                            <li><a href="disclaimer.html" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
