@@ -732,30 +732,68 @@ export default function StockRecordsPage() {
             <div>
               <h3 className="font-semibold text-foreground mb-4">產品功能</h3>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>股票回測</li>
-                <li>策略優化</li>
-                <li>風險評估</li>
-                <li>績效分析</li>
+                <li>
+                  <a href="/app/index.html" className="hover:text-primary transition-colors">
+                    股票回測
+                  </a>
+                </li>
+                <li>
+                  <a href="/stock-records" className="hover:text-primary transition-colors">
+                    股票紀錄
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/index.html#optimizer" className="hover:text-primary transition-colors">
+                    策略優化
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/index.html#report" className="hover:text-primary transition-colors">
+                    績效分析
+                  </a>
+                </li>
               </ul>
             </div>
 
             <div>
               <h3 className="font-semibold text-foreground mb-4">支援與幫助</h3>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>使用教學</li>
-                <li>常見問題</li>
-                <li>聯絡客服</li>
-                <li>意見回饋</li>
+                <li>
+                  <a href="/app/tutorial.html" className="hover:text-primary transition-colors">
+                    使用教學
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/faq.html" className="hover:text-primary transition-colors">
+                    常見問題
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/contact.html" className="hover:text-primary transition-colors">
+                    寄信給我
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/community.html" className="hover:text-primary transition-colors">
+                    社群討論
+                  </a>
+                </li>
               </ul>
             </div>
 
             <div>
-              <h3 className="font-semibold text-foreground mb-4">關於我們</h3>
+              <h3 className="font-semibold text-foreground mb-4">其他說明</h3>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>公司介紹</li>
-                <li>服務條款</li>
-                <li>隱私政策</li>
-                <li>免責聲明</li>
+                <li>
+                  <a href="/app/privacy.html" className="hover:text-primary transition-colors">
+                    隱私政策
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/disclaimer.html" className="hover:text-primary transition-colors">
+                    免責聲明
+                  </a>
+                </li>
               </ul>
             </div>
           </div>

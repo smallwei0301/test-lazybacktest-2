@@ -1485,17 +1485,51 @@ export default function HomePage() {
             <div>
               <h4 className="font-semibold mb-4">支援與幫助</h4>
               <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">使用教學</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">常見問題</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">寄信給我</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">社群討論</a></li>
+                <li>
+                  <a href="/app/tutorial.html" className="hover:text-primary transition-colors">
+                    使用教學
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/faq.html" className="hover:text-primary transition-colors">
+                    常見問題
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/contact.html" className="hover:text-primary transition-colors">
+                    寄信給我
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/community.html" className="hover:text-primary transition-colors">
+                    社群討論
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/index.html" className="hover:text-primary transition-colors">
+                    股票回測
+                  </a>
+                </li>
+                <li>
+                  <a href="/stock-records" className="hover:text-primary transition-colors">
+                    股票紀錄
+                  </a>
+                </li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold mb-4">其他說明</h4>
               <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">隱私政策</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">免責聲明</a></li>
+                <li>
+                  <a href="/app/privacy.html" className="hover:text-primary transition-colors">
+                    隱私政策
+                  </a>
+                </li>
+                <li>
+                  <a href="/app/disclaimer.html" className="hover:text-primary transition-colors">
+                    免責聲明
+                  </a>
+                </li>
               </ul>
             </div>
           </div>
