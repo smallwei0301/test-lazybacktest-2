@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<!-- Patch Tag: LB-FOOTER-PAGES-20251127A -->
+
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>常見問題｜LazyBacktest 幫助中心</title>
+    <meta name="description" content="解答投資人最常問的 LazyBacktest 股票回測問題，包含資料來源、策略設定、回測限制、Google Ads 合規與帳務安全等主題。">
+    <meta name="keywords" content="LazyBacktest 常見問題, 股票回測 FAQ, 台股回測, 投資工具幫助中心, Google Ads 合規">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://lazybacktest.com/faq">
+    <link rel="alternate" hreflang="zh-Hant" href="https://lazybacktest.com/faq">
+    <meta property="og:title" content="常見問題｜LazyBacktest 幫助中心">
+    <meta property="og:description" content="針對 LazyBacktest 回測流程、資料來源、SEO 與廣告合規提供完整解答。">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://lazybacktest.com/faq">
+    <meta property="og:locale" content="zh_TW">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="LazyBacktest 常見問題">
+    <meta name="twitter:description" content="快速找到 LazyBacktest 股票回測平台的常見問題解答。">
+    <meta name="geo.region" content="TW-TPE">
+    <meta name="geo.placename" content="Taipei, Taiwan">
+    <meta name="geo.position" content="25.0330;121.5654">
+    <meta name="ICBM" content="25.0330, 121.5654">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&amp;family=Inter%3Awght%40400%3B500%3B700%3B900&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+      :root {
+        --background: #ffffff;
+        --foreground: #1f2937;
+        --primary: #0891b2;
+        --muted-foreground: #4b5563;
+        --border: #e5e7eb;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Inter", "Noto Sans", sans-serif;
+        background-color: var(--background);
+        color: var(--foreground);
+      }
+      .container-wrapper {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      main { flex: 1; }
+      .faq-hero {
+        background: linear-gradient(135deg, rgba(8,145,178,0.12) 0%, rgba(226,232,240,0.5) 100%);
+        padding: 72px 20px;
+        text-align: center;
+      }
+      .faq-hero h1 {
+        font-size: clamp(34px, 4vw, 48px);
+        margin-bottom: 16px;
+        font-weight: 900;
+        color: #0f172a;
+      }
+      .faq-hero p {
+        max-width: 720px;
+        margin: 0 auto;
+        color: var(--muted-foreground);
+        font-size: 18px;
+        line-height: 1.8;
+      }
+      .faq-grid {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 60px 20px 80px;
+        display: grid;
+        gap: 24px;
+      }
+      .faq-card {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+        background-color: #ffffff;
+        box-shadow: 0 16px 50px rgba(15, 23, 42, 0.08);
+      }
+      .faq-card h2 {
+        font-size: 22px;
+        margin-bottom: 12px;
+        color: #0f172a;
+        font-weight: 800;
+      }
+      .faq-item + .faq-item {
+        margin-top: 18px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(148, 163, 184, 0.4);
+      }
+      .faq-item h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .faq-item p {
+        margin: 0;
+        color: var(--muted-foreground);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .faq-item ul {
+        margin: 8px 0 0 18px;
+        color: var(--muted-foreground);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .faq-item strong { color: #0f172a; }
+      .cta-card {
+        border-radius: 16px;
+        background: linear-gradient(120deg, rgba(8,145,178,0.15), rgba(14,116,144,0.35));
+        color: #ffffff;
+        padding: 36px;
+        text-align: center;
+      }
+      .cta-card a {
+        display: inline-flex;
+        margin-top: 18px;
+        padding: 12px 28px;
+        background: #ffffff;
+        color: #0f172a;
+        border-radius: 9999px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "LazyBacktest 的歷史行情資料來源是什麼？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "台股資料透過 Netlify Functions 串接 TWSE 與 TPEX 官方 API，並以 FinMind 作為備援；美股資料以 FinMind USStockPrice 為主，Yahoo Finance 為備援。所有回應都會加上時間戳記與 CORS Header。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "我可以用手機或平板操作回測嗎？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "可以。LazyBacktest 採響應式設計，支援桌機、筆電與行動裝置。建議在 768px 以上解析度下進行策略編輯，以便一次檢視完整表格。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "平台是否符合 Google Ads 隱私政策要求？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "是。網站提供完整的隱私權政策、免責聲明與 Cookie 提醒，並允許使用者選擇是否訂閱電子報。這些內容可協助您在導入 Google 廣告時通過審查。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "如何最佳化回測結果？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "可利用 LazyBacktest 的參數優化與滾動回測功能，自動測試多組策略並排序績效，同時搭配 AI 預測模組檢查隔日行情。"
+          }
+        }
+      ]
+    }
+    </script>
+</head>
+<body>
+  <div class="container-wrapper">
+    <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
+      <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
+            <div class="w-5 h-5 flex flex-col justify-between">
+              <div class="flex justify-between">
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+              </div>
+              <div class="flex justify-between items-end">
+                <div class="w-1 h-2 bg-white rounded-sm"></div>
+                <div class="w-1 h-3 bg-white rounded-sm"></div>
+                <div class="w-1 h-1 bg-white rounded-sm"></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <span class="text-lg font-bold" style="color: var(--foreground);">LazyBacktest</span>
+            <div class="text-xs" style="color: var(--muted-foreground);">懶人股票回測</div>
+          </div>
+        </div>
+        <nav class="hidden md:flex items-center space-x-6">
+          <a href="/" class="text-sm" style="color: var(--muted-foreground);">首頁</a>
+          <a href="index.html" class="text-sm" style="color: var(--muted-foreground);">股票回測</a>
+          <a href="/stock-records" class="text-sm" style="color: var(--muted-foreground);">股票紀錄</a>
+          <a href="contact.html" class="text-sm" style="color: var(--muted-foreground);">聯絡我們</a>
+        </nav>
+        <nav class="md:hidden flex items-center space-x-3">
+          <a href="/" class="text-sm" style="color: var(--muted-foreground);">首頁</a>
+          <a href="index.html" class="text-sm" style="color: var(--muted-foreground);">回測</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="faq-hero">
+        <h1>LazyBacktest 常見問題</h1>
+        <p>彙整首頁與客服信箱最常被問到的主題，並新增進階技巧、SEO 與 Google Ads 合規指引，協助您在 6,000 名每日活躍用戶的情境下維持穩定營運。</p>
+      </section>
+
+      <section class="faq-grid">
+        <article class="faq-card">
+          <h2>帳號與環境</h2>
+          <div class="faq-item">
+            <h3>Q1. LazyBacktest 支援哪些瀏覽器？</h3>
+            <p>支援最新版本的 Chrome、Edge、Firefox 與 Safari。若使用 iOS Safari，建議更新至 iOS 16 以上以獲得最佳效能。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q2. 是否需要安裝任何外掛？</h3>
+            <p>不需要。網站建置於 Netlify，所有演算法在雲端完成，只需開啟瀏覽器即可。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q3. 如何保存我常用的策略設定？</h3>
+            <p>系統會自動將最新設定寫入瀏覽器 localStorage，亦可下載 JSON 檔保存，方便跨裝置共享。</p>
+          </div>
+        </article>
+
+        <article class="faq-card">
+          <h2>資料與策略</h2>
+          <div class="faq-item">
+            <h3>Q4. 歷史資料多久更新一次？</h3>
+            <p>台股資料於每個交易日晚間 6 點更新，美股資料於台北時間上午 6 點前更新。若遇到官方 API 異常，系統會顯示告警並切換至備援來源。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q5. 可以匯入自己的指標嗎？</h3>
+            <p>可以。請依照 <strong>strategy-plugin-contract.js</strong> 的格式撰寫指標，放入 <strong>strategy-plugins</strong> 目錄後重新整理頁面即可載入。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q6. 為什麼回測結果與券商報表不同？</h3>
+            <p>LazyBacktest 依據金管會規範預設計入 1.425‰ 手續費、0.3% 證交稅與 0.1% 滑價。若券商報表使用不同費率，請於設定面板調整。</p>
+          </div>
+        </article>
+
+        <article class="faq-card">
+          <h2>優化與 AI</h2>
+          <div class="faq-item">
+            <h3>Q7. 參數優化會不會過度擬合？</h3>
+            <p>系統會顯示 Walk-Forward 得分、PSR/DSR 與有效樣本數，協助判斷穩健度。建議搭配嚴格模式與子週期分析，避免只看單一最佳組合。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q8. AI 預測適合什麼情境？</h3>
+            <p>AI 模組使用 LSTM 與 Kelly 相關研究，適合評估隔日方向與投入比例。請勿將預測視為投資建議，仍需自行評估風險。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q9. 可以下載完整交易紀錄嗎？</h3>
+            <p>可以。於回測結果下方按下「匯出 CSV」，即可儲存所有交易資料並上傳至 Google 試算表或自建資料庫。</p>
+          </div>
+        </article>
+
+        <article class="faq-card">
+          <h2>廣告與法遵</h2>
+          <div class="faq-item">
+            <h3>Q10. LazyBacktest 是否符合 Google Ads 政策？</h3>
+            <p>符合。平台提供隱私政策、免責聲明、Cookie 提醒與使用者資料保護條款，並確保投資內容僅供教育用途。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q11. 我要如何為 SEO 與在地化優化？</h3>
+            <p>建議在文章與回測筆記中加入「台股」、「ETF」、「台北股市」等地區關鍵字，並於 meta tags 中加上 geo.region、geo.position 等資訊。</p>
+          </div>
+          <div class="faq-item">
+            <h3>Q12. 收集 Email 時需要注意什麼？</h3>
+            <p>請清楚告知用途並提供退訂機制。若使用 Google Ads，再行銷前需獲得使用者同意，並遵守台灣個資法規範。</p>
+          </div>
+        </article>
+
+        <article class="faq-card cta-card">
+          <h2>找不到解答？</h2>
+          <p>歡迎透過聯絡表單或社群討論區提出問題，團隊會於 2 個工作日內回覆。</p>
+          <a href="contact.html">寄信給 LazyBacktest</a>
+        </article>
+      </section>
+    </main>
+
+    <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+      <div class="container mx-auto px-4">
+        <div class="grid md:grid-cols-4 gap-8">
+          <div>
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                  <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                </svg>
+              </div>
+              <div>
+                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+              </div>
+            </div>
+            <p class="text-sm mb-4" style="color: #6b7280;">服務據點：台北市｜服務時間：平日 09:30-18:30<br>協助量化新手快速完成台股與美股回測。</p>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a></li>
+              <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a></li>
+              <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">功能與資源</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="tutorial.html" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+              <li><a href="faq.html" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+              <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+              <li><a href="community.html" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+              <li><a href="/stock-records" class="transition-colors" style="color: #6b7280;">股票紀錄</a></li>
+              <li><a href="index.html" class="transition-colors" style="color: #6b7280;">股票回測</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">政策與權責</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="privacy.html" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+              <li><a href="disclaimer.html" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+              <li><a href="community.html#guidelines" class="transition-colors" style="color: #6b7280;">社群公約</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+          <p style="color: #6b7280;">聯絡信箱：<a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+          <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<!-- Patch Tag: LB-FOOTER-PAGES-20251127A -->
+
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社群討論｜LazyBacktest 交流版</title>
+    <meta name="description" content="在 LazyBacktest 社群討論區分享回測心得、策略問題與功能建議，與台灣投資人即時交流。留言系統支援地區標籤與資料隱私提示，符合 Google Ads 內容政策。">
+    <meta name="keywords" content="LazyBacktest 社群, 股票回測討論, 台股策略交流, 量化社群">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://lazybacktest.com/community">
+    <link rel="alternate" hreflang="zh-Hant" href="https://lazybacktest.com/community">
+    <meta property="og:title" content="社群討論｜LazyBacktest 交流版">
+    <meta property="og:description" content="分享回測成果、提出策略疑問，與 6,000 位活躍用戶互動。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://lazybacktest.com/community">
+    <meta property="og:locale" content="zh_TW">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="LazyBacktest 社群討論">
+    <meta name="twitter:description" content="加入 LazyBacktest 交流版，互相分享回測心得與投資觀察。">
+    <meta name="geo.region" content="TW-TPE">
+    <meta name="geo.placename" content="Taipei, Taiwan">
+    <meta name="geo.position" content="25.0330;121.5654">
+    <meta name="ICBM" content="25.0330, 121.5654">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&amp;family=Inter%3Awght%40400%3B500%3B700%3B900&amp;family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+      :root {
+        --background: #ffffff;
+        --foreground: #1f2937;
+        --primary: #0891b2;
+        --muted-foreground: #4b5563;
+        --border: #e5e7eb;
+        --accent: #f59e0b;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Inter", "Noto Sans", sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      .container-wrapper {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      main { flex: 1; }
+      .community-hero {
+        background: linear-gradient(130deg, rgba(8,145,178,0.16) 0%, rgba(245,158,11,0.1) 100%);
+        padding: 80px 20px 60px;
+        text-align: center;
+      }
+      .community-hero h1 {
+        font-size: clamp(34px, 5vw, 52px);
+        margin-bottom: 16px;
+        font-weight: 900;
+        color: #0f172a;
+      }
+      .community-hero p {
+        max-width: 760px;
+        margin: 0 auto;
+        font-size: 18px;
+        line-height: 1.8;
+        color: var(--muted-foreground);
+      }
+      .board-container {
+        max-width: 1024px;
+        margin: -60px auto 0;
+        padding: 0 20px 80px;
+      }
+      .post-form {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 32px;
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+        border: 1px solid rgba(8,145,178,0.2);
+      }
+      .post-form h2 {
+        font-size: 24px;
+        font-weight: 800;
+        margin-bottom: 12px;
+      }
+      .post-form p {
+        color: var(--muted-foreground);
+        margin-bottom: 24px;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .post-list {
+        margin-top: 40px;
+        display: grid;
+        gap: 20px;
+      }
+      .post-card {
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 24px;
+        border: 1px solid var(--border);
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+      }
+      .post-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 9999px;
+        font-size: 13px;
+        font-weight: 600;
+        background: rgba(8,145,178,0.12);
+        color: #0e7490;
+      }
+      .post-meta {
+        font-size: 13px;
+        color: var(--muted-foreground);
+      }
+      .post-content {
+        font-size: 15px;
+        line-height: 1.7;
+        color: var(--foreground);
+        white-space: pre-wrap;
+      }
+      .empty-state {
+        border: 1px dashed rgba(8,145,178,0.4);
+        border-radius: 12px;
+        padding: 32px;
+        text-align: center;
+        color: var(--muted-foreground);
+      }
+      @media (max-width: 640px) {
+        .post-form { padding: 24px; }
+        .post-card { padding: 20px; }
+      }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "DiscussionForumPosting",
+      "name": "LazyBacktest 社群討論",
+      "url": "https://lazybacktest.com/community",
+      "headline": "LazyBacktest 社群討論",
+      "author": {
+        "@type": "Organization",
+        "name": "LazyBacktest"
+      },
+      "publisher": {
+        "@type": "Organization",
+        "name": "LazyBacktest",
+        "url": "https://lazybacktest.com"
+      },
+      "about": ["股票回測", "量化投資", "策略優化"],
+      "dateCreated": "2025-01-01",
+      "discussionUrl": "https://lazybacktest.com/community#board"
+    }
+    </script>
+</head>
+<body>
+  <div class="container-wrapper">
+    <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
+      <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
+            <div class="w-5 h-5 flex flex-col justify-between">
+              <div class="flex justify-between">
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+                <div class="w-1 h-1 bg-white rounded-full"></div>
+              </div>
+              <div class="flex justify-between items-end">
+                <div class="w-1 h-2 bg-white rounded-sm"></div>
+                <div class="w-1 h-3 bg-white rounded-sm"></div>
+                <div class="w-1 h-1 bg-white rounded-sm"></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <span class="text-lg font-bold" style="color: var(--foreground);">LazyBacktest</span>
+            <div class="text-xs" style="color: var(--muted-foreground);">懶人股票回測</div>
+          </div>
+        </div>
+        <nav class="hidden md:flex items-center space-x-6">
+          <a href="/" class="text-sm" style="color: var(--muted-foreground);">首頁</a>
+          <a href="index.html" class="text-sm" style="color: var(--muted-foreground);">股票回測</a>
+          <a href="/stock-records" class="text-sm" style="color: var(--muted-foreground);">股票紀錄</a>
+          <a href="contact.html" class="text-sm" style="color: var(--muted-foreground);">聯絡我們</a>
+        </nav>
+        <nav class="md:hidden flex items-center space-x-3">
+          <a href="/" class="text-sm" style="color: var(--muted-foreground);">首頁</a>
+          <a href="index.html" class="text-sm" style="color: var(--muted-foreground);">回測</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="community-hero">
+        <h1>LazyBacktest 社群討論</h1>
+        <p>與超過 6,000 名每日活躍用戶交流，分享回測心得、策略優化技巧與資料爬蟲經驗。發言前請先閱讀社群公約，確保討論內容符合法規與 Google Ads 廣告政策。</p>
+      </section>
+
+      <section id="board" class="board-container">
+        <div class="post-form">
+          <h2>發表新貼文</h2>
+          <p>請勿張貼投資報酬保證、未經授權的金融商品廣告或任何違反台灣證券法規的內容。留言一經送出即代表同意本站<a href="privacy.html" style="color: #0e7490;">隱私政策</a>與<a href="disclaimer.html" style="color: #0e7490;">免責聲明</a>。</p>
+          <form id="discussion-form" class="grid gap-4 md:grid-cols-2">
+            <div class="md:col-span-1">
+              <label for="displayName" class="block text-sm font-medium text-gray-700">顯示名稱</label>
+              <input id="displayName" name="displayName" type="text" required maxlength="40" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-cyan-500 focus:ring-cyan-500" placeholder="例：台北量化人" />
+            </div>
+            <div class="md:col-span-1">
+              <label for="location" class="block text-sm font-medium text-gray-700">所在縣市（選填）</label>
+              <input id="location" name="location" type="text" maxlength="40" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-cyan-500 focus:ring-cyan-500" placeholder="例：台北市" />
+            </div>
+            <div class="md:col-span-1">
+              <label for="email" class="block text-sm font-medium text-gray-700">Email（非公開，用於回覆）</label>
+              <input id="email" name="email" type="email" maxlength="80" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-cyan-500 focus:ring-cyan-500" placeholder="example@mail.com" />
+            </div>
+            <div class="md:col-span-1">
+              <label for="topic" class="block text-sm font-medium text-gray-700">主題分類</label>
+              <select id="topic" name="topic" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-cyan-500 focus:ring-cyan-500">
+                <option value="策略心得">策略心得</option>
+                <option value="回測提問">回測提問</option>
+                <option value="功能建議">功能建議</option>
+                <option value="系統問題">系統問題</option>
+                <option value="其他">其他</option>
+              </select>
+            </div>
+            <div class="md:col-span-2">
+              <label for="message" class="block text-sm font-medium text-gray-700">留言內容</label>
+              <textarea id="message" name="message" rows="5" required maxlength="1000" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-cyan-500 focus:ring-cyan-500" placeholder="分享你的策略亮點或提出問題，我們會在 2 個工作日內回覆。"></textarea>
+              <div class="flex items-center justify-between mt-2 text-xs text-gray-500">
+                <span id="charCount">0 / 1000</span>
+                <span>為保護投資人，請勿張貼個資或未公開資訊。</span>
+              </div>
+            </div>
+            <div class="md:col-span-2 flex items-center justify-between">
+              <label class="flex items-center text-sm text-gray-600">
+                <input type="checkbox" id="consent" required class="mr-2 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500" />
+                我了解此區僅供教育分享，不構成投資建議。
+              </label>
+              <button type="submit" class="inline-flex items-center px-5 py-2 bg-cyan-600 text-white text-sm font-semibold rounded-md shadow hover:bg-cyan-700 transition">送出留言</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="flex items-center justify-between mt-10">
+          <h2 class="text-2xl font-bold text-slate-900">最新留言</h2>
+          <select id="sortOrder" class="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-cyan-500 focus:ring-cyan-500">
+            <option value="newest">依最新排序</option>
+            <option value="oldest">依最早排序</option>
+          </select>
+        </div>
+        <p class="text-sm text-gray-500 mt-2">系統會先顯示最近 20 則留言並在瀏覽器儲存草稿，方便日後回訪。</p>
+
+        <div id="postList" class="post-list" aria-live="polite"></div>
+        <div id="emptyState" class="empty-state" hidden>目前尚無留言，快成為第一位分享者吧！</div>
+      </section>
+
+      <section id="guidelines" class="max-w-3xl mx-auto px-4 pb-16">
+        <h2 class="text-2xl font-bold text-slate-900 mb-4">社群公約</h2>
+        <ol class="list-decimal list-inside space-y-2 text-sm text-gray-600 leading-6">
+          <li>遵守台灣證券交易法與個資保護規範，禁止張貼未公開資訊或特定報酬保證。</li>
+          <li>請勿張貼廣告型內容、聯盟行銷連結或任何違反 Google Ads 政策的素材。</li>
+          <li>尊重彼此觀點，若發現惡意洗版或不實訊息，可寄信至 <a href="mailto:smallwei0301@gmail.com" class="underline text-cyan-700">smallwei0301@gmail.com</a> 檢舉。</li>
+          <li>論壇採公開瀏覽、輕量儲存設計，建議勿留下手機、身分證等敏感個資。</li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+      <div class="container mx-auto px-4">
+        <div class="grid md:grid-cols-4 gap-8">
+          <div>
+            <div class="flex items-center space-x-3 mb-4">
+              <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                  <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                </svg>
+              </div>
+              <div>
+                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+              </div>
+            </div>
+            <p class="text-sm mb-4" style="color: #6b7280;">服務據點：台北市｜服務時間：平日 09:30-18:30<br>協助量化新手快速完成台股與美股回測。</p>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a></li>
+              <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a></li>
+              <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">功能與資源</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="tutorial.html" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+              <li><a href="faq.html" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+              <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+              <li><a href="community.html" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+              <li><a href="/stock-records" class="transition-colors" style="color: #6b7280;">股票紀錄</a></li>
+              <li><a href="index.html" class="transition-colors" style="color: #6b7280;">股票回測</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-4" style="color: #374151;">政策與權責</h4>
+            <ul class="space-y-2 text-sm">
+              <li><a href="privacy.html" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+              <li><a href="disclaimer.html" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+              <li><a href="community.html#guidelines" class="transition-colors" style="color: #6b7280;">社群公約</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+          <p style="color: #6b7280;">聯絡信箱：<a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+          <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'lazybacktest-community-posts';
+    const VERSION_TAG = 'LB-COMMUNITY-BOARD-20251127A';
+    const MAX_POSTS = 20;
+
+    const seededPosts = [
+      {
+        id: VERSION_TAG + '-seed-1',
+        displayName: '高雄波段王',
+        location: '高雄市',
+        topic: '策略心得',
+        message: '分享一個在台股波段中使用 KD+均線策略的經驗：先用 LazyBacktest 找出 KD < 30 且 20 日線走升的區間，再搭配分批加碼設定，有效減少假突破。',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: VERSION_TAG + '-seed-2',
+        displayName: 'QuantLee',
+        location: '台北市',
+        topic: '功能建議',
+        message: '建議未來可以新增多市場組合回測，把台股與美股 ETF 放在同一張淨值曲線，方便比較資金配置。',
+        createdAt: new Date(Date.now() - 3600 * 1000).toISOString()
+      }
+    ];
+
+    const postListEl = document.getElementById('postList');
+    const emptyStateEl = document.getElementById('emptyState');
+    const formEl = document.getElementById('discussion-form');
+    const charCountEl = document.getElementById('charCount');
+    const messageEl = document.getElementById('message');
+    const sortOrderEl = document.getElementById('sortOrder');
+
+    function loadPosts() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(seededPosts));
+          return [...seededPosts];
+        }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(seededPosts));
+          return [...seededPosts];
+        }
+        return parsed.slice(0, MAX_POSTS);
+      } catch (error) {
+        console.error('載入留言失敗', error);
+        return [...seededPosts];
+      }
+    }
+
+    function savePosts(posts) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(posts.slice(0, MAX_POSTS)));
+      } catch (error) {
+        console.error('儲存留言失敗', error);
+      }
+    }
+
+    function formatDate(isoString) {
+      const date = new Date(isoString);
+      if (Number.isNaN(date.getTime())) return '時間未知';
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function createPostElement(post) {
+      const card = document.createElement('article');
+      card.className = 'post-card';
+
+      const header = document.createElement('div');
+      header.className = 'post-header';
+
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-3 flex-wrap';
+
+      const name = document.createElement('span');
+      name.className = 'font-semibold text-slate-900';
+      name.textContent = post.displayName;
+      left.appendChild(name);
+
+      if (post.location) {
+        const location = document.createElement('span');
+        location.className = 'post-meta';
+        location.textContent = `｜${post.location}`;
+        left.appendChild(location);
+      }
+
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = post.topic;
+      left.appendChild(badge);
+
+      const right = document.createElement('div');
+      right.className = 'post-meta';
+      right.textContent = formatDate(post.createdAt);
+
+      header.appendChild(left);
+      header.appendChild(right);
+
+      const content = document.createElement('p');
+      content.className = 'post-content';
+      content.textContent = post.message;
+
+      card.appendChild(header);
+      card.appendChild(content);
+      return card;
+    }
+
+    function renderPosts() {
+      const posts = loadPosts();
+      const sorted = [...posts].sort((a, b) => {
+        if (sortOrderEl.value === 'oldest') {
+          return new Date(a.createdAt) - new Date(b.createdAt);
+        }
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+
+      postListEl.innerHTML = '';
+      if (sorted.length === 0) {
+        emptyStateEl.hidden = false;
+        return;
+      }
+      emptyStateEl.hidden = true;
+      sorted.forEach(post => {
+        postListEl.appendChild(createPostElement(post));
+      });
+    }
+
+    function handleFormSubmit(event) {
+      event.preventDefault();
+      const formData = new FormData(formEl);
+      const displayName = formData.get('displayName').trim();
+      const location = formData.get('location').trim();
+      const email = formData.get('email').trim();
+      const topic = formData.get('topic');
+      const message = formData.get('message').trim();
+      const consent = document.getElementById('consent').checked;
+
+      if (!displayName || !message || !consent) {
+        alert('請完整填寫必填欄位並同意社群規範。');
+        return;
+      }
+
+      const newPost = {
+        id: `${VERSION_TAG}-${Date.now()}`,
+        displayName,
+        location,
+        topic,
+        message,
+        createdAt: new Date().toISOString()
+      };
+
+      const posts = loadPosts();
+      posts.unshift(newPost);
+      savePosts(posts);
+      renderPosts();
+
+      if (email) {
+        try {
+          localStorage.setItem(`${STORAGE_KEY}-contact`, JSON.stringify({ displayName, email }));
+        } catch (error) {
+          console.warn('暫存聯絡資訊失敗', error);
+        }
+      }
+
+      formEl.reset();
+      charCountEl.textContent = '0 / 1000';
+      alert('留言已送出，我們會盡快回覆！');
+    }
+
+    function restoreContactDraft() {
+      try {
+        const raw = localStorage.getItem(`${STORAGE_KEY}-contact`);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data.displayName) {
+          document.getElementById('displayName').value = data.displayName;
+        }
+        if (data.email) {
+          document.getElementById('email').value = data.email;
+        }
+      } catch (error) {
+        console.warn('讀取聯絡草稿失敗', error);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      restoreContactDraft();
+      renderPosts();
+      formEl.addEventListener('submit', handleFormSubmit);
+      sortOrderEl.addEventListener('change', renderPosts);
+      messageEl.addEventListener('input', () => {
+        charCountEl.textContent = `${messageEl.value.length} / 1000`;
+      });
+    });
+  </script>
+</body>
+</html>
