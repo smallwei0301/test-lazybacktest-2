@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Trash2, PlusCircle, ImagePlus, List, LayoutGrid, Calculator, BarChart3, Home, ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import SiteFooter from "@/components/site-footer"
 
 interface Stock {
   uuid: string
@@ -703,70 +704,7 @@ export default function StockRecordsPage() {
         </div>
       )}
       {/* Footer */}
-      <footer className="bg-muted/30 border-t">
-        <div className="container mx-auto px-4 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <div className="w-5 h-5 flex flex-col justify-between">
-                    <div className="flex justify-between">
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <div className="w-1 h-2 bg-primary-foreground rounded-sm"></div>
-                      <div className="w-1 h-3 bg-primary-foreground rounded-sm"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-sm"></div>
-                    </div>
-                  </div>
-                </div>
-                <span className="text-lg font-bold text-foreground">LazyBacktest</span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                專為忙碌上班族設計的股票回測平台，讓您在下班後也能做出明智的投資決策。
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">產品功能</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>股票回測</li>
-                <li>策略優化</li>
-                <li>風險評估</li>
-                <li>績效分析</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">支援與幫助</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>使用教學</li>
-                <li>常見問題</li>
-                <li>聯絡客服</li>
-                <li>意見回饋</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">關於我們</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>公司介紹</li>
-                <li>服務條款</li>
-                <li>隱私政策</li>
-                <li>免責聲明</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-border mt-8 pt-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              © 2024 LazyBacktest. 版權所有 | 本平台僅供教育和研究用途，不構成投資建議
-            </p>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter tone="muted" className="mt-16" />
     </div>
   )
 }
