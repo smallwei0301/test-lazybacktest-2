@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社群討論 - LazyBacktest</title>
+    <!-- Page Version: LB-COMMUNITY-PAGE-20250218A -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/secondary-pages.css">
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="site-header">
+            <div class="site-inner">
+                <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none;">
+                    <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                        <div class="w-5 h-5 flex flex-col justify-between">
+                            <div class="flex justify-between">
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                            </div>
+                            <div class="flex justify-between items-end">
+                                <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-lg font-bold" style="color: #0f172a; display:block;">LazyBacktest</span>
+                        <span class="text-xs" style="color: #4b5563;">懶人股票回測</span>
+                    </div>
+                </a>
+                <nav>
+                    <a href="home.html">首頁</a>
+                    <a href="usage-guide.html">使用教學</a>
+                    <a href="index.html">立即體驗</a>
+                    <a href="faq.html">常見問題</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+                <nav class="nav-mobile">
+                    <a href="usage-guide.html" class="link-chip">教學</a>
+                    <a href="index.html" class="link-chip link-chip--primary">開始回測</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="page-section page-section--muted">
+                <div class="page-container">
+                    <h1 class="page-title">社群討論區</h1>
+                    <p class="page-subtitle">
+                        在這裡你可以分享回測心得、討論策略調整，也能把不懂的地方提出來讓其他投資人幫忙。所有貼文都儲存在雲端，任何人都能立即閱讀，不用擔心換裝置後資料不見。
+                    </p>
+                    <div class="inline-links" style="justify-content:center;">
+                        <a href="usage-guide.html" class="link-chip">先熟悉使用流程</a>
+                        <a href="faq.html" class="link-chip">查看常見問題</a>
+                        <a href="contact.html" class="link-chip">需要私訊請寄信</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--bright">
+                <div class="page-container">
+                    <div class="community-layout">
+                        <aside class="community-panel" aria-labelledby="community-rules">
+                            <h2 id="community-rules">參與守則</h2>
+                            <p>為了維持友善的討論環境，發文時請留意以下事項：</p>
+                            <ul style="margin-top: 12px; padding-left: 20px; color:#475569; line-height:1.7;">
+                                <li>分享時請附上回測重點（股票、期間、策略亮點）。</li>
+                                <li>避免張貼個資或帳號密碼等敏感資訊。</li>
+                                <li>請勿張貼廣告、推銷或違反法規的內容。</li>
+                                <li>有錯誤或想刪文，請<a href="contact.html" style="color:#0891b2; text-decoration:none;">寄信給我</a>協助處理。</li>
+                            </ul>
+                            <div class="tip-box" style="margin-top:20px;">
+                                <div class="tip-title">小提醒</div>
+                                <p>發文前可以先到<a href="usage-guide.html" style="color:#0891b2; text-decoration:none;">使用教學</a>確認步驟是否正確，再分享結果給大家參考。</p>
+                            </div>
+                            <div class="tip-box" style="margin-top:16px;">
+                                <div class="tip-title">隱私注意</div>
+                                <p>系統會記錄發文時間與暱稱，相關資料保護方式詳見<a href="privacy.html" style="color:#0891b2; text-decoration:none;">隱私政策</a>。</p>
+                            </div>
+                        </aside>
+                        <section class="community-panel" aria-labelledby="community-form-heading">
+                            <h2 id="community-form-heading">分享你的策略觀察</h2>
+                            <p style="margin-bottom: 18px;">貼文會立即顯示在右側清單，其他使用者也可以同步閱讀。若想討論特定功能，記得在內文提到對應的頁面或參數設定。</p>
+                            <div id="community-status" class="status-banner" role="status" hidden>載入留言中…</div>
+                            <form class="community-form" id="community-post-form">
+                                <label for="community-author">暱稱（最多 20 字）</label>
+                                <input id="community-author" name="author" class="community-input" type="text" maxlength="20" placeholder="例如：趨勢派小明" required>
+                                <div class="community-hint">建議使用匿名暱稱，保護個人隱私。</div>
+                                <label for="community-content">想分享的內容（最多 500 字）</label>
+                                <textarea id="community-content" name="content" class="community-textarea" maxlength="500" rows="6" placeholder="分享回測重點、策略靈感或遇到的問題" required></textarea>
+                                <div class="community-hint">貼文會公開顯示，請勿張貼個資或券商帳號。</div>
+                                <button type="submit" class="community-submit">送出貼文</button>
+                            </form>
+                        </section>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--bright" style="padding-top:0;">
+                <div class="page-container">
+                    <div class="community-panel" aria-live="polite" aria-label="最新貼文">
+                        <h2>雲端留言牆</h2>
+                        <p style="margin-bottom: 18px;">以下為所有使用者的公開貼文，依照時間由新到舊排列。若想補充圖片或外部連結，建議在貼文中附上描述與外部參考來源。</p>
+                        <div id="community-post-list" class="community-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--muted">
+                <div class="page-container">
+                    <div class="inline-links" style="justify-content:center;">
+                        <a href="index.html" class="link-chip link-chip--primary">回到回測工具</a>
+                        <a href="stock-records/" class="link-chip">整理我的股票紀錄</a>
+                        <a href="disclaimer.html" class="link-chip">先看免責聲明</a>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="page-container">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="usage-guide.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="stock-records/">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+    <script src="js/community.js" defer></script>
+</body>
+</html>
