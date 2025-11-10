@@ -1,0 +1,18 @@
+<svg width="800" height="450" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="450" rx="24" fill="#f9fafb"/>
+  <rect x="32" y="40" width="736" height="56" rx="12" fill="#e5e7eb" fill-opacity="0.6"/>
+  <rect x="32" y="120" width="736" height="280" rx="20" fill="#ffffff" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6 8"/>
+  <rect x="72" y="164" width="656" height="72" rx="16" fill="#e0f2fe"/>
+  <rect x="92" y="184" width="240" height="32" rx="10" fill="#0891b2" fill-opacity="0.9"/>
+  <rect x="356" y="184" width="240" height="32" rx="10" fill="#38bdf8" fill-opacity="0.65"/>
+  <rect x="92" y="232" width="200" height="26" rx="8" fill="#bae6fd"/>
+  <text x="60" y="138" fill="#0891b2" font-size="22" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">步驟 3：挑選策略組合</text>
+  <text x="108" y="206" fill="#ffffff" font-size="18" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">多頭策略清單</text>
+  <text x="372" y="206" fill="#0f172a" font-size="18" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">空頭策略清單</text>
+  <text x="104" y="252" fill="#0f172a" font-size="14" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="600">可拖曳調整排序，控制優先順序</text>
+  <path d="M732 200H696" stroke="#0891b2" stroke-width="4" stroke-linecap="round"/>
+  <path d="M708 184L732 200L708 216" stroke="#0891b2" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="72" y="292" fill="#4b5563" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif">拖曳策略排序可改變執行優先權；點「＋」可以加入更多策略模組。</text>
+  <rect x="72" y="316" width="424" height="32" rx="10" fill="#fef3c7"/>
+  <text x="88" y="338" fill="#92400e" font-size="15" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="600">Tip：同時選多空策略，可測試在不同趨勢下的表現</text>
+</svg>

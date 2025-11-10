@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社群討論 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #0f172a;
+            --muted-foreground: #4b5563;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --accent: #f59e0b;
+            --border: #e5e7eb;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background-color: #f9fafb;
+            color: var(--muted-foreground);
+        }
+        .page-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #ffffffcc;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 18px 20px;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .brand-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+            color: var(--foreground);
+        }
+        .brand-text span:first-child {
+            font-size: 1.125rem;
+            font-weight: 700;
+        }
+        .brand-text span:last-child {
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px 18px;
+            justify-content: flex-end;
+        }
+        .nav-links a {
+            font-size: 0.95rem;
+            color: #4b5563;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 6px 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .nav-links a:hover,
+        .nav-links a:focus-visible {
+            color: var(--primary);
+            background-color: rgba(8, 145, 178, 0.08);
+            outline: none;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            padding: 80px 20px 48px;
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(6, 182, 212, 0.06));
+        }
+        .hero-inner {
+            max-width: 920px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: clamp(2.25rem, 4vw, 3rem);
+            color: var(--foreground);
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        .hero-subtitle {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: #475569;
+        }
+        .board-section {
+            padding: 60px 20px;
+        }
+        .board-inner {
+            max-width: 980px;
+            margin: 0 auto;
+            display: grid;
+            gap: 28px;
+        }
+        .post-form {
+            background-color: #ffffff;
+            border-radius: 24px;
+            padding: 28px;
+            border: 1px solid rgba(8, 145, 178, 0.15);
+            box-shadow: 0 18px 46px -32px rgba(8, 145, 178, 0.3);
+        }
+        .post-form h2 {
+            font-size: 1.5rem;
+            margin-bottom: 16px;
+            color: var(--foreground);
+        }
+        .form-grid {
+            display: grid;
+            gap: 18px;
+        }
+        .form-grid label {
+            font-weight: 600;
+            color: #334155;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .form-grid input,
+        .form-grid textarea {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            padding: 12px 16px;
+            font-size: 1rem;
+            font-family: inherit;
+            color: #0f172a;
+            background-color: #ffffff;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .form-grid textarea {
+            min-height: 140px;
+            resize: vertical;
+        }
+        .form-grid input:focus,
+        .form-grid textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(8, 145, 178, 0.15);
+            outline: none;
+        }
+        .tips-box {
+            background: rgba(254, 243, 199, 0.7);
+            border-left: 4px solid var(--accent);
+            padding: 14px 18px;
+            border-radius: 14px;
+            color: #92400e;
+            font-weight: 600;
+        }
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .form-actions button {
+            background-color: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            border-radius: 9999px;
+            padding: 12px 28px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .form-actions button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 12px 26px -18px rgba(8, 145, 178, 0.7);
+        }
+        .status-text {
+            font-size: 0.9rem;
+            color: #475569;
+        }
+        .post-list {
+            display: grid;
+            gap: 20px;
+        }
+        .post-item {
+            background-color: #ffffff;
+            border-radius: 20px;
+            padding: 22px 24px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            box-shadow: 0 12px 40px -34px rgba(15, 23, 42, 0.45);
+        }
+        .post-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .post-author {
+            font-weight: 700;
+            color: var(--foreground);
+        }
+        .post-time {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        .empty-state {
+            padding: 40px 28px;
+            border-radius: 20px;
+            border: 1px dashed rgba(148, 163, 184, 0.6);
+            background-color: rgba(226, 232, 240, 0.35);
+            text-align: center;
+        }
+        .resource-links {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        }
+        .resource-card {
+            background-color: #ffffff;
+            border-radius: 20px;
+            padding: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .resource-card h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            color: var(--foreground);
+            font-size: 1.2rem;
+        }
+        .resource-card p {
+            margin-bottom: 16px;
+            line-height: 1.7;
+        }
+        .resource-card a {
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+        }
+        footer {
+            background-color: #f3f4f6;
+            color: #374151;
+            margin-top: 80px;
+        }
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+        .footer-grid {
+            display: grid;
+            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        .footer-grid h4 {
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .footer-grid ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+        .footer-grid a {
+            color: #6b7280;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .footer-grid a:hover,
+        .footer-grid a:focus-visible {
+            color: var(--primary);
+            outline: none;
+        }
+        .footer-bottom {
+            border-top: 1px solid rgba(0,0,0,0.06);
+            margin-top: 40px;
+            padding-top: 24px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        .footer-bottom a {
+            color: #374151;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <div class="header-inner">
+                <a href="home.html" class="brand-link">
+                    <div style="width: 40px; height: 40px; background-color: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 22px; height: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;">
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 4px; grid-column: span 3; height: 8px;"></span>
+                        </div>
+                    </div>
+                    <span class="brand-text">
+                        <span>LazyBacktest</span>
+                        <span>懶人股票回測</span>
+                    </span>
+                </a>
+                <nav class="nav-links">
+                    <a href="home.html">首頁</a>
+                    <a href="index.html">股票回測</a>
+                    <a href="tutorial.html">使用教學</a>
+                    <a href="faq.html">常見問題</a>
+                    <a href="community.html" style="background-color: rgba(8, 145, 178, 0.1); color: var(--primary);">社群討論</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <h1 class="hero-title">LazyBacktest 社群討論區</h1>
+                    <p class="hero-subtitle">分享你的策略發現、回測心得或學習筆記。所有留言都會儲存在 Netlify 雲端 Blobs 中，任何使用者都能閱讀與回覆。</p>
+                </div>
+            </section>
+
+            <section class="board-section">
+                <div class="board-inner">
+                    <section class="post-form" aria-labelledby="community-form-title">
+                        <h2 id="community-form-title">發表新留言</h2>
+                        <form id="community-form" class="form-grid" autocomplete="off">
+                            <div>
+                                <label for="author">顯示名稱</label>
+                                <input type="text" id="author" name="author" maxlength="40" placeholder="例：台股小資、量化菜鳥" required>
+                            </div>
+                            <div>
+                                <label for="content">想分享的內容</label>
+                                <textarea id="content" name="content" maxlength="600" placeholder="可以分享你測試的策略組合、調參心得或需要協助的問題。" required></textarea>
+                            </div>
+                            <div class="tips-box">提醒：請避免張貼個資、廣告或未經驗證的報牌。保持友善與尊重，讓社群一起成長。</div>
+                            <div class="form-actions">
+                                <button type="submit">送出留言</button>
+                                <span class="status-text" id="community-status" aria-live="polite"></span>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section aria-labelledby="community-list-title">
+                        <div class="post-header" style="margin-bottom: 8px;">
+                            <h2 id="community-list-title" style="margin: 0; font-size: 1.4rem; color: var(--foreground);">最新留言</h2>
+                            <a href="/stock-records" style="font-size: 0.95rem; color: var(--primary); text-decoration: none;">整理我的股票紀錄 →</a>
+                        </div>
+                        <div id="community-posts" class="post-list" role="feed" aria-live="polite"></div>
+                        <div id="community-empty" class="empty-state" hidden>還沒有留言，搶先分享你的第一個回測心得吧！</div>
+                    </section>
+
+                    <section class="resource-links">
+                        <div class="resource-card">
+                            <h3>第一次使用？</h3>
+                            <p>搭配使用教學，按照步驟完成股票搜尋、策略選擇與風險控管，快速熟悉操作流程。</p>
+                            <a href="tutorial.html">查看使用教學</a>
+                        </div>
+                        <div class="resource-card">
+                            <h3>遇到問題？</h3>
+                            <p>常見問題頁面彙整了資料來源、回測速度與策略解讀等疑問，協助你快速排除卡關。</p>
+                            <a href="faq.html">先看常見問題</a>
+                        </div>
+                        <div class="resource-card">
+                            <h3>需要更直接的協助？</h3>
+                            <p>透過寄信給我聯繫開發者，提供錯誤訊息或建議，我們會在 24 小時內回覆。</p>
+                            <a href="contact.html">寄信給我</a>
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者想支持一下韭菜胖叔叔，歡迎斗內讓我可以上車繼續更新。</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="tutorial.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="/stock-records">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-bottom">
+                    <p>鄉民內部測試版：建議事項與 Bug，請寄信到 <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                    <p>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+    <script>
+        const postsContainer = document.getElementById('community-posts');
+        const emptyState = document.getElementById('community-empty');
+        const statusText = document.getElementById('community-status');
+        const form = document.getElementById('community-form');
+
+        const endpoint = '/.netlify/functions/community-posts';
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-TW', { hour12: false });
+        }
+
+        function renderPosts(posts) {
+            postsContainer.innerHTML = '';
+            if (!posts || posts.length === 0) {
+                emptyState.hidden = false;
+                return;
+            }
+            emptyState.hidden = true;
+            posts.forEach((post) => {
+                const article = document.createElement('article');
+                article.className = 'post-item';
+
+                const header = document.createElement('div');
+                header.className = 'post-header';
+
+                const authorEl = document.createElement('span');
+                authorEl.className = 'post-author';
+                authorEl.textContent = post.author;
+
+                const timeEl = document.createElement('time');
+                timeEl.className = 'post-time';
+                timeEl.dateTime = post.createdAt;
+                timeEl.textContent = formatDate(post.createdAt);
+
+                header.appendChild(authorEl);
+                header.appendChild(timeEl);
+
+                const contentEl = document.createElement('p');
+                contentEl.style.margin = '0';
+                contentEl.style.lineHeight = '1.75';
+                contentEl.style.whiteSpace = 'pre-wrap';
+                contentEl.textContent = post.content;
+
+                article.appendChild(header);
+                article.appendChild(contentEl);
+
+                postsContainer.appendChild(article);
+            });
+        }
+
+        async function loadPosts() {
+            try {
+                statusText.textContent = '載入留言中…';
+                const response = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
+                if (!response.ok) {
+                    throw new Error('無法載入留言');
+                }
+                const data = await response.json();
+                renderPosts(Array.isArray(data.posts) ? data.posts : []);
+                statusText.textContent = '';
+            } catch (error) {
+                console.error(error);
+                statusText.textContent = '留言載入失敗，請稍後再試。';
+                emptyState.hidden = false;
+            }
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const formData = new FormData(form);
+            const author = formData.get('author').trim();
+            const content = formData.get('content').trim();
+
+            if (!author || !content) {
+                statusText.textContent = '請輸入顯示名稱與留言內容。';
+                return;
+            }
+
+            statusText.textContent = '送出中…';
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ author, content })
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || '留言送出失敗');
+                }
+
+                form.reset();
+                statusText.textContent = '已送出留言！';
+                await loadPosts();
+            } catch (error) {
+                console.error(error);
+                statusText.textContent = '留言送出失敗，請稍後再試。';
+            }
+        });
+
+        loadPosts();
+    </script>
+</body>
+</html>

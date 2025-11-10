@@ -1,0 +1,16 @@
+<svg width="800" height="450" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="450" rx="24" fill="#f9fafb"/>
+  <rect x="32" y="40" width="736" height="56" rx="12" fill="#e5e7eb" fill-opacity="0.6"/>
+  <rect x="32" y="120" width="736" height="280" rx="20" fill="#ffffff" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6 8"/>
+  <rect x="72" y="168" width="420" height="64" rx="12" fill="#0891b2" fill-opacity="0.9"/>
+  <rect x="524" y="168" width="160" height="24" rx="6" fill="#bae6fd"/>
+  <rect x="524" y="204" width="160" height="24" rx="6" fill="#bae6fd"/>
+  <text x="96" y="208" fill="#ffffff" font-size="20" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">輸入股票代號或名稱</text>
+  <path d="M512 200H476" stroke="#0891b2" stroke-width="4" stroke-linecap="round"/>
+  <path d="M490 186L512 200L490 214" stroke="#0891b2" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="60" y="148" width="456" height="104" rx="16" stroke="#0891b2" stroke-width="3" stroke-dasharray="12 14"/>
+  <text x="60" y="132" fill="#0891b2" font-size="22" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">步驟 1：搜尋標的</text>
+  <text x="72" y="272" fill="#4b5563" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif">在搜尋欄輸入「台積電」等代碼，系統會即時帶出上市櫃股票與 ETF。</text>
+  <rect x="72" y="296" width="328" height="32" rx="10" fill="#fef3c7"/>
+  <text x="88" y="318" fill="#92400e" font-size="15" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="600">Tip：輸入空白鍵可瀏覽最近查詢紀錄</text>
+</svg>
