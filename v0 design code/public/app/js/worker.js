@@ -5208,6 +5208,7 @@ async function fetchStockData(
     ? false
     : Boolean(options.adjusted || options.adjustedPrice);
   const split = indexSymbol ? false : Boolean(options.splitAdjustment);
+  const skipCoverageGapRepair = Boolean(options.skipCoverageGapRepair);
   const optionEffectiveStart = options.effectiveStartDate || startDate;
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
@@ -5634,12 +5635,18 @@ async function fetchStockData(
       const existingCoverage = Array.isArray(monthEntry.coverage)
         ? monthEntry.coverage.map((range) => ({ ...range }))
         : [];
-      const forcedRepairRanges = detectCoverageGapsForMonth(
-        monthEntry,
-        monthInfo.rangeStartISO,
-        monthInfo.rangeEndISO,
-        { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
-      );
+      
+      // 只在非批量優化時執行缺口檢測
+      let forcedRepairRanges = [];
+      if (!skipCoverageGapRepair) {
+        forcedRepairRanges = detectCoverageGapsForMonth(
+          monthEntry,
+          monthInfo.rangeStartISO,
+          monthInfo.rangeEndISO,
+          { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
+        );
+      }
+      
       let coverageForComputation = existingCoverage;
       if (forcedRepairRanges.length > 0) {
         coverageForComputation = subtractRangeBounds(
@@ -12619,7 +12626,7 @@ async function runOptimization(
 
   // Data acquisition policy:
   // - If useCache === true: only use provided cachedData or現有的 worker 快取；禁止再抓遠端。
-  // - If useCache === false: 使用提供或既有快取，否則才呼叫 fetchStockData。
+  // - If useCache === false: 檢查快取終點是否早於需求終點，若是則使用快取；否則抓取新資料。
   if (useCache) {
     if (Array.isArray(cachedData) && cachedData.length > 0) {
       stockData = cachedData;
@@ -12635,77 +12642,77 @@ async function runOptimization(
       );
     }
   } else {
+    // 檢查快取資料是否存在且終點早於需求終點
+    const requestedEndDate = new Date(baseParams.endDate);
+    let shouldSkipFetch = false;
+    let cacheEndDate = null;
+    let cacheSource = null;
+
+    // 優先檢查 cachedData 的終點
     if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-    } else if (
-      Array.isArray(workerLastDataset) &&
-      workerLastDataset.length > 0
-    ) {
-      stockData = workerLastDataset;
-      console.log("[Worker Opt] Using worker's cached data.");
-    } else {
-      // 檢查快取資料是否存在且終點早於需求終點
-      const requestedEndDate = new Date(baseParams.endDate);
-      let shouldSkipFetch = false;
-      let cacheEndDate = null;
-
-      // 檢查 cachedData 的終點
-      if (Array.isArray(cachedData) && cachedData.length > 0) {
-        const lastCachedItem = cachedData[cachedData.length - 1];
-        if (lastCachedItem && lastCachedItem.date) {
-          cacheEndDate = new Date(lastCachedItem.date);
-          if (cacheEndDate < requestedEndDate) {
-            shouldSkipFetch = true;
-            stockData = cachedData;
-            console.log(`[Worker Opt] 快取終點 (${lastCachedItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
-          }
+      const lastCachedItem = cachedData[cachedData.length - 1];
+      if (lastCachedItem && lastCachedItem.date) {
+        cacheEndDate = new Date(lastCachedItem.date);
+        if (cacheEndDate < requestedEndDate) {
+          shouldSkipFetch = true;
+          stockData = cachedData;
+          cacheSource = 'provided-cache';
+          console.log(`[Worker Opt] 快取終點 (${lastCachedItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
         }
       }
+    }
 
-      // 如果沒有 cachedData，檢查 workerLastDataset
-      if (!shouldSkipFetch && Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
-        const lastWorkerItem = workerLastDataset[workerLastDataset.length - 1];
-        if (lastWorkerItem && lastWorkerItem.date) {
-          cacheEndDate = new Date(lastWorkerItem.date);
-          if (cacheEndDate < requestedEndDate) {
-            shouldSkipFetch = true;
-            stockData = workerLastDataset;
-            console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
-          }
+    // 如果 cachedData 未滿足條件，檢查 workerLastDataset
+    if (!shouldSkipFetch && Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+      const lastWorkerItem = workerLastDataset[workerLastDataset.length - 1];
+      if (lastWorkerItem && lastWorkerItem.date) {
+        cacheEndDate = new Date(lastWorkerItem.date);
+        if (cacheEndDate < requestedEndDate) {
+          shouldSkipFetch = true;
+          stockData = workerLastDataset;
+          cacheSource = 'worker-cache';
+          console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
+        } else {
+          // 快取終點足夠，直接使用
+          stockData = workerLastDataset;
+          shouldSkipFetch = true;
+          cacheSource = 'worker-cache';
+          console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 足夠滿足需求終點 (${baseParams.endDate})，使用現有快取資料。`);
         }
       }
+    }
 
-      // 如果快取終點不早於需求終點，或沒有快取，則抓取資料
-      if (!shouldSkipFetch) {
-        const optDataStart =
-          baseParams.dataStartDate || baseParams.startDate;
-        const optEffectiveStart =
-          baseParams.effectiveStartDate || baseParams.startDate;
-        const optLookback = Number.isFinite(baseParams.lookbackDays)
-          ? baseParams.lookbackDays
-          : null;
-        const fetched = await fetchStockData(
-          baseParams.stockNo,
-          optDataStart,
-          baseParams.endDate,
-          baseParams.marketType || baseParams.market || "TWSE",
-          {
-            adjusted: baseParams.adjustedPrice,
-            splitAdjustment: baseParams.splitAdjustment,
-            effectiveStartDate: optEffectiveStart,
-            lookbackDays: optLookback,
-          },
-        );
-        stockData = fetched?.data || [];
-        dataFetched = true;
-        if (!Array.isArray(stockData) || stockData.length === 0)
-          throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-        self.postMessage({
-          type: "progress",
-          progress: 50,
-          message: "數據獲取完成，開始優化...",
-        });
-      }
+    // 如果都沒有快取或快取不滿足條件，才抓取新資料
+    if (!shouldSkipFetch) {
+      const optDataStart =
+        baseParams.dataStartDate || baseParams.startDate;
+      const optEffectiveStart =
+        baseParams.effectiveStartDate || baseParams.startDate;
+      const optLookback = Number.isFinite(baseParams.lookbackDays)
+        ? baseParams.lookbackDays
+        : null;
+      const fetched = await fetchStockData(
+        baseParams.stockNo,
+        optDataStart,
+        baseParams.endDate,
+        baseParams.marketType || baseParams.market || "TWSE",
+        {
+          adjusted: baseParams.adjustedPrice,
+          splitAdjustment: baseParams.splitAdjustment,
+          effectiveStartDate: optEffectiveStart,
+          lookbackDays: optLookback,
+          skipCoverageGapRepair: true,
+        },
+      );
+      stockData = fetched?.data || [];
+      dataFetched = true;
+      if (!Array.isArray(stockData) || stockData.length === 0)
+        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
+      self.postMessage({
+        type: "progress",
+        progress: 50,
+        message: "數據獲取完成，開始優化...",
+      });
     }
   }
 
