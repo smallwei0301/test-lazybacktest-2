@@ -3856,7 +3856,6 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeRange: optimizedRange,
             useCachedData,
             cachedData: cachedDataForWorker,
-            skipDataValidation: true,
         });
         
         // 設定超時
@@ -5827,7 +5826,6 @@ function performSingleBacktest(params) {
                 type: 'runBacktest',
                 params: preparedParams,
                 useCachedData: false,
-                skipDataValidation: true,
             });
             
         } catch (error) {

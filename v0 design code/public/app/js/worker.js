@@ -4753,7 +4753,6 @@ async function tryFetchRangeFromBlob({
   fetchDiagnostics,
   cacheKey,
   split,
-  skipDataValidation,
 }) {
   if (marketKey !== "TWSE" && marketKey !== "TPEX") {
     return null;
@@ -5027,13 +5026,11 @@ async function tryFetchRangeFromBlob({
   ) {
     rangeFetchInfo.status = "current-month-stale";
     rangeFetchInfo.reason = "current-month-gap";
-    if (!skipDataValidation) {
-      console.warn(
-        `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
-          lastDate || "N/A"
-        } < expected=${targetLatestISO})，等待當日補齊。`,
-      );
-    }
+    console.warn(
+      `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
+        lastDate || "N/A"
+      } < expected=${targetLatestISO})，等待當日補齊。`,
+    );
   } else {
     rangeFetchInfo.status = "success";
     delete rangeFetchInfo.reason;
@@ -5215,7 +5212,6 @@ async function fetchStockData(
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
     : null;
-  const skipDataValidation = Boolean(options.skipDataValidation);
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -5369,7 +5365,6 @@ async function fetchStockData(
       fetchDiagnostics,
       cacheKey,
       split,
-      skipDataValidation,
     });
     if (blobRangeResult) {
       return blobRangeResult;
@@ -12603,7 +12598,6 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
-  skipDataValidation = false,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -12650,35 +12644,68 @@ async function runOptimization(
       stockData = workerLastDataset;
       console.log("[Worker Opt] Using worker's cached data.");
     } else {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      const fetched = await fetchStockData(
-        baseParams.stockNo,
-        optDataStart,
-        baseParams.endDate,
-        baseParams.marketType || baseParams.market || "TWSE",
-        {
-          adjusted: baseParams.adjustedPrice,
-          splitAdjustment: baseParams.splitAdjustment,
-          effectiveStartDate: optEffectiveStart,
-          lookbackDays: optLookback,
-          skipDataValidation: skipDataValidation,
-        },
-      );
-      stockData = fetched?.data || [];
-      dataFetched = true;
-      if (!Array.isArray(stockData) || stockData.length === 0)
-        throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
-      self.postMessage({
-        type: "progress",
-        progress: 50,
-        message: "數據獲取完成，開始優化...",
-      });
+      // 檢查快取資料是否存在且終點早於需求終點
+      const requestedEndDate = new Date(baseParams.endDate);
+      let shouldSkipFetch = false;
+      let cacheEndDate = null;
+
+      // 檢查 cachedData 的終點
+      if (Array.isArray(cachedData) && cachedData.length > 0) {
+        const lastCachedItem = cachedData[cachedData.length - 1];
+        if (lastCachedItem && lastCachedItem.date) {
+          cacheEndDate = new Date(lastCachedItem.date);
+          if (cacheEndDate < requestedEndDate) {
+            shouldSkipFetch = true;
+            stockData = cachedData;
+            console.log(`[Worker Opt] 快取終點 (${lastCachedItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
+          }
+        }
+      }
+
+      // 如果沒有 cachedData，檢查 workerLastDataset
+      if (!shouldSkipFetch && Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+        const lastWorkerItem = workerLastDataset[workerLastDataset.length - 1];
+        if (lastWorkerItem && lastWorkerItem.date) {
+          cacheEndDate = new Date(lastWorkerItem.date);
+          if (cacheEndDate < requestedEndDate) {
+            shouldSkipFetch = true;
+            stockData = workerLastDataset;
+            console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
+          }
+        }
+      }
+
+      // 如果快取終點不早於需求終點，或沒有快取，則抓取資料
+      if (!shouldSkipFetch) {
+        const optDataStart =
+          baseParams.dataStartDate || baseParams.startDate;
+        const optEffectiveStart =
+          baseParams.effectiveStartDate || baseParams.startDate;
+        const optLookback = Number.isFinite(baseParams.lookbackDays)
+          ? baseParams.lookbackDays
+          : null;
+        const fetched = await fetchStockData(
+          baseParams.stockNo,
+          optDataStart,
+          baseParams.endDate,
+          baseParams.marketType || baseParams.market || "TWSE",
+          {
+            adjusted: baseParams.adjustedPrice,
+            splitAdjustment: baseParams.splitAdjustment,
+            effectiveStartDate: optEffectiveStart,
+            lookbackDays: optLookback,
+          },
+        );
+        stockData = fetched?.data || [];
+        dataFetched = true;
+        if (!Array.isArray(stockData) || stockData.length === 0)
+          throw new Error(`優化失敗: 無法獲取 ${baseParams.stockNo} 數據`);
+        self.postMessage({
+          type: "progress",
+          progress: 50,
+          message: "數據獲取完成，開始優化...",
+        });
+      }
     }
   }
 
@@ -12852,7 +12879,6 @@ self.onmessage = async function (e) {
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
-    skipDataValidation,
   } = e.data;
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
@@ -13095,7 +13121,6 @@ self.onmessage = async function (e) {
             splitAdjustment: params.splitAdjustment,
             effectiveStartDate: effectiveStartDate || params.startDate,
             lookbackDays,
-            skipDataValidation,
           },
         );
         dataToUse = outcome.data;
@@ -13349,7 +13374,6 @@ self.onmessage = async function (e) {
         optimizeRange,
         useCachedData,
         cachedData || workerLastDataset,
-        skipDataValidation,
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
