@@ -1,5 +1,7 @@
 "use client"
 
+// Page Version: LB-FE-20250304A
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +22,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState, useRef } from "react"
+import SiteFooter from "@/components/site-footer"
 
 export default function HomePage() {
   const [stats, setStats] = useState({ stat1: 0, stat2: 0, stat3: 0 })
@@ -83,7 +86,7 @@ export default function HomePage() {
   // </CHANGE>
 
   return (
-    <div className="min-h-screen bg-background">
+    <div id="top" className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -131,6 +134,11 @@ export default function HomePage() {
             >
               常見問題
             </a>
+            <Link href="/tutorial">
+              <span className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                使用教學
+              </span>
+            </Link>
             <Link href="/stock-records">
               <span className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
                 股票紀錄
@@ -1445,67 +1453,7 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-foreground text-background py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-background rounded-lg flex items-center justify-center shadow-sm">
-                  <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
-                  </svg>
-                </div>
-                <div>
-                  <span className="text-lg font-bold text-foreground">LazyBacktest</span>
-                  <div className="text-xs text-muted opacity-80">懶人股票回測</div>
-                </div>
-              </div>
-              <p className="text-sm opacity-80">先恭喜您，投資賺錢！<br /> 如果這個網站幫助您投資順利<br /> 或者單純想支持一下韭菜胖叔叔<br />歡迎斗內讓我可以上車繼續更新<br /> 用奶粉發電，不再用愛發電</p>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Donate (斗內/贊助)</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li>
-                  <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    歐付寶
-                  </a>
-                </li>
-                <li>
-                  <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    綠界
-                  </a>
-                </li>
-                <li>
-                  <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    PayPal
-                  </a>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">支援與幫助</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">使用教學</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">常見問題</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">寄信給我</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">社群討論</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">其他說明</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">隱私政策</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">免責聲明</a></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-muted/20 mt-8 pt-8 text-center text-sm opacity-80">
-            <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" className="underline hover:text-primary transition-colors">smallwei0301@gmail.com</a></p>
-            <p className="text-xs opacity-60 mt-2">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter theme="dark" />
     </div>
   )
 }
