@@ -1,0 +1,26 @@
+<svg width="960" height="540" viewBox="0 0 960 540" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="960" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5A4" stop-opacity="0.14" />
+      <stop offset="1" stop-color="#1E293B" stop-opacity="0.18" />
+    </linearGradient>
+    <filter id="blur2" x="-40" y="-40" width="1040" height="620" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18" />
+    </filter>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg2)" />
+  <rect x="70" y="50" width="820" height="440" rx="28" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2" />
+  <g filter="url(#blur2)" opacity="0.35">
+    <rect x="120" y="120" width="720" height="320" rx="24" fill="#CBD5F5" />
+  </g>
+  <rect x="110" y="110" width="360" height="300" rx="20" fill="#ffffff" stroke="#0EA5A4" stroke-width="3" />
+  <rect x="130" y="140" width="320" height="52" rx="12" fill="#0EA5A4" opacity="0.12" />
+  <rect x="130" y="210" width="320" height="52" rx="12" fill="#0EA5A4" opacity="0.12" />
+  <rect x="130" y="280" width="320" height="52" rx="12" fill="#0EA5A4" opacity="0.12" />
+  <text x="110" y="436" fill="#0EA5A4" font-size="18" font-family="'Noto Sans TC', 'Inter', sans-serif" font-weight="600">
+    Step 2 ︱設定股票代號、期間與初始資金
+  </text>
+  <text x="110" y="464" fill="#475569" font-size="14" font-family="'Noto Sans TC', 'Inter', sans-serif" opacity="0.85">
+    在左側基本設定一次完成必要欄位，善用期間範本可以快速切換常用年份。
+  </text>
+</svg>

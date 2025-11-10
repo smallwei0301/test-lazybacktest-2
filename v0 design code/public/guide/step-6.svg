@@ -1,0 +1,26 @@
+<svg width="960" height="540" viewBox="0 0 960 540" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg6" x1="0" y1="540" x2="960" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.16" />
+      <stop offset="1" stop-color="#6366F1" stop-opacity="0.18" />
+    </linearGradient>
+    <filter id="blur6" x="-30" y="-30" width="1020" height="600" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18" />
+    </filter>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg6)" />
+  <rect x="60" y="50" width="840" height="430" rx="28" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2" />
+  <g filter="url(#blur6)" opacity="0.32">
+    <rect x="100" y="90" width="760" height="350" rx="24" fill="#E2E8F0" />
+  </g>
+  <rect x="200" y="260" width="560" height="150" rx="20" fill="#ffffff" stroke="#0EA5A4" stroke-width="3" />
+  <rect x="220" y="290" width="240" height="48" rx="10" fill="#0EA5A4" opacity="0.12" />
+  <rect x="480" y="290" width="240" height="48" rx="10" fill="#0EA5A4" opacity="0.12" />
+  <rect x="220" y="350" width="500" height="36" rx="9" fill="#0EA5A4" opacity="0.12" />
+  <text x="140" y="236" fill="#0EA5A4" font-size="18" font-family="'Noto Sans TC', 'Inter', sans-serif" font-weight="600">
+    Step 6 ︱啟用 AI 預測與批量優化
+  </text>
+  <text x="140" y="264" fill="#475569" font-size="14" font-family="'Noto Sans TC', 'Inter', sans-serif" opacity="0.85">
+    當需要探索多組參數時，開啟 AI 或批量優化，系統會自動嘗試並以報酬排序。建議逐步調整避免計算時間過長。
+  </text>
+</svg>
