@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<!-- Version: LB-WEB-20250309A -->
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用教學｜LazyBacktest 台股回測系統</title>
+    <meta name="description" content="循序漸進的 LazyBacktest 使用教學，透過實際畫面示範設定策略、啟動台股回測、閱讀績效報告，讓新手也能快速上手。">
+    <meta name="keywords" content="LazyBacktest, 台股回測, 使用教學, 新手教學, 回測流程">
+    <meta name="author" content="LazyBacktest">
+    <meta name="robots" content="index,follow">
+    <meta name="geo.region" content="TW">
+    <meta name="geo.placename" content="Taipei, Taiwan">
+    <meta name="geo.position" content="25.0330;121.5654">
+    <meta name="ICBM" content="25.0330, 121.5654">
+    <link rel="canonical" href="https://lazybacktest.tw/tutorial">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="LazyBacktest 使用教學">
+    <meta property="og:description" content="圖解 LazyBacktest 台股回測流程與技巧，協助你在幾分鐘內完成回測。">
+    <meta property="og:url" content="https://lazybacktest.tw/tutorial">
+    <meta property="og:locale" content="zh_TW">
+    <meta property="og:site_name" content="LazyBacktest">
+    <meta property="og:image" content="https://lazybacktest.tw/assets/tutorial-cover.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #4b5563;
+            --card: #f9fafb;
+            --card-foreground: #374151;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --secondary: #f59e0b;
+            --secondary-foreground: #ffffff;
+            --border: #e5e7eb;
+            --muted: #f3f4f6;
+            --muted-foreground: #6b7280;
+        }
+        body {
+            margin: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            color: var(--foreground);
+            background-color: var(--background);
+        }
+        .container-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            background: linear-gradient(135deg, rgba(8,145,178,0.08) 0%, rgba(245,158,11,0.08) 100%);
+            padding: clamp(56px, 8vw, 92px) 20px;
+        }
+        .hero-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background-color: rgba(8,145,178,0.15);
+            color: #036a83;
+            font-weight: 600;
+        }
+        .hero-title {
+            font-size: clamp(32px, 6vw, 48px);
+            color: #0f172a;
+            font-weight: 900;
+            margin: 20px 0 16px;
+        }
+        .hero-subtitle {
+            font-size: clamp(18px, 3vw, 22px);
+            color: var(--muted-foreground);
+            max-width: 720px;
+            margin: 0 auto;
+            line-height: 1.8;
+        }
+        .howto-grid {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: clamp(48px, 8vw, 72px) 20px;
+            display: grid;
+            gap: 28px;
+        }
+        .howto-step {
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: clamp(28px, 6vw, 40px);
+            display: grid;
+            gap: 16px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+        .step-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background-color: rgba(8,145,178,0.16);
+            color: #036a83;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        .step-title {
+            font-size: clamp(20px, 3.4vw, 26px);
+            font-weight: 800;
+            color: #0f172a;
+            margin: 0;
+        }
+        .step-image {
+            width: 100%;
+            border-radius: 14px;
+            background: linear-gradient(145deg, rgba(14,165,233,0.15), rgba(8,145,178,0.05));
+            padding: 24px;
+        }
+        .step-image svg {
+            width: 100%;
+            height: auto;
+        }
+        .step-body {
+            font-size: 16px;
+            line-height: 1.9;
+            color: var(--foreground);
+        }
+        .step-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .chip {
+            padding: 8px 16px;
+            border-radius: 999px;
+            background-color: rgba(15,23,42,0.05);
+            color: #0f172a;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .tips-section, .ad-section, .cta-section {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: clamp(40px, 6vw, 64px) 20px;
+        }
+        .tips-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        }
+        .tips-card {
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background-color: #ffffff;
+            padding: 24px;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+        }
+        .tips-card h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            color: #0f172a;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .ad-section {
+            background-color: rgba(241,245,249,0.6);
+            border-radius: 20px;
+            border: 1px dashed rgba(15,23,42,0.12);
+        }
+        .ad-placeholder {
+            border-radius: 12px;
+            border: 2px dashed rgba(8,145,178,0.4);
+            background-color: rgba(255,255,255,0.7);
+            padding: 28px;
+            text-align: center;
+            color: var(--muted-foreground);
+            font-size: 15px;
+            line-height: 1.8;
+        }
+        .cta-section {
+            text-align: center;
+            background: linear-gradient(120deg, rgba(8,145,178,0.12), rgba(14,116,144,0.08));
+            border-radius: 24px;
+            margin-bottom: 72px;
+        }
+        .cta-title {
+            font-size: clamp(26px, 4.8vw, 34px);
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 16px;
+        }
+        .cta-description {
+            font-size: 17px;
+            color: var(--muted-foreground);
+            max-width: 620px;
+            margin: 0 auto 28px;
+            line-height: 1.9;
+        }
+        .cta-actions {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 28px;
+            background-color: #0891b2;
+            color: white;
+            border-radius: 999px;
+            text-decoration: none;
+            font-weight: 700;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        }
+        .cta-button:hover {
+            background-color: #0e7490;
+            transform: translateY(-2px);
+            box-shadow: 0 12px 20px rgba(8,145,178,0.18);
+        }
+        .cta-button.secondary {
+            background-color: white;
+            color: #0f172a;
+            border: 1px solid rgba(15,23,42,0.12);
+        }
+        .cta-button.secondary:hover {
+            background-color: rgba(255,255,255,0.9);
+            box-shadow: 0 10px 18px rgba(15,23,42,0.12);
+        }
+        @media (max-width: 768px) {
+            .step-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .step-actions {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "@id": "https://lazybacktest.tw/tutorial#howto",
+        "name": "LazyBacktest 台股回測使用教學",
+        "description": "逐步介紹如何設定資料來源、建立策略並閱讀 LazyBacktest 回測結果的操作指南。",
+        "inLanguage": "zh-TW",
+        "image": "https://lazybacktest.tw/assets/tutorial-cover.png",
+        "totalTime": "PT10M",
+        "estimatedCost": {
+            "@type": "MonetaryAmount",
+            "currency": "TWD",
+            "value": "0"
+        },
+        "step": [
+            {
+                "@type": "HowToStep",
+                "name": "設定回測參數",
+                "text": "選擇股票代碼、期間以及策略模板，並確認手續費等進階設定。"
+            },
+            {
+                "@type": "HowToStep",
+                "name": "執行回測",
+                "text": "點擊立即開始回測，等待系統完成資料下載與計算。"
+            },
+            {
+                "@type": "HowToStep",
+                "name": "解讀成果報告",
+                "text": "查看損益曲線、交易紀錄與策略指標，必要時下載報表。"
+            }
+        ]
+    }
+    </script>
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 sticky top-0 z-50 shadow-sm" style="border-color: #e5e7eb;">
+            <div class="max-w-6xl mx-auto px-4">
+                <div class="flex items-center justify-between py-4">
+                    <a href="home.html" class="flex items-center space-x-3" style="color: #0f172a; text-decoration: none;">
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <svg width="24" height="16" viewBox="0 0 24 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect width="24" height="16" rx="4" fill="#0EA5A4" />
+                                <path d="M4 9l3.5-3L10 9l3.5-3L17 9" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold">LazyBacktest</span>
+                            <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                        </div>
+                    </a>
+                    <nav aria-label="主要導覽" class="hidden md:flex items-center space-x-6 text-sm font-medium" style="color: #4b5563;">
+                        <a href="home.html" class="hover:text-[#0891b2] transition-colors">首頁</a>
+                        <a href="index.html" class="hover:text-[#0891b2] transition-colors">股票回測</a>
+                        <a href="tutorial.html" class="text-[#0891b2] font-semibold">使用教學</a>
+                        <a href="faq.html" class="hover:text-[#0891b2] transition-colors">常見問題</a>
+                        <a href="community.html" class="hover:text-[#0891b2] transition-colors">社群討論</a>
+                        <a href="/stock-records" class="hover:text-[#0891b2] transition-colors">股票紀錄</a>
+                        <a href="contact.html" class="hover:text-[#0891b2] transition-colors">寄信給我</a>
+                    </nav>
+                </div>
+            </div>
+        </header>
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <span class="hero-eyebrow" aria-label="台股回測教學">一步一步完成台股回測</span>
+                    <h1 class="hero-title">LazyBacktest 使用教學：10 分鐘學會自動回測</h1>
+                    <p class="hero-subtitle">本教學涵蓋回測前的準備、策略設定、執行與結果解讀，並提供常見錯誤排除、資料品質檢查以及在地（臺灣）投資人常見情境的最佳實務。</p>
+                </div>
+            </section>
+            <section class="howto-grid" aria-labelledby="howto-heading">
+                <h2 id="howto-heading" class="sr-only">操作步驟</h2>
+                <article class="howto-step">
+                    <div class="step-header">
+                        <div class="step-badge" aria-hidden="true">1</div>
+                        <h3 class="step-title">設定回測資料與策略</h3>
+                    </div>
+                    <div class="step-image" role="img" aria-label="在 LazyBacktest 選擇股票與日期的示意圖">
+                        <svg viewBox="0 0 480 220" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="0" y="0" width="480" height="220" rx="18" fill="rgba(255,255,255,0.9)" stroke="rgba(8,145,178,0.35)" stroke-width="3"/>
+                            <rect x="32" y="40" width="180" height="28" rx="8" fill="rgba(8,145,178,0.18)"/>
+                            <rect x="32" y="88" width="140" height="18" rx="6" fill="rgba(15,23,42,0.12)"/>
+                            <rect x="32" y="118" width="220" height="18" rx="6" fill="rgba(15,23,42,0.08)"/>
+                            <rect x="280" y="88" width="168" height="64" rx="12" fill="rgba(245,158,11,0.15)"/>
+                            <circle cx="312" cy="120" r="18" fill="#0891b2"/>
+                            <path d="M304 120l6 6 14-14" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="step-body">
+                        <p>在首頁按下「立即開始回測」後，於左側面板輸入股票代碼、回測期間與初始資金。臺灣券商常見的交易成本已預設完成，但你可以在「進階設定」調整手續費、稅率或配息再投入方式，確保模擬貼近真實交易。</p>
+                        <div class="step-actions" aria-label="設定小提醒">
+                            <span class="chip">支援台股、ETF 與自選自動儲蓄策略</span>
+                            <span class="chip">日期區間建議涵蓋 2 個景氣循環</span>
+                            <span class="chip">策略模組可儲存成自訂模板</span>
+                        </div>
+                    </div>
+                </article>
+                <article class="howto-step">
+                    <div class="step-header">
+                        <div class="step-badge" aria-hidden="true">2</div>
+                        <h3 class="step-title">啟動回測並追蹤計算狀態</h3>
+                    </div>
+                    <div class="step-image" role="img" aria-label="LazyBacktest 回測進度條與通知示意圖">
+                        <svg viewBox="0 0 480 220" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="0" y="0" width="480" height="220" rx="18" fill="rgba(255,255,255,0.9)" stroke="rgba(14,116,144,0.35)" stroke-width="3"/>
+                            <rect x="32" y="60" width="416" height="20" rx="10" fill="rgba(148,163,184,0.35)"/>
+                            <rect x="32" y="60" width="280" height="20" rx="10" fill="#0891b2"/>
+                            <rect x="32" y="110" width="416" height="64" rx="12" fill="rgba(8,145,178,0.12)"/>
+                            <circle cx="68" cy="142" r="14" fill="#0ea5a4"/>
+                            <path d="M60 142l6 6 16-16" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                            <rect x="96" y="132" width="220" height="20" rx="6" fill="rgba(15,23,42,0.18)"/>
+                        </svg>
+                    </div>
+                    <div class="step-body">
+                        <p>按下「立即開始回測」後，系統會即時顯示下載行情、抓取財報與模擬交易的進度條。若遇到資料不足或網路延遲，畫面會跳出提示並提供排除建議，例如切換資料來源或縮短回測期間。</p>
+                        <div class="step-actions" aria-label="運行提醒">
+                            <span class="chip">可同時開啟多組瀏覽器分頁監控</span>
+                            <span class="chip">運算時間受股票歷史資料長度影響</span>
+                            <span class="chip">進度完成後自動儲存策略快照</span>
+                        </div>
+                    </div>
+                </article>
+                <article class="howto-step">
+                    <div class="step-header">
+                        <div class="step-badge" aria-hidden="true">3</div>
+                        <h3 class="step-title">閱讀成果報告並分享洞察</h3>
+                    </div>
+                    <div class="step-image" role="img" aria-label="LazyBacktest 報表、曲線與分享按鈕示意圖">
+                        <svg viewBox="0 0 480 220" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="0" y="0" width="480" height="220" rx="18" fill="rgba(255,255,255,0.9)" stroke="rgba(245,158,11,0.32)" stroke-width="3"/>
+                            <polyline points="40,160 110,120 180,150 250,90 320,140 400,80" fill="none" stroke="#f59e0b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+                            <rect x="40" y="52" width="168" height="24" rx="8" fill="rgba(8,145,178,0.16)"/>
+                            <rect x="260" y="48" width="180" height="112" rx="14" fill="rgba(8,145,178,0.08)"/>
+                            <rect x="280" y="68" width="140" height="16" rx="6" fill="rgba(15,23,42,0.2)"/>
+                            <rect x="280" y="96" width="140" height="16" rx="6" fill="rgba(15,23,42,0.1)"/>
+                            <rect x="280" y="124" width="92" height="16" rx="6" fill="rgba(15,23,42,0.1)"/>
+                        </svg>
+                    </div>
+                    <div class="step-body">
+                        <p>結果頁面會整理策略績效、最大回落、勝率、交易清單、配息記錄與風險指標。你可以下載 PDF 報告，或利用「分享連結」把結果交給夥伴討論。若要與實際交易紀錄比對，可進入「股票紀錄」頁面管理持股與損益。</p>
+                        <div class="step-actions" aria-label="成果應用建議">
+                            <span class="chip">支援匯出 CSV 與 PDF 報表</span>
+                            <span class="chip">可比對策略版本差異</span>
+                            <span class="chip">收藏成功案例以利未來複用</span>
+                        </div>
+                    </div>
+                </article>
+            </section>
+            <section class="tips-section" aria-labelledby="tips-heading">
+                <div class="tips-grid">
+                    <article class="tips-card">
+                        <h3 id="tips-heading">常見錯誤排除</h3>
+                        <ul style="margin:0; padding-left:20px; line-height:1.8;">
+                            <li>顯示「資料抓取失敗」：請檢查證券代碼是否仍在上市櫃，或縮短回測期間。</li>
+                            <li>回測過慢：建議暫時關閉同時間的大量分頁，或改在非尖峰時間啟動回測。</li>
+                            <li>績效曲線斷層：可能是停牌或除權息缺資料，請啟用「自動補齊還原權值」。</li>
+                        </ul>
+                    </article>
+                    <article class="tips-card">
+                        <h3>資料品質檢查</h3>
+                        <ul style="margin:0; padding-left:20px; line-height:1.8;">
+                            <li>比較「交易紀錄」與「月度報告」，確認總報酬一致。</li>
+                            <li>利用「股票紀錄」手動輸入實際持股，與模擬結果交叉驗證。</li>
+                            <li>下載 CSV，檢查每日現金與庫存是否合理。</li>
+                        </ul>
+                    </article>
+                    <article class="tips-card">
+                        <h3>在地投資人小撇步</h3>
+                        <ul style="margin:0; padding-left:20px; line-height:1.8;">
+                            <li>善用「股利再投入」模擬殖利率股策略。</li>
+                            <li>ETF 定期定額族可設定「每月固定買進」的批次排程。</li>
+                            <li>記得在 5 月報稅前下載上一年度的損益報告備查。</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
+            <section class="ad-section" aria-labelledby="ad-ready-heading">
+                <h2 id="ad-ready-heading" style="font-size:22px; font-weight:700; color:#0f172a; margin-bottom:16px;">Google 廣告預留區</h2>
+                <p style="color:var(--muted-foreground); line-height:1.8; margin-bottom:16px;">本區塊採用 Google Publisher Policies 建議的可視範圍尺寸，並預留 336×280 與 728×90 兩種響應式版面。待核准後可直接嵌入 Google AdSense 程式碼。</p>
+                <div class="ad-placeholder" aria-label="LazyBacktest Google 廣告預備位置">
+                    <strong>廣告預留提醒：</strong>
+                    <p style="margin:12px 0 0;">1. 已確認頁面內容為原創教學、無受限制敏感議題。<br>2. 廣告載入前會保留此友善文字，避免誤點。<br>3. 請在 Netlify 部署環境中加入 Cookie 同意橫幅，以符合 Google 使用者同意政策。</p>
+                </div>
+            </section>
+            <section class="tips-section" aria-labelledby="geo-heading">
+                <h2 id="geo-heading" style="font-size:24px; font-weight:800; color:#0f172a; margin-bottom:20px;">SEO 與在地優化建議</h2>
+                <div class="tips-grid">
+                    <article class="tips-card">
+                        <h3>搜尋排名關鍵字</h3>
+                        <p style="line-height:1.8; margin:0;">主力關鍵字：台股回測、LazyBacktest 教學、股票策略模擬。<br>長尾關鍵字：定期定額回測、殖利率策略回測、ETF 回測教學。</p>
+                    </article>
+                    <article class="tips-card">
+                        <h3>在地化資訊</h3>
+                        <p style="line-height:1.8; margin:0;">服務範圍：台灣上市櫃與興櫃市場。<br>交易時區：GMT+8。<br>支援語系：繁體中文、英文介面籌備中。</p>
+                    </article>
+                    <article class="tips-card">
+                        <h3>內容持續更新節奏</h3>
+                        <p style="line-height:1.8; margin:0;">每季更新策略案例；重大政策（如交易稅）調整後 3 日內同步修訂教學內容。</p>
+                    </article>
+                </div>
+            </section>
+            <section class="cta-section" aria-labelledby="cta-heading">
+                <h2 id="cta-heading" class="cta-title">準備好體驗 LazyBacktest 嗎？</h2>
+                <p class="cta-description">立即前往股票回測頁面，建立第一個策略。若有任何不清楚的步驟，歡迎透過常見問題或寄信與我們聯繫。</p>
+                <div class="cta-actions">
+                    <a class="cta-button" href="index.html">
+                        <span aria-hidden="true">🚀</span>
+                        立即開始回測
+                    </a>
+                    <a class="cta-button secondary" href="faq.html">
+                        <span aria-hidden="true">💡</span>
+                        查看常見問題
+                    </a>
+                </div>
+            </section>
+        </main>
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="container mx-auto px-4">
+                <div class="grid md:grid-cols-4 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="tutorial.html" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+                            <li><a href="faq.html" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                            <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+                            <li><a href="community.html" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+                            <li><a href="/stock-records" class="transition-colors" style="color: #6b7280;">股票紀錄</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="privacy.html" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+                            <li><a href="disclaimer.html" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
