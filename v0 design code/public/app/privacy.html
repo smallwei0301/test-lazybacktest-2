@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隱私政策 - LazyBacktest</title>
+    <!-- Patch Tag: LB-FOOTER-UX-20250221A -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin>
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background: #f8fafc;
+            color: #0f172a;
+        }
+
+        main.policy-main {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 48px 20px 80px;
+        }
+
+        .policy-hero {
+            background: radial-gradient(circle at top left, rgba(8,145,178,0.14), transparent 60%),
+                        radial-gradient(circle at bottom right, rgba(59,130,246,0.12), transparent 55%),
+                        #ffffff;
+            padding: 48px;
+            border-radius: 24px;
+            margin-bottom: 40px;
+            box-shadow: 0 22px 50px -40px rgba(15, 23, 42, 0.55);
+        }
+
+        .policy-hero h1 {
+            margin: 0 0 12px;
+            font-size: 36px;
+        }
+
+        .policy-hero p {
+            margin: 0;
+            font-size: 16px;
+            color: #374151;
+            line-height: 1.8;
+        }
+
+        .policy-section {
+            margin-bottom: 36px;
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 28px 32px;
+            box-shadow: 0 20px 48px -42px rgba(15, 23, 42, 0.45);
+            border: 1px solid rgba(203, 213, 225, 0.4);
+        }
+
+        .policy-section h2 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-size: 24px;
+        }
+
+        .policy-section p,
+        .policy-section ul {
+            color: #374151;
+            line-height: 1.8;
+        }
+
+        .policy-section ul {
+            padding-left: 20px;
+        }
+
+        .policy-note {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-left: 4px solid #0ea5a4;
+            background: rgba(14, 165, 233, 0.12);
+            border-radius: 12px;
+            font-size: 14px;
+            color: #0f172a;
+        }
+
+        @media (max-width: 768px) {
+            .policy-hero {
+                padding: 32px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="lb-site-header">
+        <div class="lb-nav-container">
+            <a href="home.html" class="lb-brand">
+                <span class="lb-brand-mark">
+                    <span class="sr-only">LazyBacktest</span>
+                    <svg width="26" height="18" viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                        <rect x="0.5" y="0.5" width="25" height="17" rx="3.5" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.4)" />
+                        <path d="M6 12L10 6L13.5 10.5L16.5 8L20 12" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <circle cx="20.5" cy="5.5" r="1.5" fill="#0f172a" />
+                    </svg>
+                </span>
+                <span class="lb-brand-text">
+                    <span class="lb-brand-title">LazyBacktest</span>
+                    <span class="lb-brand-subtitle">懶人股票回測</span>
+                </span>
+            </a>
+            <nav class="lb-site-nav">
+                <a href="home.html" class="lb-nav-link">首頁介紹</a>
+                <a href="index.html" class="lb-nav-link">回測 App</a>
+                <a href="guide.html" class="lb-nav-link">使用教學</a>
+                <a href="faq.html" class="lb-nav-link">常見問題</a>
+                <a href="contact.html" class="lb-nav-link">寄信給我</a>
+                <a href="community.html" class="lb-nav-link">社群討論</a>
+            </nav>
+            <a href="index.html" class="lb-nav-primary">立即開始回測</a>
+        </div>
+    </header>
+
+    <main class="policy-main">
+        <section class="policy-hero">
+            <h1>隱私政策</h1>
+            <p>LazyBacktest 尊重並保護所有使用者的個人資料。本政策說明我們如何蒐集、使用與保存資料，以及你可以運用的權利。</p>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-collection">
+            <h2 id="policy-collection">我們蒐集哪些資料？</h2>
+            <ul>
+                <li><strong>瀏覽器端設定：</strong>你在回測 App 中輸入的策略參數、風險設定與儲存的策略，僅儲存在你的瀏覽器 <code>localStorage</code>。</li>
+                <li><strong>雲端資料：</strong>執行批量優化、滾動測試、AI 評估與社群貼文時，我們會將必要的參數與結果透過 Netlify Blobs 暫存，以便提供跨裝置讀取。</li>
+                <li><strong>匿名使用統計：</strong>我們使用 Google Analytics 與 Netlify Analytics 追蹤匿名流量，用於產品改善，不會識別個人身份。</li>
+            </ul>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-use">
+            <h2 id="policy-use">資料如何被使用？</h2>
+            <ul>
+                <li>提供回測、優化、滾動測試與 AI 模型所需的運算與快取。</li>
+                <li>支援 <a href="community.html">社群討論</a> 的留言顯示與同步。</li>
+                <li>分析整體使用行為，優化使用者體驗與系統效能。</li>
+            </ul>
+            <div class="policy-note">我們不會販售、出租或交換你的個人資料，也不會用於廣告投放。</div>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-storage">
+            <h2 id="policy-storage">資料儲存與安全</h2>
+            <ul>
+                <li>本地策略資料保存在瀏覽器，清除快取或更換裝置會造成資料遺失。</li>
+                <li>雲端資料存放於 Netlify Blobs，採用權杖保護並限制 API 存取。</li>
+                <li>所有 API 呼叫都經過 HTTPS 加密，避免中途竊聽。</li>
+            </ul>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-rights">
+            <h2 id="policy-rights">你的權利</h2>
+            <ul>
+                <li>可以隨時刪除瀏覽器中的策略紀錄或社群貼文。</li>
+                <li>若需要刪除雲端資料，請透過 <a href="contact.html">寄信給我</a> 告知，我們會在 7 個工作天內處理。</li>
+                <li>停用瀏覽器 Cookie 仍可使用主要功能，但我們可能無法判讀匿名流量來源。</li>
+            </ul>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-updates">
+            <h2 id="policy-updates">政策更新</h2>
+            <p>若未來有調整，我們會在此頁面註明更新日期並以頁面公告提醒。持續使用 LazyBacktest 即表示你同意最新版的隱私政策。</p>
+        </section>
+
+        <section class="policy-section" aria-labelledby="policy-contact">
+            <h2 id="policy-contact">聯絡我們</h2>
+            <p>對本政策有疑問，請透過 <a href="contact.html">寄信給我</a> 或寫信至 <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a>，我們會盡速回覆。</p>
+        </section>
+    </main>
+
+    <footer class="lb-footer">
+        <div class="lb-footer__container">
+            <div class="lb-footer__grid">
+                <div>
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                            <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                        </div>
+                    </div>
+                    <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br>或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">Donate (斗內/贊助)</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="lb-footer__link">歐付寶</a></li>
+                        <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="lb-footer__link">綠界</a></li>
+                        <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="lb-footer__link">PayPal</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">支援與幫助</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="guide.html" class="lb-footer__link">使用教學</a></li>
+                        <li><a href="faq.html" class="lb-footer__link">常見問題</a></li>
+                        <li><a href="contact.html" class="lb-footer__link">寄信給我</a></li>
+                        <li><a href="community.html" class="lb-footer__link">社群討論</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">其他說明</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="privacy.html" class="lb-footer__link">隱私政策</a></li>
+                        <li><a href="disclaimer.html" class="lb-footer__link">免責聲明</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">更多功能</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="/stock-records" class="lb-footer__link">股票紀錄</a></li>
+                        <li><a href="index.html" class="lb-footer__link">股票回測</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="lb-footer__bottom">
+                <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                <small>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</small>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

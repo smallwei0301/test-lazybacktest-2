@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>常見問題 - LazyBacktest</title>
+    <!-- Patch Tag: LB-FOOTER-UX-20250221A -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin>
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background: #f9fafb;
+            color: #0f172a;
+        }
+
+        main.faq-main {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 48px 20px 80px;
+        }
+
+        .faq-hero {
+            background: radial-gradient(circle at top left, rgba(8,145,178,0.14), transparent 60%),
+                        radial-gradient(circle at bottom right, rgba(79,70,229,0.1), transparent 55%);
+            padding: 48px;
+            border-radius: 24px;
+            margin-bottom: 40px;
+            box-shadow: 0 24px 50px -42px rgba(15, 23, 42, 0.45);
+        }
+
+        .faq-hero h1 {
+            font-size: 38px;
+            margin: 0 0 12px;
+        }
+
+        .faq-hero p {
+            margin: 0;
+            font-size: 17px;
+            line-height: 1.8;
+            color: #374151;
+        }
+
+        .faq-category {
+            margin-bottom: 40px;
+        }
+
+        .faq-category h2 {
+            font-size: 26px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .faq-item {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 24px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            box-shadow: 0 18px 40px -40px rgba(15, 23, 42, 0.45);
+        }
+
+        .faq-question {
+            margin: 0 0 12px;
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .faq-answer {
+            margin: 0;
+            color: #374151;
+            line-height: 1.8;
+        }
+
+        .faq-answer a {
+            color: #0e7490;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .faq-answer a:hover,
+        .faq-answer a:focus-visible {
+            text-decoration: underline;
+        }
+
+        .faq-note {
+            margin-top: 12px;
+            padding: 14px 16px;
+            border-left: 4px solid #0ea5a4;
+            background: rgba(14, 165, 233, 0.08);
+            border-radius: 12px;
+            font-size: 14px;
+            color: #0f172a;
+        }
+
+        @media (max-width: 768px) {
+            .faq-hero {
+                padding: 32px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="lb-site-header">
+        <div class="lb-nav-container">
+            <a href="home.html" class="lb-brand">
+                <span class="lb-brand-mark">
+                    <span class="sr-only">LazyBacktest</span>
+                    <svg width="26" height="18" viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                        <rect x="0.5" y="0.5" width="25" height="17" rx="3.5" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.4)" />
+                        <path d="M6 12L10 6L13.5 10.5L16.5 8L20 12" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <circle cx="20.5" cy="5.5" r="1.5" fill="#0f172a" />
+                    </svg>
+                </span>
+                <span class="lb-brand-text">
+                    <span class="lb-brand-title">LazyBacktest</span>
+                    <span class="lb-brand-subtitle">懶人股票回測</span>
+                </span>
+            </a>
+            <nav class="lb-site-nav">
+                <a href="home.html" class="lb-nav-link">首頁介紹</a>
+                <a href="index.html" class="lb-nav-link">回測 App</a>
+                <a href="guide.html" class="lb-nav-link">使用教學</a>
+                <a href="faq.html" class="lb-nav-link" aria-current="page">常見問題</a>
+                <a href="contact.html" class="lb-nav-link">寄信給我</a>
+                <a href="community.html" class="lb-nav-link">社群討論</a>
+            </nav>
+            <a href="index.html" class="lb-nav-primary">立即開始回測</a>
+        </div>
+    </header>
+
+    <main class="faq-main">
+        <section class="faq-hero">
+            <h1>常見問題整理</h1>
+            <p>
+                以下整理自首頁的重點問答，並補充更多在社群與客服中常見的提問。
+                若你需要的資訊不在清單內，歡迎透過 <a href="community.html">社群討論</a> 或 <a href="contact.html">寄信給我</a> 直接告訴我們。
+            </p>
+        </section>
+
+        <section class="faq-category" aria-labelledby="faq-start">
+            <h2 id="faq-start">開始使用</h2>
+            <article class="faq-item">
+                <h3 class="faq-question">LazyBacktest 需要安裝程式嗎？</h3>
+                <p class="faq-answer">
+                    不需要。打開 <a href="home.html">首頁介紹</a> 或直接進入 <a href="index.html">回測 App</a> 即可使用。
+                    所有運算都在瀏覽器與 Netlify Functions 上完成，支援桌機與手機，建議使用最新版 Chrome 或 Edge。
+                </p>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">我要如何快速跑出第一份結果？</h3>
+                <p class="faq-answer">
+                    進入回測 App 後，直接點擊頁面頂部的 <strong>「一鍵回測」</strong>（ID：<code>quickBacktestBtn</code>）。
+                    系統會套用台積電 2330 的示範設定，並於下方顯示解析提示。
+                    若想換標的，編輯旁邊的輸入框或到「基本設定」調整 <code>#stockNo</code> 與 <code>#marketSelect</code> 即可。
+                </p>
+                <div class="faq-note">延伸閱讀：<a href="guide.html#step-1">使用教學第 1 步</a> 詳細示範每個按鈕的位置。</div>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">策略會儲存在哪裡？會不會消失？</h3>
+                <p class="faq-answer">
+                    當你按下「儲存目前」按鈕（ID：<code>saveStrategyBtn</code>）時，設定會寫入瀏覽器的 <code>localStorage</code>（鍵值：<code>SAVED_STRATEGIES_KEY</code>）。
+                    這代表資料只存在你的裝置中；如果換電腦或清除瀏覽器資料，策略會被刪除。
+                    建議將重要設定同步記錄到 <a href="/stock-records">股票紀錄</a> 或手動備份。
+                </p>
+            </article>
+        </section>
+
+        <section class="faq-category" aria-labelledby="faq-data">
+            <h2 id="faq-data">資料來源與計算</h2>
+            <article class="faq-item">
+                <h3 class="faq-question">歷史資料從哪裡取得？更新頻率為何？</h3>
+                <p class="faq-answer">
+                    台股資料透過 Netlify Functions 呼叫證交所（<code>/api/twse</code>）與櫃買中心（<code>/api/tpex</code>）官方資料，
+                    另提供加權指數、OTC 指數與美股／指數資料（<code>/api/us</code>、<code>/api/index</code>）。
+                    每日收盤後即可獲得最新資料，若當天尚未發布，系統會沿用前一次快取。
+                </p>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">除權息與股票拆分如何處理？</h3>
+                <p class="faq-answer">
+                    「基本設定」卡內的 <code>#adjustedPriceCheckbox</code> 與 <code>#splitAdjustmentCheckbox</code> 可控制是否還原股價。
+                    台股預設開啟，美股因資料來源限制會自動停用並在 <code>#marketAdjustedHint</code> 顯示提醒。
+                </p>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">回測過程會用到哪些雲端資源？</h3>
+                <p class="faq-answer">
+                    一般回測在瀏覽器中執行，批量優化、滾動測試與 AI 模型會透過 Web Worker 與 Netlify Functions 分工處理。
+                    如果開啟開發者模式（<code>developerAreaToggle</code>），可在 <code>#blobUsageContent</code> 看到雲端 Blob 儲存的使用量。
+                </p>
+            </article>
+        </section>
+
+        <section class="faq-category" aria-labelledby="faq-workflow">
+            <h2 id="faq-workflow">操作流程</h2>
+            <article class="faq-item">
+                <h3 class="faq-question">分段優化、批量優化與滾動測試要怎麼排順序？</h3>
+                <p class="faq-answer">
+                    建議順序為：
+                </p>
+                <ol class="faq-answer" style="padding-left: 20px;">
+                    <li>先在左側設定策略並按「立刻回測」，建立基準結果。</li>
+                    <li>使用「分段優化助手」（<code>stagingOptimizationBtn</code>）尋找合理的資金配置。</li>
+                    <li>再執行「批量策略優化」（<code>start-batch-optimization</code>）掃描不同策略組合。</li>
+                    <li>最後啟動「滾動測試」（<code>start-rolling-test</code>）驗證穩健度。</li>
+                </ol>
+                <div class="faq-note">完成後，可在「策略比較」面板勾選多個版本一次對照指標。</div>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">AI 模型預測會覆蓋我現有的策略嗎？</h3>
+                <p class="faq-answer">
+                    不會。啟動按鈕（<code>ai-run-button</code>）會根據當前策略參數計算 AI 建議，
+                    結果會顯示在 AI 報告區並同步到策略摘要中，但不會自動改寫你的進出場設定。
+                    若想採納，請手動調整策略或儲存為新版本。
+                </p>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">可以把回測結果分享給其他人嗎？</h3>
+                <p class="faq-answer">
+                    目前策略儲存在瀏覽器端，建議將摘要截圖或匯出交易紀錄後分享。
+                    若需要長期留存與共用，可把重點紀錄搬到 <a href="/stock-records">股票紀錄</a>，
+                    未來我們也會在 <a href="community.html">社群討論</a> 推出範本分享功能。
+                </p>
+            </article>
+        </section>
+
+        <section class="faq-category" aria-labelledby="faq-policy">
+            <h2 id="faq-policy">授權與安全</h2>
+            <article class="faq-item">
+                <h3 class="faq-question">LazyBacktest 是否提供投資建議？</h3>
+                <p class="faq-answer">
+                    不提供。所有功能僅供教育與回測用途，實際投資請自行評估風險。
+                    詳細規範請參考 <a href="disclaimer.html">免責聲明</a> 與 <a href="privacy.html">隱私政策</a>。
+                </p>
+            </article>
+            <article class="faq-item">
+                <h3 class="faq-question">我的資料會被上傳嗎？</h3>
+                <p class="faq-answer">
+                    只有在發送社群貼文、使用批量優化快取、或啟用 AI 模型時，
+                    會透過 Netlify Blobs 暫存必要資訊。一般回測設定與策略儲存僅在你的瀏覽器完成，
+                    我們不會蒐集個人身份資訊。
+                </p>
+            </article>
+        </section>
+
+        <section class="faq-category" aria-labelledby="faq-contact">
+            <h2 id="faq-contact">還有問題嗎？</h2>
+            <article class="faq-item">
+                <h3 class="faq-question">找不到答案時該怎麼辦？</h3>
+                <p class="faq-answer">
+                    可以：
+                </p>
+                <ul class="faq-answer" style="padding-left: 20px;">
+                    <li>前往 <a href="community.html">社群討論</a> 與其他投資人交流。</li>
+                    <li>直接到 <a href="contact.html">寄信給我</a> 留下需求，我們會盡速回覆。</li>
+                    <li>再次瀏覽 <a href="guide.html">使用教學</a>，按照步驟檢查設定是否遺漏。</li>
+                </ul>
+            </article>
+        </section>
+    </main>
+
+    <footer class="lb-footer">
+        <div class="lb-footer__container">
+            <div class="lb-footer__grid">
+                <div>
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                            <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                        </div>
+                    </div>
+                    <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br>或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">Donate (斗內/贊助)</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="lb-footer__link">歐付寶</a></li>
+                        <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="lb-footer__link">綠界</a></li>
+                        <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="lb-footer__link">PayPal</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">支援與幫助</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="guide.html" class="lb-footer__link">使用教學</a></li>
+                        <li><a href="faq.html" class="lb-footer__link">常見問題</a></li>
+                        <li><a href="contact.html" class="lb-footer__link">寄信給我</a></li>
+                        <li><a href="community.html" class="lb-footer__link">社群討論</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">其他說明</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="privacy.html" class="lb-footer__link">隱私政策</a></li>
+                        <li><a href="disclaimer.html" class="lb-footer__link">免責聲明</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">更多功能</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="/stock-records" class="lb-footer__link">股票紀錄</a></li>
+                        <li><a href="index.html" class="lb-footer__link">股票回測</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="lb-footer__bottom">
+                <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                <small>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</small>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

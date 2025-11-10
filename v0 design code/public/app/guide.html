@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用教學 - LazyBacktest</title>
+    <!-- Patch Tag: LB-FOOTER-UX-20250221A -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin>
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            color: #0f172a;
+            background: #f8fafc;
+        }
+
+        main.guide-main {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 48px 20px 80px;
+        }
+
+        .guide-hero {
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(14, 116, 144, 0.08));
+            border-radius: 24px;
+            padding: 48px 40px;
+            margin-bottom: 48px;
+            box-shadow: 0 24px 60px -40px rgba(8, 145, 178, 0.65);
+        }
+
+        .guide-hero h1 {
+            font-size: 40px;
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+
+        .guide-hero p {
+            margin: 0;
+            font-size: 17px;
+            line-height: 1.8;
+            color: #1f2937;
+        }
+
+        .guide-grid {
+            display: grid;
+            gap: 32px;
+        }
+
+        .guide-step {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 20px 55px -40px rgba(15, 23, 42, 0.4);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .guide-step h2 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 24px;
+        }
+
+        .guide-step p {
+            margin: 12px 0;
+            line-height: 1.75;
+            color: #374151;
+        }
+
+        .guide-illustration {
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid rgba(203, 213, 225, 0.8);
+            background: linear-gradient(180deg, #f9fafb 0%, #ffffff 100%);
+            box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+            margin: 20px 0;
+        }
+
+        .guide-tip {
+            margin-top: 16px;
+            padding: 18px 20px;
+            border-radius: 14px;
+            background: rgba(8, 145, 178, 0.08);
+            border: 1px solid rgba(8, 145, 178, 0.25);
+            color: #0f172a;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .guide-crosslinks {
+            margin-top: 48px;
+            padding: 32px;
+            border-radius: 20px;
+            background: rgba(79, 70, 229, 0.08);
+            border: 1px solid rgba(79, 70, 229, 0.24);
+        }
+
+        .guide-crosslinks ul {
+            margin: 16px 0 0;
+            padding-left: 20px;
+            color: #312e81;
+        }
+
+        .guide-crosslinks a {
+            color: #4338ca;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .guide-crosslinks a:hover,
+        .guide-crosslinks a:focus-visible {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .guide-hero {
+                padding: 32px 24px;
+            }
+
+            .guide-hero h1 {
+                font-size: 30px;
+            }
+
+            .guide-step {
+                padding: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="lb-site-header">
+        <div class="lb-nav-container">
+            <a href="home.html" class="lb-brand">
+                <span class="lb-brand-mark">
+                    <span class="sr-only">LazyBacktest</span>
+                    <svg width="26" height="18" viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                        <rect x="0.5" y="0.5" width="25" height="17" rx="3.5" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.4)" />
+                        <path d="M6 12L10 6L13.5 10.5L16.5 8L20 12" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                        <circle cx="20.5" cy="5.5" r="1.5" fill="#0f172a" />
+                    </svg>
+                </span>
+                <span class="lb-brand-text">
+                    <span class="lb-brand-title">LazyBacktest</span>
+                    <span class="lb-brand-subtitle">懶人股票回測</span>
+                </span>
+            </a>
+            <nav class="lb-site-nav">
+                <a href="home.html" class="lb-nav-link">首頁介紹</a>
+                <a href="index.html" class="lb-nav-link">回測 App</a>
+                <a href="guide.html" class="lb-nav-link" aria-current="page">使用教學</a>
+                <a href="faq.html" class="lb-nav-link">常見問題</a>
+                <a href="contact.html" class="lb-nav-link">寄信給我</a>
+                <a href="community.html" class="lb-nav-link">社群討論</a>
+            </nav>
+            <a href="index.html" class="lb-nav-primary">立即開始回測</a>
+        </div>
+    </header>
+
+    <main class="guide-main">
+        <section class="guide-hero">
+            <h1>一步步掌握 LazyBacktest 的全功能操作流程</h1>
+            <p>
+                本指南帶你從首頁的一鍵回測，到深入使用策略管理、分段優化、批量優化、滾動測試與 AI 預測。
+                每一個截圖都標示了實際按鈕或資訊所在位置，對應到 <code>index.html</code> 內的元件，例如
+                <strong>#quickBacktestBtn</strong>、<strong>#marketSelect</strong>、<strong>#stagingOptimizationBtn</strong>、
+                <strong>#start-batch-optimization</strong>、<strong>#start-rolling-test</strong> 與 <strong>#ai-run-button</strong>，
+                確保你看得到、點得到，也能善用平台提供的每一項功能。
+            </p>
+        </section>
+
+        <div class="guide-grid">
+            <article class="guide-step" id="step-1">
+                <h2>第 1 步：從首頁一鍵回測起步</h2>
+                <p>
+                    在回測 App 頁面的頂部，你會看見 <strong>「一鍵回測」</strong>按鈕（ID：<code>quickBacktestBtn</code>）與
+                    <strong>快速輸入框</strong>（ID：<code>quickBacktestKeyword</code>）。
+                    這裡可直接輸入股票名稱或代碼，按下後系統會自動帶入預設的台積電 2330 回測設定，
+                    並在下方提示區（ID：<code>quickBacktestHint</code>）即時顯示解析結果。
+                    旁邊的 <strong>「進入開發者模式」</strong>（ID：<code>developerAreaToggle</code>）可展開除錯工具與 Blob 使用監控，方便進階使用者追蹤計算狀態。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 420" role="img" aria-label="首頁一鍵回測按鈕位置示意">
+                    <rect x="0" y="0" width="960" height="420" rx="24" fill="#f8fafc" />
+                    <rect x="40" y="60" width="880" height="120" rx="16" fill="#ffffff" stroke="#cbd5f5" stroke-width="1.5" />
+                    <rect x="72" y="100" width="250" height="56" rx="12" fill="#0ea5a4" />
+                    <text x="92" y="135" fill="#ffffff" font-size="22" font-weight="700">一鍵回測</text>
+                    <rect x="342" y="100" width="260" height="56" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="6 6" />
+                    <text x="358" y="135" fill="#0f172a" font-size="18">台積電 / 2330</text>
+                    <rect x="40" y="220" width="240" height="60" rx="12" fill="rgba(59,130,246,0.12)" />
+                    <text x="60" y="258" fill="#1d4ed8" font-size="18">開發者工具</text>
+                    <rect x="640" y="92" width="230" height="80" rx="16" fill="rgba(8,145,178,0.18)" stroke="#0ea5a4" stroke-width="2" />
+                    <text x="660" y="132" fill="#0f172a" font-size="20" font-weight="600">提示：狀態顯示在此</text>
+                    <path d="M750 172 L750 260" stroke="#0ea5a4" stroke-width="3" stroke-dasharray="6 6" marker-end="url(#arrowhead)" />
+                    <defs>
+                        <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto">
+                            <polygon points="0 0, 8 4, 0 8" fill="#0ea5a4"></polygon>
+                        </marker>
+                    </defs>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：輸入框支援直接貼上代碼或名稱。若顯示「找不到官方代碼」，
+                    系統會用原文字嘗試搜尋，記得確認提示狀態再進行回測。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-2">
+                <h2>第 2 步：基本設定卡完整掌握標的與資料</h2>
+                <p>
+                    展開 <strong>「基本設定」</strong>卡後，依序設定 <code>#stockNo</code>（股票或指數代碼）、
+                    <code>#marketSelect</code>（市場：上市、上櫃、美股、指數）以及日期區間。
+                    勾選 <code>#adjustedPriceCheckbox</code> 與 <code>#splitAdjustmentCheckbox</code> 可啟用除權息與拆分校正，
+                    使用 <code>#recentYears</code> 搭配 <code>#applyYearsBtn</code> 能快速套用最近 N 年範圍。
+                    當你準備完成後，點擊 <strong>「立刻回測」</strong>按鈕（ID：<code>quickRunBacktestBtn</code>）即可產生第一份結果。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 520" role="img" aria-label="基本設定卡的欄位位置">
+                    <rect x="0" y="0" width="960" height="520" rx="28" fill="#ffffff" stroke="#dbeafe" stroke-width="2" />
+                    <rect x="40" y="48" width="880" height="420" rx="20" fill="#f8fafc" />
+                    <rect x="80" y="90" width="310" height="60" rx="14" fill="#ffffff" stroke="#94a3b8" />
+                    <text x="96" y="128" fill="#0f172a" font-size="18">#stockNo</text>
+                    <rect x="420" y="90" width="200" height="60" rx="14" fill="#ffffff" stroke="#0ea5a4" stroke-width="2.5" />
+                    <text x="440" y="128" fill="#0f172a" font-size="18">#marketSelect</text>
+                    <rect x="80" y="180" width="820" height="90" rx="16" fill="#e0f2fe" stroke="#38bdf8" stroke-dasharray="8 6" />
+                    <text x="100" y="220" fill="#075985" font-size="18">日期設定：#startDate / #endDate / #recentYears</text>
+                    <rect x="80" y="300" width="360" height="70" rx="18" fill="#0ea5a4" />
+                    <text x="120" y="345" fill="#ffffff" font-size="22" font-weight="700">立刻回測</text>
+                    <rect x="470" y="300" width="190" height="70" rx="18" fill="rgba(8,145,178,0.12)" />
+                    <text x="490" y="342" fill="#0f172a" font-size="18">除權息 &amp; 拆分</text>
+                    <rect x="80" y="400" width="420" height="60" rx="14" fill="rgba(14,116,144,0.12)" />
+                    <text x="100" y="437" fill="#0f172a" font-size="18">提示：美股自動停用校正選項</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：設定完成後建議先按一次「立刻回測」，這會建立之後批量優化、滾動測試所需的快取，
+                    後續流程會更順暢。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-3">
+                <h2>第 3 步：調整交易條件、手續費與滑價</h2>
+                <p>
+                    在 <strong>「交易設定」</strong>卡裡，可透過 <code>tradeTimingClose</code> 等選項切換
+                    信號當日或次日成交，調整 <code>#buyFee</code>、<code>#sellFee</code> 等手續費與交易稅，
+                    以及設定滑價與最低成交股數。
+                    所有欄位都會保留上次回測結果，方便你做 A/B 比較。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 420" role="img" aria-label="交易設定區塊位置">
+                    <rect x="0" y="0" width="960" height="420" rx="28" fill="#ffffff" stroke="#e2e8f0" />
+                    <rect x="60" y="60" width="840" height="300" rx="18" fill="#f1f5f9" />
+                    <rect x="100" y="90" width="260" height="60" rx="14" fill="#ffffff" stroke="#0ea5a4" stroke-width="2" />
+                    <text x="120" y="128" fill="#0f172a" font-size="18">買賣時間點</text>
+                    <rect x="380" y="90" width="220" height="60" rx="14" fill="#ffffff" stroke="#94a3b8" />
+                    <text x="398" y="128" fill="#0f172a" font-size="18">手續費與稅率</text>
+                    <rect x="100" y="170" width="660" height="80" rx="16" fill="rgba(14,116,144,0.12)" />
+                    <text x="120" y="208" fill="#0f172a" font-size="18">滑價、最小單位、退傭</text>
+                    <rect x="100" y="270" width="240" height="60" rx="16" fill="#0ea5a4" />
+                    <text x="118" y="308" fill="#ffffff" font-size="18" font-weight="600">套用與預設提示</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：預設費率會依台股／美股自動套用，若想評估券商優惠方案，可手動覆寫再回測。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-4">
+                <h2>第 4 步：風險控管與分段資金配置</h2>
+                <p>
+                    「風險管理」區塊可設定 <code>#maxDrawdown</code>、<code>#stopLoss</code>、<code>#takeProfit</code> 等強制出場條件。
+                    進一步的 <strong>分段進出場</strong>（<code>#stagingEntryList</code> / <code>#stagingExitList</code>）
+                    讓你自訂每一段的比例與觸發方式（價格回落、策略訊號再觸發）。
+                    這些設定會直接影響後面的「分段優化助手」結果，記得依風險承受度調整。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 420" role="img" aria-label="風險管理與分段設定位置">
+                    <rect x="0" y="0" width="960" height="420" rx="28" fill="#ffffff" stroke="#cbd5f5" />
+                    <rect x="70" y="70" width="820" height="290" rx="20" fill="#f8fafc" />
+                    <rect x="110" y="100" width="300" height="70" rx="16" fill="#0ea5a4" opacity="0.85" />
+                    <text x="130" y="142" fill="#ffffff" font-size="20" font-weight="700">停損 / 停利</text>
+                    <rect x="450" y="100" width="360" height="70" rx="16" fill="#0f172a" opacity="0.08" stroke="#0f172a" stroke-dasharray="6 6" />
+                    <text x="470" y="142" fill="#0f172a" font-size="18">分段進出場編輯器</text>
+                    <rect x="110" y="210" width="700" height="90" rx="18" fill="rgba(8,145,178,0.12)" />
+                    <text x="130" y="250" fill="#0f172a" font-size="18">提示：與分段優化助手互相連動</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：分段設定完畢後，建議先跑一次回測，再到右側的「分段優化助手」檢查建議結果是否合理。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-5">
+                <h2>第 5 步：多空策略與參數調整</h2>
+                <p>
+                    在「策略設定」中可以自訂做多進出場（<code>#entryStrategy</code> / <code>#exitStrategy</code>）
+                    與做空策略（<code>#enableShortSelling</code>、<code>#shortEntryStrategy</code> 等）。
+                    每個策略下方會即時生成對應的參數輸入欄位（如均線週期、RSI 門檻），
+                    並支援混搭多空雙向策略。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 460" role="img" aria-label="策略設定的下拉選單位置">
+                    <rect x="0" y="0" width="960" height="460" rx="28" fill="#ffffff" stroke="#e2e8f0" />
+                    <rect x="80" y="80" width="360" height="80" rx="18" fill="#0ea5a4" opacity="0.18" stroke="#0ea5a4" stroke-width="2" />
+                    <text x="110" y="125" fill="#0f172a" font-size="20">做多進場策略</text>
+                    <rect x="500" y="80" width="360" height="80" rx="18" fill="#f1f5f9" stroke="#94a3b8" />
+                    <text x="530" y="125" fill="#0f172a" font-size="20">做多出場策略</text>
+                    <rect x="80" y="200" width="360" height="80" rx="18" fill="#fde68a" />
+                    <text x="110" y="245" fill="#92400e" font-size="20">啟用做空交易</text>
+                    <rect x="500" y="200" width="360" height="80" rx="18" fill="#f1f5f9" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 6" />
+                    <text x="520" y="245" fill="#b91c1c" font-size="20">做空出場策略</text>
+                    <rect x="80" y="310" width="780" height="90" rx="20" fill="rgba(59,130,246,0.12)" />
+                    <text x="100" y="355" fill="#1d4ed8" font-size="18">每個策略下方都會自動顯示可調參數</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：想快速驗證不同策略組合，可先儲存多個版本，再透過「策略比較」一次檢視表現差異。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-6">
+                <h2>第 6 步：儲存策略、檢視今日建議與回測摘要</h2>
+                <p>
+                    執行回測後，左側的「策略管理」提供 <code>#saveStrategyBtn</code>、
+                    <code>#loadStrategyBtn</code>、<code>#deleteStrategyBtn</code> 等功能；
+                    「今日建議」會在 <code>#today-suggestion-area</code> 中給出即時操作提醒，
+                    「快速結果」卡片則將數據摘要輸出在 <code>#result</code>。
+                    右側的 <strong>回測摘要</strong>、報酬曲線、交易紀錄等會依結果動態更新。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 520" role="img" aria-label="策略管理與回測摘要位置">
+                    <rect x="0" y="0" width="960" height="520" rx="32" fill="#ffffff" stroke="#dbeafe" />
+                    <rect x="60" y="60" width="360" height="140" rx="20" fill="#0ea5a4" opacity="0.15" stroke="#0ea5a4" stroke-width="2" />
+                    <text x="90" y="110" fill="#0f172a" font-size="20">策略管理</text>
+                    <rect x="60" y="220" width="360" height="100" rx="20" fill="#fef3c7" />
+                    <text x="90" y="270" fill="#92400e" font-size="18">今日建議（回測後啟動）</text>
+                    <rect x="60" y="340" width="360" height="100" rx="20" fill="#e0f2fe" />
+                    <text x="90" y="390" fill="#075985" font-size="18">快速結果摘要</text>
+                    <rect x="450" y="80" width="430" height="360" rx="28" fill="#0f172a" opacity="0.08" stroke="#0f172a" stroke-width="2" />
+                    <text x="480" y="130" fill="#0f172a" font-size="22" font-weight="700">回測摘要與績效圖表</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：儲存策略時會同時保存風險管理與分段設定，後續在「策略比較」與「AI 模型」中都能引用同一份資料。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-7">
+                <h2>第 7 步：分段優化、批量優化與策略比較</h2>
+                <p>
+                    右側標籤列提供三大工具：
+                </p>
+                <ul>
+                    <li><strong>分段優化助手</strong>（按鈕 ID：<code>stagingOptimizationBtn</code>），會根據現有策略測試多組進出場分段，並可用 <code>applyStagingOptimizationBtn</code> 一鍵套用。</li>
+                    <li><strong>批量策略優化</strong>（按鈕 ID：<code>start-batch-optimization</code>），允許同時測試多個進出場策略組合與參數範圍。</li>
+                    <li><strong>策略比較</strong>區塊（<code>strategy-comparison-table-wrapper</code>）能把多份已儲存策略以指標欄位一次對照。</li>
+                </ul>
+                <svg class="guide-illustration" viewBox="0 0 960 520" role="img" aria-label="分段優化與批量優化介面示意">
+                    <rect x="0" y="0" width="960" height="520" rx="32" fill="#ffffff" stroke="#d6d3f0" />
+                    <rect x="50" y="70" width="860" height="140" rx="24" fill="#ede9fe" />
+                    <text x="90" y="125" fill="#4c1d95" font-size="20">分段優化助手</text>
+                    <rect x="580" y="100" width="220" height="60" rx="16" fill="#4c1d95" />
+                    <text x="600" y="140" fill="#ffffff" font-size="18" font-weight="700">一鍵優化</text>
+                    <rect x="50" y="240" width="860" height="120" rx="24" fill="#eef2ff" />
+                    <text x="90" y="290" fill="#1e3a8a" font-size="20">批量策略優化</text>
+                    <rect x="580" y="270" width="220" height="60" rx="16" fill="#1e3a8a" opacity="0.9" />
+                    <text x="602" y="308" fill="#ffffff" font-size="18">開始批量優化</text>
+                    <rect x="50" y="380" width="860" height="110" rx="24" fill="#dbeafe" />
+                    <text x="90" y="430" fill="#0f172a" font-size="20">策略比較表</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：批量優化結果會寫入雲端 Blob，若在開發者模式查看 <code>#blobUsageContent</code>，可檢視目前快取與儲存狀態。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-8">
+                <h2>第 8 步：滾動測試與 AI 模型評估</h2>
+                <p>
+                    「滾動測試」頁籤可設定視窗數、訓練／測試區間與評分門檻（例如 <code>#rolling-window-count</code>、
+                    <code>#rolling-threshold-sharpe</code>）。按下 <code>#start-rolling-test</code> 後，系統會模擬 Walk-Forward 流程，
+                    於 <code>#rolling-test-report</code> 輸出各視窗的合格率與評級。
+                    「AI 模型」頁籤透過 <code>#ai-run-button</code> 或 <code>#ai-run-fresh-button</code> 啟動訓練，
+                    結果會在 <code>#ai-metrics-overview</code> 與 <code>#ai-trade-table-body</code> 顯示預測績效、交易規則與勝率。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 520" role="img" aria-label="滾動測試與 AI 模型示意">
+                    <rect x="0" y="0" width="960" height="520" rx="32" fill="#ffffff" stroke="#bae6fd" />
+                    <rect x="60" y="70" width="380" height="360" rx="24" fill="#f0f9ff" />
+                    <text x="90" y="120" fill="#0c4a6e" font-size="20">滾動測試設定</text>
+                    <rect x="80" y="150" width="340" height="70" rx="18" fill="#38bdf8" />
+                    <text x="110" y="190" fill="#ffffff" font-size="18" font-weight="700">#start-rolling-test</text>
+                    <rect x="480" y="70" width="420" height="360" rx="24" fill="#ede9fe" />
+                    <text x="510" y="120" fill="#4c1d95" font-size="20">AI 模型預測</text>
+                    <rect x="500" y="150" width="260" height="70" rx="18" fill="#4c1d95" />
+                    <text x="528" y="190" fill="#ffffff" font-size="18">#ai-run-button</text>
+                    <rect x="500" y="250" width="360" height="120" rx="20" fill="#fdf2f8" />
+                    <text x="520" y="292" fill="#9d174d" font-size="18">指標輸出：#ai-metrics-overview</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：滾動測試與 AI 評估都會耗費較多計算資源，建議在跑完批量優化並保持頁面開啟時執行，避免中途重整。
+                </div>
+            </article>
+
+            <article class="guide-step" id="step-9">
+                <h2>第 9 步：交易紀錄、指標圖表與匯出</h2>
+                <p>
+                    回測完成後，右側會顯示完整的交易紀錄表（<code>#trade-results</code>）、
+                    以及績效指標（<code>#performance-table-container</code>）、策略摘要與 AI 報告等圖表。
+                    可透過策略管理的匯出功能保存設定，也能前往「股票紀錄」頁面集中管理所有跑過的策略。
+                </p>
+                <svg class="guide-illustration" viewBox="0 0 960 420" role="img" aria-label="交易紀錄與圖表位置">
+                    <rect x="0" y="0" width="960" height="420" rx="32" fill="#ffffff" stroke="#dbeafe" />
+                    <rect x="80" y="70" width="800" height="120" rx="20" fill="#e2e8f0" />
+                    <text x="110" y="120" fill="#0f172a" font-size="20">交易紀錄表（#trade-results）</text>
+                    <rect x="80" y="220" width="380" height="140" rx="20" fill="#ede9fe" />
+                    <text x="110" y="270" fill="#4c1d95" font-size="18">策略摘要與 KPI</text>
+                    <rect x="480" y="220" width="400" height="140" rx="20" fill="#cffafe" />
+                    <text x="510" y="270" fill="#0f172a" font-size="18">AI 評估與敏感度</text>
+                </svg>
+                <div class="guide-tip">
+                    小提醒：若想追蹤不同策略版本的績效變化，建議將結果儲存後同步到
+                    <a href="/stock-records">股票紀錄頁面</a>，再使用「策略比較」檢視歷史表現。
+                </div>
+            </article>
+        </div>
+
+        <section class="guide-crosslinks" aria-labelledby="guide-crosslinks-title">
+            <h2 id="guide-crosslinks-title">下一步想了解更多？</h2>
+            <p>
+                完成基本操作後，你可以繼續探索以下資源：
+            </p>
+            <ul>
+                <li>若遇到常見疑問，請參考 <a href="faq.html">常見問題</a>，整理了回測流程、資料來源與授權限制。</li>
+                <li>想與其他使用者交流，可到 <a href="community.html">社群討論</a> 共同分享策略心得。</li>
+                <li>若需要與我們聯絡或提交建議，歡迎使用 <a href="contact.html">寄信給我</a> 表單。</li>
+                <li>查看資料使用條款，請閱讀 <a href="privacy.html">隱私政策</a> 與 <a href="disclaimer.html">免責聲明</a>。</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer class="lb-footer">
+        <div class="lb-footer__container">
+            <div class="lb-footer__grid">
+                <div>
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                            </svg>
+                        </div>
+                        <div>
+                            <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                            <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                        </div>
+                    </div>
+                    <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br>或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">Donate (斗內/贊助)</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="lb-footer__link">歐付寶</a></li>
+                        <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="lb-footer__link">綠界</a></li>
+                        <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="lb-footer__link">PayPal</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">支援與幫助</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="guide.html" class="lb-footer__link">使用教學</a></li>
+                        <li><a href="faq.html" class="lb-footer__link">常見問題</a></li>
+                        <li><a href="contact.html" class="lb-footer__link">寄信給我</a></li>
+                        <li><a href="community.html" class="lb-footer__link">社群討論</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">其他說明</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="privacy.html" class="lb-footer__link">隱私政策</a></li>
+                        <li><a href="disclaimer.html" class="lb-footer__link">免責聲明</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="lb-footer__title">更多功能</h4>
+                    <ul class="lb-footer__list">
+                        <li><a href="/stock-records" class="lb-footer__link">股票紀錄</a></li>
+                        <li><a href="index.html" class="lb-footer__link">股票回測</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="lb-footer__bottom">
+                <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                <small>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</small>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

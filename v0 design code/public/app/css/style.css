@@ -1,4 +1,201 @@
 /* --- 自訂 CSS --- */
+/* Patch Tag: LB-FOOTER-UX-20250221A */
+
+.lb-site-header {
+    background-color: rgba(255, 255, 255, 0.95);
+    border-bottom: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+}
+
+.lb-site-header .lb-nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+
+.lb-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+}
+
+.lb-brand-mark {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #0891b2;
+    box-shadow: 0 10px 24px -12px rgba(8, 145, 178, 0.45);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.lb-brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.lb-brand-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.lb-brand-subtitle {
+    font-size: 0.75rem;
+    color: #4b5563;
+}
+
+.lb-site-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+}
+
+.lb-nav-link {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: #4b5563;
+    text-decoration: none;
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.lb-nav-link:hover,
+.lb-nav-link:focus-visible {
+    color: #0891b2;
+    opacity: 0.9;
+}
+
+.lb-nav-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.65rem 1.25rem;
+    border-radius: 9999px;
+    background-color: #0891b2;
+    color: #ffffff;
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 12px 20px -15px rgba(8, 145, 178, 0.75);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.lb-nav-primary:hover,
+.lb-nav-primary:focus-visible {
+    transform: translateY(-1px);
+    background-color: #0e7490;
+    box-shadow: 0 18px 24px -18px rgba(8, 145, 178, 0.9);
+}
+
+.lb-footer {
+    background-color: #f3f4f6;
+    color: #374151;
+    padding: 3rem 0;
+    margin-top: 4rem;
+}
+
+.lb-footer .lb-footer__container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+}
+
+.lb-footer__grid {
+    display: grid;
+    gap: 2rem;
+}
+
+@media (min-width: 768px) {
+    .lb-footer__grid {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+.lb-footer__title {
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: #374151;
+}
+
+.lb-footer__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.lb-footer__link {
+    color: #6b7280;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.lb-footer__link:hover,
+.lb-footer__link:focus-visible {
+    color: #0f172a;
+}
+
+.lb-footer__bottom {
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+.lb-footer__bottom a {
+    color: #374151;
+    text-decoration: underline;
+}
+
+.lb-footer__bottom small {
+    display: block;
+    margin-top: 0.5rem;
+    color: #9ca3af;
+}
+
+@media (max-width: 768px) {
+    .lb-site-header .lb-nav-container {
+        flex-direction: column;
+        height: auto;
+        padding: 0.75rem 1.25rem 1.5rem;
+    }
+
+    .lb-site-nav {
+        width: 100%;
+        justify-content: center;
+        gap: 0.75rem 1.25rem;
+    }
+
+    .lb-nav-primary {
+        width: 100%;
+    }
+}
 .loading-mascot-wrapper {
     background: none;
     background-color: transparent !important;
