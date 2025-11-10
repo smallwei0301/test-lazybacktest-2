@@ -1,8 +1,11 @@
 /** @type {import('tailwindcss').Config} */
+// Config Version: LB-TAILWIND-CONTENT-20250218B
 module.exports = {
   content: [
     "./index.html",
     "./js/**/*.js",
+    "./v0 design code/public/app/**/*.html",
+    "./v0 design code/public/app/js/**/*.js",
   ],
   theme: {
     extend: {

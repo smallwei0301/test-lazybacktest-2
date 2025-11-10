@@ -1,0 +1,20 @@
+<!-- Asset Version: LB-GUIDE-IMG-20250218A -->
+<svg width="480" height="280" viewBox="0 0 480 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="480" height="280" rx="18" fill="#F8FAFC"/>
+  <rect x="24" y="24" width="432" height="48" rx="10" fill="#E2E8F0"/>
+  <circle cx="56" cy="48" r="12" fill="#0891B2"/>
+  <rect x="88" y="40" width="90" height="16" rx="8" fill="#CBD5F5"/>
+  <rect x="88" y="60" width="140" height="10" rx="5" fill="#E2E8F0"/>
+  <rect x="24" y="96" width="432" height="132" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="8 8"/>
+  <rect x="48" y="118" width="260" height="22" rx="11" fill="#E2E8F0"/>
+  <rect x="48" y="150" width="200" height="16" rx="8" fill="#E2E8F0"/>
+  <rect x="48" y="180" width="320" height="12" rx="6" fill="#E2E8F0"/>
+  <rect x="320" y="120" width="108" height="36" rx="18" fill="#0891B2"/>
+  <text x="374" y="143" text-anchor="middle" font-family="'Inter', 'Noto Sans', sans-serif" font-size="14" font-weight="700" fill="white">立即體驗</text>
+  <g>
+    <path d="M330 162L356 188" stroke="#0891B2" stroke-width="4" stroke-linecap="round"/>
+    <path d="M352 170L356 188L338 184" stroke="#0891B2" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="270" y="206" width="162" height="44" rx="12" fill="rgba(8,145,178,0.12)"/>
+  <text x="351" y="232" text-anchor="middle" font-family="'Inter', 'Noto Sans', sans-serif" font-size="13" font-weight="600" fill="#0F172A">從首頁進入回測工具</text>
+</svg>

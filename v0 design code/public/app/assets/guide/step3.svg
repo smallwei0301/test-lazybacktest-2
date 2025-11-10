@@ -1,0 +1,21 @@
+<!-- Asset Version: LB-GUIDE-IMG-20250218C -->
+<svg width="480" height="280" viewBox="0 0 480 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="480" height="280" rx="18" fill="#F8FAFC"/>
+  <rect x="32" y="36" width="416" height="208" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="56" y="68" width="160" height="18" rx="9" fill="#E2E8F0"/>
+  <rect x="56" y="96" width="120" height="16" rx="8" fill="#E2E8F0"/>
+  <rect x="56" y="126" width="180" height="16" rx="8" fill="#E2E8F0"/>
+  <rect x="56" y="156" width="96" height="16" rx="8" fill="#E2E8F0"/>
+  <rect x="56" y="186" width="148" height="16" rx="8" fill="#E2E8F0"/>
+  <rect x="232" y="92" width="168" height="32" rx="10" fill="#0891B2"/>
+  <text x="316" y="113" text-anchor="middle" font-family="'Inter', 'Noto Sans', sans-serif" font-size="13" font-weight="700" fill="white">自訂參數</text>
+  <rect x="232" y="140" width="168" height="80" rx="12" fill="rgba(8,145,178,0.1)" stroke="#0891B2" stroke-dasharray="8 6"/>
+  <rect x="252" y="154" width="128" height="14" rx="7" fill="#FFFFFF"/>
+  <rect x="252" y="176" width="104" height="12" rx="6" fill="#FFFFFF"/>
+  <g stroke="#0891B2" stroke-width="4" stroke-linecap="round">
+    <path d="M248 210L288 246"/>
+    <path d="M284 224L288 246L268 240" stroke-linejoin="round"/>
+  </g>
+  <rect x="176" y="220" width="212" height="36" rx="12" fill="rgba(8,145,178,0.12)"/>
+  <text x="282" y="244" text-anchor="middle" font-family="'Inter', 'Noto Sans', sans-serif" font-size="12" font-weight="600" fill="#0F172A">調整停利停損、資金配置與策略篩選</text>
+</svg>

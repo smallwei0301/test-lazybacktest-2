@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用教學 - LazyBacktest</title>
+    <!-- Page Version: LB-USER-GUIDE-20250218A -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900"
+    />
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/secondary-pages.css">
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="site-header">
+            <div class="site-inner">
+                <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none;">
+                    <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                        <div class="w-5 h-5 flex flex-col justify-between">
+                            <div class="flex justify-between">
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                            </div>
+                            <div class="flex justify-between items-end">
+                                <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                                <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-lg font-bold" style="color: #0f172a; display:block;">LazyBacktest</span>
+                        <span class="text-xs" style="color: #4b5563;">懶人股票回測</span>
+                    </div>
+                </a>
+                <nav>
+                    <a href="home.html">首頁</a>
+                    <a href="index.html">立即體驗</a>
+                    <a href="faq.html">常見問題</a>
+                    <a href="community.html">社群討論</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+                <nav class="nav-mobile">
+                    <a href="index.html" class="link-chip link-chip--primary">開始回測</a>
+                    <a href="faq.html" class="link-chip">FAQ</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="page-section page-section--muted">
+                <div class="page-container">
+                    <h1 class="page-title">一步一步掌握 LazyBacktest</h1>
+                    <p class="page-subtitle">
+                        這份使用教學會帶你從首頁進入回測工具、設定策略、觀看圖表，到最後儲存成果。
+                        每個步驟都附上示意圖與小提醒，照著做就能立刻上手。
+                    </p>
+                    <div class="inline-links" style="justify-content: center;">
+                        <a href="index.html" class="link-chip link-chip--primary">直接前往股票回測</a>
+                        <a href="stock-records/" class="link-chip">看看股票紀錄怎麼整理</a>
+                        <a href="community.html" class="link-chip link-chip--ghost">加入社群討論</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--bright">
+                <div class="page-container">
+                    <div class="step-grid">
+                        <article class="step-card">
+                            <span class="step-badge">Step 1</span>
+                            <h2 class="step-title">從首頁點選「立即體驗」</h2>
+                            <p class="step-description">打開 LazyBacktest 首頁，點擊右上角的「立即體驗」按鈕，就能進入回測工具。首頁也整理了平台功能與成功案例，可以快速理解回測能解決哪些問題。</p>
+                            <img src="assets/guide/step1.svg" class="step-image" alt="LazyBacktest 首頁按鈕示意圖">
+                            <div class="tip-box">
+                                <div class="tip-title">小提醒</div>
+                                <p>如果想先了解平台能做什麼，再決定要不要回測，可以先閱讀<a href="faq.html" style="color:#0891b2; text-decoration:none;">常見問題</a>整理出的使用情境。</p>
+                            </div>
+                        </article>
+
+                        <article class="step-card">
+                            <span class="step-badge">Step 2</span>
+                            <h2 class="step-title">輸入想測的股票或指數</h2>
+                            <p class="step-description">在搜尋列輸入股票名稱或代碼，例如「台積電」或「2330」。系統會自動帶出市場與全名，確認無誤後按下搜尋即可抓取歷史資料。</p>
+                            <img src="assets/guide/step2.svg" class="step-image" alt="回測搜尋欄位示意圖">
+                            <div class="tip-box">
+                                <div class="tip-title">提示</div>
+                                <p>若找不到代碼，可以到<a href="community.html" style="color:#0891b2; text-decoration:none;">社群討論</a>請教其他使用者，他們常分享不同券商代碼與注意事項。</p>
+                            </div>
+                        </article>
+
+                        <article class="step-card">
+                            <span class="step-badge">Step 3</span>
+                            <h2 class="step-title">調整進出場與資金配置</h2>
+                            <p class="step-description">回測工具會預設多組常用參數，你可以調整停損停利、資金投入比例或策略篩選條件。懶得設定也沒關係，直接使用預設組合就能快速看到結果。</p>
+                            <img src="assets/guide/step3.svg" class="step-image" alt="策略參數設定示意圖">
+                            <div class="tip-box">
+                                <div class="tip-title">專家建議</div>
+                                <p>初學者可以先用預設組合跑一次，熟悉流程後再慢慢微調。想確認設定是否合理，可以參考<a href="privacy.html" style="color:#0891b2; text-decoration:none;">資料使用原則</a>了解系統抓的歷史資料來源。</p>
+                            </div>
+                        </article>
+
+                        <article class="step-card">
+                            <span class="step-badge">Step 4</span>
+                            <h2 class="step-title">解讀圖表與交易紀錄</h2>
+                            <p class="step-description">完成回測後會顯示收益曲線、最大回落、勝率等指標，交易明細也會列在下方。將滑鼠移到圖表節點，就能看到當日的進出場細節。</p>
+                            <img src="assets/guide/step4.svg" class="step-image" alt="回測結果圖表示意圖">
+                            <div class="tip-box">
+                                <div class="tip-title">Tips</div>
+                                <p>想把關鍵結果分享給朋友？可以直接複製網址，或到<a href="community.html" style="color:#0891b2; text-decoration:none;">社群討論</a>張貼你的觀察，一起討論策略優化。</p>
+                            </div>
+                        </article>
+
+                        <article class="step-card">
+                            <span class="step-badge">Step 5</span>
+                            <h2 class="step-title">儲存至「股票紀錄」</h2>
+                            <p class="step-description">覺得這次的組合值得收藏時，請點擊工具上方的「儲存股票紀錄」。未來打開「股票紀錄」頁面，就能比較不同策略的成果並快速再次回測。</p>
+                            <img src="assets/guide/step5.svg" class="step-image" alt="儲存股票紀錄示意圖">
+                            <div class="tip-box">
+                                <div class="tip-title">高手密技</div>
+                                <p>建議依不同市場或策略建立分類備註，方便之後在<a href="stock-records/" style="color:#0891b2; text-decoration:none;">股票紀錄</a>快速查找。也別忘了回到<a href="faq.html" style="color:#0891b2; text-decoration:none;">常見問題</a>複習最佳實務。</p>
+                            </div>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--muted">
+                <div class="page-container">
+                    <h2 class="page-title" style="font-size:32px;">還想了解更多？</h2>
+                    <p class="page-subtitle" style="margin-bottom:32px;">
+                        如果你在步驟中有任何疑問，或想知道如何在真實投資前做好風險控管，以下整理的資源可以幫你更快找到答案。
+                    </p>
+                    <div class="inline-links" style="justify-content:center;">
+                        <a href="faq.html" class="link-chip link-chip--ghost">先看常見問題</a>
+                        <a href="community.html" class="link-chip">在社群詢問高手</a>
+                        <a href="contact.html" class="link-chip">寄信給我</a>
+                        <a href="disclaimer.html" class="link-chip">了解免責聲明</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section page-section--accent">
+                <div class="page-container" style="text-align:center;">
+                    <h2 class="page-title">準備好開始第一次回測了嗎？</h2>
+                    <p class="page-subtitle" style="color:rgba(255,255,255,0.92);">
+                        立刻前往回測工具，輸入第一檔股票，三分鐘內就能看到完整結果。
+                    </p>
+                    <a href="index.html" class="link-chip link-chip--primary" style="background-color:white; color:#0891b2;">我要開始回測</a>
+                </div>
+            </section>
+        </main>
+
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="page-container">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="usage-guide.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="stock-records/">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
