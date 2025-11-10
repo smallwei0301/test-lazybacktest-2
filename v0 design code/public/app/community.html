@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<!-- Version: LB-20240505-FE-003 -->
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社群討論 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { margin: 0; font-family: "Inter", "Noto Sans", sans-serif; background-color: #f8fafc; color: #1f2937; }
+        .container-wrapper { display: flex; flex-direction: column; min-height: 100vh; }
+        main { flex: 1; }
+        .hero { background: linear-gradient(135deg, rgba(8,145,178,0.1), rgba(37,99,235,0.08)); padding: 80px 20px 60px; }
+        .hero__inner { max-width: 1080px; margin: 0 auto; color: #0f172a; text-align: center; }
+        .hero__title { font-size: clamp(32px, 5vw, 48px); font-weight: 900; margin-bottom: 16px; }
+        .hero__desc { font-size: 18px; line-height: 1.8; max-width: 720px; margin: 0 auto 24px; color: #334155; }
+        .hero__stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+        .hero__stats span { background: white; border: 1px solid #e2e8f0; border-radius: 999px; padding: 10px 18px; font-weight: 600; color: #0f172a; }
+        .discussion { max-width: 1080px; margin: -40px auto 0; padding: 0 20px 80px; display: grid; gap: 24px; }
+        .discussion__layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; }
+        .panel { background: white; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 24px 40px rgba(15,23,42,0.08); }
+        .panel__header { padding: 28px 32px 0; }
+        .panel__title { font-size: 24px; font-weight: 800; margin: 0 0 12px; color: #0f172a; }
+        .panel__desc { margin: 0 0 24px; color: #4b5563; line-height: 1.7; }
+        .panel__body { padding: 0 32px 32px; }
+        .form-grid { display: grid; gap: 16px; }
+        .form-grid label { font-weight: 600; color: #0f172a; }
+        .form-grid input,
+        .form-grid textarea { width: 100%; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; font-size: 16px; font-family: inherit; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+        .form-grid input:focus,
+        .form-grid textarea:focus { outline: none; border-color: #0891b2; box-shadow: 0 0 0 3px rgba(8,145,178,0.15); }
+        .form-grid textarea { min-height: 140px; resize: vertical; }
+        .submit-button { display: inline-flex; align-items: center; justify-content: center; padding: 14px 28px; border-radius: 12px; font-weight: 700; border: none; background: #0891b2; color: white; cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .submit-button:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(8,145,178,0.2); }
+        .submit-button:disabled { background: #94a3b8; cursor: not-allowed; box-shadow: none; transform: none; }
+        .status { margin-top: 12px; font-size: 14px; color: #0f172a; }
+        .status.error { color: #dc2626; }
+        .status.success { color: #047857; }
+        .posts-wrapper { display: grid; gap: 16px; }
+        .post-card { border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px 24px; background: #f8fafc; }
+        .post-card__header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+        .post-card__author { font-weight: 700; color: #0f172a; }
+        .post-card__time { font-size: 14px; color: #64748b; }
+        .post-card__content { margin: 0; font-size: 16px; line-height: 1.8; color: #334155; word-break: break-word; }
+        .empty-state { text-align: center; padding: 40px 24px; border: 1px dashed #cbd5f5; border-radius: 16px; background: rgba(226,232,240,0.4); color: #475569; }
+        .guide-card { background: #0f172a; color: white; border-radius: 16px; padding: 32px; display: grid; gap: 16px; }
+        .guide-card__title { margin: 0; font-size: 22px; font-weight: 800; }
+        .guide-card__list { margin: 0; padding-left: 20px; line-height: 1.8; }
+        .guide-card__list a { color: #38bdf8; font-weight: 600; }
+        .reload-button { background: transparent; border: none; color: #0891b2; font-weight: 600; cursor: pointer; }
+        @media (max-width: 960px) {
+            .discussion__layout { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .panel__header, .panel__body { padding: 24px; }
+            .post-card { padding: 18px; }
+            .hero { padding: 60px 16px 48px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-wrapper">
+        <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm" style="background-color: rgba(255, 255, 255, 0.95); border-color: #e5e7eb;">
+            <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px; display: flex; align-items: center; justify-content: space-between;">
+                <div class="flex items-center space-x-3" style="flex-shrink: 0;">
+                    <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none; flex-shrink: 0;">
+                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+                            <div class="w-5 h-5 flex flex-col justify-between">
+                                <div class="flex justify-between">
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                    <div class="w-1 h-1 bg-white rounded-full"></div>
+                                </div>
+                                <div class="flex justify-between items-end">
+                                    <div class="w-1 h-2 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-3 bg-white rounded-sm"></div>
+                                    <div class="w-1 h-1 bg-white rounded-sm"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="flex-shrink: 0;">
+                            <span class="text-lg font-bold" style="color: #4b5563; display: block;">LazyBacktest</span>
+                            <div class="text-xs" style="color: #4b5563;">懶人股票回測</div>
+                        </div>
+                    </a>
+                </div>
+                <nav style="display: flex; gap: 24px; flex-wrap: wrap; justify-content: flex-end;">
+                    <a href="home.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">首頁</a>
+                    <a href="tutorial.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">使用教學</a>
+                    <a href="faq.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">常見問題</a>
+                    <a href="index.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">立即體驗</a>
+                    <a href="community.html" class="text-sm" style="color: #0891b2; font-weight: 600; text-decoration: none; white-space: nowrap;">社群討論</a>
+                    <a href="contact.html" class="text-sm" style="color: #4b5563; text-decoration: none; white-space: nowrap;">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+        <main>
+            <section class="hero">
+                <div class="hero__inner">
+                    <h1 class="hero__title">分享你的回測心得，找到同好一起進步</h1>
+                    <p class="hero__desc">LazyBacktest 社群每日累積超過 200 則交流，無論是策略優化、資料來源或使用技巧，都有人願意提供建議。留言會儲存在雲端，讓所有用戶隨時查閱。</p>
+                    <div class="hero__stats">
+                        <span>6000 位活躍用戶</span>
+                        <span>雲端儲存，跨裝置同步</span>
+                        <span>每週官方整理熱門討論</span>
+                    </div>
+                </div>
+            </section>
+            <section class="discussion">
+                <div class="discussion__layout">
+                    <div class="panel">
+                        <div class="panel__header">
+                            <h2 class="panel__title">立即發佈你的想法</h2>
+                            <p class="panel__desc">分享最近的回測結果、遇到的問題，或是想請教的策略細節。每則留言會透過 Netlify 雲端儲存，讓其他投資人也能閱讀並回覆。</p>
+                        </div>
+                        <div class="panel__body">
+                            <form id="community-form" class="form-grid">
+                                <div>
+                                    <label for="displayName">暱稱</label>
+                                    <input id="displayName" name="displayName" type="text" placeholder="例如：小資交易員" maxlength="40" required>
+                                </div>
+                                <div>
+                                    <label for="message">想分享的內容</label>
+                                    <textarea id="message" name="message" placeholder="分享你的策略調整、遇到的 bug 或成功案例吧！" maxlength="2000" required></textarea>
+                                </div>
+                                <button type="submit" class="submit-button">發佈留言</button>
+                                <div id="community-status" class="status"></div>
+                            </form>
+                        </div>
+                    </div>
+                    <aside class="guide-card">
+                        <h2 class="guide-card__title">社群交流指南</h2>
+                        <ul class="guide-card__list">
+                            <li>分享回測心得前，先閱讀 <a href="tutorial.html">使用教學</a>，確保設定一致。</li>
+                            <li>涉及個資或帳務問題，請直接 <a href="contact.html">寄信給我</a>，避免公開敏感資訊。</li>
+                            <li>留言遵循 <a href="disclaimer.html">免責聲明</a> 與 <a href="privacy.html">隱私政策</a>，共同維護友善環境。</li>
+                            <li>想更系統化紀錄策略，歡迎使用 <a href="/stock-records/">股票紀錄</a> 功能。</li>
+                        </ul>
+                    </aside>
+                </div>
+                <div class="panel">
+                    <div class="panel__header" style="padding-bottom: 16px;">
+                        <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px;">
+                            <div>
+                                <h2 class="panel__title" style="margin-bottom: 4px;">最新留言</h2>
+                                <p class="panel__desc" style="margin: 0;">下方會顯示雲端同步的留言。點擊右上角可重新整理，隨時掌握最新討論。</p>
+                            </div>
+                            <button id="community-reload" class="reload-button" type="button">重新整理</button>
+                        </div>
+                    </div>
+                    <div class="panel__body">
+                        <div id="community-posts" class="posts-wrapper"></div>
+                    </div>
+                </div>
+                <div class="guide-card" style="background:#fef9c3; color:#713f12; border:1px solid #fde68a;">
+                    <h2 class="guide-card__title" style="color:#713f12;">提醒：善用其他資源提升效率</h2>
+                    <p style="margin:0; line-height:1.8;">若你還沒跑過完整回測，請先到 <a href="index.html" style="color:#ca8a04; font-weight:600;">股票回測</a> 完成一次測試，再把結果分享到社群，討論會更精準。</p>
+                </div>
+            </section>
+        </main>
+        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+            <div class="container mx-auto px-4" style="max-width: 1200px;">
+                <div class="grid md:grid-cols-5 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">歡迎把討論連結分享給朋友，一起加入 LazyBacktest 的雲端社群。</p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" style="color: #6b7280;">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" style="color: #6b7280;">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" style="color: #6b7280;">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="tutorial.html" style="color: #6b7280;">使用教學</a></li>
+                            <li><a href="faq.html" style="color: #6b7280;">常見問題</a></li>
+                            <li><a href="contact.html" style="color: #6b7280;">寄信給我</a></li>
+                            <li><a href="community.html" style="color: #6b7280;">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="privacy.html" style="color: #6b7280;">隱私政策</a></li>
+                            <li><a href="disclaimer.html" style="color: #6b7280;">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold mb-4" style="color: #374151;">更多功能</h4>
+                        <ul class="space-y-2 text-sm">
+                            <li><a href="/stock-records/" style="color: #6b7280;">股票紀錄</a></li>
+                            <li><a href="index.html" style="color: #6b7280;">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
+                    <p>留言遵守社群規範，若看到不適當內容請立即 <a href="contact.html" style="color:#374151;">寄信通知我們</a>。</p>
+                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+    <script src="js/community-board.js"></script>
+</body>
+</html>
