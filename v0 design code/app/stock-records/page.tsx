@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, PlusCircle, ImagePlus, List, LayoutGrid, Calculator, BarChart3 } from "lucide-react"
+import { Trash2, PlusCircle, ImagePlus, List, LayoutGrid, Calculator, BarChart3, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Eye, EyeOff, X } from "lucide-react"
 import Link from "next/link"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
@@ -45,6 +45,14 @@ interface Settings {
   hideZeroGainRows: boolean
 }
 
+interface ToastNotification {
+  id: string
+  message: string
+  type: "success" | "error" | "warning" | "info"
+  duration: number
+  show: boolean
+}
+
 const BUY_FEE_RATE = 0.001425
 const DEFAULT_SELL_FEE_STOCK = 0.001425 + 0.003
 const DEFAULT_SELL_FEE_ETF = 0.001425 + 0.001
@@ -72,7 +80,7 @@ export default function StockRecordsPage() {
   const [modalDividendExDate, setModalDividendExDate] = useState("")
   const [modalDividendAmount, setModalDividendAmount] = useState("")
   const [showConfirmDeleteModal, setShowConfirmDeleteModal] = useState(false)
-  const [toast, setToast] = useState({ show: false, message: "", isError: false })
+  const [toasts, setToasts] = useState<ToastNotification[]>([])
   const [imageUploadText, setImageUploadText] = useState("圖片輸入")
   const [imageUploadLoading, setImageUploadLoading] = useState(false)
 
@@ -83,9 +91,30 @@ export default function StockRecordsPage() {
     loadData()
   }, [])
 
-  const showToast = (message: string, isError = false) => {
-    setToast({ show: true, message, isError })
-    setTimeout(() => setToast({ show: false, message: "", isError: false }), 3000)
+  const showToast = (
+    message: string,
+    type: "success" | "error" | "warning" | "info" = "success",
+    duration: number = 3000
+  ) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const newToast: ToastNotification = {
+      id,
+      message,
+      type,
+      duration,
+      show: true
+    }
+    setToasts((prev) => [...prev, newToast])
+
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id))
+      }, duration)
+    }
+  }
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
   }
 
   const saveData = () => {
@@ -176,9 +205,9 @@ export default function StockRecordsPage() {
     try {
       // Simulate image processing
       await new Promise((resolve) => setTimeout(resolve, 2000))
-      showToast("圖片辨識功能需要API金鑰設定", true)
+      showToast("圖片辨識功能需要API金鑰設定", "error")
     } catch (error) {
-      showToast("圖片辨識失敗", true)
+      showToast("圖片辨識失敗", "error")
     } finally {
       setImageUploadText("圖片輸入")
       setImageUploadLoading(false)
@@ -218,28 +247,45 @@ export default function StockRecordsPage() {
     <div className="min-h-screen bg-background">
       <SiteHeader activePath="/stock-records" backLink={{ href: "/backtest", label: "回到回測工具" }} />
 
-      {/* Toast Notification */}
-      {toast.show && (
-        <div
-          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-lg shadow-lg text-white transition-all duration-300 ${
-            toast.isError ? "bg-destructive" : "bg-primary"
-          }`}
-        >
-          {toast.message}
-        </div>
-      )}
+      {/* Toast Notifications - Responsive */}
+      <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 space-y-2 z-50 max-w-xs sm:max-w-sm">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`p-3 sm:p-4 rounded-lg shadow-lg flex items-start justify-between gap-3 sm:gap-4 animate-in fade-in slide-in-from-bottom-2 text-xs sm:text-sm ${
+              toast.type === "error"
+                ? "bg-destructive text-destructive-foreground"
+                : toast.type === "warning"
+                ? "bg-yellow-500 text-white"
+                : toast.type === "info"
+                ? "bg-blue-500 text-white"
+                : "bg-green-500 text-white"
+            }`}
+          >
+            <p className="font-medium flex-1">{toast.message}</p>
+            {toast.duration === 0 && (
+              <button
+                onClick={() => removeToast(toast.id)}
+                className="flex-shrink-0 text-base sm:text-lg leading-none hover:opacity-75 transition-opacity"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
 
-      <div className="container mx-auto p-4 md:p-8">
-        <section className="mb-12 text-center">
-          <div className="max-w-4xl mx-auto">
-            <Badge variant="outline" className="mb-4 border-primary text-primary">
+      <div className="container mx-auto p-3 sm:p-4 md:p-8">
+        <section className="mb-8 sm:mb-12 text-center">
+          <div className="max-w-4xl mx-auto px-2 sm:px-4">
+            <Badge variant="outline" className="mb-3 sm:mb-4 border-primary text-primary text-xs sm:text-sm">
               專業投資組合管理
             </Badge>
-            <h1 className="text-4xl lg:text-5xl font-bold text-foreground mb-4 text-balance">股票收益紀錄系統</h1>
-            <p className="text-lg text-muted-foreground mb-8 text-pretty leading-relaxed">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-3 sm:mb-4 text-balance">股票收益紀錄系統</h1>
+            <p className="text-sm sm:text-base md:text-lg text-muted-foreground mb-6 sm:mb-8 text-pretty leading-relaxed">
               自動追蹤您的台股投資組合表現，提供詳細的收益分析與風險評估
             </p>
-            <div className="flex flex-wrap justify-center items-center gap-8 text-sm text-muted-foreground">
+            <div className="flex flex-wrap justify-center items-center gap-4 sm:gap-8 text-xs sm:text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-primary rounded-full"></div>
                 <span>智能圖片辨識</span>
@@ -281,10 +327,10 @@ export default function StockRecordsPage() {
               <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
             </div>
           </CardHeader>
-          <CardContent className="p-6">
-            <form onSubmit={handleAddStock} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-end">
-              <div className="space-y-2">
-                <Label htmlFor="stockId" className="text-sm font-medium text-foreground">
+          <CardContent className="p-3 sm:p-4 md:p-6">
+            <form onSubmit={handleAddStock} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-6 items-end">
+              <div className="space-y-1 sm:space-y-2">
+                <Label htmlFor="stockId" className="text-xs sm:text-sm font-medium text-foreground">
                   股票代碼
                 </Label>
                 <Input
@@ -292,12 +338,12 @@ export default function StockRecordsPage() {
                   value={stockId}
                   onChange={(e) => setStockId(e.target.value)}
                   placeholder="例如: 2330"
-                  className="border-muted-foreground/20 focus:border-primary"
+                  className="border-muted-foreground/20 focus:border-primary text-sm"
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="purchaseDate" className="text-sm font-medium text-foreground">
+              <div className="space-y-1 sm:space-y-2">
+                <Label htmlFor="purchaseDate" className="text-xs sm:text-sm font-medium text-foreground">
                   購買日期
                 </Label>
                 <Input
@@ -305,12 +351,12 @@ export default function StockRecordsPage() {
                   type="date"
                   value={purchaseDate}
                   onChange={(e) => setPurchaseDate(e.target.value)}
-                  className="border-muted-foreground/20 focus:border-primary"
+                  className="border-muted-foreground/20 focus:border-primary text-sm"
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="purchaseShares" className="text-sm font-medium text-foreground">
+              <div className="space-y-1 sm:space-y-2">
+                <Label htmlFor="purchaseShares" className="text-xs sm:text-sm font-medium text-foreground">
                   購買張數
                 </Label>
                 <Input
@@ -321,7 +367,7 @@ export default function StockRecordsPage() {
                   value={purchaseShares}
                   onChange={(e) => setPurchaseShares(e.target.value)}
                   placeholder="1張 = 1000股"
-                  className="border-muted-foreground/20 focus:border-primary"
+                  className="border-muted-foreground/20 focus:border-primary text-sm"
                   required
                 />
               </div>
@@ -337,31 +383,47 @@ export default function StockRecordsPage() {
                   value={purchasePrice}
                   onChange={(e) => setPurchasePrice(e.target.value)}
                   placeholder="例如: 688.5"
-                  className="border-muted-foreground/20 focus:border-primary"
+                  className="border-muted-foreground/20 focus:border-primary text-sm"
                   required
                 />
               </div>
-              <Button type="submit" size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground h-12">
-                <PlusCircle className="mr-2 h-5 w-5" />
-                新增紀錄
+              <div className="space-y-1 sm:space-y-2">
+                <Label htmlFor="purchasePrice" className="text-xs sm:text-sm font-medium text-foreground">
+                  購買成本 (每股)
+                </Label>
+                <Input
+                  id="purchasePrice"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={purchasePrice}
+                  onChange={(e) => setPurchasePrice(e.target.value)}
+                  placeholder="例如: 688.5"
+                  className="border-muted-foreground/20 focus:border-primary text-sm"
+                  required
+                />
+              </div>
+              <Button type="submit" size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground h-10 sm:h-12 text-xs sm:text-sm">
+                <PlusCircle className="mr-1 sm:mr-2 h-4 sm:h-5 w-4 sm:w-5" />
+                新增
               </Button>
             </form>
           </CardContent>
         </Card>
 
-        <Card className="mb-8 shadow-lg border-0">
-          <CardHeader className="bg-gradient-to-r from-primary/5 to-accent/5 rounded-t-lg">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <Card className="mb-6 sm:mb-8 shadow-lg border-0">
+          <CardHeader className="bg-gradient-to-r from-primary/5 to-accent/5 rounded-t-lg p-3 sm:p-4 md:p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
               <div>
-                <CardTitle className="text-2xl font-bold text-foreground">我的投資組合</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">即時追蹤您的投資表現</p>
+                <CardTitle className="text-xl sm:text-2xl font-bold text-foreground">我的投資組合</CardTitle>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">即時追蹤您的投資表現</p>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2 sm:gap-3">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setSettings((prev) => ({ ...prev, isCompactMode: !prev.isCompactMode }))}
-                  className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                  className="border-primary text-primary hover:bg-primary hover:text-primary-foreground text-xs sm:text-sm h-9 sm:h-10"
                 >
                   {settings.isCompactMode ? <LayoutGrid className="mr-2 h-4 w-4" /> : <List className="mr-2 h-4 w-4" />}
                   {settings.isCompactMode ? "卡片模式" : "精簡模式"}
@@ -378,54 +440,54 @@ export default function StockRecordsPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-6">
+          <CardContent className="p-3 sm:p-4 md:p-6">
             {portfolio.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="w-24 h-24 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                  <BarChart3 className="h-12 w-12 text-muted-foreground" />
+              <div className="text-center py-8 sm:py-12 md:py-16">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 bg-muted rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                  <BarChart3 className="h-8 sm:h-10 md:h-12 w-8 sm:w-10 md:w-12 text-muted-foreground" />
                 </div>
-                <h3 className="text-lg font-semibold text-foreground mb-2">尚未新增任何股票紀錄</h3>
-                <p className="text-muted-foreground mb-6">開始記錄您的第一筆投資，建立專屬的投資組合</p>
+                <h3 className="text-base sm:text-lg font-semibold text-foreground mb-1 sm:mb-2">尚未新增任何股票紀錄</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground mb-4 sm:mb-6">開始記錄您的第一筆投資，建立專屬的投資組合</p>
                 <Button
                   onClick={() => document.getElementById("stockId")?.focus()}
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs sm:text-sm h-9 sm:h-10"
                 >
                   立即新增股票
                 </Button>
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  <div className="bg-gradient-to-br from-primary/10 to-primary/5 p-6 rounded-xl border border-primary/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-sm font-medium text-muted-foreground">總投資金額</div>
-                      <div className="w-8 h-8 bg-primary/20 rounded-lg flex items-center justify-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
+                  <div className="bg-gradient-to-br from-primary/10 to-primary/5 p-4 sm:p-6 rounded-xl border border-primary/20">
+                    <div className="flex items-center justify-between mb-2 sm:mb-3">
+                      <div className="text-xs sm:text-sm font-medium text-muted-foreground">總投資金額</div>
+                      <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary/20 rounded-lg flex items-center justify-center">
                         <BarChart3 className="h-4 w-4 text-primary" />
                       </div>
                     </div>
-                    <div className="text-3xl font-bold text-primary mb-1">
+                    <div className="text-2xl sm:text-3xl font-bold text-primary mb-1">
                       ${Math.round(metrics.totalInvestment).toLocaleString()}
                     </div>
                     <div className="text-xs text-muted-foreground">包含手續費</div>
                   </div>
-                  <div className="bg-gradient-to-br from-accent/10 to-accent/5 p-6 rounded-xl border border-accent/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-sm font-medium text-muted-foreground">持有張數</div>
-                      <div className="w-8 h-8 bg-accent/20 rounded-lg flex items-center justify-center">
-                        <Calculator className="h-4 w-4 text-accent" />
+                  <div className="bg-gradient-to-br from-primary/10 to-primary/5 p-4 sm:p-6 rounded-xl border border-primary/20 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-2 sm:mb-3">
+                      <div className="text-xs sm:text-sm font-medium text-muted-foreground">持有張數</div>
+                      <div className="w-7 h-7 sm:w-8 sm:h-8 bg-accent/20 rounded-lg flex items-center justify-center">
+                        <Calculator className="h-3 w-3 sm:h-4 sm:w-4 text-accent" />
                       </div>
                     </div>
-                    <div className="text-3xl font-bold text-accent mb-1">{metrics.totalShares.toLocaleString()}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-accent mb-1">{metrics.totalShares.toLocaleString()}</div>
                     <div className="text-xs text-muted-foreground">總持股張數</div>
                   </div>
-                  <div className="bg-gradient-to-br from-primary/10 to-accent/10 p-6 rounded-xl border border-primary/20">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-sm font-medium text-muted-foreground">持有股票數</div>
-                      <div className="w-8 h-8 bg-primary/20 rounded-lg flex items-center justify-center">
-                        <List className="h-4 w-4 text-primary" />
+                  <div className="bg-gradient-to-br from-primary/10 to-accent/10 p-4 sm:p-6 rounded-xl border border-primary/20 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-2 sm:mb-3">
+                      <div className="text-xs sm:text-sm font-medium text-muted-foreground">持有股票數</div>
+                      <div className="w-7 h-7 sm:w-8 sm:h-8 bg-primary/20 rounded-lg flex items-center justify-center">
+                        <List className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
                       </div>
                     </div>
-                    <div className="text-3xl font-bold text-foreground mb-1">{metrics.stockCount}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-foreground mb-1">{metrics.stockCount}</div>
                     <div className="text-xs text-muted-foreground">不同股票</div>
                   </div>
                 </div>

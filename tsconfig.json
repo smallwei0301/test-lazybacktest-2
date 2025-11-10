@@ -11,7 +11,7 @@
     "baseUrl": ".",
     "resolveJsonModule": true,
     "lib": ["DOM", "ES2020"],
-    "types": []
+    "types": ["jest", "@testing-library/jest-dom"]
   },
   "include": ["types/**/*.ts", "types/**/*.d.ts"],
   "exclude": ["node_modules"]
