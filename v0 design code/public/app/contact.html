@@ -220,42 +220,35 @@
 <body>
     <div class="container-wrapper">
         <!-- Header -->
-        <header class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm" style="background-color: rgba(255, 255, 255, 0.95); border-color: #e5e7eb;">
-            <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px; display: flex; align-items: center; justify-content: space-between;">
-                <div class="flex items-center space-x-3" style="flex-shrink: 0;">
-                    <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none; flex-shrink: 0;">
-                        <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
-                            <div class="w-5 h-5 flex flex-col justify-between">
-                                <div class="flex justify-between">
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
-                                </div>
-                                <div class="flex justify-between items-end">
-                                    <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
-                                    <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
-                                    <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="flex-shrink: 0;">
-                            <span class="text-lg font-bold text-foreground" style="color: #4b5563; display: block;">LazyBacktest</span>
-                            <div class="text-xs text-muted" style="color: #4b5563;">懶人股票回測</div>
-                        </div>
-                    </a>
-                </div>
-                <nav style="display: flex; gap: 24px; flex-shrink: 0;">
-                    <a href="home.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: #4b5563; white-space: nowrap;">
-                        首頁
-                    </a>
-                    <a href="index.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: #4b5563; white-space: nowrap;">
-                        立即體驗
-                    </a>
+        <header class="lb-site-header">
+            <div class="lb-nav-container">
+                <a href="home.html" class="lb-brand">
+                    <span class="lb-brand-mark">
+                        <span class="sr-only">LazyBacktest</span>
+                        <svg width="26" height="18" viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                            <rect x="0.5" y="0.5" width="25" height="17" rx="3.5" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.4)" />
+                            <path d="M6 12L10 6L13.5 10.5L16.5 8L20 12" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                            <circle cx="20.5" cy="5.5" r="1.5" fill="#0f172a" />
+                        </svg>
+                    </span>
+                    <span class="lb-brand-text">
+                        <span class="lb-brand-title">LazyBacktest</span>
+                        <span class="lb-brand-subtitle">懶人股票回測</span>
+                    </span>
+                </a>
+                <nav class="lb-site-nav">
+                    <a href="home.html" class="lb-nav-link">首頁介紹</a>
+                    <a href="index.html" class="lb-nav-link">回測 App</a>
+                    <a href="guide.html" class="lb-nav-link">使用教學</a>
+                    <a href="faq.html" class="lb-nav-link">常見問題</a>
+                    <a href="contact.html" class="lb-nav-link" aria-current="page">寄信給我</a>
+                    <a href="community.html" class="lb-nav-link">社群討論</a>
                 </nav>
+                <a href="index.html" class="lb-nav-primary">立即開始回測</a>
             </div>
         </header>
 
-        <!-- Main Content -->
+        <!-- Main Content -->        <!-- Main Content -->
         <main>
             <!-- Contact Section -->
             <section class="contact-section">
@@ -314,15 +307,31 @@
                     </div>
                 </div>
             </section>
+
+            <section style="max-width: 800px; margin: 0 auto; padding: 0 20px 60px;">
+                <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 16px; padding: 28px;">
+                    <h2 style="font-size: 20px; font-weight: 700; color: #312e81; margin-top: 0;">快速連結</h2>
+                    <p style="color: #4338ca; line-height: 1.7; margin-bottom: 12px;">
+                        來信前可以先參考以下資源，或在寄信後持續追蹤最新更新：
+                    </p>
+                    <ul style="list-style: disc; margin: 0; padding-left: 22px; color: #4338ca; line-height: 1.7;">
+                        <li>第一次使用？請閱讀 <a href="guide.html" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">使用教學</a>。</li>
+                        <li>遇到疑問？可先查看 <a href="faq.html" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">常見問題</a>。</li>
+                        <li>想和其他投資人交流？歡迎加入 <a href="community.html" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">社群討論</a>。</li>
+                        <li>關於資料使用與權責，請參考 <a href="privacy.html" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">隱私政策</a> 與 <a href="disclaimer.html" style="color: #1d4ed8; font-weight: 600; text-decoration: none;">免責聲明</a>。</li>
+                    </ul>
+                </div>
+            </section>
         </main>
 
         <!-- Footer -->
-        <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
-            <div class="container mx-auto px-4" style="max-width: 1200px;">
-                <div class="grid md:grid-cols-4 gap-8">
+        <footer class="lb-footer">
+            <!-- Patch Tag: LB-FOOTER-UX-20250221A -->
+            <div class="lb-footer__container">
+                <div class="lb-footer__grid">
                     <div>
                         <div class="flex items-center space-x-3 mb-4">
-                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
                                 <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                     <rect width="28" height="20" rx="4" fill="#0EA5A4" />
                                 </svg>
@@ -332,43 +341,50 @@
                                 <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
                             </div>
                         </div>
-                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br>或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新<br> 用奶粉發電，不再用愛發電</p>
                     </div>
                     <div>
-                        <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
-                        <ul class="space-y-2 text-sm">
+                        <h4 class="lb-footer__title">Donate (斗內/贊助)</h4>
+                        <ul class="lb-footer__list">
                             <li>
-                                <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a>
+                                <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="lb-footer__link">歐付寶</a>
                             </li>
                             <li>
-                                <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a>
+                                <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="lb-footer__link">綠界</a>
                             </li>
                             <li>
-                                <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a>
+                                <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="lb-footer__link">PayPal</a>
                             </li>
                         </ul>
                     </div>
                     <div>
-                        <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
-                        <ul class="space-y-2 text-sm">
-                            <li><a href="home.html" class="transition-colors" style="color: #6b7280;">首頁</a></li>
-                            <li><a href="index.html" class="transition-colors" style="color: #6b7280;">使用工具</a></li>
-                            <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">聯絡我們</a></li>
-                            <li><a href="#" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                        <h4 class="lb-footer__title">支援與幫助</h4>
+                        <ul class="lb-footer__list">
+                            <li><a href="guide.html" class="lb-footer__link">使用教學</a></li>
+                            <li><a href="faq.html" class="lb-footer__link">常見問題</a></li>
+                            <li><a href="contact.html" class="lb-footer__link">寄信給我</a></li>
+                            <li><a href="community.html" class="lb-footer__link">社群討論</a></li>
                         </ul>
                     </div>
                     <div>
-                        <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
-                        <ul class="space-y-2 text-sm">
-                            <li><a href="#" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
-                            <li><a href="#" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                        <h4 class="lb-footer__title">其他說明</h4>
+                        <ul class="lb-footer__list">
+                            <li><a href="privacy.html" class="lb-footer__link">隱私政策</a></li>
+                            <li><a href="disclaimer.html" class="lb-footer__link">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="lb-footer__title">更多功能</h4>
+                        <ul class="lb-footer__list">
+                            <li><a href="/stock-records" class="lb-footer__link">股票紀錄</a></li>
+                            <li><a href="index.html" class="lb-footer__link">股票回測</a></li>
                         </ul>
                     </div>
                 </div>
 
-                <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0,0,0,0.06); color: #6b7280;">
-                    <p style="color: #6b7280;">鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a></p>
-                    <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                <div class="lb-footer__bottom">
+                    <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                    <small>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</small>
                 </div>
             </div>
         </footer>
