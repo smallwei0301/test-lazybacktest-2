@@ -13167,8 +13167,9 @@ self.onmessage = async function (e) {
 
       // 【新增】最終數據充足性驗證 - 只有當無法獲得充足數據時才警告
       const dataWarnings = [];
+      let datasetSummary = null;
       if (strategyData && Array.isArray(strategyData) && strategyData.length > 0) {
-        const datasetSummary = summariseDatasetRows(strategyData, {
+        datasetSummary = summariseDatasetRows(strategyData, {
           requestedStart: params.originalStartDate || params.startDate,
           effectiveStartDate: effectiveStartDate || params.startDate,
           warmupStartDate: dataStartDate || params.startDate,
@@ -13204,6 +13205,25 @@ self.onmessage = async function (e) {
           });
         }
       }
+
+      const datasetWindowMeta = {
+        stockNo: params.stockNo,
+        market: params.marketType || params.market || 'TWSE',
+        marketType: params.marketType || null,
+        warmupStartDate: dataStartDate || params.startDate,
+        dataStartDate: dataStartDate || params.startDate,
+        effectiveStartDate: startISO,
+        endDate: params.endDate || null,
+        lookbackDays,
+        priceMode: getPriceModeKey(params.adjustedPrice),
+        adjustedPrice: Boolean(params.adjustedPrice),
+        splitAdjustment: Boolean(params.splitAdjustment),
+        dataPointCount: Array.isArray(strategyData) ? strategyData.length : 0,
+        datasetSummary,
+        fetchedAt: Date.now(),
+      };
+      backtestResult.datasetWindow = Array.isArray(strategyData) ? strategyData : [];
+      backtestResult.datasetWindowMeta = datasetWindowMeta;
 
       backtestResult.dataWarnings = dataWarnings;
       if (dataWarnings.length > 0) {

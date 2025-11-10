@@ -87,6 +87,119 @@ let lastIndicatorSeries = null;
 let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 let lastRecentYearsSetting = null;
+const processedBacktestState = {
+    data: null,
+    meta: null,
+    version: 0,
+    lastClearedReason: null,
+};
+
+function normalizeProcessedKey(value, options = {}) {
+    if (value === null || value === undefined) return '';
+    const text = typeof value === 'string' ? value.trim() : String(value).trim();
+    return options.upper ? text.toUpperCase() : text;
+}
+
+function buildProcessedDatasetFingerprint(payload = {}) {
+    return [
+        normalizeProcessedKey(payload.market || payload.marketType || '', { upper: true }),
+        normalizeProcessedKey(payload.stockNo || '', { upper: true }),
+        normalizeProcessedKey(payload.startDate || ''),
+        normalizeProcessedKey(payload.endDate || ''),
+        payload.adjustedPrice ? 'ADJ:1' : 'ADJ:0',
+        payload.splitAdjustment ? 'SPLIT:1' : 'SPLIT:0',
+    ].join('|');
+}
+
+function syncProcessedDatasetBridge() {
+    if (typeof window === 'undefined') return;
+    if (!window.lazybacktestDataBridge) {
+        window.lazybacktestDataBridge = {};
+    }
+    window.lazybacktestDataBridge.getProcessedDataset = () => processedBacktestState.data;
+    window.lazybacktestDataBridge.getProcessedDatasetMeta = () => processedBacktestState.meta;
+    window.lazybacktestDataBridge.getProcessedDatasetVersion = () => processedBacktestState.version;
+    window.lazybacktestDataBridge.matchesProcessedDataset = (params) => processedDatasetMatches(params);
+    window.lazybacktestDataBridge.clearProcessedDataset = (reason) => clearProcessedBacktestDataset(reason || 'external');
+}
+
+function processedDatasetMatches(params = {}) {
+    const meta = processedBacktestState.meta;
+    if (!meta || !Array.isArray(processedBacktestState.data) || processedBacktestState.data.length === 0) {
+        return false;
+    }
+    if (params.stockNo && normalizeProcessedKey(params.stockNo, { upper: true }) !== meta.stockNoNormalized) {
+        return false;
+    }
+    const requestedMarket = params.market || params.marketType;
+    if (requestedMarket && normalizeProcessedKey(requestedMarket, { upper: true }) !== meta.marketNormalized) {
+        return false;
+    }
+    if (params.startDate && normalizeProcessedKey(params.startDate) !== meta.startDate) {
+        return false;
+    }
+    if (params.endDate && normalizeProcessedKey(params.endDate) !== meta.endDate) {
+        return false;
+    }
+    if (typeof params.adjustedPrice === 'boolean' && params.adjustedPrice !== Boolean(meta.adjustedPrice)) {
+        return false;
+    }
+    if (typeof params.splitAdjustment === 'boolean' && params.splitAdjustment !== Boolean(meta.splitAdjustment)) {
+        return false;
+    }
+    return true;
+}
+
+function clearProcessedBacktestDataset(reason = 'manual-clear') {
+    processedBacktestState.data = null;
+    processedBacktestState.meta = null;
+    processedBacktestState.version += 1;
+    processedBacktestState.lastClearedReason = reason;
+    if (typeof cachedStockData !== 'undefined') {
+        cachedStockData = null;
+    }
+    syncProcessedDatasetBridge();
+}
+
+function setProcessedBacktestDataset(rows, meta = {}) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        clearProcessedBacktestDataset('empty-dataset');
+        return;
+    }
+    const enrichedMeta = {
+        ...meta,
+        stockNo: meta.stockNo || '',
+        market: meta.market || meta.marketType || '',
+        startDate: normalizeProcessedKey(meta.startDate || ''),
+        endDate: normalizeProcessedKey(meta.endDate || ''),
+        adjustedPrice: Boolean(meta.adjustedPrice),
+        splitAdjustment: Boolean(meta.splitAdjustment),
+        warmupStartDate: normalizeProcessedKey(meta.warmupStartDate || meta.dataStartDate || ''),
+        dataStartDate: normalizeProcessedKey(meta.dataStartDate || ''),
+        effectiveStartDate: normalizeProcessedKey(meta.effectiveStartDate || ''),
+    };
+    enrichedMeta.marketNormalized = normalizeProcessedKey(enrichedMeta.market, { upper: true });
+    enrichedMeta.stockNoNormalized = normalizeProcessedKey(enrichedMeta.stockNo, { upper: true });
+    enrichedMeta.fingerprint = buildProcessedDatasetFingerprint({
+        market: enrichedMeta.marketNormalized,
+        stockNo: enrichedMeta.stockNoNormalized,
+        startDate: enrichedMeta.startDate,
+        endDate: enrichedMeta.endDate,
+        adjustedPrice: enrichedMeta.adjustedPrice,
+        splitAdjustment: enrichedMeta.splitAdjustment,
+    });
+    enrichedMeta.updatedAt = Date.now();
+    enrichedMeta.version = processedBacktestState.version + 1;
+    processedBacktestState.data = rows;
+    processedBacktestState.meta = enrichedMeta;
+    processedBacktestState.version += 1;
+    if (typeof cachedStockData !== 'undefined') {
+        cachedStockData = rows;
+    }
+    syncProcessedDatasetBridge();
+}
+
+syncProcessedDatasetBridge();
 
 const ensureAIBridge = () => {
     if (typeof window === 'undefined') return null;
@@ -4773,6 +4886,8 @@ function runBacktestInternal() {
         console.log("[Main] Validation:", isValid);
         if(!isValid) return;
 
+        clearProcessedBacktestDataset('pending-run');
+
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
         const windowOptions = {
             minBars: 90,
@@ -4895,7 +5010,7 @@ function runBacktestInternal() {
             cachedEntry.fetchDiagnostics = cacheDiagnostics;
             const sliceStart = curSettings.effectiveStartDate || effectiveStartDate;
             setVisibleStockData(extractRangeData(cachedEntry.data, sliceStart, curSettings.endDate));
-            cachedStockData = cachedEntry.data;
+                    rawBacktestDataset = cachedEntry.data;
             lastFetchSettings = { ...curSettings };
             refreshPriceInspectorControls();
             updatePriceDebug(cachedEntry);
@@ -4926,6 +5041,7 @@ function runBacktestInternal() {
             } else if(type==='marketError'){
                 // 處理市場查詢錯誤，顯示智慧錯誤處理對話框
                 hideLoading();
+                clearProcessedBacktestDataset('market-error');
                 if (window.showMarketSwitchModal) {
                     window.showMarketSwitchModal(message, marketType, stockNo);
                 } else {
@@ -5050,7 +5166,7 @@ function runBacktestInternal() {
                         splitAdjustment: params.splitAdjustment,
                      }, cacheEntry.data);
                     setVisibleStockData(extractRangeData(mergedData, rawEffectiveStart || effectiveStartDate, curSettings.endDate));
-                    cachedStockData = mergedData;
+                    rawBacktestDataset = mergedData;
                      lastFetchSettings = { ...curSettings };
                      refreshPriceInspectorControls();
                      updatePriceDebug(cacheEntry);
@@ -5143,7 +5259,7 @@ function runBacktestInternal() {
                         splitAdjustment: params.splitAdjustment,
                     }, updatedEntry.data);
                     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
-                    cachedStockData = updatedEntry.data;
+                    rawBacktestDataset = updatedEntry.data;
                     lastFetchSettings = { ...curSettings };
                     refreshPriceInspectorControls();
                     updatePriceDebug(updatedEntry);
@@ -5153,6 +5269,45 @@ function runBacktestInternal() {
                 } else if(!useCache) {
                      console.warn("[Main] No rawData to cache from backtest.");
                 }
+                const workerWindow = Array.isArray(data?.datasetWindow) ? data.datasetWindow : null;
+                const workerWindowMeta = data?.datasetWindowMeta || {};
+                const processedPriceMode = (workerWindowMeta.priceMode || priceMode || (params.adjustedPrice ? 'adjusted' : 'raw')).toString().toLowerCase();
+                const processedMeta = {
+                    stockNo: params.stockNo,
+                    market: workerWindowMeta.market || workerWindowMeta.marketType || curSettings.market,
+                    marketType: workerWindowMeta.marketType || params.marketType || params.market || curSettings.market,
+                    startDate: params.startDate,
+                    endDate: params.endDate,
+                    dataStartDate: workerWindowMeta.dataStartDate
+                        || workerWindowMeta.warmupStartDate
+                        || curSettings.dataStartDate
+                        || params.startDate,
+                    warmupStartDate: workerWindowMeta.warmupStartDate || curSettings.dataStartDate || params.startDate,
+                    effectiveStartDate: workerWindowMeta.effectiveStartDate
+                        || curSettings.effectiveStartDate
+                        || effectiveStartDate
+                        || params.startDate,
+                    lookbackDays: workerWindowMeta.lookbackDays || lookbackDays || null,
+                    adjustedPrice: Boolean(params.adjustedPrice),
+                    splitAdjustment: Boolean(params.splitAdjustment),
+                    priceMode: processedPriceMode,
+                    datasetDiagnostics: data?.datasetDiagnostics || null,
+                    dataWarnings: Array.isArray(data?.dataWarnings) ? data.dataWarnings : [],
+                    fetchedAt: Date.now(),
+                    dataPointCount: workerWindow?.length || data?.rawDataUsed?.length || 0,
+                };
+                const processedPayload = workerWindow && workerWindow.length > 0
+                    ? workerWindow
+                    : (Array.isArray(data?.rawDataUsed) ? data.rawDataUsed : null);
+                if (processedPayload && processedPayload.length > 0) {
+                    setProcessedBacktestDataset(processedPayload, processedMeta);
+                } else {
+                    clearProcessedBacktestDataset('no-processed-data');
+                }
+                if (Array.isArray(data?.rawDataUsed) && data.rawDataUsed.length > 0) {
+                    setVisibleStockData(data.rawDataUsed);
+                }
+
                 if (data?.datasetDiagnostics) {
                     const enrichedDiagnostics = { ...data.datasetDiagnostics };
                     const existingMeta = (data.datasetDiagnostics && data.datasetDiagnostics.meta) || {};
@@ -5236,6 +5391,7 @@ function runBacktestInternal() {
                 resetStrategyStatusCard('error');
                 if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
                 hideLoading();
+                clearProcessedBacktestDataset('worker-error');
                 if (window.lazybacktestTodaySuggestion && typeof window.lazybacktestTodaySuggestion.showError === 'function') {
                     window.lazybacktestTodaySuggestion.showError(data?.message || '回測過程錯誤');
                 }
@@ -5247,6 +5403,7 @@ function runBacktestInternal() {
              resetStrategyStatusCard('error');
              if(backtestWorker)backtestWorker.terminate(); backtestWorker=null;
              hideLoading();
+             clearProcessedBacktestDataset('worker-runtime-error');
              const suggestionArea = document.getElementById('today-suggestion-area');
               if (suggestionArea) suggestionArea.classList.add('hidden');
         };
@@ -5260,7 +5417,7 @@ function runBacktestInternal() {
             lookbackDays:lookbackDays,
         };
         if(useCache) {
-            const cachePayload = cachedEntry?.data || cachedStockData;
+        const cachePayload = cachedEntry?.data || rawBacktestDataset;
             if (Array.isArray(cachePayload)) {
                 workerMsg.cachedData = cachePayload; // Prefer完整快取資料
             }
@@ -8086,8 +8243,8 @@ function runOptimizationInternal(optimizeType) {
             useCachedData:useCache 
         }; 
         
-        if(useCache && cachedStockData) {
-            workerMsg.cachedData=cachedStockData;
+        if(useCache && rawBacktestDataset) {
+            workerMsg.cachedData=rawBacktestDataset;
             const cacheEntry = ensureDatasetCacheEntryFresh(
                 buildCacheKey(curSettings),
                 cachedDataStore.get(buildCacheKey(curSettings)),
@@ -8635,7 +8792,7 @@ function syncCacheFromBacktestResult(data, dataSource, params, curSettings, cach
     });
     cachedDataStore.set(cacheKey, updatedEntry);
     setVisibleStockData(extractRangeData(updatedEntry.data, curSettings.effectiveStartDate || effectiveStartDate, curSettings.endDate));
-    cachedStockData = updatedEntry.data;
+    rawBacktestDataset = updatedEntry.data;
     lastFetchSettings = { ...curSettings };
     refreshPriceInspectorControls();
     updatePriceDebug(updatedEntry);
@@ -8842,7 +8999,7 @@ async function runStagingOptimization() {
         };
         const cacheKey = buildCacheKey(curSettings);
         let cachedEntry = cachedDataStore.get(cacheKey) || null;
-        let cachedPayload = Array.isArray(cachedEntry?.data) ? cachedEntry.data : (Array.isArray(cachedStockData) ? cachedStockData : null);
+        let cachedPayload = Array.isArray(cachedEntry?.data) ? cachedEntry.data : (Array.isArray(rawBacktestDataset) ? rawBacktestDataset : null);
         let cachedMeta = cachedEntry ? buildCachedMetaFromEntry(cachedEntry, effectiveStartDate, lookbackDays) : null;
         let datasetReady = Array.isArray(cachedPayload) && cachedPayload.length > 0;
 
@@ -9221,11 +9378,12 @@ function resetSettings() {
     updateStrategyParams('shortEntry');
     document.getElementById("shortExitStrategy").value = "cover_ma_cross";
     updateStrategyParams('shortExit');
-    cachedStockData = null;
+    rawBacktestDataset = null;
     cachedDataStore.clear();
     lastFetchSettings = null;
     refreshPriceInspectorControls();
     clearPreviousResults();
+    clearProcessedBacktestDataset('reset-settings');
     showSuccess("設定已重置");
 }
 

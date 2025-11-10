@@ -22,6 +22,7 @@ let backtestWorker = null;
 let optimizationWorker = null;
 let workerUrl = null; // Loader 會賦值
 let cachedStockData = null;
+let rawBacktestDataset = null;
 const cachedDataStore = new Map(); // Map<market|stockNo|priceMode, CacheEntry>
 const progressAnimator = createProgressAnimator();
 const LOADING_MASCOT_VERSION = 'LB-PROGRESS-MASCOT-20260709A';

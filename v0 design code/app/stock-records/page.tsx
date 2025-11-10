@@ -91,6 +91,11 @@ export default function StockRecordsPage() {
     loadData()
   }, [])
 
+  // Auto-save when data changes
+  useEffect(() => {
+    saveData()
+  }, [portfolio, sales, feeSettings, settings])
+
   const showToast = (
     message: string,
     type: "success" | "error" | "warning" | "info" = "success",
@@ -241,6 +246,150 @@ export default function StockRecordsPage() {
     }
   }
 
+  // Calculate yearly summary by fiscal year
+  const calculateYearlySummary = () => {
+    if (portfolio.length === 0) {
+      return []
+    }
+
+    const fiscalYearStart = settings.fiscalYearStart
+    const yearlyData: Record<
+      string,
+      {
+        year: string
+        totalInvestment: number
+        totalShares: number
+        totalDividends: number
+        realizedPL: number
+        unrealizedPL: number
+      }
+    > = {}
+
+    portfolio.forEach((stock) => {
+      const stockDate = new Date(stock.date)
+      let year = stockDate.getFullYear()
+      const month = stockDate.getMonth() + 1
+
+      // Adjust year for fiscal year calculation
+      if (month < fiscalYearStart) {
+        year -= 1
+      }
+
+      const yearKey = `${year}-${year + 1}`
+
+      if (!yearlyData[yearKey]) {
+        yearlyData[yearKey] = {
+          year: yearKey,
+          totalInvestment: 0,
+          totalShares: 0,
+          totalDividends: 0,
+          realizedPL: 0,
+          unrealizedPL: 0,
+        }
+      }
+
+      const cost = stock.price * stock.shares * 1000 * (1 + BUY_FEE_RATE)
+      yearlyData[yearKey].totalInvestment += cost
+      yearlyData[yearKey].totalShares += stock.shares
+
+      // Add dividends
+      stock.manualDividends.forEach((div) => {
+        yearlyData[yearKey].totalDividends += div.dividend * stock.shares
+      })
+
+      // Add realized P&L from sales
+      const stockSales = sales[stock.uuid] || []
+      stockSales.forEach((sale) => {
+        const saleDate = new Date(sale.date)
+        let saleYear = saleDate.getFullYear()
+        const saleMonth = saleDate.getMonth() + 1
+        if (saleMonth < fiscalYearStart) {
+          saleYear -= 1
+        }
+        const saleYearKey = `${saleYear}-${saleYear + 1}`
+        if (saleYearKey === yearKey && sale.realizedPL) {
+          yearlyData[yearKey].realizedPL += sale.realizedPL
+        }
+      })
+    })
+
+    return Object.values(yearlyData).sort((a, b) => a.year.localeCompare(b.year))
+  }
+
+  // Calculate financial plan
+  const handleCalculateFinancialPlan = () => {
+    const initialAge = document.getElementById("initialAge") as HTMLInputElement
+    const initialInvestmentYear = document.getElementById("initialInvestmentYear") as HTMLInputElement
+    const planningEndYear = document.getElementById("planningEndYear") as HTMLInputElement
+    const initialInvestmentAmount = document.getElementById("initialInvestmentAmount") as HTMLInputElement
+    const annualIncreaseAmount = document.getElementById("annualIncreaseAmount") as HTMLInputElement
+    const expectedReturnRate = document.getElementById("expectedReturnRate") as HTMLInputElement
+
+    if (
+      !initialAge.value ||
+      !initialInvestmentYear.value ||
+      !planningEndYear.value ||
+      !initialInvestmentAmount.value ||
+      !annualIncreaseAmount.value ||
+      !expectedReturnRate.value
+    ) {
+      showToast("請輸入所有規劃參數", "error")
+      return
+    }
+
+    const age = Number.parseInt(initialAge.value)
+    const startYear = Number.parseInt(initialInvestmentYear.value)
+    const endYear = Number.parseInt(planningEndYear.value)
+    const initialAmount = Number.parseFloat(initialInvestmentAmount.value)
+    const annualIncrease = Number.parseFloat(annualIncreaseAmount.value)
+    const returnRate = Number.parseFloat(expectedReturnRate.value) / 100
+
+    if (startYear >= endYear || endYear - startYear > 100) {
+      showToast("年份設定有誤，請檢查", "error")
+      return
+    }
+
+    // Calculate compound interest
+    let currentBalance = initialAmount
+    const plan: Array<{
+      year: number
+      age: number
+      balance: number
+      yearlyGain: number
+    }> = []
+
+    for (let year = startYear; year <= endYear; year++) {
+      const yearlyGain = currentBalance * returnRate
+      currentBalance = currentBalance + yearlyGain + annualIncrease
+      plan.push({
+        year,
+        age: age + (year - startYear),
+        balance: Math.round(currentBalance),
+        yearlyGain: Math.round(yearlyGain),
+      })
+    }
+
+    const newSettings = {
+      ...settings,
+      financialPlan: {
+        initialAge: age,
+        startYear,
+        endYear,
+        initialAmount,
+        annualIncrease,
+        returnRate: returnRate * 100,
+        projections: plan,
+      },
+    }
+
+    setSettings(newSettings)
+    showToast(
+      `財務規劃已完成！預計 ${endYear} 年達成 $${Math.round(currentBalance).toLocaleString()} 資產`,
+      "success"
+    )
+  }
+
+  const yearlySummary = calculateYearlySummary()
   const metrics = calculatePortfolioMetrics()
 
   return (
@@ -604,7 +753,46 @@ export default function StockRecordsPage() {
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <p className="text-muted-foreground text-center py-8">年度統計功能開發中...</p>
+              {yearlySummary.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">尚無年度統計數據，請先新增股票紀錄。</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-semibold text-foreground">會計年度</th>
+                      <th className="text-right py-3 px-4 font-semibold text-foreground">投資成本</th>
+                      <th className="text-right py-3 px-4 font-semibold text-foreground">持股張數</th>
+                      <th className="text-right py-3 px-4 font-semibold text-foreground">現金股利</th>
+                      <th className="text-right py-3 px-4 font-semibold text-foreground">已實現損益</th>
+                      <th className="text-right py-3 px-4 font-semibold text-foreground">未實現損益</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yearlySummary.map((year, idx) => (
+                      <tr key={idx} className="border-b hover:bg-muted/50 transition-colors">
+                        <td className="py-3 px-4 font-medium">{year.year}</td>
+                        <td className="text-right py-3 px-4">${Math.round(year.totalInvestment).toLocaleString()}</td>
+                        <td className="text-right py-3 px-4">{year.totalShares.toLocaleString()}</td>
+                        <td className="text-right py-3 px-4 text-accent">${Math.round(year.totalDividends).toLocaleString()}</td>
+                        <td
+                          className={`text-right py-3 px-4 font-semibold ${
+                            year.realizedPL >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          ${Math.round(year.realizedPL).toLocaleString()}
+                        </td>
+                        <td
+                          className={`text-right py-3 px-4 font-semibold ${
+                            year.unrealizedPL >= 0 ? "text-blue-600" : "text-orange-600"
+                          }`}
+                        >
+                          ${Math.round(year.unrealizedPL).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -641,7 +829,7 @@ export default function StockRecordsPage() {
                 <Input id="expectedReturnRate" type="number" placeholder="8" />
               </div>
             </div>
-            <Button className="w-full md:w-auto mb-6">
+            <Button className="w-full md:w-auto mb-6" onClick={handleCalculateFinancialPlan}>
               <Calculator className="mr-2 h-5 w-5" />
               計算並同步目標
             </Button>
