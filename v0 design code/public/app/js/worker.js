@@ -4753,6 +4753,7 @@ async function tryFetchRangeFromBlob({
   fetchDiagnostics,
   cacheKey,
   split,
+  skipDataValidation,
 }) {
   if (marketKey !== "TWSE" && marketKey !== "TPEX") {
     return null;
@@ -5026,11 +5027,13 @@ async function tryFetchRangeFromBlob({
   ) {
     rangeFetchInfo.status = "current-month-stale";
     rangeFetchInfo.reason = "current-month-gap";
-    console.warn(
-      `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
-        lastDate || "N/A"
-      } < expected=${targetLatestISO})，等待當日補齊。`,
-    );
+    if (!skipDataValidation) {
+      console.warn(
+        `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
+          lastDate || "N/A"
+        } < expected=${targetLatestISO})，等待當日補齊。`,
+      );
+    }
   } else {
     rangeFetchInfo.status = "success";
     delete rangeFetchInfo.reason;
@@ -5212,6 +5215,7 @@ async function fetchStockData(
   const optionLookbackDays = Number.isFinite(options.lookbackDays)
     ? Number(options.lookbackDays)
     : null;
+  const skipDataValidation = Boolean(options.skipDataValidation);
   if (
     Number.isNaN(startDateObj.getTime()) ||
     Number.isNaN(endDateObj.getTime())
@@ -5365,6 +5369,7 @@ async function fetchStockData(
       fetchDiagnostics,
       cacheKey,
       split,
+      skipDataValidation,
     });
     if (blobRangeResult) {
       return blobRangeResult;
@@ -12845,6 +12850,7 @@ self.onmessage = async function (e) {
     optimizeTargetStrategy,
     optimizeParamName,
     optimizeRange,
+    skipDataValidation,
   } = e.data;
   const sharedUtils =
     typeof lazybacktestShared === "object" && lazybacktestShared
@@ -13087,6 +13093,7 @@ self.onmessage = async function (e) {
             splitAdjustment: params.splitAdjustment,
             effectiveStartDate: effectiveStartDate || params.startDate,
             lookbackDays,
+            skipDataValidation,
           },
         );
         dataToUse = outcome.data;

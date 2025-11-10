@@ -3855,7 +3855,8 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
             optimizeParamName: optimizeTarget.name,
             optimizeRange: optimizedRange,
             useCachedData,
-            cachedData: cachedDataForWorker
+            cachedData: cachedDataForWorker,
+            skipDataValidation: true,
         });
         
         // 設定超時
@@ -5825,7 +5826,8 @@ function performSingleBacktest(params) {
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: false
+                useCachedData: false,
+                skipDataValidation: true,
             });
             
         } catch (error) {

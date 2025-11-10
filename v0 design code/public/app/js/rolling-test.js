@@ -2719,6 +2719,7 @@
                     useCachedData: Array.isArray(cachedStockData) && cachedStockData.length > 0,
                     cachedData: Array.isArray(cachedStockData) ? cachedStockData : null,
                     cachedMeta: buildCachedMeta(),
+                    skipDataValidation: true,
                 };
 
                 worker.onmessage = (event) => {
