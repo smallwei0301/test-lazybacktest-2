@@ -87,26 +87,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader activePath="/" />
-      <section className="border-b bg-muted/40">
-        <div className="container mx-auto flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">快速導覽：</span>
-          <Link href="/guide" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            使用教學
-          </Link>
-          <Link href="/faq" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            常見問題
-          </Link>
-          <Link href="/community" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            社群討論
-          </Link>
-          <Link href="/contact" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            寄信給我
-          </Link>
-          <Link href="/privacy" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            隱私政策
-          </Link>
-        </div>
-      </section>
 
       {/* Hero Section */}
       <main>
@@ -188,23 +168,51 @@ export default function HomePage() {
           </div>
 
           {/* Carousel Stories */}
-          <div className="max-w-4xl mx-auto">
-            {/* Arrow Controls + Card Container */}
-            <div className="relative flex items-center justify-between gap-4">
-              {/* Previous Button - Left Side */}
+          <div className="max-w-4xl mx-auto px-2 sm:px-4">
+            {/* Card Container with Floating Arrows */}
+            <div className="relative group">
+              {/* Previous Button - Left Side (Floating) */}
               <button
                 onClick={() => {
                   setCurrentStory((prev) => (prev - 1 + 3) % 3)
                   setIsAutoPlay(false)
                 }}
-                className="p-2 rounded-full hover:bg-muted transition-colors flex-shrink-0"
+                className="absolute z-10 flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors"
+                style={{
+                  left: '0.5rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#0891b2',
+                  textShadow: '0 2px 8px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(8, 145, 178, 0.4)',
+                  cursor: 'pointer',
+                }}
                 aria-label="Previous story"
               >
-                <ArrowRight className="h-6 w-6 rotate-180 text-muted-foreground hover:text-foreground" />
+                &lt;
+              </button>
+
+              {/* Next Button - Right Side (Floating) */}
+              <button
+                onClick={() => {
+                  setCurrentStory((prev) => (prev + 1) % 3)
+                  setIsAutoPlay(false)
+                }}
+                className="absolute z-10 flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors"
+                style={{
+                  right: '0.5rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#0891b2',
+                  textShadow: '0 2px 8px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(8, 145, 178, 0.4)',
+                  cursor: 'pointer',
+                }}
+                aria-label="Next story"
+              >
+                &gt;
               </button>
 
               {/* Carousel Container */}
-              <div className="overflow-hidden flex-1">
+              <div className="overflow-hidden">
                 <div
                   className="transition-opacity duration-500 ease-in-out"
                   style={{
@@ -336,18 +344,6 @@ export default function HomePage() {
                   )}
                 </div>
               </div>
-
-              {/* Next Button - Right Side */}
-              <button
-                onClick={() => {
-                  setCurrentStory((prev) => (prev + 1) % 3)
-                  setIsAutoPlay(false)
-                }}
-                className="p-2 rounded-full hover:bg-muted transition-colors flex-shrink-0"
-                aria-label="Next story"
-              >
-                <ArrowRight className="h-6 w-6 text-muted-foreground hover:text-foreground" />
-              </button>
             </div>
 
             {/* Dots Indicator - Below Carousel */}

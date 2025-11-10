@@ -217,20 +217,6 @@ export default function StockRecordsPage() {
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader activePath="/stock-records" backLink={{ href: "/backtest", label: "回到回測工具" }} />
-      <section className="border-b bg-muted/40">
-        <div className="container mx-auto flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">輕鬆切換：</span>
-          <Link href="/backtest" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            回到回測主畫面
-          </Link>
-          <Link href="/guide" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            快速複習使用教學
-          </Link>
-          <Link href="/community" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            與社群分享紀錄技巧
-          </Link>
-        </div>
-      </section>
 
       {/* Toast Notification */}
       {toast.show && (

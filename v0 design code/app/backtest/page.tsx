@@ -22,20 +22,6 @@ export default function BacktestPage() {
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader activePath="/backtest" backLink={{ href: "/", label: "返回首頁" }} />
-      <section className="border-b bg-muted/40">
-        <div className="container mx-auto flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">想更快熟悉？</span>
-          <Link href="/guide" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            查看逐步使用教學
-          </Link>
-          <Link href="/stock-records" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            管理股票紀錄
-          </Link>
-          <Link href="/community" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
-            與用戶交換策略心得
-          </Link>
-        </div>
-      </section>
 
       {/* Hero Section */}
       <section className="py-16 bg-gradient-to-br from-background via-primary/5 to-accent/5">

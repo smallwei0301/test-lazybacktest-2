@@ -26,3 +26,6 @@ Thumbs.db
 *.tmp
 *.swp
 *.swo
+
+# 開發文件 - AI Agent 參考檔案
+.vscode/*.md

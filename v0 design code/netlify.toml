@@ -44,12 +44,6 @@
   status = 200
   force = true
 
-# Catch-all redirect for Next.js SPA - MUST be last
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
 # 計畫任務 - 緩存預熱
 [[scheduled_functions]]
   name = "cache-warmer"

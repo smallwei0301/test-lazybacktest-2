@@ -1,5 +1,20 @@
 # LazyBacktest Netlify 部署與 Proxy 說明
 
+## 📌 重要：開始工作前必讀
+
+**所有 AI Agent 在進行任何檔案操作前，必須先讀取以下文件：**
+
+1. **[FILE-ORGANIZATION.md](./FILE-ORGANIZATION.md)** - 檔案放置規則
+   - 定義各類檔案應放置的位置
+   - 確保部署時不會包含無關檔案
+   - 避免專案結構混亂
+
+2. **[PROJECT-RULES.md](./PROJECT-RULES.md)** - 專案規則與準則
+   - 開發規範與最佳實踐
+   - 提交與部署流程
+
+---
+
 ## 1. Proxy 設定（Netlify Function）
 
 此專案使用多支 Netlify Function 作為 proxy，負責在伺服端整合台灣與美國市場的行情來源：

@@ -1,6 +1,7 @@
 'use client'
 // Version: LB-FOOTER-NAV-20250819A
 import Link from "next/link"
+import Image from "next/image"
 import { ArrowLeft, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -36,17 +37,13 @@ export function SiteHeader({ activePath = "", backLink }: SiteHeaderProps) {
 
           <Link href="/" className="flex items-center space-x-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-              <div className="flex items-center gap-0.5">
-                <div className="h-1.5 w-1.5 rounded-full bg-primary-foreground/90"></div>
-                <div className="flex flex-col gap-0.5">
-                  <div className="h-3 w-1 rounded-sm bg-primary-foreground"></div>
-                  <div className="h-2 w-1 rounded-sm bg-primary-foreground/70"></div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <div className="h-4 w-1 rounded-sm bg-primary-foreground"></div>
-                  <div className="h-1.5 w-1 rounded-sm bg-primary-foreground/70"></div>
-                </div>
-              </div>
+              <Image
+                src="/logo/logo-white.png"
+                alt="LazyBacktest Logo"
+                width={40}
+                height={40}
+                className="rounded-lg"
+              />
             </div>
             <div>
               <span className="text-lg font-semibold text-foreground">LazyBacktest</span>
