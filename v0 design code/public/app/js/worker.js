@@ -12603,6 +12603,7 @@ async function runOptimization(
   optRange,
   useCache,
   cachedData,
+  skipDataValidation = false,
 ) {
   const targetLblMap = {
     entry: "進場",
@@ -12666,6 +12667,7 @@ async function runOptimization(
           splitAdjustment: baseParams.splitAdjustment,
           effectiveStartDate: optEffectiveStart,
           lookbackDays: optLookback,
+          skipDataValidation: skipDataValidation,
         },
       );
       stockData = fetched?.data || [];
@@ -13347,6 +13349,7 @@ self.onmessage = async function (e) {
         optimizeRange,
         useCachedData,
         cachedData || workerLastDataset,
+        skipDataValidation,
       );
       self.postMessage({ type: "result", data: optOutcome });
     } else if (type === "getSuggestion") {
