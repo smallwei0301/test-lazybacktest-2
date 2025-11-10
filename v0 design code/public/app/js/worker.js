@@ -12642,55 +12642,24 @@ async function runOptimization(
       );
     }
   } else {
-    // 檢查快取資料是否存在且終點早於需求終點
-    const requestedEndDate = new Date(baseParams.endDate);
-    let shouldSkipFetch = false;
-    let cacheEndDate = null;
-    let cacheSource = null;
-
-    // 優先檢查 cachedData 的終點
+    // 批量優化模式：優先使用現有快取，不判斷終點早晚
+    // 只有在暖身資料不足時才重新抓取
+    
     if (Array.isArray(cachedData) && cachedData.length > 0) {
-      const lastCachedItem = cachedData[cachedData.length - 1];
-      if (lastCachedItem && lastCachedItem.date) {
-        cacheEndDate = new Date(lastCachedItem.date);
-        if (cacheEndDate < requestedEndDate) {
-          shouldSkipFetch = true;
-          stockData = cachedData;
-          cacheSource = 'provided-cache';
-          console.log(`[Worker Opt] 快取終點 (${lastCachedItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
-        }
-      }
-    }
-
-    // 如果 cachedData 未滿足條件，檢查 workerLastDataset
-    if (!shouldSkipFetch && Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
-      const lastWorkerItem = workerLastDataset[workerLastDataset.length - 1];
-      if (lastWorkerItem && lastWorkerItem.date) {
-        cacheEndDate = new Date(lastWorkerItem.date);
-        if (cacheEndDate < requestedEndDate) {
-          shouldSkipFetch = true;
-          stockData = workerLastDataset;
-          cacheSource = 'worker-cache';
-          console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 早於需求終點 (${baseParams.endDate})，使用現有快取資料。`);
-        } else {
-          // 快取終點足夠，直接使用
-          stockData = workerLastDataset;
-          shouldSkipFetch = true;
-          cacheSource = 'worker-cache';
-          console.log(`[Worker Opt] Worker 快取終點 (${lastWorkerItem.date}) 足夠滿足需求終點 (${baseParams.endDate})，使用現有快取資料。`);
-        }
-      }
-    }
-
-    // 如果都沒有快取或快取不滿足條件，才抓取新資料
-    if (!shouldSkipFetch) {
-      const optDataStart =
-        baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart =
-        baseParams.effectiveStartDate || baseParams.startDate;
+      stockData = cachedData;
+      console.log(`[Worker Opt] 使用提供的快取資料（${cachedData.length} 筆）`);
+    } else if (Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
+      stockData = workerLastDataset;
+      console.log(`[Worker Opt] 使用 Worker 快取資料（${workerLastDataset.length} 筆）`);
+    } else {
+      // 完全沒有快取資料，才重新抓取
+      const optDataStart = baseParams.dataStartDate || baseParams.startDate;
+      const optEffectiveStart = baseParams.effectiveStartDate || baseParams.startDate;
       const optLookback = Number.isFinite(baseParams.lookbackDays)
         ? baseParams.lookbackDays
         : null;
+      
+      console.log(`[Worker Opt] 無快取資料，重新抓取...`);
       const fetched = await fetchStockData(
         baseParams.stockNo,
         optDataStart,
