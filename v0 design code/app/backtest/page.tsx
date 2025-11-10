@@ -12,62 +12,30 @@ import {
   Users,
   CheckCircle,
   AlertTriangle,
-  ArrowLeft,
-  Home,
 } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
+import { SiteHeader } from "@/components/site-header"
+import { SiteFooter } from "@/components/site-footer"
 
 export default function BacktestPage() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Link
-              href="/"
-              className="flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5" />
-              <Home className="h-5 w-5" />
-              <span className="text-sm font-medium">返回首頁</span>
-            </Link>
-            <div className="h-6 w-px bg-border"></div>
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-                <div className="w-6 h-6 flex flex-col justify-between">
-                  <div className="flex justify-between">
-                    <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                    <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                    <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                  </div>
-                  <div className="flex justify-between items-end">
-                    <div className="w-1 h-2 bg-primary-foreground rounded-sm"></div>
-                    <div className="w-1 h-3 bg-primary-foreground rounded-sm"></div>
-                    <div className="w-1 h-1 bg-primary-foreground rounded-sm"></div>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <span className="text-xl font-bold text-foreground">股票回測工具</span>
-                <div className="text-xs text-muted-foreground">策略驗證平台</div>
-              </div>
-            </div>
-          </div>
-          <nav className="hidden md:flex items-center space-x-6">
-            <Link href="/stock-records">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-primary text-primary hover:bg-primary hover:text-primary-foreground bg-transparent"
-              >
-                股票紀錄
-              </Button>
-            </Link>
-          </nav>
+      <SiteHeader activePath="/backtest" backLink={{ href: "/", label: "返回首頁" }} />
+      <section className="border-b bg-muted/40">
+        <div className="container mx-auto flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">想更快熟悉？</span>
+          <Link href="/guide" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            查看逐步使用教學
+          </Link>
+          <Link href="/stock-records" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            管理股票紀錄
+          </Link>
+          <Link href="/community" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            與用戶交換策略心得
+          </Link>
         </div>
-      </header>
+      </section>
 
       {/* Hero Section */}
       <section className="py-16 bg-gradient-to-br from-background via-primary/5 to-accent/5">
@@ -981,70 +949,7 @@ export default function BacktestPage() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-muted/30 border-t">
-        <div className="container mx-auto px-4 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <div className="w-5 h-5 flex flex-col justify-between">
-                    <div className="flex justify-between">
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-full"></div>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <div className="w-1 h-2 bg-primary-foreground rounded-sm"></div>
-                      <div className="w-1 h-3 bg-primary-foreground rounded-sm"></div>
-                      <div className="w-1 h-1 bg-primary-foreground rounded-sm"></div>
-                    </div>
-                  </div>
-                </div>
-                <span className="text-lg font-bold text-foreground">LazyBacktest</span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                專為忙碌上班族設計的股票回測平台，讓您在下班後也能做出明智的投資決策。
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">產品功能</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>股票回測</li>
-                <li>策略優化</li>
-                <li>風險評估</li>
-                <li>績效分析</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">支援與幫助</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>使用教學</li>
-                <li>常見問題</li>
-                <li>聯絡客服</li>
-                <li>意見回饋</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-4">關於我們</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>公司介紹</li>
-                <li>服務條款</li>
-                <li>隱私政策</li>
-                <li>免責聲明</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-border mt-8 pt-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              © 2024 LazyBacktest. 版權所有 | 本平台僅供教育和研究用途，不構成投資建議
-            </p>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
 
       <script src="/backtest-worker.js" defer></script>
       <script src="/batch-optimization.js" defer></script>

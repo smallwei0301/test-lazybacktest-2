@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { SiteFooter } from "@/components/site-footer"
+import { SiteHeader } from "@/components/site-header"
 import {
   Shield,
   BarChart3,
@@ -84,66 +86,30 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <div className="flex items-center gap-0.5">
-                <div className="w-1.5 h-1.5 bg-primary-foreground rounded-full"></div>
-                <div className="flex flex-col gap-0.5">
-                  <div className="w-1 h-3 bg-primary-foreground rounded-sm"></div>
-                  <div className="w-1 h-2 bg-primary-foreground rounded-sm"></div>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <div className="w-1 h-4 bg-primary-foreground rounded-sm"></div>
-                  <div className="w-1 h-1.5 bg-primary-foreground rounded-sm"></div>
-                </div>
-              </div>
-            </div>
-            <div>
-              <span className="text-xl font-bold text-foreground">LazyBacktest</span>
-              <div className="text-xs text-muted-foreground">懶人回測</div>
-            </div>
+      <SiteHeader activePath="/" />
+      <section className="border-b bg-muted/40">
+        <div className="container mx-auto flex flex-wrap items-center justify-center gap-3 px-4 py-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">快速導覽：</span>
+          <Link href="/guide" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            使用教學
           </Link>
-          <nav className="hidden md:flex items-center space-x-8">
-            <a
-              href="#features"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              功能特色
-            </a>
-            <a
-              href="#how-it-works"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              如何運作
-            </a>
-            <a
-              href="#testimonials"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              用戶見證
-            </a>
-            <a
-              href="#faq"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              常見問題
-            </a>
-            <Link href="/stock-records">
-              <span className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                股票紀錄
-              </span>
-            </Link>
-            <a href="/app/index.html">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">進入回測 App</Button>
-            </a>
-          </nav>
+          <Link href="/faq" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            常見問題
+          </Link>
+          <Link href="/community" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            社群討論
+          </Link>
+          <Link href="/contact" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            寄信給我
+          </Link>
+          <Link href="/privacy" className="rounded-full border border-border px-3 py-1 transition-colors hover:border-primary hover:text-primary">
+            隱私政策
+          </Link>
         </div>
-      </header>
+      </section>
 
       {/* Hero Section */}
+      <main>
       <section className="relative py-20 lg:py-32 overflow-hidden">
         {/* CHANGE> 更新Hero區背景圖片，使用更專業的金融交易場景 */}
         <div className="absolute inset-0">
@@ -1439,73 +1405,24 @@ export default function HomePage() {
                 </Button>
               </a>
             </div>
+            <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-muted-foreground">
+              <Link href="/guide" className="rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary">
+                先看完整使用教學
+              </Link>
+              <Link href="/faq" className="rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary">
+                查看常見問題整理
+              </Link>
+              <Link href="/community" className="rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary">
+                與其他用戶討論策略
+              </Link>
+            </div>
             <p className="text-sm text-muted-foreground mt-6">不用註冊也可以先試跑一個範例策略</p>
           </div>
         </div>
       </section>
+      </main>
 
-      {/* Footer */}
-      <footer className="bg-foreground text-background py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-background rounded-lg flex items-center justify-center shadow-sm">
-                  <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
-                  </svg>
-                </div>
-                <div>
-                  <span className="text-lg font-bold text-foreground">LazyBacktest</span>
-                  <div className="text-xs text-muted opacity-80">懶人股票回測</div>
-                </div>
-              </div>
-              <p className="text-sm opacity-80">先恭喜您，投資賺錢！<br /> 如果這個網站幫助您投資順利<br /> 或者單純想支持一下韭菜胖叔叔<br />歡迎斗內讓我可以上車繼續更新<br /> 用奶粉發電，不再用愛發電</p>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">Donate (斗內/贊助)</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li>
-                  <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    歐付寶
-                  </a>
-                </li>
-                <li>
-                  <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    綠界
-                  </a>
-                </li>
-                <li>
-                  <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" className="hover:text-primary transition-colors">
-                    PayPal
-                  </a>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">支援與幫助</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">使用教學</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">常見問題</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">寄信給我</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">社群討論</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4">其他說明</h4>
-              <ul className="space-y-2 text-sm opacity-80">
-                <li><a href="#" className="hover:text-primary transition-colors">隱私政策</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">免責聲明</a></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-muted/20 mt-8 pt-8 text-center text-sm opacity-80">
-            <p>鄉民內部測試版: 建議事項與 Bug，請聯絡信箱: <a href="mailto:smallwei0301@gmail.com" className="underline hover:text-primary transition-colors">smallwei0301@gmail.com</a></p>
-            <p className="text-xs opacity-60 mt-2">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

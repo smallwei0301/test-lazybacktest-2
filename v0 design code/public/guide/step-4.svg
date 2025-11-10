@@ -1,0 +1,25 @@
+<svg width="960" height="540" viewBox="0 0 960 540" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="960" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E40AF" stop-opacity="0.15" />
+      <stop offset="1" stop-color="#0EA5A4" stop-opacity="0.12" />
+    </linearGradient>
+    <filter id="blur4" x="-20" y="-20" width="1000" height="580" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="16" />
+    </filter>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg4)" />
+  <rect x="70" y="70" width="820" height="400" rx="24" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2" />
+  <g filter="url(#blur4)" opacity="0.3">
+    <rect x="110" y="140" width="740" height="260" rx="18" fill="#CBD5F5" />
+  </g>
+  <rect x="110" y="110" width="320" height="48" rx="12" fill="#ffffff" stroke="#0EA5A4" stroke-width="3" />
+  <rect x="450" y="110" width="180" height="48" rx="12" fill="#ffffff" stroke="#0EA5A4" stroke-width="3" />
+  <rect x="150" y="180" width="660" height="200" rx="16" fill="#ffffff" stroke="#0EA5A4" stroke-width="3" stroke-dasharray="10 8" />
+  <text x="110" y="360" fill="#0EA5A4" font-size="18" font-family="'Noto Sans TC', 'Inter', sans-serif" font-weight="600">
+    Step 4 ︱切換績效分析與交易記錄
+  </text>
+  <text x="110" y="388" fill="#475569" font-size="14" font-family="'Noto Sans TC', 'Inter', sans-serif" opacity="0.85">
+    回測完成後，利用上方標籤切換到績效或交易明細，確認指標與每筆交易是否符合預期。
+  </text>
+</svg>
