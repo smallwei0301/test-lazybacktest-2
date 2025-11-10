@@ -8,5 +8,6 @@
     "systemPromptFile": ".vscode/ai-agent-system-prompt.md",
     "autoValidation": true,
     "workflowMode": "complete"
-  }
+  },
+  "css.lint.unknownAtRules": "ignore"
 }
