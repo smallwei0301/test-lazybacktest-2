@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隱私政策 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #0f172a;
+            --muted-foreground: #4b5563;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --accent: #f59e0b;
+            --border: #e5e7eb;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background-color: #f9fafb;
+            color: var(--muted-foreground);
+        }
+        .page-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #ffffffcc;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 18px 20px;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .brand-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+            color: var(--foreground);
+        }
+        .brand-text span:first-child {
+            font-size: 1.125rem;
+            font-weight: 700;
+        }
+        .brand-text span:last-child {
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px 18px;
+            justify-content: flex-end;
+        }
+        .nav-links a {
+            font-size: 0.95rem;
+            color: #4b5563;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 6px 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .nav-links a:hover,
+        .nav-links a:focus-visible {
+            color: var(--primary);
+            background-color: rgba(8, 145, 178, 0.08);
+            outline: none;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            padding: 80px 20px 48px;
+            background: linear-gradient(140deg, rgba(8, 145, 178, 0.12), rgba(6, 182, 212, 0.05));
+        }
+        .hero-inner {
+            max-width: 920px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: clamp(2.25rem, 4vw, 3rem);
+            color: var(--foreground);
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        .hero-subtitle {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: #475569;
+        }
+        .content-section {
+            padding: 60px 20px;
+        }
+        .content-inner {
+            max-width: 960px;
+            margin: 0 auto;
+            display: grid;
+            gap: 32px;
+        }
+        .policy-card {
+            background-color: #ffffff;
+            border-radius: 24px;
+            padding: 32px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 20px 46px -36px rgba(15, 23, 42, 0.4);
+        }
+        .policy-card h2 {
+            margin-top: 0;
+            font-size: 1.6rem;
+            color: var(--foreground);
+        }
+        .policy-card p,
+        .policy-card ul {
+            line-height: 1.75;
+            color: #475569;
+        }
+        .policy-card ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .policy-card li {
+            margin-bottom: 8px;
+        }
+        .cta-box {
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.08), rgba(245, 158, 11, 0.06));
+            border-radius: 24px;
+            padding: 32px;
+            text-align: center;
+        }
+        .cta-box h2 {
+            font-size: 1.5rem;
+            color: var(--foreground);
+            margin-bottom: 12px;
+        }
+        .cta-box p {
+            color: #475569;
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+        .cta-box a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 26px;
+            border-radius: 9999px;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 6px;
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--primary-foreground);
+        }
+        .btn-secondary {
+            background-color: #ffffff;
+            color: var(--primary);
+            border: 1px solid rgba(8, 145, 178, 0.3);
+        }
+        footer {
+            background-color: #f3f4f6;
+            color: #374151;
+            margin-top: 80px;
+        }
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+        .footer-grid {
+            display: grid;
+            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        .footer-grid h4 {
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .footer-grid ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+        .footer-grid a {
+            color: #6b7280;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .footer-grid a:hover,
+        .footer-grid a:focus-visible {
+            color: var(--primary);
+            outline: none;
+        }
+        .footer-bottom {
+            border-top: 1px solid rgba(0,0,0,0.06);
+            margin-top: 40px;
+            padding-top: 24px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        .footer-bottom a {
+            color: #374151;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <div class="header-inner">
+                <a href="home.html" class="brand-link">
+                    <div style="width: 40px; height: 40px; background-color: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 22px; height: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;">
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 4px; grid-column: span 3; height: 8px;"></span>
+                        </div>
+                    </div>
+                    <span class="brand-text">
+                        <span>LazyBacktest</span>
+                        <span>懶人股票回測</span>
+                    </span>
+                </a>
+                <nav class="nav-links">
+                    <a href="home.html">首頁</a>
+                    <a href="index.html">股票回測</a>
+                    <a href="tutorial.html">使用教學</a>
+                    <a href="faq.html">常見問題</a>
+                    <a href="community.html">社群討論</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <h1 class="hero-title">隱私政策</h1>
+                    <p class="hero-subtitle">我們重視用戶的資料安全，下方條款說明收集的資料種類、使用目的與保護措施。若有任何疑問，歡迎透過寄信給我與我們聯繫。</p>
+                </div>
+            </section>
+
+            <section class="content-section">
+                <div class="content-inner">
+                    <article class="policy-card">
+                        <h2>一、我們收集哪些資料</h2>
+                        <ul>
+                            <li><strong>回測操作資料：</strong>包含你在回測頁面選擇的股票代號、策略設定與回測區間，此資料僅在瀏覽器端計算，不會上傳伺服器。</li>
+                            <li><strong>聯絡資訊：</strong>當你透過「寄信給我」提供 email 或訊息時，我們只會在回覆與客服使用。</li>
+                            <li><strong>社群留言內容：</strong>你在社群討論區張貼的顯示名稱與留言會儲存在 Netlify Blobs，以便所有使用者閱讀。</li>
+                            <li><strong>網站分析：</strong>透過 Google Analytics 觀察匿名化的瀏覽行為，用來優化網站效能與內容。</li>
+                        </ul>
+                    </article>
+
+                    <article class="policy-card">
+                        <h2>二、資料如何使用</h2>
+                        <ul>
+                            <li>用於提供回測結果：策略設定僅在瀏覽器內計算，不會傳送至第三方。</li>
+                            <li>客服與回覆：當你寄信或在社群留言時，我們會使用提供的聯絡方式回覆問題。</li>
+                            <li>服務改進：透過匿名分析了解常見操作流程，調整教學與介面。</li>
+                            <li>安全性維護：紀錄系統錯誤與 API 請求狀況，避免惡意使用。</li>
+                        </ul>
+                    </article>
+
+                    <article class="policy-card">
+                        <h2>三、資料保存與保護</h2>
+                        <ul>
+                            <li>社群留言儲存在 Netlify 提供的 Blobs 儲存空間，採用伺服器端存取權限控管。</li>
+                            <li>寄信提供的資訊只會存留在信箱與客服記錄中，不會另行建立行銷名單。</li>
+                            <li>不會出售、出租或以其他方式提供個人資料給第三方。</li>
+                            <li>如需刪除留言或資料，請寄信提供相關資訊，我們會在 7 個工作天內完成。</li>
+                        </ul>
+                    </article>
+
+                    <article class="policy-card">
+                        <h2>四、使用者權利</h2>
+                        <p>你可以隨時要求：</p>
+                        <ul>
+                            <li>查詢或更正你在社群討論區的留言。</li>
+                            <li>刪除社群內容或停止顯示。</li>
+                            <li>停止接收我們的任何通知。</li>
+                        </ul>
+                        <p>請寄信到 <a href="mailto:smallwei0301@gmail.com" style="color: var(--primary); text-decoration: underline;">smallwei0301@gmail.com</a>，我們會在 24 小時內回覆。</p>
+                    </article>
+
+                    <article class="policy-card">
+                        <h2>五、本政策的更新</h2>
+                        <p>若未來因功能新增或法規調整需要修改條款，會在此頁面公告最新內容，同時於社群討論區與首頁提醒。持續使用網站即代表你同意更新後的政策。</p>
+                    </article>
+
+                    <div class="cta-box">
+                        <h2>需要更深入的說明？</h2>
+                        <p>如果想了解回測流程的資料處理方式，可以閱讀使用教學；若對條款仍有疑問，歡迎寄信或在社群討論區留言。</p>
+                        <a class="btn-primary" href="tutorial.html">閱讀使用教學</a>
+                        <a class="btn-secondary" href="community.html">前往社群討論</a>
+                        <a class="btn-secondary" href="contact.html">寄信給我</a>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者想支持一下韭菜胖叔叔，歡迎斗內讓我可以上車繼續更新。</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="tutorial.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="/stock-records">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-bottom">
+                    <p>鄉民內部測試版：建議事項與 Bug，請寄信到 <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                    <p>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

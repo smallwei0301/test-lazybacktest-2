@@ -1,0 +1,19 @@
+<svg width="800" height="450" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="450" rx="24" fill="#f9fafb"/>
+  <rect x="32" y="40" width="736" height="56" rx="12" fill="#e5e7eb" fill-opacity="0.6"/>
+  <rect x="32" y="120" width="736" height="280" rx="20" fill="#ffffff" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6 8"/>
+  <rect x="72" y="164" width="300" height="200" rx="16" fill="#fef9c3"/>
+  <rect x="396" y="164" width="272" height="48" rx="12" fill="#bae6fd"/>
+  <rect x="396" y="220" width="272" height="48" rx="12" fill="#bae6fd"/>
+  <rect x="396" y="276" width="272" height="48" rx="12" fill="#bae6fd"/>
+  <text x="88" y="198" fill="#0f172a" font-size="20" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">風險控管</text>
+  <text x="420" y="196" fill="#0f172a" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">停損停利設定</text>
+  <text x="420" y="252" fill="#0f172a" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">資金控管</text>
+  <text x="420" y="308" fill="#0f172a" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">部位調整</text>
+  <text x="60" y="138" fill="#0891b2" font-size="22" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">步驟 4：設定風險參數</text>
+  <path d="M376 264H340" stroke="#f59e0b" stroke-width="4" stroke-linecap="round"/>
+  <path d="M356 248L376 264L356 280" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="72" y="332" fill="#4b5563" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif">設定停損停利％數與加減碼方式，系統會依照條件自動控管部位。</text>
+  <rect x="72" y="356" width="428" height="32" rx="10" fill="#fee2e2"/>
+  <text x="88" y="378" fill="#b91c1c" font-size="15" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="600">Tip：建議先從 5% 停損、10% 停利測試，確保風險在可承受範圍</text>
+</svg>

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>常見問題 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #0f172a;
+            --muted-foreground: #4b5563;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --accent: #f59e0b;
+            --border: #e5e7eb;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            background-color: #f9fafb;
+            color: var(--muted-foreground);
+        }
+        .page-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #ffffffcc;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 0;
+            z-index: 40;
+        }
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 18px 20px;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .brand-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+            color: var(--foreground);
+        }
+        .brand-text span:first-child {
+            font-size: 1.125rem;
+            font-weight: 700;
+        }
+        .brand-text span:last-child {
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px 18px;
+            justify-content: flex-end;
+        }
+        .nav-links a {
+            font-size: 0.95rem;
+            color: #4b5563;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 6px 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .nav-links a:hover,
+        .nav-links a:focus-visible {
+            color: var(--primary);
+            background-color: rgba(8, 145, 178, 0.08);
+            outline: none;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            padding: 80px 20px 48px;
+            background: linear-gradient(145deg, rgba(8, 145, 178, 0.12), rgba(6, 182, 212, 0.05));
+        }
+        .hero-inner {
+            max-width: 900px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: clamp(2.25rem, 4vw, 3rem);
+            color: var(--foreground);
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        .hero-subtitle {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: #475569;
+        }
+        .faq-section {
+            padding: 60px 20px;
+        }
+        .faq-inner {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .faq-group {
+            display: grid;
+            gap: 20px;
+        }
+        details {
+            background-color: #ffffff;
+            border-radius: 20px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 14px 40px -32px rgba(15, 23, 42, 0.6);
+            padding: 22px 28px;
+        }
+        summary {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--foreground);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+        summary::-webkit-details-marker {
+            display: none;
+        }
+        details[open] {
+            border-color: rgba(8, 145, 178, 0.35);
+            box-shadow: 0 20px 48px -30px rgba(8, 145, 178, 0.35);
+        }
+        details p,
+        details ul {
+            margin: 16px 0 0;
+            line-height: 1.75;
+            color: #475569;
+        }
+        .faq-tag {
+            display: inline-block;
+            background-color: rgba(8, 145, 178, 0.12);
+            color: var(--primary);
+            font-size: 0.8rem;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            margin-left: 8px;
+        }
+        .cta-banner {
+            margin-top: 60px;
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.1), rgba(245, 158, 11, 0.08));
+            border-radius: 24px;
+            padding: 36px 32px;
+            display: grid;
+            gap: 16px;
+            align-items: center;
+        }
+        .cta-banner h3 {
+            font-size: 1.5rem;
+            color: var(--foreground);
+            margin: 0;
+        }
+        .cta-banner p {
+            margin: 0;
+            line-height: 1.7;
+            color: #475569;
+        }
+        .cta-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .btn-primary,
+        .btn-secondary {
+            border-radius: 9999px;
+            font-weight: 600;
+            text-decoration: none;
+            padding: 12px 24px;
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--primary-foreground);
+        }
+        .btn-secondary {
+            background-color: #ffffff;
+            color: var(--primary);
+            border: 1px solid rgba(8, 145, 178, 0.3);
+        }
+        footer {
+            background-color: #f3f4f6;
+            color: #374151;
+            margin-top: 80px;
+        }
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+        .footer-grid {
+            display: grid;
+            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        .footer-grid h4 {
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .footer-grid ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 10px;
+        }
+        .footer-grid a {
+            color: #6b7280;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .footer-grid a:hover,
+        .footer-grid a:focus-visible {
+            color: var(--primary);
+            outline: none;
+        }
+        .footer-bottom {
+            border-top: 1px solid rgba(0,0,0,0.06);
+            margin-top: 40px;
+            padding-top: 24px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        .footer-bottom a {
+            color: #374151;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <div class="header-inner">
+                <a href="home.html" class="brand-link">
+                    <div style="width: 40px; height: 40px; background-color: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 22px; height: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;">
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 4px; grid-column: span 3; height: 8px;"></span>
+                        </div>
+                    </div>
+                    <span class="brand-text">
+                        <span>LazyBacktest</span>
+                        <span>懶人股票回測</span>
+                    </span>
+                </a>
+                <nav class="nav-links">
+                    <a href="home.html">首頁</a>
+                    <a href="index.html">股票回測</a>
+                    <a href="tutorial.html">使用教學</a>
+                    <a href="faq.html" style="background-color: rgba(8, 145, 178, 0.1); color: var(--primary);">常見問題</a>
+                    <a href="community.html">社群討論</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <h1 class="hero-title">常見問題總整理</h1>
+                    <p class="hero-subtitle">我們從首頁使用者最關心的問題開始，並補充更多實務經驗，幫助你在回測流程中快速排除疑惑。</p>
+                </div>
+            </section>
+
+            <section class="faq-section">
+                <div class="faq-inner">
+                    <div class="faq-group">
+                        <details open>
+                            <summary>我不會寫程式，可以使用 LazyBacktest 嗎？<span class="faq-tag">新手友善</span></summary>
+                            <p>可以！LazyBacktest 全程使用圖形化介面，只要輸入股票代號、選擇策略、設定回測區間，就能執行回測。所有操作都在同一個頁面完成，不需要寫一行程式碼。</p>
+                        </details>
+                        <details>
+                            <summary>系統的資料來源是什麼？多久更新一次？<span class="faq-tag">資料</span></summary>
+                            <p>回測資料直接透過 Netlify Functions 從台灣證券交易所（TWSE）與櫃買中心（TPEX）擷取，並搭配 Netlify Blobs 快取以確保速度與穩定性。資料每日同步，確保策略驗證使用最新的官方收盤資訊。</p>
+                        </details>
+                        <details>
+                            <summary>一次回測會測試多少策略？會不會跑很久？<span class="faq-tag">效能</span></summary>
+                            <p>系統會針對你選擇的多頭、空頭策略自動排列組合，同時跑完所有設定。一般情況下數十組策略大約幾秒鐘內完成；若組數較多，可以善用篩選或先從核心策略開始測試。</p>
+                        </details>
+                        <details>
+                            <summary>回測結果要怎麼看？哪些指標最重要？<span class="faq-tag">解讀</span></summary>
+                            <p>結果頁會顯示：累積報酬率、最大回檔（最大虧損）、勝率、交易次數與每筆平均損益。建議優先觀察「勝率 + 最大回檔 + 累積報酬」三項。如果某組策略報酬率高，但最大回檔超過你能承受的幅度，就需要再調整。</p>
+                        </details>
+                        <details>
+                            <summary>可以自訂停損停利或加減碼規則嗎？<span class="faq-tag">控管</span></summary>
+                            <p>可以，在策略設定下方有停損停利、資金控管與部位調整等欄位。輸入百分比或選擇固定分批的方式後，系統會在回測時自動加減碼，模擬真實交易決策。</p>
+                        </details>
+                        <details>
+                            <summary>如何保存回測結果，方便之後查看？<span class="faq-tag">紀錄</span></summary>
+                            <p>完成回測後，建議開啟「股票紀錄」頁面集中管理。你可以為每次測試新增紀錄、加上備註，日後回來比較不同策略表現時更方便。</p>
+                        </details>
+                        <details>
+                            <summary>社群討論區可以分享成果嗎？留言會保存多久？<span class="faq-tag">社群</span></summary>
+                            <p>可以。社群討論區的留言會存放在 Netlify 雲端 Blobs 中，所有使用者都能即時讀取。未來若想整理討論精華，也會從同一個資料來源擷取，不會因為換裝置就遺失。</p>
+                        </details>
+                        <details>
+                            <summary>遇到問題要如何回報？<span class="faq-tag">支援</span></summary>
+                            <p>如果操作時發現錯誤或有新功能建議，歡迎直接透過「寄信給我」頁面聯繫開發者，通常會在 24 小時內回覆。此外，也可以在社群討論區留言，讓其他用戶一起幫忙排查。</p>
+                        </details>
+                    </div>
+
+                    <div class="cta-banner">
+                        <div>
+                            <h3>下一步想做什麼？</h3>
+                            <p>掌握常見問題後，可以搭配使用教學逐步操作，或直接加入社群分享你的策略成果。</p>
+                        </div>
+                        <div class="cta-actions">
+                            <a class="btn-primary" href="index.html#backtest-tool">前往股票回測</a>
+                            <a class="btn-secondary" href="tutorial.html">閱讀使用教學</a>
+                            <a class="btn-secondary" href="community.html">加入社群討論</a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者想支持一下韭菜胖叔叔，歡迎斗內讓我可以上車繼續更新。</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="tutorial.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="/stock-records">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-bottom">
+                    <p>鄉民內部測試版：建議事項與 Bug，請寄信到 <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                    <p>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

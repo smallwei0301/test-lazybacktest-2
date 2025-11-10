@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用教學 - LazyBacktest</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VNX2RVHZ5K');
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="" />
+    <link rel="stylesheet" as="style" onload="this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?display=swap&family=Inter%3Awght%40400%3B500%3B700%3B900&family=Noto+Sans%3Awght%40400%3B500%3B700%3B900" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        :root {
+            --background: #ffffff;
+            --foreground: #0f172a;
+            --muted-foreground: #4b5563;
+            --primary: #0891b2;
+            --primary-foreground: #ffffff;
+            --accent: #f59e0b;
+            --border: #e5e7eb;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", "Noto Sans", sans-serif;
+            color: var(--muted-foreground);
+            background-color: #f9fafb;
+        }
+        .page-wrapper {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #ffffffcc;
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 18px 20px;
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .brand-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+            color: var(--foreground);
+        }
+        .brand-text span:first-child {
+            font-size: 1.125rem;
+            font-weight: 700;
+        }
+        .brand-text span:last-child {
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .nav-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px 18px;
+            justify-content: flex-end;
+        }
+        .nav-links a {
+            font-size: 0.95rem;
+            color: #4b5563;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 6px 10px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .nav-links a:hover,
+        .nav-links a:focus-visible {
+            color: var(--primary);
+            background-color: rgba(8, 145, 178, 0.08);
+            outline: none;
+        }
+        main {
+            flex: 1;
+        }
+        .hero {
+            padding: 80px 20px 60px;
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.1), rgba(245, 158, 11, 0.08));
+        }
+        .hero-inner {
+            max-width: 960px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: clamp(2.25rem, 4vw, 3rem);
+            color: var(--foreground);
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        .hero-subtitle {
+            font-size: 1.125rem;
+            line-height: 1.8;
+            color: #475569;
+            margin-bottom: 32px;
+        }
+        .hero-actions {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--primary-foreground);
+            padding: 14px 28px;
+            border-radius: 9999px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 20px -12px rgba(8, 145, 178, 0.6);
+        }
+        .btn-secondary {
+            background-color: #ffffff;
+            color: var(--primary);
+            padding: 14px 24px;
+            border-radius: 9999px;
+            font-weight: 600;
+            text-decoration: none;
+            border: 1px solid rgba(8, 145, 178, 0.3);
+        }
+        .section {
+            padding: 60px 20px;
+        }
+        .section-inner {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        .section-title {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--foreground);
+            margin-bottom: 32px;
+            text-align: center;
+        }
+        .steps-grid {
+            display: grid;
+            gap: 40px;
+        }
+        .step-card {
+            display: grid;
+            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            align-items: center;
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 24px;
+            padding: 32px;
+            box-shadow: 0 18px 40px -36px rgba(15, 23, 42, 0.6);
+        }
+        .step-card:nth-child(even) {
+            background: linear-gradient(135deg, #ffffff 0%, rgba(8, 145, 178, 0.08) 100%);
+        }
+        .step-text h3 {
+            font-size: 1.5rem;
+            color: var(--foreground);
+            margin-bottom: 12px;
+            font-weight: 700;
+        }
+        .step-text p {
+            margin-bottom: 12px;
+            line-height: 1.8;
+        }
+        .tips-box {
+            background: rgba(254, 243, 199, 0.6);
+            border-left: 4px solid var(--accent);
+            padding: 14px 18px;
+            border-radius: 14px;
+            color: #92400e;
+            font-weight: 600;
+        }
+        .step-figure img {
+            width: 100%;
+            border-radius: 20px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background-color: #ffffff;
+        }
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 24px;
+        }
+        .resource-card {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 0 12px 32px -28px rgba(15, 23, 42, 0.45);
+        }
+        .resource-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--foreground);
+            margin-bottom: 12px;
+        }
+        .resource-card p {
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+        .cta-section {
+            padding: 70px 20px;
+            background: linear-gradient(120deg, rgba(8, 145, 178, 0.12), rgba(6, 182, 212, 0.08));
+        }
+        .cta-inner {
+            max-width: 720px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .cta-inner h2 {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--foreground);
+            margin-bottom: 16px;
+        }
+        .cta-inner p {
+            line-height: 1.8;
+            color: #475569;
+            margin-bottom: 24px;
+        }
+        footer {
+            background-color: #f3f4f6;
+            color: #374151;
+            margin-top: 80px;
+        }
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 20px;
+        }
+        .footer-grid {
+            display: grid;
+            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+        .footer-grid h4 {
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .footer-grid ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: grid;
+            gap: 10px;
+        }
+        .footer-grid a {
+            color: #6b7280;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .footer-grid a:hover,
+        .footer-grid a:focus-visible {
+            color: var(--primary);
+            outline: none;
+        }
+        .footer-bottom {
+            border-top: 1px solid rgba(0,0,0,0.06);
+            margin-top: 40px;
+            padding-top: 24px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        .footer-bottom a {
+            color: #374151;
+            text-decoration: underline;
+        }
+        @media (max-width: 768px) {
+            .step-card {
+                padding: 24px;
+            }
+            .hero {
+                padding-top: 64px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <div class="header-inner">
+                <a href="home.html" class="brand-link">
+                    <div style="width: 40px; height: 40px; background-color: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 22px; height: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;">
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 50%;"></span>
+                            <span style="display:block; background-color: var(--primary-foreground); border-radius: 4px; grid-column: span 3; height: 8px;"></span>
+                        </div>
+                    </div>
+                    <span class="brand-text">
+                        <span>LazyBacktest</span>
+                        <span>懶人股票回測</span>
+                    </span>
+                </a>
+                <nav class="nav-links">
+                    <a href="home.html">首頁</a>
+                    <a href="index.html">股票回測</a>
+                    <a href="tutorial.html" style="background-color: rgba(8, 145, 178, 0.1); color: var(--primary);">使用教學</a>
+                    <a href="faq.html">常見問題</a>
+                    <a href="community.html">社群討論</a>
+                    <a href="contact.html">寄信給我</a>
+                </nav>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div class="hero-inner">
+                    <h1 class="hero-title">5 個步驟，快速掌握 LazyBacktest</h1>
+                    <p class="hero-subtitle">以下教學完全對照系統目前的畫面，搭配實際位置截圖與小提醒，幫助你一步步完成回測、找出穩定策略。</p>
+                    <div class="hero-actions">
+                        <a class="btn-primary" href="index.html#backtest-tool">立即前往回測工具</a>
+                        <a class="btn-secondary" href="faq.html">我還有疑問，先看常見問題</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="steps">
+                <div class="section-inner">
+                    <h2 class="section-title">完整操作流程</h2>
+                    <div class="steps-grid">
+                        <article class="step-card">
+                            <div class="step-text">
+                                <h3>步驟 1：搜尋標的</h3>
+                                <p>點選回測頁面最上方的「輸入股票代號或名稱」欄位，輸入像是「2330」或「台積電」。清單會即時顯示上市櫃股票、ETF、期貨商品。</p>
+                                <p>輸入完成後，按 Enter 或點擊下方結果即可鎖定標的，搜尋框會記錄最近使用的項目，方便快速切換。</p>
+                                <div class="tips-box">小提醒：按空白鍵可喚出歷史紀錄，下次想再測同一檔股票，不用重新輸入。</div>
+                            </div>
+                            <figure class="step-figure">
+                                <img src="assets/tutorial/step-stock.svg" alt="LazyBacktest 搜尋股票代號的畫面，標示出輸入欄位的位置">
+                            </figure>
+                        </article>
+
+                        <article class="step-card">
+                            <div class="step-text">
+                                <h3>步驟 2：設定回測區間</h3>
+                                <p>在標的下方即可看到「開始日期」、「結束日期」。系統預設抓取近三年資料，你也可以透過右側快速選單套用一年、三年、五年等常見期間。</p>
+                                <p>若想針對特定行情檢驗策略，例如疫情期間或升息循環，可輸入精確日期，LazyBacktest 會自動抓取當時的歷史資料。</p>
+                                <div class="tips-box">小提醒：試著用不同市場狀態（多頭、空頭）跑一次，能更快速判斷策略是否穩定。</div>
+                            </div>
+                            <figure class="step-figure">
+                                <img src="assets/tutorial/step-dates.svg" alt="LazyBacktest 設定開始與結束日期的位置示意圖">
+                            </figure>
+                        </article>
+
+                        <article class="step-card">
+                            <div class="step-text">
+                                <h3>步驟 3：挑選策略組合</h3>
+                                <p>接著在「多頭策略」、「空頭策略」清單中挑選想測試的模組。LazyBacktest 會將策略分區塊顯示，支援拖曳排序調整優先權。</p>
+                                <p>你可以同時選擇多個策略，系統會以排列組合方式跑出所有可能，讓你一次比較勝率、報酬、最大回檔。</p>
+                                <div class="tips-box">小提醒：搭配多空策略一起測，能知道同一套邏輯在不同趨勢下的表現差異。</div>
+                            </div>
+                            <figure class="step-figure">
+                                <img src="assets/tutorial/step-strategy.svg" alt="LazyBacktest 策略清單與拖曳排序位置示意圖">
+                            </figure>
+                        </article>
+
+                        <article class="step-card">
+                            <div class="step-text">
+                                <h3>步驟 4：設定風險參數</h3>
+                                <p>在策略區塊下方可以找到「停損停利」、「資金控管」、「加減碼」等欄位。調整百分比後，LazyBacktest 會依設定自動出場或加碼。</p>
+                                <p>如果你剛開始測試，建議先保持單筆固定投入，搭配 5% 停損、10% 停利，熟悉結果後再調整參數。</p>
+                                <div class="tips-box" style="background: rgba(254, 226, 226, 0.7); border-left-color: #dc2626; color: #b91c1c;">小提醒：若停損設太寬，報酬可能變動劇烈；可以先跑寬鬆設定，再逐步縮小，找到穩定區間。</div>
+                            </div>
+                            <figure class="step-figure">
+                                <img src="assets/tutorial/step-risk.svg" alt="LazyBacktest 風險控管設定位置示意圖">
+                            </figure>
+                        </article>
+
+                        <article class="step-card">
+                            <div class="step-text">
+                                <h3>步驟 5：開始回測並閱讀結果</h3>
+                                <p>確認設定後，點擊右上角的「開始回測」。系統會即時執行所有策略組合，右側同步顯示績效摘要、交易明細與圖表。</p>
+                                <p>建議優先檢查三個指標：勝率、最大回檔、累積報酬。這能讓你快速判斷策略是否穩定並符合風險承受度。</p>
+                                <div class="tips-box" style="background: rgba(220, 252, 231, 0.7); border-left-color: #16a34a; color: #166534;">小提醒：覺得結果不理想？試著回到策略清單調整組合，或縮短回測區間，觀察不同市場的表現。</div>
+                            </div>
+                            <figure class="step-figure">
+                                <img src="assets/tutorial/step-results.svg" alt="LazyBacktest 開始回測按鈕與結果區塊示意圖">
+                            </figure>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" style="background-color: #ffffff;">
+                <div class="section-inner">
+                    <h2 class="section-title">延伸資源</h2>
+                    <div class="resource-grid">
+                        <div class="resource-card">
+                            <h3>操作遇到問題？</h3>
+                            <p>整理首頁常見的提問，並新增更多實務情境，例如資料來源、策略邏輯、回測速度等議題。</p>
+                            <a class="btn-secondary" href="faq.html">查看常見問題</a>
+                        </div>
+                        <div class="resource-card">
+                            <h3>想聽聽其他人的做法？</h3>
+                            <p>前往社群討論區，發表你的策略想法或閱讀其他用戶分享的心得，所有留言都會雲端保存。</p>
+                            <a class="btn-secondary" href="community.html">加入社群討論</a>
+                        </div>
+                        <div class="resource-card">
+                            <h3>需要協助？</h3>
+                            <p>如果有程式錯誤或想提供建議，直接透過「寄信給我」聯繫開發者，我們將在 24 小時內回覆。</p>
+                            <a class="btn-secondary" href="contact.html">寄信給我</a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="cta-section">
+                <div class="cta-inner">
+                    <h2>準備好開始回測了嗎？</h2>
+                    <p>掌握以上五個步驟後，你已經能熟練操作 LazyBacktest。接下來只要持續優化策略、記錄回測成果，就能打造屬於自己的勝率手冊。</p>
+                    <div class="hero-actions">
+                        <a class="btn-primary" href="index.html#backtest-tool">立即開始股票回測</a>
+                        <a class="btn-secondary" href="/stock-records">整理我的股票紀錄</a>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-grid">
+                    <div>
+                        <div class="flex items-center space-x-3 mb-4">
+                            <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                                <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                    <rect width="28" height="20" rx="4" fill="#0EA5A4" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                                <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                            </div>
+                        </div>
+                        <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者想支持一下韭菜胖叔叔，歡迎斗內讓我可以上車繼續更新。</p>
+                    </div>
+                    <div>
+                        <h4>Donate (斗內/贊助)</h4>
+                        <ul>
+                            <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener">歐付寶</a></li>
+                            <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener">綠界</a></li>
+                            <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener">PayPal</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>支援與幫助</h4>
+                        <ul>
+                            <li><a href="tutorial.html">使用教學</a></li>
+                            <li><a href="faq.html">常見問題</a></li>
+                            <li><a href="contact.html">寄信給我</a></li>
+                            <li><a href="community.html">社群討論</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>其他說明</h4>
+                        <ul>
+                            <li><a href="privacy.html">隱私政策</a></li>
+                            <li><a href="disclaimer.html">免責聲明</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>更多功能</h4>
+                        <ul>
+                            <li><a href="/stock-records">股票紀錄</a></li>
+                            <li><a href="index.html#backtest-tool">股票回測</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="footer-bottom">
+                    <p>鄉民內部測試版：建議事項與 Bug，請寄信到 <a href="mailto:smallwei0301@gmail.com">smallwei0301@gmail.com</a></p>
+                    <p>© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

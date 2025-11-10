@@ -1,0 +1,18 @@
+<svg width="800" height="450" viewBox="0 0 800 450" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="450" rx="24" fill="#f9fafb"/>
+  <rect x="32" y="40" width="736" height="56" rx="12" fill="#e5e7eb" fill-opacity="0.6"/>
+  <rect x="32" y="120" width="736" height="280" rx="20" fill="#ffffff" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6 8"/>
+  <rect x="72" y="160" width="200" height="56" rx="12" fill="#0891b2" fill-opacity="0.95"/>
+  <text x="108" y="194" fill="#ffffff" font-size="20" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">開始回測</text>
+  <path d="M292 188H256" stroke="#0891b2" stroke-width="4" stroke-linecap="round"/>
+  <path d="M272 172L292 188L272 204" stroke="#0891b2" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="312" y="160" width="424" height="220" rx="16" fill="#e0f2fe"/>
+  <rect x="340" y="188" width="368" height="64" rx="12" fill="#ffffff" stroke="#38bdf8" stroke-width="3" stroke-dasharray="10 12"/>
+  <rect x="340" y="268" width="368" height="84" rx="12" fill="#ffffff" stroke="#cbd5f5" stroke-width="2" stroke-dasharray="6 10"/>
+  <text x="60" y="138" fill="#0891b2" font-size="22" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">步驟 5：啟動回測並閱讀結果</text>
+  <text x="332" y="220" fill="#0f172a" font-size="18" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">績效摘要</text>
+  <text x="332" y="300" fill="#0f172a" font-size="18" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="700">交易明細與圖表</text>
+  <text x="72" y="244" fill="#4b5563" font-size="16" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif">按下「開始回測」後，系統會跑策略並在右側顯示績效摘要、交易紀錄與圖表。</text>
+  <rect x="72" y="268" width="460" height="32" rx="10" fill="#dcfce7"/>
+  <text x="88" y="290" fill="#166534" font-size="15" font-family="'Noto Sans TC', 'Microsoft JhengHei', sans-serif" font-weight="600">Tip：檢查「勝率、最大回檔、累積報酬」三項指標，快速判斷策略穩定度</text>
+</svg>

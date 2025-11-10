@@ -358,18 +358,42 @@
                         </div>
                     </div>
                     <nav class="hidden md:flex items-center space-x-6">
-                        <a href="/" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                        <a href="home.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
                             首頁
                         </a>
+                        <a href="index.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            股票回測
+                        </a>
+                        <a href="tutorial.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            使用教學
+                        </a>
+                        <a href="faq.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            常見問題
+                        </a>
+                        <a href="community.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            社群討論
+                        </a>
                         <a href="contact.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
-                            聯絡我們
+                            寄信給我
                         </a>
                     </nav>
-                    <nav class="md:hidden flex items-center space-x-3">
-                        <a href="/" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                    <nav class="md:hidden flex flex-wrap items-center justify-end gap-3 text-sm">
+                        <a href="home.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
                             首頁
                         </a>
-                        <a href="contact.html" class="text-sm text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                        <a href="index.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            回測
+                        </a>
+                        <a href="tutorial.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            教學
+                        </a>
+                        <a href="faq.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            FAQ
+                        </a>
+                        <a href="community.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
+                            社群
+                        </a>
+                        <a href="contact.html" class="text-muted hover:text-primary transition-colors" style="color: var(--muted-foreground);">
                             聯絡
                         </a>
                     </nav>
@@ -377,7 +401,7 @@
             </header>
 
             <!-- Main Content -->
-            <main class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
+            <main id="backtest-tool" class="flex-1 min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex flex-col" style="background: linear-gradient(135deg, var(--background) 0%, color-mix(in srgb, var(--primary) 5%, transparent) 50%, color-mix(in srgb, var(--accent) 5%, transparent) 100%);">
                 <!-- Hero Section -->
                 <div class="bg-background border-b flex-shrink-0" style="background-color: var(--background); border-color: var(--border);">
                     <div class="container mx-auto px-4 py-12">
@@ -2761,11 +2785,10 @@
             </main>
             <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
                 <div class="container mx-auto px-4">
-                    <div class="grid md:grid-cols-4 gap-8">
+                    <div class="grid md:grid-cols-5 gap-8">
                         <div>
                             <div class="flex items-center space-x-3 mb-4">
                                 <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm" style="background-color: #ffffff;">
-                                    <!-- simple brand mark -->
                                     <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                         <rect width="28" height="20" rx="4" fill="#0EA5A4" />
                                     </svg>
@@ -2775,36 +2798,37 @@
                                     <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
                                 </div>
                             </div>
-                            <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！</br> 如果這個網站幫助您投資順利</br> 或者單純想支持一下韭菜胖叔叔</br>歡迎斗內讓我可以上車繼續更新</br> 用奶粉發電，不再用愛發電</p>
+                            <p class="text-sm mb-4" style="color: #6b7280;">先恭喜您，投資賺錢！<br> 如果這個網站幫助您投資順利<br> 或者單純想支持一下韭菜胖叔叔<br>歡迎斗內讓我可以上車繼續更新。</p>
                         </div>
                         <div>
                             <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
                             <ul class="space-y-2 text-sm">
-                                <li>
-                                    <a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a>
-                                </li>
-                                <li>
-                                    <a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a>
-                                </li>
-                                <li>
-                                    <a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a>
-                                </li>
+                                <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">歐付寶</a></li>
+                                <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">綠界</a></li>
+                                <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" class="transition-colors" style="color: #6b7280;">PayPal</a></li>
                             </ul>
                         </div>
                         <div>
                             <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
                             <ul class="space-y-2 text-sm">
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
+                                <li><a href="tutorial.html" class="transition-colors" style="color: #6b7280;">使用教學</a></li>
+                                <li><a href="faq.html" class="transition-colors" style="color: #6b7280;">常見問題</a></li>
+                                <li><a href="contact.html" class="transition-colors" style="color: #6b7280;">寄信給我</a></li>
+                                <li><a href="community.html" class="transition-colors" style="color: #6b7280;">社群討論</a></li>
                             </ul>
                         </div>
                         <div>
                             <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
                             <ul class="space-y-2 text-sm">
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
-                                <li><a href="#" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                                <li><a href="privacy.html" class="transition-colors" style="color: #6b7280;">隱私政策</a></li>
+                                <li><a href="disclaimer.html" class="transition-colors" style="color: #6b7280;">免責聲明</a></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold mb-4" style="color: #374151;">更多功能</h4>
+                            <ul class="space-y-2 text-sm">
+                                <li><a href="/stock-records" class="transition-colors" style="color: #6b7280;">股票紀錄</a></li>
+                                <li><a href="index.html#backtest-tool" class="transition-colors" style="color: #6b7280;">股票回測</a></li>
                             </ul>
                         </div>
                     </div>
