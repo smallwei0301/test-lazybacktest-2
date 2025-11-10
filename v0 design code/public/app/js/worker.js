@@ -12642,24 +12642,58 @@ async function runOptimization(
       );
     }
   } else {
-    // 批量優化模式：優先使用現有快取，不判斷終點早晚
+    // 批量優化模式：判斷快取暖身期是否足夠參數優化需求
     // 只有在暖身資料不足時才重新抓取
     
+    // 計算參數優化所需的暖身起點
+    const optDataStart = baseParams.dataStartDate || baseParams.startDate;
+    const optEffectiveStart = baseParams.effectiveStartDate || baseParams.startDate;
+    const optLookback = Number.isFinite(baseParams.lookbackDays)
+      ? baseParams.lookbackDays
+      : null;
+    
+    // 確定所需的最早暖身日期
+    let requiredWarmupStart = optDataStart;
+    if (optLookback && optEffectiveStart) {
+      // 如果有指定 lookbackDays，計算往前推算的暖身起點
+      const effectiveDate = new Date(optEffectiveStart);
+      const warmupDate = new Date(effectiveDate);
+      warmupDate.setDate(warmupDate.getDate() - optLookback);
+      const calculatedWarmup = warmupDate.toISOString().split('T')[0];
+      // 取最早的日期作為暖身起點
+      requiredWarmupStart = calculatedWarmup < optDataStart ? calculatedWarmup : optDataStart;
+    }
+    
+    // 檢查快取資料的暖身起點是否足夠
+    let cacheWarmupSufficient = false;
+    let cacheToUse = null;
+    
     if (Array.isArray(cachedData) && cachedData.length > 0) {
-      stockData = cachedData;
-      console.log(`[Worker Opt] 使用提供的快取資料（${cachedData.length} 筆）`);
+      const cacheFirstDate = cachedData[0]?.date;
+      if (cacheFirstDate && cacheFirstDate <= requiredWarmupStart) {
+        cacheWarmupSufficient = true;
+        cacheToUse = cachedData;
+        console.log(`[Worker Opt] 快取暖身期足夠（快取起點：${cacheFirstDate}，需求起點：${requiredWarmupStart}），使用提供的快取資料（${cachedData.length} 筆）`);
+      } else {
+        console.log(`[Worker Opt] 快取暖身期不足（快取起點：${cacheFirstDate}，需求起點：${requiredWarmupStart}）`);
+      }
     } else if (Array.isArray(workerLastDataset) && workerLastDataset.length > 0) {
-      stockData = workerLastDataset;
-      console.log(`[Worker Opt] 使用 Worker 快取資料（${workerLastDataset.length} 筆）`);
+      const cacheFirstDate = workerLastDataset[0]?.date;
+      if (cacheFirstDate && cacheFirstDate <= requiredWarmupStart) {
+        cacheWarmupSufficient = true;
+        cacheToUse = workerLastDataset;
+        console.log(`[Worker Opt] 快取暖身期足夠（快取起點：${cacheFirstDate}，需求起點：${requiredWarmupStart}），使用 Worker 快取資料（${workerLastDataset.length} 筆）`);
+      } else {
+        console.log(`[Worker Opt] Worker 快取暖身期不足（快取起點：${cacheFirstDate}，需求起點：${requiredWarmupStart}）`);
+      }
+    }
+    
+    if (cacheWarmupSufficient && cacheToUse) {
+      // 快取暖身期足夠，直接使用
+      stockData = cacheToUse;
     } else {
-      // 完全沒有快取資料，才重新抓取
-      const optDataStart = baseParams.dataStartDate || baseParams.startDate;
-      const optEffectiveStart = baseParams.effectiveStartDate || baseParams.startDate;
-      const optLookback = Number.isFinite(baseParams.lookbackDays)
-        ? baseParams.lookbackDays
-        : null;
-      
-      console.log(`[Worker Opt] 無快取資料，重新抓取...`);
+      // 暖身資料不足或完全無快取，重新抓取
+      console.log(`[Worker Opt] 暖身資料不足，重新抓取完整資料...`);
       const fetched = await fetchStockData(
         baseParams.stockNo,
         optDataStart,
