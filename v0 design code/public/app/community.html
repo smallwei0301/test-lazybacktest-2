@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>社群討論 - LazyBacktest 懶人股票回測</title>
+    <meta
+      name="description"
+      content="加入 LazyBacktest 社群討論區，交流台股回測心得、策略設定與投資風險控管。支援即時留言並遵循 Google Ads 內容規範。"
+    />
+    <meta name="keywords" content="LazyBacktest 社群, 股票回測討論, 台股社群, 投資討論板" />
+    <link rel="canonical" href="https://lazybacktest.com/app/community.html" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="社群討論 - LazyBacktest 懶人股票回測" />
+    <meta
+      property="og:description"
+      content="分享您的回測心得與策略設定，並遵循透明的社群規範，一起打造安全的投資討論空間。"
+    />
+    <meta property="og:url" content="https://lazybacktest.com/app/community.html" />
+    <meta property="og:image" content="https://lazybacktest.com/modern-office-worker-analyzing-stock-charts-on-com.jpg" />
+    <meta name="geo.region" content="TW" />
+    <meta name="geo.placename" content="Taipei" />
+    <meta name="geo.position" content="25.0418;121.525" />
+    <meta name="ICBM" content="25.0418, 121.525" />
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VNX2RVHZ5K"></script>
+    <script>
+      window.dataLayer = window.dataLayer || []
+      function gtag() {
+        dataLayer.push(arguments)
+      }
+      gtag("js", new Date())
+      gtag("config", "G-VNX2RVHZ5K")
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin />
+    <link
+      rel="stylesheet"
+      as="style"
+      onload="this.rel='stylesheet'"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=Noto+Sans:wght@400;500;700;900&display=swap"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Inter", "Noto Sans", sans-serif;
+        background-color: #ffffff;
+        color: #1f2937;
+      }
+
+      .community-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 96px 24px 72px;
+      }
+
+      .community-hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(245, 158, 11, 0.08));
+        z-index: 0;
+      }
+
+      .community-hero img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.1;
+        z-index: -1;
+      }
+
+      .community-hero-content {
+        position: relative;
+        z-index: 1;
+        max-width: 960px;
+        margin: 0 auto;
+        text-align: center;
+      }
+
+      .community-hero h1 {
+        font-size: clamp(2.25rem, 5vw, 3.2rem);
+        font-weight: 900;
+        color: #0f172a;
+        margin-bottom: 18px;
+      }
+
+      .community-hero p {
+        font-size: 1.05rem;
+        line-height: 1.9;
+        color: #4b5563;
+        margin: 0 auto;
+        max-width: 720px;
+      }
+
+      .community-wrapper {
+        max-width: 1050px;
+        margin: 0 auto;
+        padding: 56px 24px 96px;
+        display: grid;
+        gap: 32px;
+        grid-template-columns: 2fr 1fr;
+      }
+
+      .post-form,
+      .post-list,
+      .guideline-card {
+        background: #ffffff;
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+
+      .post-form {
+        padding: 32px;
+      }
+
+      .post-form h2 {
+        margin: 0 0 16px;
+        font-size: 1.5rem;
+        color: #0f172a;
+      }
+
+      .post-form label {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: #0f172a;
+      }
+
+      .post-form input,
+      .post-form textarea,
+      .post-form select {
+        width: 100%;
+        margin-top: 8px;
+        margin-bottom: 20px;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        font-size: 0.95rem;
+      }
+
+      .post-form button {
+        width: 100%;
+        padding: 14px;
+        border: none;
+        border-radius: 9999px;
+        background: linear-gradient(135deg, #0891b2, #0e7490);
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+
+      .post-list {
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .post-item {
+        padding: 24px 28px;
+        border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+      }
+
+      .post-item:last-child {
+        border-bottom: none;
+      }
+
+      .post-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .post-author {
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .post-tag {
+        background-color: rgba(8, 145, 178, 0.15);
+        color: #0e7490;
+        padding: 6px 12px;
+        border-radius: 9999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      .post-content {
+        margin: 0;
+        color: #334155;
+        line-height: 1.7;
+        white-space: pre-line;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: #94a3b8;
+      }
+
+      .guideline-card {
+        padding: 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        position: sticky;
+        top: 96px;
+        height: fit-content;
+      }
+
+      .guideline-card h3 {
+        margin: 0;
+        font-size: 1.25rem;
+        color: #0f172a;
+      }
+
+      .guideline-card ul {
+        margin: 0;
+        padding-left: 20px;
+        color: #4b5563;
+        line-height: 1.8;
+      }
+
+      .guideline-alert {
+        background: #fef3c7;
+        border-radius: 12px;
+        padding: 16px 18px;
+        color: #92400e;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 992px) {
+        .community-wrapper {
+          grid-template-columns: 1fr;
+        }
+        .guideline-card {
+          position: static;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container-wrapper">
+      <header
+        class="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shadow-sm"
+        style="background-color: rgba(255, 255, 255, 0.95); border-color: #e5e7eb;"
+      >
+        <div class="container mx-auto px-4 h-16 flex items-center justify-between" style="max-width: 1200px;">
+          <a href="home.html" class="flex items-center space-x-3" style="text-decoration: none;">
+            <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm" style="background-color: #0891b2;">
+              <div class="w-5 h-5 flex flex-col justify-between">
+                <div class="flex justify-between">
+                  <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                  <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                  <div class="w-1 h-1 bg-primary-foreground rounded-full" style="background-color: white;"></div>
+                </div>
+                <div class="flex justify-between items-end">
+                  <div class="w-1 h-2 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                  <div class="w-1 h-3 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                  <div class="w-1 h-1 bg-primary-foreground rounded-sm" style="background-color: white;"></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <span class="text-xl font-bold" style="color: #0f172a;">LazyBacktest</span>
+              <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+            </div>
+          </a>
+          <nav class="hidden md:flex items-center space-x-6 text-sm" style="color: #4b5563;">
+            <a href="/" class="hover:text-primary" style="text-decoration: none;">首頁</a>
+            <a href="/app/index.html" class="hover:text-primary" style="text-decoration: none;">股票回測</a>
+            <a href="/stock-records" class="hover:text-primary" style="text-decoration: none;">股票紀錄</a>
+            <a href="contact.html" class="hover:text-primary" style="text-decoration: none;">寄信給我</a>
+          </nav>
+        </div>
+      </header>
+
+      <main>
+        <section class="community-hero">
+          <img src="/modern-office-worker-analyzing-stock-charts-on-com.jpg" alt="社群討論背景" />
+          <div class="community-hero-content">
+            <p class="inline-flex items-center gap-2 text-sm font-semibold text-primary uppercase tracking-[0.2em] mb-4">
+              Community
+            </p>
+            <h1>LazyBacktest 社群討論區</h1>
+            <p>
+              分享策略成果、詢問回測設定、交流風險控管心得。為了符合 Google Ads 內容規範，請勿張貼違反政策或誤導投資人之言論，
+              讓我們共同維護友善、透明的投資環境。
+            </p>
+          </div>
+        </section>
+
+        <section class="community-wrapper">
+          <div class="space-y-6">
+            <div class="post-form">
+              <h2>發表一則新留言</h2>
+              <p style="color: #64748b; line-height: 1.7; margin-bottom: 24px;">
+                內容僅供教育與討論用途，請避免留下聯盟行銷連結或保證獲利的說法。所有留言會儲存在您的瀏覽器中，方便日後回顧。
+              </p>
+              <form id="community-form" novalidate>
+                <label for="nickname">暱稱</label>
+                <input id="nickname" name="nickname" type="text" placeholder="輸入顯示名稱" required maxlength="24" />
+
+                <label for="topic">討論主題</label>
+                <select id="topic" name="topic">
+                  <option value="策略分享">策略分享</option>
+                  <option value="參數提問">參數提問</option>
+                  <option value="績效檢討">績效檢討</option>
+                  <option value="風險控管">風險控管</option>
+                  <option value="其他">其他</option>
+                </select>
+
+                <label for="content">留言內容</label>
+                <textarea
+                  id="content"
+                  name="content"
+                  rows="5"
+                  placeholder="分享您的觀察或提出問題，請至少輸入 20 個字。"
+                  required
+                  minlength="20"
+                  maxlength="800"
+                ></textarea>
+
+                <button type="submit">送出留言</button>
+                <p id="form-message" style="margin-top: 12px; font-size: 0.9rem; color: #0f172a;"></p>
+              </form>
+            </div>
+
+            <div class="post-list" id="post-list">
+              <div class="empty-state" id="empty-state">目前還沒有留言，成為第一個分享心得的人吧！</div>
+            </div>
+          </div>
+
+          <aside class="guideline-card">
+            <h3>社群守則</h3>
+            <ul>
+              <li>禁止張貼保證獲利、快速致富或違反金融法規的內容。</li>
+              <li>勿散佈未經證實的消息、仇恨言論或攻擊其他使用者。</li>
+              <li>若分享策略，請標註適用期間並提醒投資有風險。</li>
+              <li>留言僅代表個人意見，不構成投資建議。</li>
+              <li>若發現不當內容，請寄信至 <a href="mailto:smallwei0301@gmail.com">客服信箱</a> 告知。</li>
+            </ul>
+            <div class="guideline-alert">
+              為維持 Google Ads 合規，我們會移除包含成人、暴力、仇恨或誤導金融訊息的留言。重複違規帳號將會遭到封鎖。
+            </div>
+            <a
+              href="/app/index.html"
+              style="display: inline-flex; align-items: center; justify-content: center; padding: 12px 20px; border-radius: 9999px; background-color: #0891b2; color: #fff; font-weight: 600; text-decoration: none;"
+            >
+              回到回測工具
+            </a>
+          </aside>
+        </section>
+      </main>
+
+      <footer class="py-12 mt-16" style="background-color: #f3f4f6; color: #374151;">
+        <div class="container mx-auto px-4">
+          <div class="grid md:grid-cols-4 gap-8">
+            <div>
+              <div class="flex items-center space-x-3 mb-4">
+                <div class="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                  <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                    <rect width="28" height="20" rx="4" fill="#0EA5A4"></rect>
+                  </svg>
+                </div>
+                <div>
+                  <span class="text-lg font-bold" style="color: #0f172a;">LazyBacktest</span>
+                  <div class="text-xs" style="color: #6b7280;">懶人股票回測</div>
+                </div>
+              </div>
+              <p class="text-sm" style="color: #6b7280;">
+                先恭喜您，投資賺錢！<br />如果這個網站幫助您投資順利，或者想支持韭菜胖叔叔，歡迎斗內讓我可以上車繼續更新。<br />
+                用奶粉發電，不再用愛發電。
+              </p>
+            </div>
+            <div>
+              <h4 class="font-semibold mb-4" style="color: #374151;">Donate (斗內/贊助)</h4>
+              <ul class="space-y-2 text-sm">
+                <li><a href="https://payment.opay.tw/Broadcaster/Donate/C0EB7741A027F28BA11ED9BDBEAD263A" target="_blank" rel="noopener" style="color: #6b7280;">歐付寶</a></li>
+                <li><a href="https://p.ecpay.com.tw/8AB5D6F" target="_blank" rel="noopener" style="color: #6b7280;">綠界</a></li>
+                <li><a href="https://www.paypal.com/ncp/payment/79RNTHL69MAPE" target="_blank" rel="noopener" style="color: #6b7280;">PayPal</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="font-semibold mb-4" style="color: #374151;">支援與幫助</h4>
+              <ul class="space-y-2 text-sm">
+                <li><a href="tutorial.html" style="color: #6b7280;">使用教學</a></li>
+                <li><a href="faq.html" style="color: #6b7280;">常見問題</a></li>
+                <li><a href="contact.html" style="color: #6b7280;">寄信給我</a></li>
+                <li><a href="community.html" style="color: #0f172a;">社群討論</a></li>
+                <li><a href="/app/index.html" style="color: #6b7280;">股票回測</a></li>
+                <li><a href="/stock-records" style="color: #6b7280;">股票紀錄</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 class="font-semibold mb-4" style="color: #374151;">其他說明</h4>
+              <ul class="space-y-2 text-sm">
+                <li><a href="privacy.html" style="color: #6b7280;">隱私政策</a></li>
+                <li><a href="disclaimer.html" style="color: #6b7280;">免責聲明</a></li>
+              </ul>
+            </div>
+          </div>
+          <div class="border-t mt-8 pt-8 text-center text-sm" style="border-color: rgba(0, 0, 0, 0.06); color: #6b7280;">
+            <p>
+              鄉民內部測試版: 建議事項與 Bug，請聯絡信箱：
+              <a href="mailto:smallwei0301@gmail.com" class="underline" style="color: #374151;">smallwei0301@gmail.com</a>
+            </p>
+            <p style="color: #9ca3af;">© 2025 LazyBacktest. 僅供教育與研究用途，不構成投資建議。</p>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const form = document.getElementById("community-form")
+        const nicknameInput = document.getElementById("nickname")
+        const contentInput = document.getElementById("content")
+        const topicSelect = document.getElementById("topic")
+        const postList = document.getElementById("post-list")
+        const emptyState = document.getElementById("empty-state")
+        const formMessage = document.getElementById("form-message")
+        const storageKey = "lazybacktest-community-posts-v1"
+        const blockedKeywords = ["保證獲利", "暴利", "快速致富", "成人", "情色", "仇恨", "暴力"]
+
+        const formatDate = (isoString) => {
+          const date = new Date(isoString)
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+        }
+
+        const loadPosts = () => {
+          try {
+            const stored = localStorage.getItem(storageKey)
+            return stored ? JSON.parse(stored) : []
+          } catch (error) {
+            console.error("Failed to load community posts", error)
+            return []
+          }
+        }
+
+        const savePosts = (posts) => {
+          localStorage.setItem(storageKey, JSON.stringify(posts.slice(0, 100)))
+        }
+
+        const renderPosts = (posts) => {
+          postList.innerHTML = ""
+          if (!posts.length) {
+            emptyState.style.display = "block"
+            postList.appendChild(emptyState)
+            return
+          }
+          emptyState.style.display = "none"
+          posts.forEach((post) => {
+            const article = document.createElement("article")
+            article.className = "post-item"
+            article.innerHTML = `
+              <div class="post-header">
+                <div>
+                  <div class="post-author">${post.nickname}</div>
+                  <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 2px;">${formatDate(post.createdAt)}</div>
+                </div>
+                <span class="post-tag">${post.topic}</span>
+              </div>
+              <p class="post-content">${post.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+            `
+            postList.appendChild(article)
+          })
+        }
+
+        let posts = loadPosts()
+        renderPosts(posts)
+
+        form.addEventListener("submit", (event) => {
+          event.preventDefault()
+          formMessage.textContent = ""
+
+          const nickname = nicknameInput.value.trim()
+          const content = contentInput.value.trim()
+          const topic = topicSelect.value
+
+          if (!nickname || !content) {
+            formMessage.textContent = "請完整填寫暱稱與留言內容。"
+            formMessage.style.color = "#b91c1c"
+            return
+          }
+
+          if (content.length < 20) {
+            formMessage.textContent = "留言至少需要 20 個字，請補充更多細節。"
+            formMessage.style.color = "#b91c1c"
+            return
+          }
+
+          const violated = blockedKeywords.find((keyword) => content.includes(keyword))
+          if (violated) {
+            formMessage.textContent = `留言包含「${violated}」等違規字詞，請調整後再送出。`
+            formMessage.style.color = "#b91c1c"
+            return
+          }
+
+          const newPost = {
+            id: crypto.randomUUID(),
+            nickname,
+            topic,
+            content,
+            createdAt: new Date().toISOString(),
+          }
+
+          posts = [newPost, ...posts]
+          savePosts(posts)
+          renderPosts(posts)
+
+          form.reset()
+          topicSelect.value = "策略分享"
+          formMessage.textContent = "留言已送出，謝謝分享！"
+          formMessage.style.color = "#047857"
+        })
+      })
+    </script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "LazyBacktest 社群討論區",
+        "description": "使用者可在此討論股票回測策略與風險控管，留言僅供教育用途。",
+        "about": {
+          "@type": "Thing",
+          "name": "股票回測"
+        },
+        "potentialAction": {
+          "@type": "CommunicateAction",
+          "target": "https://lazybacktest.com/app/community.html",
+          "description": "發表留言與其他投資人交流"
+        }
+      }
+    </script>
+  </body>
+</html>
