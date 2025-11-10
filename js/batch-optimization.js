@@ -3425,7 +3425,8 @@ async function executeBacktestForCombination(combination, options = {}) {
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedDataForWorker
+                    cachedData: cachedDataForWorker,
+                    skipDataValidation: true
                 });
 
                 // 設定超時
@@ -5825,7 +5826,8 @@ function performSingleBacktest(params) {
             worker.postMessage({
                 type: 'runBacktest',
                 params: preparedParams,
-                useCachedData: false
+                useCachedData: false,
+                skipDataValidation: true
             });
             
         } catch (error) {

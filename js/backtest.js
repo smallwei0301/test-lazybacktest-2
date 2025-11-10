@@ -5415,6 +5415,7 @@ function runBacktestInternal() {
             dataStartDate:dataStartDate,
             effectiveStartDate:effectiveStartDate,
             lookbackDays:lookbackDays,
+            skipDataValidation:false,
         };
         if(useCache) {
         const cachePayload = cachedEntry?.data || rawBacktestDataset;
