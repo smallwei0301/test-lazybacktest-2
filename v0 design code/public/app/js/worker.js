@@ -12652,13 +12652,32 @@ async function runOptimization(
       ? baseParams.lookbackDays
       : null;
     
+    // 檢查參數掃描時的最大值是否會增加暖身期需求
+    // 某些參數（如 MA period、RSI period 等）的最大值會影響指標計算的暖身天數
+    let adjustedLookback = optLookback;
+    if (optRange && typeof optRange === 'object') {
+      const rangeMax = Number.isFinite(optRange.to) ? optRange.to : optRange.from;
+      const rangeMin = Number.isFinite(optRange.from) ? optRange.from : rangeMax;
+      const maxRangeValue = Math.max(Math.abs(rangeMax), Math.abs(rangeMin));
+      
+      // 對於周期參數（period, length, lookback等），最大值直接影響暖身期
+      // 例如：MA period=50 需要至少 50 天的歷史數據；MACD(12,26,9) 需要 26+9=35 天
+      // 為了安全起見，如果參數最大值大於當前 lookback，增加暖身期
+      if (maxRangeValue > (adjustedLookback || 0)) {
+        // 參數掃描的最大值可能需要的暖身期
+        // 通常乘以 1.5 倍作為緩衝，以確保有足夠的暖身天數
+        adjustedLookback = Math.ceil(maxRangeValue * 1.5);
+        console.log(`[Worker Opt] 參數掃描最大值 (${maxRangeValue}) > 基礎 lookback (${optLookback})，調整暖身期至 ${adjustedLookback}`);
+      }
+    }
+    
     // 確定所需的最早暖身日期
     let requiredWarmupStart = optDataStart;
-    if (optLookback && optEffectiveStart) {
+    if (adjustedLookback && optEffectiveStart) {
       // 如果有指定 lookbackDays，計算往前推算的暖身起點
       const effectiveDate = new Date(optEffectiveStart);
       const warmupDate = new Date(effectiveDate);
-      warmupDate.setDate(warmupDate.getDate() - optLookback);
+      warmupDate.setDate(warmupDate.getDate() - adjustedLookback);
       const calculatedWarmup = warmupDate.toISOString().split('T')[0];
       // 取最早的日期作為暖身起點
       requiredWarmupStart = calculatedWarmup < optDataStart ? calculatedWarmup : optDataStart;

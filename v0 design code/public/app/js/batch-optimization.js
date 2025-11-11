@@ -460,13 +460,14 @@ function sliceDatasetRowsByRange(rows, requiredRange) {
     };
 }
 
-function buildCachedDatasetUsage(rows, requiredRange) {
+function buildCachedDatasetUsage(rows, requiredRange, options = {}) {
     const summary = summarizeDatasetRange(rows);
     const hasDataset = Array.isArray(rows) && rows.length > 0;
 
     let evaluation = {
         coverageSatisfied: hasDataset,
         reason: hasDataset ? 'ok' : 'dataset-empty',
+        warnings: null,
         datasetStartTs: normaliseDateLikeToMs(summary.startDate),
         datasetEndTs: normaliseDateLikeToMs(summary.endDate),
         requiredStartTs: normaliseDateLikeToMs(requiredRange?.dataStartDate
@@ -477,7 +478,7 @@ function buildCachedDatasetUsage(rows, requiredRange) {
     };
 
     if (hasDataset) {
-        evaluation = evaluateDatasetCoverage(summary, requiredRange);
+        evaluation = evaluateDatasetCoverage(summary, requiredRange, options);
     }
 
     let sliceInfo = null;
@@ -553,7 +554,7 @@ function summarizeRequiredRangeFromParams(params = {}) {
     };
 }
 
-function evaluateDatasetCoverage(summary, requiredRange) {
+function evaluateDatasetCoverage(summary, requiredRange, options = {}) {
     const datasetStartTs = normaliseDateLikeToMs(summary?.startDate || null);
     const datasetEndTs = normaliseDateLikeToMs(summary?.endDate || null);
     const requiredStartTs = normaliseDateLikeToMs(requiredRange?.dataStartDate || requiredRange?.effectiveStartDate || requiredRange?.startDate || null);
@@ -561,30 +562,51 @@ function evaluateDatasetCoverage(summary, requiredRange) {
 
     let coverageSatisfied = true;
     const reasons = [];
+    const warnings = [];
+
+    // 批量優化模式：只記錄警告，不影響 coverageSatisfied
+    const isBatchOptimization = options.batchOptimization === true;
 
     if (requiredStartTs !== null && datasetStartTs !== null && datasetStartTs - requiredStartTs > DATASET_COVERAGE_TOLERANCE_MS) {
-        coverageSatisfied = false;
-        reasons.push('dataset-start-after-required-start');
+        if (isBatchOptimization) {
+            warnings.push('dataset-start-after-required-start');
+        } else {
+            coverageSatisfied = false;
+            reasons.push('dataset-start-after-required-start');
+        }
     }
 
     if (requiredEndTs !== null && datasetEndTs !== null && requiredEndTs - datasetEndTs > DATASET_COVERAGE_TOLERANCE_MS) {
-        coverageSatisfied = false;
-        reasons.push('dataset-end-before-required-end');
+        if (isBatchOptimization) {
+            warnings.push('dataset-end-before-required-end');
+        } else {
+            coverageSatisfied = false;
+            reasons.push('dataset-end-before-required-end');
+        }
     }
 
     if (requiredEndTs !== null && datasetEndTs === null) {
-        coverageSatisfied = false;
-        reasons.push('dataset-end-missing');
+        if (isBatchOptimization) {
+            warnings.push('dataset-end-missing');
+        } else {
+            coverageSatisfied = false;
+            reasons.push('dataset-end-missing');
+        }
     }
 
     if (requiredStartTs !== null && datasetStartTs === null) {
-        coverageSatisfied = false;
-        reasons.push('dataset-start-missing');
+        if (isBatchOptimization) {
+            warnings.push('dataset-start-missing');
+        } else {
+            coverageSatisfied = false;
+            reasons.push('dataset-start-missing');
+        }
     }
 
     return {
         coverageSatisfied,
         reason: reasons.length > 0 ? reasons.join('|') : 'ok',
+        warnings: warnings.length > 0 ? warnings.join('|') : null,
         datasetStartTs,
         datasetEndTs,
         requiredStartTs,
@@ -1405,7 +1427,28 @@ function formatDatasetCoverageSummary(label, digest) {
     const datasetRange = `${formatCoverageDate(summary.startDate)}～${formatCoverageDate(summary.endDate)}`;
     const requiredStart = required.dataStartDate || required.effectiveStartDate || required.startDate;
     const requiredRange = `${formatCoverageDate(requiredStart)}～${formatCoverageDate(required.endDate)}`;
-    const status = coverage.coverageSatisfied ? '符合' : `不符（${coverage.reason || '未知原因'}）`;
+    
+    // 顯示狀態：優先檢查警告，再檢查 reason
+    let status;
+    if (coverage.warnings) {
+        // 批量優化模式：有警告但仍使用快取
+        const warningText = coverage.warnings.replace('dataset-end-before-required-end', '快取終點早於需求終點')
+            .replace('dataset-start-after-required-start', '快取起點晚於需求起點')
+            .replace('dataset-end-missing', '快取終點缺失')
+            .replace('dataset-start-missing', '快取起點缺失')
+            .replace('|', '、');
+        status = `沿用快取（警告：${warningText}）`;
+    } else if (coverage.coverageSatisfied) {
+        status = '符合';
+    } else {
+        const reasonText = (coverage.reason || '未知原因')
+            .replace('dataset-end-before-required-end', '覆蓋不足：快取終點早於需求終點')
+            .replace('dataset-start-after-required-start', '覆蓋不足：快取起點晚於需求起點')
+            .replace('dataset-end-missing', '快取終點缺失')
+            .replace('dataset-start-missing', '快取起點缺失')
+            .replace('|', '、');
+        status = `不符（${reasonText}）`;
+    }
 
     return `${label}：來源=${detail.source || '未知'}｜筆數=${formatSimpleValue(datasetLength)}｜資料範圍=${datasetRange}｜需求範圍=${requiredRange}｜檢查=${status}`;
 }
@@ -3282,7 +3325,7 @@ async function executeBacktestForCombination(combination, options = {}) {
             const preparedParams = enrichParamsWithLookback(params);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+            const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange, { batchOptimization: true });
             let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
             const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
 
@@ -3802,7 +3845,7 @@ async function optimizeSingleStrategyParameter(params, optimizeTarget, strategyT
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange, { batchOptimization: true });
         let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
         let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
         const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
@@ -3986,7 +4029,7 @@ async function optimizeSingleRiskParameter(params, optimizeTarget, targetMetric,
         const preparedParams = enrichParamsWithLookback(params);
         const datasetMeta = buildBatchDatasetMeta(preparedParams);
         const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
-        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange);
+        const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange, { batchOptimization: true });
         let { evaluation: coverageEvaluation, useCachedData } = cachedUsage;
         let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
         const sliceSummary = cachedUsage.sliceInfo?.summaryAfter || null;
@@ -7469,7 +7512,8 @@ function performSingleBacktestFast(params) {
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
             const cachedUsage = buildCachedDatasetUsage(
                 Array.isArray(cachedStockData) ? cachedStockData : null,
-                requiredRange
+                requiredRange,
+                { batchOptimization: true }
             );
             let { useCachedData } = cachedUsage;
             let cachedDataForWorker = useCachedData ? cachedUsage.datasetForWorker : null;
