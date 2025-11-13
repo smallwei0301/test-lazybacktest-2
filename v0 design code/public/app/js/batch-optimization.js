@@ -275,6 +275,10 @@ const batchResultFilters = {
 let batchFilterPopoverElement = null;
 let batchFilterPopoverTrigger = null;
 let batchFilterUIInitialized = false;
+const BATCH_RESULTS_STORAGE_KEY = 'batchOptimizationSavedResultSets_v1';
+const MAX_SAVED_BATCH_RESULT_SETS = 12;
+let batchSavedResultSets = [];
+let batchResultStorageAvailable = false;
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
@@ -4458,8 +4462,8 @@ function parseFilterInputValue(rawValue, config) {
     }
 
     if (config.expectsPercent) {
-        if (numericValue > 1 || numericValue < -1) {
-            return numericValue / 100;
+        if (Math.abs(numericValue) <= 1) {
+            return numericValue * 100;
         }
     }
 
@@ -4494,8 +4498,7 @@ function formatFilterValueForInput(filterKey) {
         return '';
     }
 
-    const numeric = config.expectsPercent ? value * 100 : value;
-    return formatSimpleNumber(numeric);
+    return formatSimpleNumber(value);
 }
 
 function formatFilterValueForDisplay(filterKey) {
@@ -4509,8 +4512,7 @@ function formatFilterValueForDisplay(filterKey) {
         return '';
     }
 
-    const numeric = config.expectsPercent ? value * 100 : value;
-    const formatted = formatSimpleNumber(numeric);
+    const formatted = formatSimpleNumber(value);
     return config.expectsPercent ? `${formatted}%` : formatted;
 }
 
@@ -4540,7 +4542,12 @@ function applyBatchResultFilters(result) {
             return false;
         }
 
-        if (!config.comparator(metricValue, threshold)) {
+        let comparisonThreshold = threshold;
+        if (config.expectsPercent && Math.abs(comparisonThreshold) <= 1) {
+            comparisonThreshold = comparisonThreshold * 100;
+        }
+
+        if (!config.comparator(metricValue, comparisonThreshold)) {
             return false;
         }
     }
@@ -4602,6 +4609,330 @@ function updateBatchFilterIndicators() {
             button.title = isActive && displayValue ? `${config.label}篩選：${config.operatorLabel}${displayValue}` : baseTitle;
         }
     });
+}
+
+function resetBatchResultFilters() {
+    Object.keys(batchResultFilters).forEach((key) => {
+        batchResultFilters[key] = null;
+    });
+}
+
+function isBatchResultStorageSupported() {
+    if (typeof window === 'undefined' || !window || typeof window.localStorage === 'undefined') {
+        return false;
+    }
+
+    try {
+        const testKey = '__lb_batch_storage_test__';
+        window.localStorage.setItem(testKey, '1');
+        window.localStorage.removeItem(testKey);
+        return true;
+    } catch (error) {
+        console.warn('[Batch Optimization] Storage unavailable:', error);
+        return false;
+    }
+}
+
+function loadBatchSavedResultsFromStorage() {
+    if (!batchResultStorageAvailable) {
+        return [];
+    }
+
+    try {
+        const raw = window.localStorage.getItem(BATCH_RESULTS_STORAGE_KEY);
+        if (!raw) {
+            return [];
+        }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed.filter((entry) => entry && typeof entry === 'object' && Array.isArray(entry.results));
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to parse saved results:', error);
+        return [];
+    }
+}
+
+function persistBatchSavedResults() {
+    if (!batchResultStorageAvailable) {
+        return;
+    }
+
+    try {
+        window.localStorage.setItem(BATCH_RESULTS_STORAGE_KEY, JSON.stringify(batchSavedResultSets));
+    } catch (error) {
+        console.error('[Batch Optimization] Failed to persist saved results:', error);
+    }
+}
+
+function refreshBatchSavedResultsUI() {
+    const select = document.getElementById('batch-saved-results');
+    if (!select) {
+        return;
+    }
+
+    const previousValue = select.value;
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = batchSavedResultSets.length > 0 ? '選擇已儲存結果...' : '目前沒有儲存結果';
+    select.appendChild(placeholder);
+
+    batchSavedResultSets.forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = entry.id;
+        const timestamp = entry.createdAt ? new Date(entry.createdAt).toLocaleString('zh-TW', { hour12: false }) : '';
+        const name = entry.name || '未命名結果';
+        option.textContent = timestamp ? `${name}（${timestamp}）` : name;
+        select.appendChild(option);
+    });
+
+    if (previousValue && batchSavedResultSets.some((entry) => entry.id === previousValue)) {
+        select.value = previousValue;
+    } else {
+        select.value = '';
+    }
+
+    updateSavedResultsActionState();
+}
+
+function updateSavedResultsActionState() {
+    const select = document.getElementById('batch-saved-results');
+    const loadBtn = document.getElementById('batch-load-saved-results');
+    const deleteBtn = document.getElementById('batch-delete-saved-results');
+
+    const hasSelection = !!(select && select.value);
+
+    if (loadBtn) {
+        loadBtn.disabled = !hasSelection || !batchResultStorageAvailable;
+    }
+    if (deleteBtn) {
+        deleteBtn.disabled = !hasSelection || !batchResultStorageAvailable;
+    }
+}
+
+function handleSaveBatchOptimizationResults() {
+    if (!batchResultStorageAvailable) {
+        showError('此瀏覽器不支援儲存批量優化結果。');
+        return;
+    }
+
+    if (!Array.isArray(batchOptimizationResults) || batchOptimizationResults.length === 0) {
+        showError('尚未產生任何批量優化結果，無法儲存。');
+        return;
+    }
+
+    const defaultName = `批量結果 ${new Date().toLocaleString('zh-TW', { hour12: false })}`;
+    let name = window.prompt('請輸入儲存名稱（可空白，將使用預設名稱）：', defaultName);
+    if (name === null) {
+        return;
+    }
+    name = name.trim();
+    if (!name) {
+        name = defaultName;
+    }
+
+    const clonedResults = cloneStructuredValue(batchOptimizationResults);
+    if (!Array.isArray(clonedResults) || clonedResults.length === 0) {
+        showError('儲存批量優化結果時發生錯誤（資料為空）。');
+        return;
+    }
+
+    const savedFilters = {};
+    Object.entries(batchResultFilters).forEach(([key, value]) => {
+        if (value === null || value === undefined) {
+            return;
+        }
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+            savedFilters[key] = numeric;
+        }
+    });
+
+    const entry = {
+        id: `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        createdAt: Date.now(),
+        results: clonedResults,
+        config: clonePlainObject({
+            sortKey: batchOptimizationConfig.sortKey || 'annualizedReturn',
+            sortDirection: batchOptimizationConfig.sortDirection || 'desc'
+        }),
+        filters: savedFilters
+    };
+
+    batchSavedResultSets = [entry, ...batchSavedResultSets].slice(0, MAX_SAVED_BATCH_RESULT_SETS);
+    persistBatchSavedResults();
+    refreshBatchSavedResultsUI();
+    const savedSelect = document.getElementById('batch-saved-results');
+    if (savedSelect) {
+        savedSelect.value = entry.id;
+    }
+    updateSavedResultsActionState();
+
+    if (typeof showSuccess === 'function') {
+        showSuccess(`已儲存批量優化結果：${name}`);
+    }
+}
+
+function handleLoadSavedBatchOptimizationResults() {
+    if (!batchResultStorageAvailable) {
+        showError('此瀏覽器不支援載入儲存的結果。');
+        return;
+    }
+
+    const select = document.getElementById('batch-saved-results');
+    if (!select || !select.value) {
+        showError('請先選擇要載入的儲存結果。');
+        return;
+    }
+
+    const entry = batchSavedResultSets.find((item) => item.id === select.value);
+    if (!entry) {
+        showError('找不到對應的儲存結果。');
+        refreshBatchSavedResultsUI();
+        return;
+    }
+
+    const clonedResults = cloneStructuredValue(entry.results);
+    if (!Array.isArray(clonedResults) || clonedResults.length === 0) {
+        showError('儲存的結果資料已損毀或為空。');
+        return;
+    }
+
+    batchOptimizationResults = clonedResults.map((result) => normaliseBatchResult(result));
+
+    const savedConfig = entry.config || {};
+    batchOptimizationConfig.sortKey = savedConfig.sortKey || 'annualizedReturn';
+    batchOptimizationConfig.sortDirection = savedConfig.sortDirection || 'desc';
+
+    const sortKeySelect = document.getElementById('batch-sort-key');
+    if (sortKeySelect) {
+        sortKeySelect.value = batchOptimizationConfig.sortKey;
+    }
+    updateSortDirectionButton();
+
+    resetBatchResultFilters();
+    if (entry.filters && typeof entry.filters === 'object') {
+        Object.entries(entry.filters).forEach(([key, value]) => {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric) && Object.prototype.hasOwnProperty.call(batchResultFilters, key)) {
+                batchResultFilters[key] = numeric;
+            }
+        });
+    }
+
+    const progressElement = document.getElementById('batch-optimization-progress');
+    if (progressElement) {
+        progressElement.classList.add('hidden');
+    }
+    const resultsDiv = document.getElementById('batch-optimization-results');
+    if (resultsDiv) {
+        resultsDiv.classList.remove('hidden');
+    }
+
+    sortBatchResults();
+    updateBatchFilterIndicators();
+    if (typeof showSuccess === 'function') {
+        showSuccess(`已載入儲存結果：${entry.name || '未命名結果'}`);
+    }
+}
+
+function handleDeleteSavedBatchOptimizationResults() {
+    if (!batchResultStorageAvailable) {
+        showError('此瀏覽器不支援刪除儲存結果。');
+        return;
+    }
+
+    const select = document.getElementById('batch-saved-results');
+    if (!select || !select.value) {
+        showError('請先選擇要刪除的儲存結果。');
+        return;
+    }
+
+    const entry = batchSavedResultSets.find((item) => item.id === select.value);
+    if (!entry) {
+        showError('找不到對應的儲存結果。');
+        refreshBatchSavedResultsUI();
+        return;
+    }
+
+    const confirmDelete = window.confirm(`確定要刪除儲存結果「${entry.name || '未命名結果'}」嗎？`);
+    if (!confirmDelete) {
+        return;
+    }
+
+    batchSavedResultSets = batchSavedResultSets.filter((item) => item.id !== entry.id);
+    persistBatchSavedResults();
+    refreshBatchSavedResultsUI();
+
+    if (typeof showSuccess === 'function') {
+        showSuccess('已刪除選定的儲存結果。');
+    }
+}
+
+function initializeBatchSavedResultsUI() {
+    if (typeof document === 'undefined') {
+        return;
+    }
+
+    batchResultStorageAvailable = isBatchResultStorageSupported();
+
+    const saveBtn = document.getElementById('batch-save-results');
+    const loadBtn = document.getElementById('batch-load-saved-results');
+    const deleteBtn = document.getElementById('batch-delete-saved-results');
+    const select = document.getElementById('batch-saved-results');
+
+    if (!batchResultStorageAvailable) {
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.title = '此瀏覽器目前不支援離線儲存結果。';
+        }
+        if (loadBtn) {
+            loadBtn.disabled = true;
+            loadBtn.title = '此瀏覽器目前不支援離線儲存結果。';
+        }
+        if (deleteBtn) {
+            deleteBtn.disabled = true;
+            deleteBtn.title = '此瀏覽器目前不支援離線儲存結果。';
+        }
+        if (select) {
+            select.disabled = true;
+            select.title = '此瀏覽器目前不支援離線儲存結果。';
+        }
+        return;
+    }
+
+    batchSavedResultSets = loadBatchSavedResultsFromStorage();
+
+    if (saveBtn) {
+        saveBtn.removeEventListener('click', handleSaveBatchOptimizationResults);
+        saveBtn.addEventListener('click', handleSaveBatchOptimizationResults);
+        saveBtn.disabled = false;
+        saveBtn.title = '';
+    }
+    if (loadBtn) {
+        loadBtn.removeEventListener('click', handleLoadSavedBatchOptimizationResults);
+        loadBtn.addEventListener('click', handleLoadSavedBatchOptimizationResults);
+        loadBtn.disabled = true;
+        loadBtn.title = '';
+    }
+    if (deleteBtn) {
+        deleteBtn.removeEventListener('click', handleDeleteSavedBatchOptimizationResults);
+        deleteBtn.addEventListener('click', handleDeleteSavedBatchOptimizationResults);
+        deleteBtn.disabled = true;
+        deleteBtn.title = '';
+    }
+    if (select) {
+        select.removeEventListener('change', updateSavedResultsActionState);
+        select.addEventListener('change', updateSavedResultsActionState);
+        select.disabled = false;
+        select.title = '';
+    }
+
+    refreshBatchSavedResultsUI();
 }
 
 // 渲染結果表格
@@ -7580,11 +7911,16 @@ function checkAllStrategyParameters() {
     }
 }
 
+function handleBatchOptimizationDomReady() {
+    initializeBatchResultFilters();
+    initializeBatchSavedResultsUI();
+}
+
 if (typeof document !== 'undefined') {
     if (document.readyState !== 'loading') {
-        initializeBatchResultFilters();
+        handleBatchOptimizationDomReady();
     } else {
-        document.addEventListener('DOMContentLoaded', initializeBatchResultFilters);
+        document.addEventListener('DOMContentLoaded', handleBatchOptimizationDomReady);
     }
 }
 

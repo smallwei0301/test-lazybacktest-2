@@ -2165,19 +2165,37 @@
                                             <div id="batch-optimization-results" class="hidden">
                                                 <div class="card bg-background border border-border" style="background-color: var(--background); border-color: var(--border);">
                                                     <div class="card-header">
-                                                        <div class="flex items-center justify-between">
-                                                            <h4 class="card-title text-lg font-semibold">優化結果</h4>
-                                                            <div class="flex items-center gap-2">
-                                                                <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
-                                                                <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
-                                                                    <option value="annualizedReturn">年化報酬率</option>
-                                                                    <option value="sharpeRatio">夏普比率</option>
-                                                                    <option value="maxDrawdown">最大回撤</option>
-                                                                    <option value="tradeCount">交易次數</option>
-                                                                </select>
-                                                                <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
-                                                                    <i data-lucide="arrow-down" class="lucide"></i>
+                                                        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                                            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                                <h4 class="card-title text-lg font-semibold">優化結果</h4>
+                                                                <div class="flex items-center gap-2">
+                                                                    <label class="text-xs text-muted-foreground" style="color: var(--muted-foreground);">排序依據:</label>
+                                                                    <select id="batch-sort-key" class="px-3 py-1 border border-border rounded text-sm bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground);">
+                                                                        <option value="annualizedReturn">年化報酬率</option>
+                                                                        <option value="sharpeRatio">夏普比率</option>
+                                                                        <option value="maxDrawdown">最大回撤</option>
+                                                                        <option value="tradeCount">交易次數</option>
+                                                                    </select>
+                                                                    <button id="batch-sort-direction" class="px-2 py-1 btn-outline rounded text-sm">
+                                                                        <i data-lucide="arrow-down" class="lucide"></i>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                <button id="batch-save-results" class="px-3 py-1 text-xs font-medium rounded border transition-colors" style="background-color: var(--primary); color: var(--primary-foreground); border-color: color-mix(in srgb, var(--primary) 70%, transparent);">
+                                                                    儲存結果
                                                                 </button>
+                                                                <div class="flex items-center gap-2">
+                                                                    <select id="batch-saved-results" class="px-3 py-1 border border-border rounded text-xs bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground); min-width: 13rem;">
+                                                                        <option value="">選擇已儲存結果...</option>
+                                                                    </select>
+                                                                    <button id="batch-load-saved-results" class="px-2 py-1 text-xs rounded border transition-colors" style="border-color: var(--border); background-color: var(--background); color: var(--foreground);" disabled>
+                                                                        載入
+                                                                    </button>
+                                                                    <button id="batch-delete-saved-results" class="px-2 py-1 text-xs rounded border transition-colors" style="border-color: var(--border); background-color: var(--background); color: var(--muted-foreground);" disabled>
+                                                                        刪除
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
