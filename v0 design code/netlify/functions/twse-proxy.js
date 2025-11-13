@@ -224,6 +224,37 @@ async function fetchTwseMonth(stockNo, monthKey) {
     return { ...parseTWSEPayload(json, stockNo), dataSource: 'TWSE' };
 }
 
+// 非同步觸發 year-cache 重建 (fire-and-forget)
+// 當月快取寫入成功後呼叫，促使 stock-range 重新讀取本月最新月快取並更新 year-cache
+async function triggerYearCacheRefresh(stockNo, monthKey) {
+    try {
+        // 從 monthKey (例如 202511) 推導出 startDate 與 endDate
+        const year = parseInt(monthKey.slice(0, 4), 10);
+        const month = parseInt(monthKey.slice(4, 6), 10);
+        if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+
+        const startDate = new Date(Date.UTC(year, month - 1, 1));
+        const endDate = new Date(Date.UTC(year, month, 0));
+        const startISO = startDate.toISOString().split('T')[0];
+        const endISO = endDate.toISOString().split('T')[0];
+
+        // 構造 stock-range 請求 URL (帶 cacheBust 避免被快取)
+        const stockRangeUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}&marketType=TWSE&cacheBust=${Date.now()}`;
+
+        // 發送非同步 trigger (不 await, 不阻塞 proxy response)
+        // 目的是促使 stock-range 重新讀取本月最新月快取並更新 year-cache
+        fetch(`https://${process.env.NETLIFY_HOST || 'localhost'}${stockRangeUrl}`, { method: 'GET' })
+            .then(() => {
+                console.log(`[TWSE Proxy Trigger] Year-cache refresh triggered for ${stockNo} ${monthKey}`);
+            })
+            .catch((err) => {
+                console.warn(`[TWSE Proxy Trigger] Year-cache refresh failed for ${stockNo} ${monthKey}:`, err.message);
+            });
+    } catch (err) {
+        console.warn('[TWSE Proxy Trigger] Error setting up year-cache refresh:', err);
+    }
+}
+
 async function hydrateFinMindDaily(store, stockNo, adjusted, startDateISO, endDateISO) {
     const token = process.env.FINMIND_TOKEN;
     if (!token) {
@@ -695,6 +726,9 @@ export default async (req) => {
                         await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE (強制)' });
                         payload = await readCache(store, cacheKey);
                         sourceFlags.add('TWSE (強制)');
+                        
+                        // 強制 TWSE 抓取成功後，也觸發 year-cache 重建
+                        triggerYearCacheRefresh(stockNo, month);
                     } catch (error) {
                         console.error('[TWSE Proxy v10.2] 強制 TWSE 失敗:', error);
                         return new Response(JSON.stringify({ error: `TWSE 來源取得失敗: ${error.message}` }), { status: 502 });
@@ -744,6 +778,12 @@ export default async (req) => {
                                     true,
                                 );
                                 yahooHydrated = true;
+                                
+                                // Yahoo 調整價也寫入月快取後，觸發 year-cache 重建
+                                if (Array.isArray(months) && months.length > 0) {
+                                    const monthForTrigger = months[0];
+                                    triggerYearCacheRefresh(stockNo, monthForTrigger);
+                                }
                             } catch (error) {
                                 console.error('[TWSE Proxy v10.2] Yahoo 還原來源失敗:', error);
                                 return new Response(
@@ -763,6 +803,9 @@ export default async (req) => {
                             await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE' });
                             payload = await readCache(store, cacheKey);
                             sourceFlags.add('TWSE');
+                            
+                            // 月快取寫入成功後，非同步觸發 year-cache 重建 (best-effort)
+                            triggerYearCacheRefresh(stockNo, month);
                         } catch (error) {
                             console.warn(`[TWSE Proxy v10.2] TWSE 主來源失敗 (${month}):`, error.message);
                             if (!finmindHydrated) {
@@ -774,6 +817,13 @@ export default async (req) => {
                                         startDate.toISOString().split('T')[0],
                                         endDate.toISOString().split('T')[0],
                                     );
+                                    finmindHydrated = true;
+                                    
+                                    // FinMind 備援也寫入月快取後，觸發 year-cache 重建
+                                    if (Array.isArray(months) && months.length > 0) {
+                                        const monthForTrigger = months[0];
+                                        triggerYearCacheRefresh(stockNo, monthForTrigger);
+                                    }
                                 } catch (finmindError) {
                                     console.error('[TWSE Proxy v10.2] FinMind 備援失敗:', finmindError);
                                     return new Response(
@@ -781,7 +831,6 @@ export default async (req) => {
                                         { status: 502 },
                                     );
                                 }
-                                finmindHydrated = true;
                             }
                             payload = await readCache(store, cacheKey);
                             if (payload && finmindLabel) sourceFlags.add(finmindLabel);
