@@ -4989,6 +4989,19 @@ async function tryFetchRangeFromBlob({
       normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
         ? currentMonthGapDays
         : null;
+
+      // 若補抓成功（取得新資料），非同步觸發後端重建/持久化 year-cache（best-effort）
+      try {
+        const persistUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&marketType=${encodeURIComponent(marketKey)}&cacheBust=${Date.now()}`;
+        // fire-and-forget, don't await - best-effort to persist the updated slices
+        fetch(persistUrl, { method: 'GET' }).then(() => {
+          /* persisted trigger sent */
+        }).catch(() => {
+          /* ignore persistence failures */
+        });
+      } catch (persistErr) {
+        console.warn('[Worker] trigger year-cache persist failed:', persistErr);
+      }
       rangeFetchInfo.rowCount = deduped.length;
       rangeFetchInfo.firstDate = firstDate;
       rangeFetchInfo.lastDate = lastDate;
