@@ -4286,13 +4286,26 @@ function sortBatchResults() {
 // 更新排序方向按鈕
 function updateSortDirectionButton() {
     const button = document.getElementById('batch-sort-direction');
-    if (button) {
-        const icon = button.querySelector('i');
-        if (batchOptimizationConfig.sortDirection === 'asc') {
-            icon.className = 'fas fa-sort-up';
-        } else {
-            icon.className = 'fas fa-sort-down';
+    if (!button) {
+        return;
+    }
+
+    const direction = batchOptimizationConfig.sortDirection === 'asc' ? 'asc' : 'desc';
+    button.setAttribute('data-sort-direction', direction);
+
+    const fontAwesomeIcon = button.querySelector('i');
+    if (fontAwesomeIcon) {
+        fontAwesomeIcon.className = direction === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+        return;
+    }
+
+    const svgIcon = button.querySelector('svg');
+    if (svgIcon) {
+        // lucide 會把 <i> 轉成 <svg>，改用旋轉讓向下箭頭呈現向上效果
+        if (!svgIcon.style.transition) {
+            svgIcon.style.transition = 'transform 0.15s ease-in-out';
         }
+        svgIcon.style.transform = direction === 'asc' ? 'rotate(180deg)' : 'rotate(0deg)';
     }
 }
 

@@ -127,9 +127,9 @@ export default function GuidePage() {
                 </CardHeader>
                 <CardContent className="grid gap-6 pt-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-center">
                   <div className="order-2 space-y-4 lg:order-1">
-                    <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
-                      <strong className="block text-primary-foreground/80">提醒：</strong>
-                      <span className="text-primary-foreground/70">{step.tip}</span>
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+                      <strong className="block text-foreground">提醒：</strong>
+                      <span className="text-foreground">{step.tip}</span>
                     </div>
                     <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
                       {step.links.map((link) => (
