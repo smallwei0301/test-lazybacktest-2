@@ -69,7 +69,7 @@ function safeParseInt(value) {
     return Number.isFinite(num) ? num : null;
 }
 
-async function fetchTwseMonth({ store, stockNo, monthKey, forceMiss }) {
+async function fetchTwseMonth({ store, stockNo, monthKey }) {
     const cacheKey = `${stockNo}_${monthKey}`;
     if (inFlightTwseMonthCache.has(cacheKey)) {
         return inFlightTwseMonthCache.get(cacheKey);
@@ -77,18 +77,15 @@ async function fetchTwseMonth({ store, stockNo, monthKey, forceMiss }) {
 
     const resolver = (async () => {
         try {
-            // 如果 forceMiss 為 true，跳過 month-cache 讀取，直接從 TWSE 抓
-            if (!forceMiss) {
-                const cached = await store.get(cacheKey, { type: 'json' });
-                if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
-                    const base = cached.data;
-                    return {
-                        stockName: base.stockName || stockNo,
-                        iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
-                        aaData: Array.isArray(base.aaData) ? base.aaData : [],
-                        dataSource: `${base.dataSource || 'TWSE'} (cache)`
-                    };
-                }
+            const cached = await store.get(cacheKey, { type: 'json' });
+            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
+                const base = cached.data;
+                return {
+                    stockName: base.stockName || stockNo,
+                    iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
+                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
+                    dataSource: `${base.dataSource || 'TWSE'} (cache)`
+                };
             }
         } catch (error) {
             if (!isQuotaError(error)) {
@@ -145,14 +142,14 @@ async function fetchTwseMonth({ store, stockNo, monthKey, forceMiss }) {
     }
 }
 
-async function composeTwseRange(stockNo, startDate, endDate, forceMiss) {
+async function composeTwseRange(stockNo, startDate, endDate) {
     const store = getStore('twse_cache_store');
     const months = buildMonthKeyList(startDate, endDate);
     const merged = [];
     let stockName = stockNo;
 
     for (const monthKey of months) {
-        const monthData = await fetchTwseMonth({ store, stockNo, monthKey, forceMiss });
+        const monthData = await fetchTwseMonth({ store, stockNo, monthKey });
         if (monthData.stockName) stockName = monthData.stockName;
         if (Array.isArray(monthData.aaData)) merged.push(...monthData.aaData);
     }
@@ -332,13 +329,11 @@ async function persistYearSlice(store, cacheKey, payload, telemetry) {
     }
 }
 
-async function fetchYearDataset({ store, stockNo, marketType, year, telemetry, forceMiss }) {
+async function fetchYearDataset({ store, stockNo, marketType, year, telemetry }) {
     const yearKey = getYearCacheKey(marketType, stockNo, year);
     telemetry.yearKeys.push(yearKey);
     let cached = null;
-    
-    // 如果 forceMiss=true，跳過 cache 讀取，直接進行重建
-    if (!forceMiss && store) {
+    if (store) {
         try {
             telemetry.readOps += 1;
             cached = await store.get(yearKey, { type: 'json' });
@@ -388,7 +383,7 @@ async function fetchYearDataset({ store, stockNo, marketType, year, telemetry, f
         };
     }
 
-    const twseData = await composeTwseRange(stockNo, startDate, endDate, forceMiss);
+    const twseData = await composeTwseRange(stockNo, startDate, endDate);
     if (store) {
         const cachePayload = {
             stockName: twseData.stockName || stockNo,
@@ -411,7 +406,6 @@ export default async (req) => {
         const startDateStr = params.get('startDate');
         const endDateStr = params.get('endDate');
         const marketType = normalizeMarketType(params.get('marketType') || params.get('market'));
-        const forceMiss = params.get('forceMiss') === 'true' || params.get('forceMiss') === '1';
 
         if (!stockNo || !startDateStr || !endDateStr) {
             return new Response(JSON.stringify({ error: 'Missing required parameters stockNo/startDate/endDate' }), { status: 400 });
@@ -448,7 +442,6 @@ export default async (req) => {
                 marketType,
                 year,
                 telemetry,
-                forceMiss,
             });
             if (result.stockName) resolvedStockName = result.stockName;
             if (Array.isArray(result.aaData)) {

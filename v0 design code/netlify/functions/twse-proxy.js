@@ -238,8 +238,8 @@ async function triggerYearCacheRefresh(stockNo, monthKey) {
         const startISO = startDate.toISOString().split('T')[0];
         const endISO = endDate.toISOString().split('T')[0];
 
-        // 構造 stock-range 請求 URL (帶 cacheBust 避免被快取，並加 forceMiss 強制重建 year-cache)
-        const stockRangeUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}&marketType=TWSE&forceMiss=true&cacheBust=${Date.now()}`;
+        // 構造 stock-range 請求 URL (帶 cacheBust 避免被快取)
+        const stockRangeUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}&marketType=TWSE&cacheBust=${Date.now()}`;
 
         // 發送非同步 trigger (不 await, 不阻塞 proxy response)
         // 目的是促使 stock-range 重新讀取本月最新月快取並更新 year-cache
