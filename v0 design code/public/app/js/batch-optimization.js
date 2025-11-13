@@ -890,7 +890,7 @@ function recordBatchDebug(event, detail = {}, options = {}) {
         try {
             printer.call(console, `[Batch Debug][${event}]`, detail);
         } catch (error) {
-            console.log('[Batch Debug][fallback]', event, detail);
+            console.log('[Batch Debug][fallback]', event, detail, error);
         }
     }
 
@@ -1455,6 +1455,7 @@ function formatCoverageDate(value) {
         try {
             return new Date(timestamp).toISOString().slice(0, 10);
         } catch (error) {
+            console.warn('[Batch Optimization] Failed to format coverage date:', value, error);
             return String(value);
         }
     }
@@ -1540,12 +1541,14 @@ function formatDebugSnapshotLabel(snapshot) {
         try {
             parts.push(new Date(digest.completedAt).toLocaleString('zh-TW', { hour12: false }));
         } catch (error) {
+            console.warn('[Batch Optimization] Failed to format completedAt timestamp:', digest.completedAt, error);
             parts.push(digest.completedAt);
         }
     } else if (digest.startedAt) {
         try {
             parts.push(new Date(digest.startedAt).toLocaleString('zh-TW', { hour12: false }));
         } catch (error) {
+            console.warn('[Batch Optimization] Failed to format startedAt timestamp:', digest.startedAt, error);
             parts.push(digest.startedAt);
         }
     }
@@ -1910,8 +1913,8 @@ function initBatchOptimization() {
             if (hint && navigator.hardwareConcurrency) {
                 hint.textContent = `建議值：≤ CPU 核心數 (${navigator.hardwareConcurrency})。預設 4。`;
             }
-        } catch (e) {
-            // ignore
+        } catch (error) {
+            console.debug('[Batch Optimization] Unable to resolve hardware concurrency hint:', error);
         }
         
         console.log('[Batch Optimization] Initialized successfully');
@@ -2301,20 +2304,31 @@ function getBatchOptimizationConfig() {
 // 顯示進度區域
 function showBatchProgress() {
     try {
+        console.log('[Batch Optimization] showBatchProgress called');
         const progressElement = document.getElementById('batch-optimization-progress');
         const resultsElement = document.getElementById('batch-optimization-results');
-        
+
         if (progressElement) {
             progressElement.classList.remove('hidden');
+        } else {
+            console.error('[Batch Optimization] Progress element not found!');
         }
-        
+
         if (resultsElement) {
             resultsElement.classList.add('hidden');
         }
-        
-        // 重置進度
-        currentBatchProgress = { current: 0, total: 0, phase: 'preparing' };
-        updateBatchProgress();
+
+        // 重置進度狀態並刷新顯示
+        currentBatchProgress = {
+            current: 0,
+            total: 0,
+            phase: 'preparing',
+            startTime: Date.now(),
+            lastUpdateTime: null,
+            estimatedTotalTime: null,
+            isLongRunning: false
+        };
+        updateBatchProgress(0, '準備中...');
     } catch (error) {
         console.error('[Batch Optimization] Error showing progress:', error);
     }
@@ -2383,7 +2397,7 @@ function resetBatchProgress() {
 }
 
 // 更新進度顯示
-function updateBatchProgress(currentCombination = null) {
+function updateBatchProgress(progressOrCombination = null, message) {
     const progressText = document.getElementById('batch-progress-text');
     const progressBar = document.getElementById('batch-progress-bar');
     const progressDetail = document.getElementById('batch-progress-detail');
@@ -2391,80 +2405,128 @@ function updateBatchProgress(currentCombination = null) {
     const timeEstimate = document.getElementById('batch-time-estimate');
     const longWaitNotice = document.getElementById('batch-long-wait-notice');
     const hourglass = document.getElementById('batch-progress-hourglass');
-    
-    if (progressText && progressBar && progressDetail) {
-        // 計算精確的百分比（每1%更新）
-        const rawPercentage = currentBatchProgress.total > 0 ? 
-            (currentBatchProgress.current / currentBatchProgress.total) * 100 : 0;
-        const percentage = Math.floor(rawPercentage); // 確保是整數百分比
-        
-        // 避免NaN%問題
-        const displayPercentage = isNaN(percentage) ? 0 : percentage;
-        
-        progressText.textContent = `${displayPercentage}%`;
-        progressBar.style.width = `${displayPercentage}%`;
-        
-        // 顯示當前處理組合資訊
-        if (progressCombination && currentCombination) {
-            const { buyStrategy, sellStrategy, current, total } = currentCombination;
-            const buyStrategyName = strategyDescriptions[buyStrategy]?.name || buyStrategy;
-            const sellStrategyName = strategyDescriptions[sellStrategy]?.name || sellStrategy;
-            progressCombination.textContent = `🔄 正在優化組合 ${current}/${total}：${buyStrategyName} + ${sellStrategyName}`;
-        } else if (progressCombination) {
+
+    if (!progressText || !progressBar || !progressDetail) {
+        return;
+    }
+
+    let combinationInfo = null;
+    let percentOverride = null;
+
+    if (typeof progressOrCombination === 'number' && Number.isFinite(progressOrCombination)) {
+        percentOverride = progressOrCombination;
+    } else if (progressOrCombination && typeof progressOrCombination === 'object' && !Array.isArray(progressOrCombination)) {
+        combinationInfo = progressOrCombination;
+        if (Number.isFinite(progressOrCombination.percentage)) {
+            percentOverride = progressOrCombination.percentage;
+        }
+        if (Number.isFinite(progressOrCombination.current)) {
+            currentBatchProgress.current = progressOrCombination.current;
+        }
+        if (Number.isFinite(progressOrCombination.total)) {
+            currentBatchProgress.total = progressOrCombination.total;
+        }
+        if (typeof progressOrCombination.phase === 'string') {
+            currentBatchProgress.phase = progressOrCombination.phase;
+        }
+    } else if (typeof progressOrCombination === 'string' && message === undefined) {
+        message = progressOrCombination;
+    }
+
+    const rawPercentage = percentOverride !== null
+        ? percentOverride
+        : (currentBatchProgress.total > 0
+            ? (currentBatchProgress.current / currentBatchProgress.total) * 100
+            : 0);
+
+    const clampedPercentage = Number.isFinite(rawPercentage)
+        ? Math.max(0, Math.min(rawPercentage, 100))
+        : 0;
+    const displayPercentage = Math.floor(clampedPercentage);
+
+    progressText.textContent = `${displayPercentage}%`;
+    progressBar.style.width = `${displayPercentage}%`;
+
+    if (progressCombination) {
+        if (combinationInfo && typeof combinationInfo === 'object') {
+            const currentIndex = Number.isFinite(combinationInfo.current)
+                ? combinationInfo.current
+                : currentBatchProgress.current;
+            const totalCount = Number.isFinite(combinationInfo.total)
+                ? combinationInfo.total
+                : currentBatchProgress.total;
+            const buyStrategyName = typeof combinationInfo.buyStrategy === 'string'
+                ? (strategyDescriptions[combinationInfo.buyStrategy]?.name || combinationInfo.buyStrategy)
+                : '—';
+            const sellStrategyName = typeof combinationInfo.sellStrategy === 'string'
+                ? (strategyDescriptions[combinationInfo.sellStrategy]?.name || combinationInfo.sellStrategy)
+                : '—';
+            progressCombination.textContent = `🔄 正在優化組合 ${currentIndex}/${totalCount || 0}：${buyStrategyName} + ${sellStrategyName}`;
+        } else {
             progressCombination.textContent = '';
         }
-        
-        // 計算剩餘時間預估
-        if (currentBatchProgress.startTime && currentBatchProgress.current > 0) {
-            const elapsedTime = Date.now() - currentBatchProgress.startTime;
-            const avgTimePerItem = elapsedTime / currentBatchProgress.current;
-            const remaining = currentBatchProgress.total - currentBatchProgress.current;
-            const estimatedRemainingTime = avgTimePerItem * remaining;
-            
-            // 更加保守的時間預估策略：
-            // 1. 如果沒有初始預估，使用當前預估
-            // 2. 如果有初始預估，使用較大值（更保守）
-            // 3. 添加 20% 的緩衝時間避免預估過於樂觀
-            const conservativeRemainingTime = estimatedRemainingTime * 1.2;
-            
-            if (!currentBatchProgress.estimatedTotalTime) {
-                currentBatchProgress.estimatedTotalTime = conservativeRemainingTime;
+    }
+
+    if (currentBatchProgress.startTime && currentBatchProgress.current > 0) {
+        const elapsedTime = Date.now() - currentBatchProgress.startTime;
+        const avgTimePerItem = elapsedTime / Math.max(currentBatchProgress.current, 1);
+        const remaining = Math.max(currentBatchProgress.total - currentBatchProgress.current, 0);
+        const estimatedRemainingTime = avgTimePerItem * remaining;
+        const conservativeRemainingTime = estimatedRemainingTime * 1.2;
+
+        if (!currentBatchProgress.estimatedTotalTime) {
+            currentBatchProgress.estimatedTotalTime = conservativeRemainingTime;
+        } else {
+            const alpha = 0.3;
+            currentBatchProgress.estimatedTotalTime =
+                alpha * conservativeRemainingTime + (1 - alpha) * currentBatchProgress.estimatedTotalTime;
+        }
+
+        if (timeEstimate) {
+            const remainingMinutes = Math.ceil(currentBatchProgress.estimatedTotalTime / 60000);
+            if (remainingMinutes > 0) {
+                timeEstimate.textContent = `預估剩餘時間：約 ${remainingMinutes} 分鐘`;
+                if (remainingMinutes > 2 && !currentBatchProgress.isLongRunning && longWaitNotice) {
+                    currentBatchProgress.isLongRunning = true;
+                    longWaitNotice.classList.remove('hidden');
+                }
             } else {
-                // 使用移動平均來平滑預估時間，避免大幅波動
-                const alpha = 0.3; // 平滑因子
-                currentBatchProgress.estimatedTotalTime = 
-                    alpha * conservativeRemainingTime + (1 - alpha) * currentBatchProgress.estimatedTotalTime;
+                timeEstimate.textContent = '預估剩餘時間：不到1分鐘';
             }
-            
-            // 顯示剩餘時間
-            if (timeEstimate) {
-                const remainingMinutes = Math.ceil(currentBatchProgress.estimatedTotalTime / 60000);
-                if (remainingMinutes > 0) {
-                    timeEstimate.textContent = `預估剩餘時間：約 ${remainingMinutes} 分鐘`;
-                    
-                    // 檢查是否為長時間運行
-                    if (remainingMinutes > 2 && !currentBatchProgress.isLongRunning) {
-                        currentBatchProgress.isLongRunning = true;
-                        if (longWaitNotice) {
-                            longWaitNotice.classList.remove('hidden');
-                        }
+        }
+    } else if (timeEstimate) {
+        timeEstimate.textContent = '';
+    }
+
+    if (hourglass) {
+        if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
+            hourglass.classList.add('animate-spin');
+        } else {
+            hourglass.classList.remove('animate-spin');
+        }
+    }
+
+    let detailText = '';
+
+    if (typeof message === 'string' && message.trim() !== '') {
+        detailText = message.trim();
+        if (percentOverride !== null && clampedPercentage > 5 && batchOptimizationStartTime) {
+            const elapsedTime = Date.now() - batchOptimizationStartTime;
+            if (elapsedTime > 0) {
+                const estimatedTotal = (elapsedTime / Math.max(clampedPercentage, 1)) * 100;
+                const remainingTime = estimatedTotal - elapsedTime;
+                if (remainingTime > 0) {
+                    const remainingMinutes = Math.floor(remainingTime / 60000);
+                    const remainingSeconds = Math.ceil((remainingTime % 60000) / 1000);
+                    if (remainingMinutes > 0) {
+                        detailText += ` (預計剩餘: ${remainingMinutes}分${remainingSeconds}秒)`;
+                    } else {
+                        detailText += ` (預計剩餘: ${remainingSeconds}秒)`;
                     }
-                } else {
-                    timeEstimate.textContent = '預估剩餘時間：不到1分鐘';
                 }
             }
         }
-        
-        // 更新沙漏動畫
-        if (hourglass) {
-            if (currentBatchProgress.phase === 'optimizing' || currentBatchProgress.phase === 'preparing') {
-                hourglass.classList.add('animate-spin');
-            } else {
-                hourglass.classList.remove('animate-spin');
-            }
-        }
-        
-        let detailText = '';
+    } else {
         switch (currentBatchProgress.phase) {
             case 'preparing':
                 detailText = '準備策略組合...';
@@ -2472,13 +2534,16 @@ function updateBatchProgress(currentCombination = null) {
             case 'optimizing':
                 detailText = `優化中... ${currentBatchProgress.current}/${currentBatchProgress.total}`;
                 break;
-                break;
             case 'completed':
                 detailText = '優化完成！';
                 break;
+            default:
+                detailText = '';
+                break;
         }
-        progressDetail.textContent = detailText;
     }
+
+    progressDetail.textContent = detailText;
 }
 
 // 執行批量優化
@@ -2525,7 +2590,6 @@ async function executeBatchOptimization(config) {
             sample: optimizedCombinations.slice(0, Math.min(5, optimizedCombinations.length)).map(summarizeCombination)
         }, { phase: 'optimize', consoleLevel: 'log' });
 
-        const totalCombinations = Math.min(optimizedCombinations.length, config.maxCombinations);
         console.log(`[Batch Optimization] Completed per-combination parameter optimization for ${optimizedCombinations.length} combinations`);
 
         // 限制組合數量
@@ -2595,7 +2659,8 @@ function getMetricFromResult(result, metric) {
 function paramsEqual(a, b) {
     try {
         return JSON.stringify(a || {}) === JSON.stringify(b || {});
-    } catch (e) {
+    } catch (error) {
+        console.debug('[Batch Optimization] Failed to compare params via JSON stringify:', error);
         return false;
     }
 }
@@ -3163,7 +3228,7 @@ function processBatch(batches, batchIndex, config) {
     updateBatchProgress(progressPercentage, `處理批次 ${batchIndex + 1}/${batches.length}...`);
 
     // 處理當前批次
-    processStrategyCombinations(currentBatch, config).then(() => {
+    processStrategyCombinations(currentBatch).then(() => {
         // 檢查是否被停止
         if (isBatchOptimizationStopped) {
             console.log('[Batch Optimization] Process stopped by user');
@@ -3187,7 +3252,7 @@ function processBatch(batches, batchIndex, config) {
 }
 
 // 處理策略組合
-async function processStrategyCombinations(combinations, config) {
+async function processStrategyCombinations(combinations) {
     const results = [];
     
     for (let i = 0; i < combinations.length; i++) {
@@ -7236,66 +7301,6 @@ function generateStrategyCombinations(buyStrategies, sellStrategies) {
     }
 
     return combinations;
-}
-
-// 更新批量進度（支援自訂訊息）
-function updateBatchProgress(percentage, message) {
-    const progressBar = document.getElementById('batch-progress-bar');
-    const progressText = document.getElementById('batch-progress-text');
-    const progressDetail = document.getElementById('batch-progress-detail');
-    
-    if (progressBar) {
-        progressBar.style.width = `${percentage}%`;
-    }
-
-    if (progressText) {
-        progressText.textContent = `${Math.round(percentage)}%`;
-    }
-
-    if (progressDetail && message) {
-        let displayMessage = message;
-        
-        // 計算剩餘時間（只有在進度 > 5% 時才顯示）
-        if (percentage > 5 && batchOptimizationStartTime) {
-            const elapsedTime = Date.now() - batchOptimizationStartTime;
-            const estimatedTotal = (elapsedTime / percentage) * 100;
-            const remainingTime = estimatedTotal - elapsedTime;
-            
-            if (remainingTime > 0) {
-                const remainingMinutes = Math.ceil(remainingTime / (1000 * 60));
-                const remainingSeconds = Math.ceil((remainingTime % (1000 * 60)) / 1000);
-                
-                if (remainingMinutes > 0) {
-                    displayMessage += ` (預計剩餘: ${remainingMinutes}分${remainingSeconds}秒)`;
-                } else {
-                    displayMessage += ` (預計剩餘: ${remainingSeconds}秒)`;
-                }
-            }
-        }
-        
-        progressDetail.textContent = displayMessage;
-    }
-}
-
-// 顯示批量優化進度
-function showBatchProgress() {
-    console.log('[Batch Optimization] showBatchProgress called');
-    const progressElement = document.getElementById('batch-optimization-progress');
-    if (progressElement) {
-        console.log('[Batch Optimization] Progress element found, showing...');
-        progressElement.classList.remove('hidden');
-    } else {
-        console.error('[Batch Optimization] Progress element not found!');
-    }
-    
-    // 隱藏結果區域
-    const resultsDiv = document.getElementById('batch-optimization-results');
-    if (resultsDiv) {
-        resultsDiv.classList.add('hidden');
-    }
-    
-    // 初始化進度
-    updateBatchProgress(0, '準備中...');
 }
 
 // 隱藏批量優化進度
