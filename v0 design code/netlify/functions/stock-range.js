@@ -69,7 +69,7 @@ function safeParseInt(value) {
     return Number.isFinite(num) ? num : null;
 }
 
-async function fetchTwseMonth({ store, stockNo, monthKey }) {
+async function fetchTwseMonth({ store, stockNo, monthKey, forceMiss }) {
     const cacheKey = `${stockNo}_${monthKey}`;
     if (inFlightTwseMonthCache.has(cacheKey)) {
         return inFlightTwseMonthCache.get(cacheKey);
@@ -77,15 +77,18 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
 
     const resolver = (async () => {
         try {
-            const cached = await store.get(cacheKey, { type: 'json' });
-            if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
-                const base = cached.data;
-                return {
-                    stockName: base.stockName || stockNo,
-                    iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
-                    aaData: Array.isArray(base.aaData) ? base.aaData : [],
-                    dataSource: `${base.dataSource || 'TWSE'} (cache)`
-                };
+            // 如果 forceMiss 為 true，跳過 month-cache 讀取，直接從 TWSE 抓
+            if (!forceMiss) {
+                const cached = await store.get(cacheKey, { type: 'json' });
+                if (cached && cached.data && (Date.now() - cached.timestamp < TWSE_MONTH_TTL_MS)) {
+                    const base = cached.data;
+                    return {
+                        stockName: base.stockName || stockNo,
+                        iTotalRecords: base.iTotalRecords ?? (Array.isArray(base.aaData) ? base.aaData.length : 0),
+                        aaData: Array.isArray(base.aaData) ? base.aaData : [],
+                        dataSource: `${base.dataSource || 'TWSE'} (cache)`
+                    };
+                }
             }
         } catch (error) {
             if (!isQuotaError(error)) {
@@ -142,14 +145,14 @@ async function fetchTwseMonth({ store, stockNo, monthKey }) {
     }
 }
 
-async function composeTwseRange(stockNo, startDate, endDate) {
+async function composeTwseRange(stockNo, startDate, endDate, forceMiss) {
     const store = getStore('twse_cache_store');
     const months = buildMonthKeyList(startDate, endDate);
     const merged = [];
     let stockName = stockNo;
 
     for (const monthKey of months) {
-        const monthData = await fetchTwseMonth({ store, stockNo, monthKey });
+        const monthData = await fetchTwseMonth({ store, stockNo, monthKey, forceMiss });
         if (monthData.stockName) stockName = monthData.stockName;
         if (Array.isArray(monthData.aaData)) merged.push(...monthData.aaData);
     }
@@ -385,7 +388,7 @@ async function fetchYearDataset({ store, stockNo, marketType, year, telemetry, f
         };
     }
 
-    const twseData = await composeTwseRange(stockNo, startDate, endDate);
+    const twseData = await composeTwseRange(stockNo, startDate, endDate, forceMiss);
     if (store) {
         const cachePayload = {
             stockName: twseData.stockName || stockNo,
