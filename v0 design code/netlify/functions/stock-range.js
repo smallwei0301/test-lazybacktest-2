@@ -329,11 +329,13 @@ async function persistYearSlice(store, cacheKey, payload, telemetry) {
     }
 }
 
-async function fetchYearDataset({ store, stockNo, marketType, year, telemetry }) {
+async function fetchYearDataset({ store, stockNo, marketType, year, telemetry, forceMiss }) {
     const yearKey = getYearCacheKey(marketType, stockNo, year);
     telemetry.yearKeys.push(yearKey);
     let cached = null;
-    if (store) {
+    
+    // 如果 forceMiss=true，跳過 cache 讀取，直接進行重建
+    if (!forceMiss && store) {
         try {
             telemetry.readOps += 1;
             cached = await store.get(yearKey, { type: 'json' });
@@ -406,6 +408,7 @@ export default async (req) => {
         const startDateStr = params.get('startDate');
         const endDateStr = params.get('endDate');
         const marketType = normalizeMarketType(params.get('marketType') || params.get('market'));
+        const forceMiss = params.get('forceMiss') === 'true' || params.get('forceMiss') === '1';
 
         if (!stockNo || !startDateStr || !endDateStr) {
             return new Response(JSON.stringify({ error: 'Missing required parameters stockNo/startDate/endDate' }), { status: 400 });
@@ -442,6 +445,7 @@ export default async (req) => {
                 marketType,
                 year,
                 telemetry,
+                forceMiss,
             });
             if (result.stockName) resolvedStockName = result.stockName;
             if (Array.isArray(result.aaData)) {
