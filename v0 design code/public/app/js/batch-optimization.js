@@ -226,6 +226,55 @@ function resolveWorkerStrategyName(strategyName, roleHint) {
 // 全局變量
 let batchOptimizationWorker = null;
 let batchOptimizationResults = [];
+const batchResultFilterConfig = {
+    annualizedReturn: {
+        key: 'annualizedReturn',
+        label: '年化報酬率',
+        expectsPercent: true,
+        comparator: (value, threshold) => value >= threshold,
+        operatorLabel: '≥'
+    },
+    sharpeRatio: {
+        key: 'sharpeRatio',
+        label: '夏普比率',
+        expectsPercent: false,
+        comparator: (value, threshold) => value >= threshold,
+        operatorLabel: '≥'
+    },
+    sortinoRatio: {
+        key: 'sortinoRatio',
+        label: '索提諾比率',
+        expectsPercent: false,
+        comparator: (value, threshold) => value >= threshold,
+        operatorLabel: '≥'
+    },
+    maxDrawdown: {
+        key: 'maxDrawdown',
+        label: '最大回撤',
+        expectsPercent: true,
+        comparator: (value, threshold) => value <= threshold,
+        operatorLabel: '≤'
+    },
+    tradesCount: {
+        key: 'tradesCount',
+        label: '交易次數',
+        expectsPercent: false,
+        comparator: (value, threshold) => value >= threshold,
+        operatorLabel: '≥'
+    }
+};
+
+const batchResultFilters = {
+    annualizedReturn: null,
+    sharpeRatio: null,
+    sortinoRatio: null,
+    maxDrawdown: null,
+    tradesCount: null
+};
+
+let batchFilterPopoverElement = null;
+let batchFilterPopoverTrigger = null;
+let batchFilterUIInitialized = false;
 let batchOptimizationConfig = {};
 let isBatchOptimizationStopped = false;
 let batchOptimizationStartTime = null;
@@ -4178,26 +4227,417 @@ function updateSortDirectionButton() {
     }
 }
 
+function initializeBatchResultFilters() {
+    if (typeof document === 'undefined' || batchFilterUIInitialized) {
+        return;
+    }
+
+    const table = document.getElementById('batch-results-table');
+    if (!table) {
+        return;
+    }
+
+    const buttons = table.querySelectorAll('[data-batch-filter-key]');
+    if (!buttons.length) {
+        return;
+    }
+
+    buttons.forEach((button) => {
+        if (button.dataset.batchFilterSetup === 'true') {
+            return;
+        }
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showBatchFilterPopover(button);
+        });
+        button.dataset.batchFilterSetup = 'true';
+    });
+
+    document.addEventListener('click', handleBatchFilterOutsideClick);
+    document.addEventListener('keydown', handleBatchFilterKeydown);
+
+    batchFilterUIInitialized = true;
+    updateBatchFilterIndicators();
+
+    if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+        lucide.createIcons();
+    }
+}
+
+function handleBatchFilterOutsideClick(event) {
+    if (!batchFilterPopoverElement) {
+        return;
+    }
+
+    const target = event.target;
+    if (batchFilterPopoverElement.contains(target)) {
+        return;
+    }
+    if (batchFilterPopoverTrigger && batchFilterPopoverTrigger.contains(target)) {
+        return;
+    }
+
+    hideBatchFilterPopover();
+}
+
+function handleBatchFilterKeydown(event) {
+    if (event.key === 'Escape' && batchFilterPopoverElement) {
+        hideBatchFilterPopover();
+    }
+}
+
+function showBatchFilterPopover(trigger) {
+    if (!trigger) {
+        return;
+    }
+
+    const filterKey = trigger.dataset.batchFilterKey;
+    const config = batchResultFilterConfig[filterKey];
+    if (!config) {
+        return;
+    }
+
+    if (batchFilterPopoverElement && batchFilterPopoverTrigger === trigger) {
+        hideBatchFilterPopover();
+        return;
+    }
+
+    hideBatchFilterPopover();
+
+    const popover = document.createElement('div');
+    popover.className = 'batch-filter-popover';
+    popover.dataset.filterKey = filterKey;
+    popover.addEventListener('click', (event) => event.stopPropagation());
+
+    const title = document.createElement('div');
+    title.className = 'filter-title';
+    title.textContent = `${config.label}篩選`;
+    popover.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.className = 'filter-hint';
+    hint.style.marginTop = '0.35rem';
+    hint.textContent = config.expectsPercent
+        ? `顯示${config.operatorLabel}指定百分比的結果`
+        : `顯示${config.operatorLabel}指定數值的結果`;
+    popover.appendChild(hint);
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = config.expectsPercent ? '0.01' : '1';
+    input.placeholder = config.expectsPercent ? '例如：25 或 0.25' : '輸入數值';
+    input.style.marginTop = '0.5rem';
+    const existingValue = formatFilterValueForInput(filterKey);
+    if (existingValue !== '') {
+        input.value = existingValue;
+    }
+    popover.appendChild(input);
+
+    const helper = document.createElement('div');
+    helper.className = 'filter-hint';
+    helper.style.marginTop = '0.35rem';
+    helper.textContent = config.expectsPercent
+        ? '可輸入 25 表示 25%，或 0.25 表示 25%。'
+        : '可輸入整數或小數。';
+    popover.appendChild(helper);
+
+    const error = document.createElement('div');
+    error.className = 'filter-error';
+    error.style.display = 'none';
+    error.style.marginTop = '0.25rem';
+    error.textContent = '請輸入有效數字。';
+    popover.appendChild(error);
+
+    const actions = document.createElement('div');
+    actions.className = 'filter-actions';
+    actions.style.marginTop = '0.5rem';
+    popover.appendChild(actions);
+
+    const clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.className = 'filter-clear';
+    clearButton.textContent = '清除';
+    actions.appendChild(clearButton);
+
+    const applyButton = document.createElement('button');
+    applyButton.type = 'button';
+    applyButton.className = 'filter-apply';
+    applyButton.textContent = '套用';
+    actions.appendChild(applyButton);
+
+    input.addEventListener('input', () => {
+        error.style.display = 'none';
+    });
+
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            applyButton.click();
+        }
+    });
+
+    clearButton.addEventListener('click', () => {
+        const hadFilter = batchResultFilters[filterKey] !== null && batchResultFilters[filterKey] !== undefined;
+        batchResultFilters[filterKey] = null;
+        hideBatchFilterPopover();
+        if (hadFilter) {
+            renderBatchResultsTable();
+        } else {
+            updateBatchFilterIndicators();
+        }
+    });
+
+    applyButton.addEventListener('click', () => {
+        const parsedValue = parseFilterInputValue(input.value, config);
+        if (parsedValue === null) {
+            error.style.display = 'block';
+            input.focus({ preventScroll: true });
+            input.select();
+            return;
+        }
+
+        batchResultFilters[filterKey] = parsedValue;
+        hideBatchFilterPopover();
+        renderBatchResultsTable();
+    });
+
+    document.body.appendChild(popover);
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const top = triggerRect.bottom + window.scrollY + 6;
+    let left = triggerRect.right + window.scrollX - popoverRect.width;
+
+    const minLeft = window.scrollX + 8;
+    const maxLeft = window.scrollX + window.innerWidth - popoverRect.width - 8;
+    if (left < minLeft) {
+        left = minLeft;
+    }
+    if (left > maxLeft) {
+        left = Math.max(minLeft, maxLeft);
+    }
+
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+
+    batchFilterPopoverElement = popover;
+    batchFilterPopoverTrigger = trigger;
+
+    setTimeout(() => {
+        try {
+            input.focus({ preventScroll: true });
+            input.select();
+        } catch (error) {
+            input.focus();
+        }
+    }, 0);
+}
+
+function hideBatchFilterPopover() {
+    if (batchFilterPopoverElement && batchFilterPopoverElement.parentNode) {
+        batchFilterPopoverElement.parentNode.removeChild(batchFilterPopoverElement);
+    }
+    batchFilterPopoverElement = null;
+    batchFilterPopoverTrigger = null;
+}
+
+function parseFilterInputValue(rawValue, config) {
+    if (!config || typeof rawValue !== 'string') {
+        return null;
+    }
+
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const numericValue = Number(trimmed.replace('%', ''));
+    if (!Number.isFinite(numericValue)) {
+        return null;
+    }
+
+    if (config.expectsPercent) {
+        if (numericValue > 1 || numericValue < -1) {
+            return numericValue / 100;
+        }
+    }
+
+    return numericValue;
+}
+
+function formatSimpleNumber(value) {
+    if (!Number.isFinite(value)) {
+        return '';
+    }
+
+    const absValue = Math.abs(value);
+    let digits = 2;
+    if (absValue >= 100) {
+        digits = 0;
+    } else if (absValue >= 10) {
+        digits = 1;
+    }
+
+    const fixed = value.toFixed(digits);
+    return fixed.replace(/\.00$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function formatFilterValueForInput(filterKey) {
+    const config = batchResultFilterConfig[filterKey];
+    if (!config) {
+        return '';
+    }
+
+    const value = batchResultFilters[filterKey];
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    const numeric = config.expectsPercent ? value * 100 : value;
+    return formatSimpleNumber(numeric);
+}
+
+function formatFilterValueForDisplay(filterKey) {
+    const config = batchResultFilterConfig[filterKey];
+    if (!config) {
+        return '';
+    }
+
+    const value = batchResultFilters[filterKey];
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    const numeric = config.expectsPercent ? value * 100 : value;
+    const formatted = formatSimpleNumber(numeric);
+    return config.expectsPercent ? `${formatted}%` : formatted;
+}
+
+function getFilteredBatchResults() {
+    return batchOptimizationResults
+        .map((result, originalIndex) => ({ result, originalIndex }))
+        .filter(({ result }) => applyBatchResultFilters(result));
+}
+
+function applyBatchResultFilters(result) {
+    if (!result || typeof result !== 'object') {
+        return false;
+    }
+
+    for (const [filterKey, threshold] of Object.entries(batchResultFilters)) {
+        if (threshold === null || threshold === undefined) {
+            continue;
+        }
+
+        const config = batchResultFilterConfig[filterKey];
+        if (!config) {
+            continue;
+        }
+
+        const metricValue = getResultMetricValue(result, filterKey);
+        if (!Number.isFinite(metricValue)) {
+            return false;
+        }
+
+        if (!config.comparator(metricValue, threshold)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function getResultMetricValue(result, key) {
+    switch (key) {
+        case 'annualizedReturn':
+            return normaliseNumericValue(result.annualizedReturn);
+        case 'sharpeRatio':
+            return normaliseNumericValue(result.sharpeRatio);
+        case 'sortinoRatio':
+            return normaliseNumericValue(result.sortinoRatio);
+        case 'maxDrawdown':
+            return normaliseNumericValue(result.maxDrawdown);
+        case 'tradesCount':
+            return normaliseNumericValue(result.tradesCount ?? result.totalTrades ?? result.tradeCount);
+        default:
+            return null;
+    }
+}
+
+function normaliseNumericValue(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function updateBatchFilterIndicators() {
+    if (typeof document === 'undefined') {
+        return;
+    }
+
+    const table = document.getElementById('batch-results-table');
+    if (!table) {
+        return;
+    }
+
+    const buttons = table.querySelectorAll('[data-batch-filter-key]');
+    buttons.forEach((button) => {
+        const key = button.dataset.batchFilterKey;
+        const isActive = key && batchResultFilters[key] !== null && batchResultFilters[key] !== undefined;
+        button.setAttribute('data-active', isActive ? 'true' : 'false');
+
+        const config = key ? batchResultFilterConfig[key] : null;
+        if (config) {
+            const displayValue = isActive ? formatFilterValueForDisplay(key) : '';
+            const baseTitle = `篩選${config.label}`;
+            button.title = isActive && displayValue ? `${config.label}篩選：${config.operatorLabel}${displayValue}` : baseTitle;
+        }
+    });
+}
+
 // 渲染結果表格
 function renderBatchResultsTable() {
     const tbody = document.getElementById('batch-results-tbody');
     if (!tbody) return;
-    
+    initializeBatchResultFilters();
+
     // 添加交叉優化控制面板
     addCrossOptimizationControls();
-    
+
     tbody.innerHTML = '';
-    
-    batchOptimizationResults.forEach((result, index) => {
+
+    const filteredResults = getFilteredBatchResults();
+
+    if (filteredResults.length === 0) {
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = `
+            <td colspan="10" class="px-3 py-8 text-center text-sm" style="color: var(--muted-foreground);">
+                沒有符合篩選條件的結果
+            </td>
+        `;
+        tbody.appendChild(emptyRow);
+        updateBatchFilterIndicators();
+        return;
+    }
+
+    filteredResults.forEach(({ result, originalIndex }, displayIndex) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
-        
+
         const buyStrategyName = strategyDescriptions[result.buyStrategy]?.name || result.buyStrategy;
-        const sellStrategyName = result.sellStrategy ? 
-            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) : 
+        const sellStrategyName = result.sellStrategy ?
+            (strategyDescriptions[result.sellStrategy]?.name || result.sellStrategy) :
             '未觸發';
-        
-        // 判斷優化類型並處理合併的類型標籤
+
         let optimizationType = '基礎';
         let typeClass = 'bg-gray-100 text-gray-700';
         const typeMap = {
@@ -4209,7 +4649,6 @@ function renderBatchResultsTable() {
         };
 
         if (result.optimizationTypes && result.optimizationTypes.length > 1) {
-            // 多重結果，顯示合併標籤
             const mappedTypes = Array.from(new Set(result.optimizationTypes.map(type => typeMap[type] || type)));
             optimizationType = mappedTypes.join(',');
             typeClass = 'bg-yellow-100 text-yellow-700';
@@ -4228,11 +4667,9 @@ function renderBatchResultsTable() {
             optimizationType = '微調';
             typeClass = 'bg-emerald-100 text-emerald-700';
         }
-        
-        // 顯示風險管理參數（如果有的話）
+
         let riskManagementInfo = '';
         if (result.riskManagement) {
-            // 優化的風險管理參數
             const stopLoss = result.riskManagement.stopLoss ? `停損:${result.riskManagement.stopLoss}%` : '';
             const takeProfit = result.riskManagement.takeProfit ? `停利:${result.riskManagement.takeProfit}%` : '';
             const parts = [stopLoss, takeProfit].filter(part => part);
@@ -4240,7 +4677,6 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(優化: ${parts.join(', ')})</small>`;
             }
         } else if (result.usedStopLoss !== undefined || result.usedTakeProfit !== undefined) {
-            // 實際使用的風險管理參數
             const stopLoss = result.usedStopLoss !== undefined ? `停損:${result.usedStopLoss}%` : '';
             const takeProfit = result.usedTakeProfit !== undefined ? `停利:${result.usedTakeProfit}%` : '';
             const parts = [stopLoss, takeProfit].filter(part => part);
@@ -4248,9 +4684,14 @@ function renderBatchResultsTable() {
                 riskManagementInfo = `<small class="text-gray-600 block">(使用: ${parts.join(', ')})</small>`;
             }
         }
-        
+
+        const tradesMetric = getResultMetricValue(result, 'tradesCount');
+        const tradesDisplay = Number.isFinite(tradesMetric)
+            ? Math.round(tradesMetric)
+            : (result.tradesCount || result.totalTrades || result.tradeCount || 0);
+
         row.innerHTML = `
-            <td class="px-3 py-2 text-sm text-gray-900 font-medium">${index + 1}</td>
+            <td class="px-3 py-2 text-sm text-gray-900 font-medium">${displayIndex + 1}</td>
             <td class="px-3 py-2 text-sm">
                 <span class="px-2 py-1 text-xs rounded-full ${typeClass}">${optimizationType}</span>
             </td>
@@ -4260,17 +4701,19 @@ function renderBatchResultsTable() {
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sharpeRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatNumber(result.sortinoRatio)}</td>
             <td class="px-3 py-2 text-sm text-gray-900">${formatPercentage(result.maxDrawdown)}</td>
-            <td class="px-3 py-2 text-sm text-gray-900">${result.tradesCount || result.totalTrades || result.tradeCount || 0}</td>
+            <td class="px-3 py-2 text-sm text-gray-900">${tradesDisplay}</td>
             <td class="px-3 py-2 text-sm text-gray-900">
-                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border" 
-                        onclick="loadBatchStrategy(${index})">
+                <button class="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded border"
+                        onclick="loadBatchStrategy(${originalIndex})">
                     載入
                 </button>
             </td>
         `;
-        
+
         tbody.appendChild(row);
     });
+
+    updateBatchFilterIndicators();
 }
 
 // 添加交叉優化控制面板
@@ -7134,6 +7577,14 @@ function checkAllStrategyParameters() {
             const paramCount = strategyDescriptions[key].optimizeTargets.length;
             console.log(`[Debug]   * ${key}: ${paramCount} parameters`);
         });
+    }
+}
+
+if (typeof document !== 'undefined') {
+    if (document.readyState !== 'loading') {
+        initializeBatchResultFilters();
+    } else {
+        document.addEventListener('DOMContentLoaded', initializeBatchResultFilters);
     }
 }
 
