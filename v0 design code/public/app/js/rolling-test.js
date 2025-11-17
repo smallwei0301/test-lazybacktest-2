@@ -2765,7 +2765,35 @@
         clone.endDate = endIso;
         if ('recentYears' in clone) delete clone.recentYears;
 
-        const enriched = enrichParamsWithLookback(clone);
+        // ✅ P1 改進: 使用統一的策略 lookback 計算邏輯
+        const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+        
+        let paramsForLookback = { ...clone };
+        
+        if (sharedUtils && typeof sharedUtils.getRequiredLookbackForStrategies === 'function') {
+            // 收集滾動測試使用的策略 ID
+            const selectedStrategies = [];
+            
+            if (clone.entryStrategy) selectedStrategies.push(clone.entryStrategy);
+            if (clone.exitStrategy) selectedStrategies.push(clone.exitStrategy);
+            if (clone.shortEntryStrategy) selectedStrategies.push(clone.shortEntryStrategy);
+            if (clone.shortExitStrategy) selectedStrategies.push(clone.shortExitStrategy);
+            
+            // 使用新的統一函數計算所需 lookback
+            if (selectedStrategies.length > 0) {
+                const requiredLookbackDays = sharedUtils.getRequiredLookbackForStrategies(
+                    selectedStrategies,
+                    { minBars: 90, multiplier: 2 }
+                );
+                
+                // 用計算出的 lookback 覆蓋原有值
+                paramsForLookback.lookbackDays = requiredLookbackDays;
+                
+                console.log(`[Rolling Test] P1: Calculated lookback for strategies [${selectedStrategies.join(', ')}]: ${requiredLookbackDays} days`);
+            }
+        }
+
+        const enriched = enrichParamsWithLookback(paramsForLookback);
         return {
             params: enriched,
             dataStartDate: enriched.dataStartDate || enriched.startDate,
@@ -2808,24 +2836,37 @@
         if (typeof sharedUtils.resolveDataWindow === 'function') {
             windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
         }
-        const fallbackMaxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
-            ? sharedUtils.getMaxIndicatorPeriod(params)
-            : 0;
-        let lookbackDays = Number.isFinite(windowDecision?.lookbackDays)
-            ? windowDecision.lookbackDays
-            : null;
-        if ((!Number.isFinite(lookbackDays) || lookbackDays <= 0) && typeof sharedUtils.resolveLookbackDays === 'function') {
+        
+        // ✅ P2 改進: 優先使用已提供的 lookbackDays（來自策略計算）
+        let lookbackDays = null;
+        
+        // 第一優先級: 使用已提供的 lookbackDays（來自 P1 的策略計算）
+        if (Number.isFinite(params.lookbackDays) && params.lookbackDays > 0) {
+            lookbackDays = params.lookbackDays;
+            console.log(`[Rolling Test] P2: Using provided lookbackDays=${lookbackDays} from strategy calculation`);
+        }
+        // 第二優先級: 使用 windowDecision 計算的值
+        else if (Number.isFinite(windowDecision?.lookbackDays) && windowDecision.lookbackDays > 0) {
+            lookbackDays = windowDecision.lookbackDays;
+        }
+        // 第三優先級: 使用備用決定
+        else if (typeof sharedUtils.resolveLookbackDays === 'function') {
             const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
             if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
                 lookbackDays = fallbackDecision.lookbackDays;
                 if (!windowDecision) windowDecision = fallbackDecision;
             }
         }
+        // 最後備用: 基於指標期數計算
         if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+            const fallbackMaxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+                ? sharedUtils.getMaxIndicatorPeriod(params)
+                : 0;
             lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
                 ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
                 : Math.max(90, fallbackMaxPeriod * 2);
         }
+        
         const effectiveStartDate = windowDecision?.effectiveStartDate
             || params.effectiveStartDate
             || params.startDate

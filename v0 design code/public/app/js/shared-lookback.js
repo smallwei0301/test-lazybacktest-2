@@ -337,6 +337,54 @@
     };
   }
 
+  // ✅ P1 新增: 根據策略組合計算所需 lookback
+  // 用於滾動測試和批量優化的統一邏輯
+  function getRequiredLookbackForStrategies(strategyIds, options = {}) {
+    if (!Array.isArray(strategyIds) || strategyIds.length === 0) {
+      return Math.max(90, options.minBars || 90);
+    }
+
+    let maxPeriod = 0;
+
+    strategyIds.forEach(strategyId => {
+      if (!strategyId) return;
+
+      // 嘗試從全局 strategyDescriptions 取得策略信息
+      let strategyParams = null;
+      
+      if (typeof globalScope !== 'undefined' && globalScope.strategyDescriptions) {
+        const strategyInfo = globalScope.strategyDescriptions[strategyId];
+        if (strategyInfo && strategyInfo.defaultParams) {
+          strategyParams = strategyInfo.defaultParams;
+        }
+      }
+
+      // 如果找不到策略定義，嘗試使用傳入的參數
+      if (!strategyParams && typeof options.strategyParams === 'object') {
+        strategyParams = options.strategyParams[strategyId];
+      }
+
+      // 計算該策略的最大期數
+      if (strategyParams) {
+        const periodInThisStrategy = getMaxIndicatorPeriod(strategyParams);
+        if (Number.isFinite(periodInThisStrategy) && periodInThisStrategy > maxPeriod) {
+          maxPeriod = periodInThisStrategy;
+        }
+      }
+    });
+
+    // 計算最終所需暖身日數
+    // 如果 maxPeriod 為 0，使用最小值 90
+    const minBars = Number.isFinite(options.minBars) ? options.minBars : 90;
+    const multiplier = Number.isFinite(options.multiplier) ? options.multiplier : 2;
+    
+    return estimateLookbackBars(maxPeriod, {
+      minBars: minBars,
+      multiplier: multiplier,
+      extraBars: options.extraBars || 0,
+    });
+  }
+
   const api = {
     MIN_DATA_DATE: DEFAULT_MIN_DATA_DATE,
     getMaxIndicatorPeriod,
@@ -346,6 +394,7 @@
     resolveLookbackDays,
     resolveDataWindow,
     traceLookbackDecision,
+    getRequiredLookbackForStrategies,  // ✅ 導出新函數
   };
 
   if (typeof globalScope.lazybacktestShared === 'object' && globalScope.lazybacktestShared) {

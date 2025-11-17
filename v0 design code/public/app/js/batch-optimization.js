@@ -592,6 +592,54 @@ function buildBatchDatasetMeta(params = {}) {
     return meta;
 }
 
+function buildBatchCachedMeta(params = {}) {
+    // 構建與滾動測試相同結構的 cachedMeta
+    // 用於 Worker 層的數據驗證和調整
+    
+    // 嘗試從全局緩存取得元數據
+    let cachedMeta = null;
+    
+    try {
+        // 如果有全局緩存和最後回測結果，取得相關元數據
+        if (typeof lastOverallResult === 'object' && lastOverallResult) {
+            const dataDebug = lastOverallResult?.dataDebug || {};
+            const coverage = (typeof computeCoverageFromRows === 'function' && Array.isArray(cachedStockData))
+                ? computeCoverageFromRows(cachedStockData)
+                : null;
+            
+            cachedMeta = {
+                summary: dataDebug.summary || null,
+                adjustments: Array.isArray(dataDebug.adjustments) ? dataDebug.adjustments : [],
+                debugSteps: Array.isArray(dataDebug.debugSteps) ? dataDebug.debugSteps : [],
+                adjustmentFallbackApplied: Boolean(dataDebug.adjustmentFallbackApplied),
+                priceSource: dataDebug.priceSource || null,
+                dataSource: dataDebug.dataSource || null,
+                splitDiagnostics: dataDebug.splitDiagnostics || null,
+                diagnostics: lastDatasetDiagnostics || null,
+                coverage,
+                fetchRange: dataDebug.fetchRange || null,
+            };
+        }
+    } catch (error) {
+        console.warn('[Batch Optimization] Failed to build cachedMeta:', error);
+    }
+    
+    // 如果無法從全局緩存取得，嘗試從緩存存儲構建
+    if (!cachedMeta && typeof buildCachedMetaFromEntry === 'function') {
+        try {
+            cachedMeta = buildCachedMetaFromEntry(
+                null,
+                params.effectiveStartDate || params.startDate,
+                params.lookbackDays
+            );
+        } catch (error) {
+            console.warn('[Batch Optimization] Failed to build cachedMeta from entry:', error);
+        }
+    }
+    
+    return cachedMeta;
+}
+
 function summarizeRequiredRangeFromParams(params = {}) {
     const dataStartDate = params.dataStartDate || params.bufferedStartDate || null;
     const effectiveStartDate = params.effectiveStartDate || params.startDate || null;
@@ -1794,13 +1842,21 @@ function enrichParamsWithLookback(params) {
     if (typeof sharedUtils.resolveDataWindow === 'function') {
         windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
     }
-    const fallbackMaxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
-        ? sharedUtils.getMaxIndicatorPeriod(params)
-        : 0;
-    let lookbackDays = Number.isFinite(windowDecision?.lookbackDays)
-        ? windowDecision.lookbackDays
-        : null;
-    if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+    
+    // ✅ P2 改進: 優先使用已提供的 lookbackDays（來自策略計算）
+    let lookbackDays = null;
+    
+    // 第一優先級: 使用已提供的 lookbackDays（來自 P1 的策略計算）
+    if (Number.isFinite(params.lookbackDays) && params.lookbackDays > 0) {
+        lookbackDays = params.lookbackDays;
+        console.log(`[Batch Optimization] P2: Using provided lookbackDays=${lookbackDays} from strategy calculation`);
+    }
+    // 第二優先級: 使用 windowDecision 計算的值
+    else if (Number.isFinite(windowDecision?.lookbackDays) && windowDecision.lookbackDays > 0) {
+        lookbackDays = windowDecision.lookbackDays;
+    }
+    // 第三優先級: 使用備用決定
+    else {
         if (typeof sharedUtils.resolveLookbackDays === 'function') {
             const fallbackDecision = sharedUtils.resolveLookbackDays(params, windowOptions);
             if (Number.isFinite(fallbackDecision?.lookbackDays) && fallbackDecision.lookbackDays > 0) {
@@ -1808,11 +1864,16 @@ function enrichParamsWithLookback(params) {
             }
         }
     }
+    // 最後備用: 基於指標期數計算
     if (!Number.isFinite(lookbackDays) || lookbackDays <= 0) {
+        const fallbackMaxPeriod = typeof sharedUtils.getMaxIndicatorPeriod === 'function'
+            ? sharedUtils.getMaxIndicatorPeriod(params)
+            : 0;
         lookbackDays = typeof sharedUtils.estimateLookbackBars === 'function'
             ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
             : Math.max(90, fallbackMaxPeriod * 2);
     }
+    
     const effectiveStartDate = windowDecision?.effectiveStartDate || params.startDate || windowDecision?.minDataDate || windowOptions.defaultStartDate;
     let dataStartDate = windowDecision?.dataStartDate || null;
     if (!dataStartDate && effectiveStartDate && typeof sharedUtils.computeBufferedStartDate === 'function') {
@@ -3440,7 +3501,33 @@ async function executeBacktestForCombination(combination, options = {}) {
             const cachedSource = overrideData ? 'override' : (cachedPayload ? 'global-cache' : 'none');
 
             rebuildStrategyDslForParams(params);
-            const preparedParams = enrichParamsWithLookback(params);
+            
+            // ✅ P1 改進: 使用統一的策略 lookback 計算邏輯
+            const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
+            
+            let paramsForLookback = { ...params };
+            
+            if (sharedUtils && typeof sharedUtils.getRequiredLookbackForStrategies === 'function') {
+                // 收集所有選定的策略 ID
+                const selectedStrategies = [];
+                if (combination.buyStrategy) selectedStrategies.push(combination.buyStrategy);
+                if (combination.sellStrategy) selectedStrategies.push(combination.sellStrategy);
+                if (combination.shortEntryStrategy) selectedStrategies.push(combination.shortEntryStrategy);
+                if (combination.shortExitStrategy) selectedStrategies.push(combination.shortExitStrategy);
+                
+                // 使用新的統一函數計算所需 lookback
+                const requiredLookbackDays = sharedUtils.getRequiredLookbackForStrategies(
+                    selectedStrategies,
+                    { minBars: 90, multiplier: 2 }
+                );
+                
+                // 用計算出的 lookback 覆蓋原有值
+                paramsForLookback.lookbackDays = requiredLookbackDays;
+                
+                console.log(`[Batch Optimization] P1: Calculated lookback for strategies [${selectedStrategies.join(', ')}]: ${requiredLookbackDays} days`);
+            }
+            
+            const preparedParams = enrichParamsWithLookback(paramsForLookback);
             datasetMeta = buildBatchDatasetMeta(preparedParams);
             const requiredRange = summarizeRequiredRangeFromParams(preparedParams);
             const cachedUsage = buildCachedDatasetUsage(cachedPayload, requiredRange, { batchOptimization: true });
@@ -3582,11 +3669,15 @@ async function executeBacktestForCombination(combination, options = {}) {
                     resolve(null);
                 };
 
+                // ✅ P0 修復: 添加 cachedMeta 以匹配滾動測試的消息結構
+                const cachedMeta = buildBatchCachedMeta(preparedParams);
+                
                 tempWorker.postMessage({
                     type: 'runBacktest',
                     params: preparedParams,
                     useCachedData,
-                    cachedData: cachedDataForWorker
+                    cachedData: cachedDataForWorker,
+                    cachedMeta  // ✅ 新增此字段以統一 Worker 消息結構
                 });
 
                 // 設定超時
