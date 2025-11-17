@@ -1795,7 +1795,7 @@ const TREND_PROMOTION_GAIN = 0.28;
 
 const TREND_STYLE_MAP = {
     bullHighVol: {
-        label: '多頭強勢',
+        label: '強勢上漲',
         overlay: 'rgba(239, 68, 68, 0.2)',
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
@@ -1807,7 +1807,7 @@ const TREND_STYLE_MAP = {
         border: 'rgba(148, 163, 184, 0.38)',
     },
     bearHighVol: {
-        label: '空頭強勢',
+        label: '強勢下跌',
         overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
@@ -2176,6 +2176,22 @@ function computeLogReturns(closes) {
         const current = Number(closes[i]);
         if (Number.isFinite(prev) && prev > 0 && Number.isFinite(current) && current > 0) {
             result[i] = Math.log(current / prev);
+        }
+    }
+    return result;
+}
+
+function computeStrategyLogReturns(strategyReturns) {
+    const length = Array.isArray(strategyReturns) ? strategyReturns.length : 0;
+    const result = new Array(length).fill(null);
+    for (let i = 1; i < length; i += 1) {
+        const prev = Number(strategyReturns[i - 1]);
+        const current = Number(strategyReturns[i]);
+        if (!Number.isFinite(prev) || !Number.isFinite(current)) continue;
+        const prevEquity = 1 + (prev / 100);
+        const currentEquity = 1 + (current / 100);
+        if (prevEquity > 0 && currentEquity > 0) {
+            result[i] = Math.log(currentEquity / prevEquity);
         }
     }
     return result;
@@ -3058,7 +3074,7 @@ function enforceMinSegmentLength(labels, minLength) {
     return result;
 }
 
-function buildSegmentsAndAggregate(labels, logReturns) {
+function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
     const length = Array.isArray(labels) ? labels.length : 0;
     const aggregated = {};
     const returnCounts = {};
@@ -3067,8 +3083,11 @@ function buildSegmentsAndAggregate(labels, logReturns) {
             segments: 0,
             days: 0,
             logReturnSum: 0,
+            strategyLogReturnSum: 0,
             coveragePct: 0,
             returnPct: null,
+            strategyReturnPct: null,
+            strategyDays: 0,
         };
         returnCounts[key] = 0;
     });
@@ -3087,6 +3106,10 @@ function buildSegmentsAndAggregate(labels, logReturns) {
         if (Number.isFinite(logReturns?.[i])) {
             aggregated[label].logReturnSum += logReturns[i];
             returnCounts[label] += 1;
+        }
+        if (Number.isFinite(strategyLogReturns?.[i])) {
+            aggregated[label].strategyLogReturnSum += strategyLogReturns[i];
+            aggregated[label].strategyDays += 1;
         }
         if (i === 0) {
             current = label;
@@ -3119,6 +3142,12 @@ function buildSegmentsAndAggregate(labels, logReturns) {
             entry.returnPct = Math.expm1(entry.logReturnSum) * 100;
         } else {
             entry.returnPct = null;
+        }
+        if (entry.strategyDays > 0) {
+            entry.strategyReturnPct = Math.expm1(entry.strategyLogReturnSum) * 100;
+        } else {
+            entry.strategyReturnPct = null;
+            entry.strategyLogReturnSum = null;
         }
         entry.coveragePct = totalDays > 0 ? (entry.days / totalDays) * 100 : 0;
     });
@@ -3227,6 +3256,11 @@ function prepareRegimeBaseData(result, options = {}) {
         volumes.push(Number.isFinite(volume) ? volume : null);
     });
     const logReturns = computeLogReturns(closes);
+    const strategyReturns = dates.map((_, idx) => {
+        const raw = Number(result?.strategyReturns?.[idx]);
+        return Number.isFinite(raw) ? raw : null;
+    });
+    const strategyLogReturns = computeStrategyLogReturns(strategyReturns);
     const atrSeries = computeATRSeries(highs, lows, closes, 14);
     const atrRatio = atrSeries.map((atr, idx) => {
         const close = closes[idx];
@@ -3288,6 +3322,7 @@ function prepareRegimeBaseData(result, options = {}) {
         closes,
         volumes,
         logReturns,
+        strategyLogReturns,
         atrSeries,
         atrRatio,
         bollWidth,
@@ -3350,7 +3385,7 @@ function classifyRegimes(base, thresholds) {
         promotions += coverageResult.promotions;
     }
     const enforced = working;
-    const aggregation = buildSegmentsAndAggregate(enforced, base.logReturns);
+    const aggregation = buildSegmentsAndAggregate(enforced, base.logReturns, base.strategyLogReturns);
     const averageConfidence = computeAverageConfidence(enforced, posteriors, labelToState);
     const bullCoverage = aggregation.aggregated?.bullHighVol?.coveragePct || 0;
     const bearCoverage = aggregation.aggregated?.bearHighVol?.coveragePct || 0;
@@ -3365,6 +3400,13 @@ function classifyRegimes(base, thresholds) {
     const latestLabel = lastIndex >= 0 ? enforced[lastIndex] || null : null;
     const latestDate = lastIndex >= 0 && Array.isArray(base.dates)
         ? base.dates[lastIndex] || null
+        : null;
+    const latestStats = latestLabel ? aggregation.aggregated?.[latestLabel] : null;
+    const latestStrategyReturn = Number.isFinite(latestStats?.strategyReturnPct)
+        ? latestStats.strategyReturnPct
+        : null;
+    const latestPriceReturn = Number.isFinite(latestStats?.returnPct)
+        ? latestStats.returnPct
         : null;
     const summary = {
         aggregatedByType: aggregation.aggregated,
@@ -3388,6 +3430,8 @@ function classifyRegimes(base, thresholds) {
         latest: {
             label: latestLabel,
             date: latestDate,
+            strategyReturnPct: latestStrategyReturn,
+            returnPct: Number.isFinite(latestStrategyReturn) ? latestStrategyReturn : latestPriceReturn,
         },
     };
     return {
@@ -3475,7 +3519,10 @@ function renderTrendSummary() {
     if (!summary) {
         container.innerHTML = '';
         placeholder.classList.remove('hidden');
-        if (metaEl) metaEl.classList.add('hidden');
+        if (metaEl) {
+            metaEl.innerHTML = '';
+            metaEl.classList.add('hidden');
+        }
         if (parameterDetailsEl) {
             parameterDetailsEl.innerHTML = '';
         }
@@ -3485,9 +3532,13 @@ function renderTrendSummary() {
     const order = ['bullHighVol', 'rangeBound', 'bearHighVol'];
     const latestLabel = summary.latest?.label || null;
     const latestDateLabel = formatTrendLatestDate(summary.latest?.date);
-    const totalLogReturn = Object.values(summary.aggregatedByType || {}).reduce((acc, entry) => {
-        const value = Number.isFinite(entry?.logReturnSum) ? entry.logReturnSum : 0;
-        return acc + value;
+    const aggregatedEntries = Object.values(summary.aggregatedByType || {});
+    const hasStrategyData = aggregatedEntries.some((entry) => Number.isFinite(entry?.strategyReturnPct));
+    const totalLogReturn = aggregatedEntries.reduce((acc, entry) => {
+        const value = hasStrategyData
+            ? entry?.strategyLogReturnSum
+            : entry?.logReturnSum;
+        return Number.isFinite(value) ? acc + value : acc;
     }, 0);
     const totalReturnPct = Number.isFinite(totalLogReturn)
         ? Math.expm1(totalLogReturn) * 100
@@ -3511,9 +3562,13 @@ function renderTrendSummary() {
         </div>`;
     const cardMarkup = order.map((key) => {
         const style = TREND_STYLE_MAP[key] || {};
-        const stats = summary.aggregatedByType?.[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: null };
+        const stats = summary.aggregatedByType?.[key]
+            || { segments: 0, days: 0, coveragePct: 0, returnPct: null, strategyReturnPct: null };
         const coverageText = formatPercentPlain(stats.coveragePct || 0, 1);
-        const returnText = Number.isFinite(stats.returnPct) ? formatPercentSigned(stats.returnPct, 2) : '—';
+        const valueToDisplay = hasStrategyData
+            ? stats.strategyReturnPct
+            : stats.returnPct;
+        const returnText = Number.isFinite(valueToDisplay) ? formatPercentSigned(valueToDisplay, 2) : '—';
         const borderColor = style.border || 'rgba(148, 163, 184, 0.35)';
         const background = style.overlay || 'rgba(148, 163, 184, 0.15)';
         const accent = style.accent || 'var(--foreground)';
@@ -3533,7 +3588,49 @@ function renderTrendSummary() {
             <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
         </div>`;
     }).join('');
-    container.innerHTML = totalBlock + cardMarkup;
+    const distributionHeading = `
+        <div class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">策略總報酬分布</div>`;
+    container.innerHTML = totalBlock + distributionHeading + cardMarkup;
+    const coverage = summary.coverage || {};
+    const avgConfidence = Number.isFinite(summary.averageConfidence)
+        ? formatPercentPlain(summary.averageConfidence * 100, 1)
+        : '—';
+    const iterationsText = Number.isFinite(summary.hmm?.iterations) ? summary.hmm.iterations : '—';
+    const logLikelihoodText = Number.isFinite(summary.hmm?.logLikelihood)
+        ? summary.hmm.logLikelihood.toFixed(1)
+        : '—';
+    const actualTrendText = Number.isFinite(coverage.actualTrendPct)
+        ? formatPercentPlain(coverage.actualTrendPct, 1)
+        : '—';
+    const targetTrendText = Number.isFinite(coverage.targetTrendPct)
+        ? formatPercentPlain(coverage.targetTrendPct, 0)
+        : '—';
+    const rangeText = Number.isFinite(coverage.actualRangePct)
+        ? formatPercentPlain(coverage.actualRangePct, 1)
+        : '—';
+    const promotionsText = Number.isFinite(coverage.promotions)
+        ? `${coverage.promotions} 日`
+        : '—';
+    const statusText = coverage.satisfied ? '達標' : '需再觀察';
+    const calibrationSliderText = Number.isFinite(calibration?.bestSlider)
+        ? calibration.bestSlider.toFixed(1)
+        : '—';
+    const calibrationEffectiveText = Number.isFinite(calibration?.bestEffective)
+        ? calibration.bestEffective.toFixed(0)
+        : '—';
+    const calibrationScoreText = Number.isFinite(calibration?.bestScore)
+        ? calibration.bestScore.toFixed(3)
+        : '—';
+    const diagnosticsLines = [
+        `HMM 迭代：${iterationsText}`,
+        `對數概似：${logLikelihoodText}`,
+        `平均狀態信心：${avgConfidence}`,
+        `趨勢覆蓋：${actualTrendText}（目標 ${targetTrendText}）`,
+        `盤整覆蓋：${rangeText}`,
+        `校準峰值：滑桿 ${calibrationSliderText}／等效 ${calibrationEffectiveText}／信心 ${calibrationScoreText}`,
+        `Sigmoid 補償：${promotionsText}／${statusText}`,
+        `總報酬：${totalReturnText}`,
+    ];
     if (parameterDetailsEl) {
         const thresholds = trendAnalysisState.thresholds || computeTrendThresholds(
             trendAnalysisState.sensitivity,
@@ -3551,52 +3648,21 @@ function renderTrendSummary() {
             { label: '趨勢 / 盤整目標', value: `${formatPercent(thresholds.targetTrendCoverage)} / ${formatPercent(thresholds.targetRangeCoverage)}` },
             { label: 'Sigmoid 補償下限', value: formatPercent(thresholds.promotionFloor) },
         ];
-        parameterDetailsEl.innerHTML = detailRows
+        const detailMarkup = detailRows
             .map((row) => `<div class="flex items-center justify-between" style="color: var(--muted-foreground);"><span>${row.label}</span><span>${row.value}</span></div>`)
             .join('');
+        const diagnosticsMarkup = `
+            <div class="pt-3 mt-3 border-t" style="border-color: color-mix(in srgb, var(--border) 60%, transparent);">
+                <div class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">趨勢校準指標</div>
+                <div class="space-y-1 text-[11px]" style="color: var(--muted-foreground);">
+                    ${diagnosticsLines.map((line) => `<div>${line}</div>`).join('')}
+                </div>
+            </div>`;
+        parameterDetailsEl.innerHTML = detailMarkup + diagnosticsMarkup;
     }
     if (metaEl) {
-        const avgConfidence = Number.isFinite(summary.averageConfidence)
-            ? formatPercentPlain(summary.averageConfidence * 100, 1)
-            : '—';
-        const iterationsText = Number.isFinite(summary.hmm?.iterations) ? summary.hmm.iterations : '—';
-        const logLikelihoodText = Number.isFinite(summary.hmm?.logLikelihood)
-            ? summary.hmm.logLikelihood.toFixed(1)
-            : '—';
-        metaEl.classList.remove('hidden');
-        const coverage = summary.coverage || {};
-        const actualTrendText = Number.isFinite(coverage.actualTrendPct)
-            ? formatPercentPlain(coverage.actualTrendPct, 1)
-            : '—';
-        const targetTrendText = Number.isFinite(coverage.targetTrendPct)
-            ? formatPercentPlain(coverage.targetTrendPct, 0)
-            : '—';
-        const rangeText = Number.isFinite(coverage.actualRangePct)
-            ? formatPercentPlain(coverage.actualRangePct, 1)
-            : '—';
-        const promotionsText = Number.isFinite(coverage.promotions)
-            ? `${coverage.promotions} 日`
-            : '—';
-        const statusText = coverage.satisfied ? '達標' : '需再觀察';
-        const calibrationSliderText = Number.isFinite(calibration?.bestSlider)
-            ? calibration.bestSlider.toFixed(1)
-            : '—';
-        const calibrationEffectiveText = Number.isFinite(calibration?.bestEffective)
-            ? calibration.bestEffective.toFixed(0)
-            : '—';
-        const calibrationScoreText = Number.isFinite(calibration?.bestScore)
-            ? calibration.bestScore.toFixed(3)
-            : '—';
-        metaEl.innerHTML = `<div class="flex flex-wrap gap-3">
-            <span>HMM 迭代：${iterationsText}</span>
-            <span>對數概似：${logLikelihoodText}</span>
-            <span>平均狀態信心：${avgConfidence}</span>
-            <span>趨勢覆蓋：${actualTrendText}（目標 ${targetTrendText}）</span>
-            <span>盤整覆蓋：${rangeText}</span>
-            <span>校準峰值：滑桿 ${calibrationSliderText}／等效 ${calibrationEffectiveText}／信心 ${calibrationScoreText}</span>
-            <span>Sigmoid 補償：${promotionsText}／${statusText}</span>
-            <span>總報酬：${totalReturnText}</span>
-        </div>`;
+        metaEl.innerHTML = '';
+        metaEl.classList.add('hidden');
     }
     initSensitivityCollapse(document.getElementById('trend-analysis-content'));
 }
@@ -8838,11 +8904,17 @@ function renderStagingOptimizationResults(results) {
             <td class="px-3 py-2">${sharpeText}</td>
             <td class="px-3 py-2 ${drawCls}">${drawdownText}</td>
             <td class="px-3 py-2">${tradesText}</td>
+            <td class="px-3 py-2">
+                <button type="button" class="px-3 py-1.5 text-xs font-semibold rounded-md border" data-apply-staging-index="${index}" data-apply-staging-rank="${index + 1}" style="border-color: color-mix(in srgb, var(--border) 80%, transparent);">
+                    套用並回測
+                </button>
+            </td>
         </tr>`;
     }).join('');
 
     tableBody.innerHTML = rows;
     resultsContainer.classList.remove('hidden');
+    initStagingOptimizationActions();
 
     const best = stagingOptimizationState.bestResult;
     if (best && best.metrics) {
@@ -8863,6 +8935,33 @@ function renderStagingOptimizationResults(results) {
     }
 }
 
+function initStagingOptimizationActions() {
+    const tableBody = document.getElementById('staging-optimization-table-body');
+    if (!tableBody || tableBody.dataset.applyActionsBound === 'true') return;
+    tableBody.dataset.applyActionsBound = 'true';
+    tableBody.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-apply-staging-index]');
+        if (!button) return;
+        const index = Number(button.dataset.applyStagingIndex);
+        if (!Number.isFinite(index)) return;
+        const candidate = Array.isArray(stagingOptimizationState.results)
+            ? stagingOptimizationState.results[index]
+            : null;
+        if (!candidate) {
+            updateStagingOptimizationStatus('找不到對應的分段組合，請重新執行分段優化。', true);
+            return;
+        }
+        const rankLabel = button.dataset.applyStagingRank || `${index + 1}`;
+        const entryLabel = candidate.combination?.entry?.display || '—';
+        const exitLabel = candidate.combination?.exit?.display || '—';
+        const confirmMessage = `確定要套用第 ${rankLabel} 名「${entryLabel} × ${exitLabel}」並立即回測嗎？`;
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+        applyStagingCombination(candidate, { autoRun: true, source: 'table' });
+    });
+}
+
 async function runStagingOptimization() {
     if (!workerUrl) {
         showError('背景計算引擎尚未準備就緒，請稍候再試。');
@@ -8878,8 +8977,6 @@ async function runStagingOptimization() {
     }
 
     const runButton = document.getElementById('stagingOptimizationBtn');
-    const applyButton = document.getElementById('applyStagingOptimizationBtn');
-    if (applyButton) applyButton.disabled = true;
 
     const baseParams = getBacktestParams();
     if (!validateBacktestParams(baseParams)) {
@@ -9040,7 +9137,6 @@ async function runStagingOptimization() {
         }
 
         renderStagingOptimizationResults(results);
-        if (applyButton) applyButton.disabled = !stagingOptimizationState.bestResult;
     } catch (error) {
         console.error('[Staging Optimization] 發生錯誤:', error);
         updateStagingOptimizationStatus(`分段優化發生錯誤：${error.message}`, true);
@@ -9108,33 +9204,52 @@ function executeStagingCandidate(params, options) {
     });
 }
 
+function applyStagingCombination(candidate, options = {}) {
+    if (!candidate || !candidate.combination) {
+        updateStagingOptimizationStatus('無法套用分段設定，請重新執行分段優化。', true);
+        return false;
+    }
+    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
+        window.lazybacktestMultiStagePanel.open();
+    }
+    const entryValues = candidate.combination.entry?.values;
+    const exitValues = candidate.combination.exit?.values;
+    if (entryValues && window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.setValues === 'function') {
+        window.lazybacktestStagedEntry.setValues(entryValues, { manual: true });
+    }
+    if (exitValues && window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.setValues === 'function') {
+        window.lazybacktestStagedExit.setValues(exitValues, { manual: true });
+    }
+    const entryModeSelect = document.getElementById('entryStagingMode');
+    if (entryModeSelect && candidate.combination.entryMode) {
+        entryModeSelect.value = candidate.combination.entryMode.value || candidate.combination.entryMode;
+        entryModeSelect.dispatchEvent(new Event('change'));
+    }
+    const exitModeSelect = document.getElementById('exitStagingMode');
+    if (exitModeSelect && candidate.combination.exitMode) {
+        exitModeSelect.value = candidate.combination.exitMode.value || candidate.combination.exitMode;
+        exitModeSelect.dispatchEvent(new Event('change'));
+    }
+    const entryLabel = candidate.combination.entry?.display || '—';
+    const exitLabel = candidate.combination.exit?.display || '—';
+    if (options.autoRun) {
+        updateStagingOptimizationStatus(`已套用「${entryLabel} × ${exitLabel}」，準備立即回測。`, false);
+        showInfo(`已套用「${entryLabel} × ${exitLabel}」，正在啟動回測。`);
+        runBacktestInternal();
+    } else {
+        updateStagingOptimizationStatus(`已套用「${entryLabel} × ${exitLabel}」，請執行回測確認績效。`, false);
+        showSuccess('已套用推薦分段設定，建議重新回測以確認績效表現。');
+    }
+    return true;
+}
+
 function applyBestStagingRecommendation() {
     const best = stagingOptimizationState.bestResult;
     if (!best) {
         updateStagingOptimizationStatus('尚未產生推薦分段，請先執行分段優化。', true);
         return;
     }
-    if (window.lazybacktestMultiStagePanel && typeof window.lazybacktestMultiStagePanel.open === 'function') {
-        window.lazybacktestMultiStagePanel.open();
-    }
-    if (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.setValues === 'function') {
-        window.lazybacktestStagedEntry.setValues(best.combination.entry.values, { manual: true });
-    }
-    if (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.setValues === 'function') {
-        window.lazybacktestStagedExit.setValues(best.combination.exit.values, { manual: true });
-    }
-    const entryModeSelect = document.getElementById('entryStagingMode');
-    if (entryModeSelect && best.combination.entryMode) {
-        entryModeSelect.value = best.combination.entryMode.value || best.combination.entryMode;
-        entryModeSelect.dispatchEvent(new Event('change'));
-    }
-    const exitModeSelect = document.getElementById('exitStagingMode');
-    if (exitModeSelect && best.combination.exitMode) {
-        exitModeSelect.value = best.combination.exitMode.value || best.combination.exitMode;
-        exitModeSelect.dispatchEvent(new Event('change'));
-    }
-    updateStagingOptimizationStatus('已套用推薦分段，請重新執行回測確認績效。', false);
-    showSuccess('已套用推薦分段設定，建議重新回測以確認績效表現。');
+    applyStagingCombination(best, { autoRun: false, source: 'best' });
 }
 
 
@@ -9509,13 +9624,19 @@ function collectStrategyMetricSnapshot(fallbackMetrics) {
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
     let latestCoverage = null;
-    if (Number.isFinite(trendSummary?.latest?.returnPct)) {
+    if (Number.isFinite(trendSummary?.latest?.strategyReturnPct)) {
+        latestReturn = Number(trendSummary.latest.strategyReturnPct);
+    } else if (Number.isFinite(trendSummary?.latest?.returnPct)) {
         latestReturn = Number(trendSummary.latest.returnPct);
     }
     if (latestLabelKey && trendSummary?.aggregatedByType && trendSummary.aggregatedByType[latestLabelKey]) {
         const stats = trendSummary.aggregatedByType[latestLabelKey];
-        if (latestReturn === null && Number.isFinite(stats?.returnPct)) {
-            latestReturn = Number(stats.returnPct);
+        if (latestReturn === null) {
+            if (Number.isFinite(stats?.strategyReturnPct)) {
+                latestReturn = Number(stats.strategyReturnPct);
+            } else if (Number.isFinite(stats?.returnPct)) {
+                latestReturn = Number(stats.returnPct);
+            }
         }
         if (Number.isFinite(stats?.coveragePct)) latestCoverage = Number(stats.coveragePct);
     }
