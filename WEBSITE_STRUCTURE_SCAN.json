@@ -1,0 +1,321 @@
+{
+  "timestamp": "2025-11-17T02:08:24.839Z",
+  "url": "https://test-lazybacktest.netlify.app",
+  "summary": {
+    "linksCount": 33,
+    "buttonsCount": 11,
+    "formsCount": 0,
+    "containersCount": 2
+  },
+  "links": [
+    {
+      "text": "LazyBacktest懶人股票回測",
+      "href": "/",
+      "classes": "flex items-center space-x-3",
+      "id": ""
+    },
+    {
+      "text": "首頁",
+      "href": "/",
+      "classes": "text-sm font-medium transition-colors hover:text-foreground text-primary",
+      "id": ""
+    },
+    {
+      "text": "使用教學",
+      "href": "/guide",
+      "classes": "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "常見問題",
+      "href": "/faq",
+      "classes": "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "社群討論",
+      "href": "/community",
+      "classes": "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "寄信給我",
+      "href": "/contact",
+      "classes": "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "股票紀錄",
+      "href": "/stock-records",
+      "classes": "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "立即開始回測",
+      "href": "/app/index.html",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 h-9 px-4 py-2 has-[>svg]:px-3 border-primary text-primary hover:bg-primary hover:text-primary-foreground",
+      "id": ""
+    },
+    {
+      "text": "首頁",
+      "href": "/",
+      "classes": "px-4 py-3 text-sm font-medium transition-colors hover:bg-muted hover:text-foreground text-primary",
+      "id": ""
+    },
+    {
+      "text": "使用教學",
+      "href": "/guide",
+      "classes": "px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "常見問題",
+      "href": "/faq",
+      "classes": "px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "社群討論",
+      "href": "/community",
+      "classes": "px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "寄信給我",
+      "href": "/contact",
+      "classes": "px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "股票紀錄",
+      "href": "/stock-records",
+      "classes": "px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+      "id": ""
+    },
+    {
+      "text": "立即開始回測",
+      "href": "/app/index.html",
+      "classes": "px-4 py-3 text-sm font-semibold text-primary transition-colors hover:bg-muted hover:text-primary",
+      "id": ""
+    },
+    {
+      "text": "進入回測 App",
+      "href": "/app/index.html",
+      "classes": "",
+      "id": ""
+    },
+    {
+      "text": "進入回測 App",
+      "href": "/app/index.html",
+      "classes": "",
+      "id": ""
+    },
+    {
+      "text": "進入 App",
+      "href": "/app/index.html",
+      "classes": "",
+      "id": ""
+    },
+    {
+      "text": "進入 App",
+      "href": "/app/index.html",
+      "classes": "",
+      "id": ""
+    },
+    {
+      "text": "進入回測 App",
+      "href": "/app/index.html",
+      "classes": "",
+      "id": ""
+    },
+    {
+      "text": "先看完整使用教學",
+      "href": "/guide",
+      "classes": "rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary",
+      "id": ""
+    },
+    {
+      "text": "查看常見問題整理",
+      "href": "/faq",
+      "classes": "rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary",
+      "id": ""
+    },
+    {
+      "text": "與其他用戶討論策略",
+      "href": "/community",
+      "classes": "rounded-md border border-border px-3 py-1.5 transition-colors hover:border-primary hover:text-primary",
+      "id": ""
+    },
+    {
+      "text": "支持我們",
+      "href": "https://portaly.cc/lazybacktest/support",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "使用教學",
+      "href": "/guide",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "常見問題",
+      "href": "/faq",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "寄信給我",
+      "href": "/contact",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "社群討論",
+      "href": "/community",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "股票紀錄",
+      "href": "/stock-records",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "股票回測",
+      "href": "/app/index.html",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "隱私政策",
+      "href": "/privacy",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "免責聲明",
+      "href": "/disclaimer",
+      "classes": "transition-colors",
+      "id": ""
+    },
+    {
+      "text": "smallwei0301@gmail.com",
+      "href": "mailto:smallwei0301@gmail.com",
+      "classes": "underline",
+      "id": ""
+    }
+  ],
+  "buttons": [
+    {
+      "text": "進入回測 App",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 rounded-md has-[>svg]:px-4 bg-primary hover:bg-primary/90 text-primary-foreground text-lg px-10 py-7 group shadow-lg",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "先看看範例策略與回測報告",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive shadow-xs dark:bg-input/30 dark:border-input dark:hover:bg-input/50 h-10 rounded-md has-[>svg]:px-4 text-lg px-8 py-7 border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground bg-transparent group",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "<",
+      "classes": "absolute z-10 flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": ">",
+      "classes": "absolute z-10 flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "",
+      "classes": "h-2 rounded-full transition-all bg-primary w-6",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "",
+      "classes": "h-2 rounded-full transition-all bg-muted-foreground/30 w-2 hover:bg-muted-foreground/50",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "",
+      "classes": "h-2 rounded-full transition-all bg-muted-foreground/30 w-2 hover:bg-muted-foreground/50",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "進入回測 App",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive shadow-xs h-10 rounded-md px-6 has-[>svg]:px-4 bg-primary hover:bg-primary/90 text-primary-foreground",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "進入 App",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive shadow-xs h-9 px-4 py-2 has-[>svg]:px-3 w-full bg-primary hover:bg-primary/90 text-primary-foreground mt-8",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "進入 App",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive shadow-xs h-9 px-4 py-2 has-[>svg]:px-3 w-full bg-accent hover:bg-accent/90 text-accent-foreground mt-8",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    },
+    {
+      "text": "進入回測 App",
+      "classes": "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive h-10 rounded-md has-[>svg]:px-4 bg-primary hover:bg-primary/90 text-primary-foreground text-xl px-12 py-8 group shadow-xl",
+      "id": "",
+      "type": "submit",
+      "onclick": null
+    }
+  ],
+  "forms": [],
+  "containers": [
+    {
+      "selector": "main",
+      "text": "專為不會寫程式的投資人設計\n不會寫程式，也能找出\n最穩定、最會賺的股票策略\n\nLazyBacktest 幫你自動測試上百種參數組合，用台股真實歷史資料，告訴你「這個方法到底有沒有效」。\n\n進入回測 A",
+      "classes": ""
+    },
+    {
+      "selector": ".container",
+      "text": "LazyBacktest\n\n懶人股票回測\n\n首頁\n使用教學\n常見問題\n社群討論\n寄信給我\n股票紀錄\n立即開始回測",
+      "classes": "container mx-auto flex h-16 items-center justify-between px-4"
+    }
+  ],
+  "dataAttrs": [],
+  "titles": {
+    "title": "懶人回測 LazyBacktest - 專為台灣上班族設計的股票回測系統",
+    "h1": "不會寫程式，也能找出最穩定、最會賺的股票策略",
+    "h2s": [
+      "你不是不努力，只是工具一直太難",
+      "為什麼選擇 LazyBacktest？",
+      "用白話告訴你，我們能做什麼",
+      "如何開始您的懶人回測",
+      "真實用戶的使用心得"
+    ]
+  },
+  "appType": {
+    "isReact": false,
+    "isVue": false,
+    "isAngular": false,
+    "isNext": false,
+    "isNuxt": false
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "timestamp": "2025-11-17T02:12:15.589Z",
+  "duration": 12656,
+  "website": "https://test-lazybacktest.netlify.app/app/index.html",
+  "checks": {
+    "cacheCleared": true,
+    "websiteAccess": true,
+    "appAccess": true,
+    "batchOptimizationExecutable": true,
+    "rollingTestExecutable": true,
+    "p1LogsFound": false,
+    "p2LogsFound": false,
+    "lookbackValuesConsistent": true,
+    "noErrors": false
+  },
+  "details": {
+    "p1Logs": [],
+    "p2Logs": [],
+    "lookbackValues": {
+      "batchOptimization": null,
+      "rollingTest": null
+    },
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 ()",
+      "Refused to execute script from 'https://test-lazybacktest.netlify.app/_vercel/insights/script.js' because its MIME type ('text/html') is not executable, and strict MIME type checking is enabled.",
+      "Failed to load resource: the server responded with a status of 404 ()",
+      "Refused to execute script from 'https://test-lazybacktest.netlify.app/_vercel/insights/script.js' because its MIME type ('text/html') is not executable, and strict MIME type checking is enabled.",
+      "Failed to load resource: the server responded with a status of 404 ()"
+    ],
+    "consoleLogs": [
+      "Failed to load resource: the server responded with a status of 404 ()",
+      "Refused to execute script from 'https://test-lazybacktest.netlify.app/_vercel/insights/script.js' because its MIME type ('text/html') is not executable, and strict MIME type checking is enabled.",
+      "[Vercel Web Analytics] Failed to load script from /_vercel/insights/script.js. Be sure to enable Web Analytics for your project and deploy again. See https://vercel.com/docs/analytics/quickstart for more information.",
+      "cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation",
+      "[Main] DOM loaded, initializing...",
+      "[Main] Initialization completed",
+      "Chart object: function",
+      "Available Chart plugins: JSHandle@array",
+      "[Loader] DOMContentLoaded event fired.",
+      "[Loader] Set workerUrl to: js/worker.js",
+      "[Loader] 策略清單暖身完成: bollinger_breakout, bollinger_reversal, cover_bollinger_breakout, cover_fixed_stop_loss, cover_k_d_cross, cover_ma_above, cover_ma_cross, cover_macd_cross, cover_price_breakout, cover_rsi_oversold, cover_trailing_stop, cover_turtle_breakout, cover_volume_spike, cover_williams_oversold, fixed_stop_loss, k_d_cross, k_d_cross_exit, ma_above, ma_below, ma_cross, ma_cross_exit, macd_cross, macd_cross_exit, price_breakdown, price_breakout, rsi_overbought, rsi_oversold, short_bollinger_reversal, short_k_d_cross, short_ma_below, short_ma_cross, short_macd_cross, short_price_breakdown, short_rsi_overbought, short_turtle_stop_loss, short_volume_spike, short_williams_overbought, trailing_stop, turtle_breakout, turtle_stop_loss, volume_spike, volume_spike_exit, williams_overbought, williams_oversold",
+      "[Fees] Stock 預設費率 for 2330 -> Buy: 0.1425%, Sell+Tax: 0.4425%",
+      "[Main] Initial setup complete.",
+      "[Loader] Loader script finished.",
+      "[Batch Optimization] Initializing...",
+      "[Batch Optimization] Strategy options generated successfully",
+      "[Batch Optimization] Events bound successfully",
+      "[Batch Optimization] Initialized successfully",
+      "[Market Switch] 市場切換功能已初始化",
+      "Failed to load resource: the server responded with a status of 404 ()",
+      "Refused to execute script from 'https://test-lazybacktest.netlify.app/_vercel/insights/script.js' because its MIME type ('text/html') is not executable, and strict MIME type checking is enabled.",
+      "[Vercel Web Analytics] Failed to load script from /_vercel/insights/script.js. Be sure to enable Web Analytics for your project and deploy again. See https://vercel.com/docs/analytics/quickstart for more information.",
+      "Failed to load resource: the server responded with a status of 404 ()"
+    ]
+  }
+}

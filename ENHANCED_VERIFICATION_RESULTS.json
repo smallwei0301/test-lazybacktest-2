@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-11-17T02:14:38.338Z",
+  "checks": {
+    "p1LogsFound": false,
+    "p2LogsFound": false,
+    "hasErrors": false,
+    "totalLogs": 3622
+  },
+  "details": {
+    "p1Logs": [],
+    "p2Logs": [],
+    "errorCount": 0,
+    "totalLogsCount": 3622
+  }
+}

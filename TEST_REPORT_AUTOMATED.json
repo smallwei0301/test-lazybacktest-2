@@ -1,0 +1,108 @@
+{
+  "timestamp": "2025-11-17T01:42:53.524Z",
+  "duration": 35,
+  "summary": {
+    "p0_passed": 3,
+    "p0_total": 3,
+    "p1_passed": 6,
+    "p1_total": 6,
+    "p2_passed": 4,
+    "p2_total": 4,
+    "files_checked": 3,
+    "files_exist": 3
+  },
+  "details": {
+    "p0": [
+      {
+        "name": "buildBatchCachedMeta 函數定義",
+        "passed": true,
+        "detail": "應在 L595 附近"
+      },
+      {
+        "name": "buildBatchCachedMeta 被調用",
+        "passed": true,
+        "detail": "應在 L3673 附近"
+      },
+      {
+        "name": "cachedMeta 在 postMessage",
+        "passed": true,
+        "detail": "應在 L3680 附近"
+      }
+    ],
+    "p1": [
+      {
+        "name": "getRequiredLookbackForStrategies 函數存在",
+        "passed": true,
+        "detail": "應在 shared-lookback.js L342 附近"
+      },
+      {
+        "name": "函數已導出",
+        "passed": true,
+        "detail": "應在 shared-lookback.js L397 附近"
+      },
+      {
+        "name": "batch-optimization 使用新函數",
+        "passed": true,
+        "detail": "應在 batch-optimization.js 中"
+      },
+      {
+        "name": "rolling-test 使用新函數",
+        "passed": true,
+        "detail": "應在 rolling-test.js 中"
+      },
+      {
+        "name": "P1 日誌 - batch-optimization",
+        "passed": true,
+        "detail": "日誌消息應存在"
+      },
+      {
+        "name": "P1 日誌 - rolling-test",
+        "passed": true,
+        "detail": "日誌消息應存在"
+      }
+    ],
+    "p2": [
+      {
+        "name": "P2 優先級邏輯 - batch-optimization",
+        "passed": true,
+        "detail": "優先級邏輯應在 enrichParamsWithLookback 中"
+      },
+      {
+        "name": "P2 優先級邏輯 - rolling-test",
+        "passed": true,
+        "detail": "優先級邏輯應在 enrichParamsWithLookback 中"
+      },
+      {
+        "name": "P2 日誌 - batch-optimization",
+        "passed": true,
+        "detail": "日誌消息應存在"
+      },
+      {
+        "name": "P2 日誌 - rolling-test",
+        "passed": true,
+        "detail": "日誌消息應存在"
+      }
+    ],
+    "files": [
+      {
+        "name": "batch-optimization.js",
+        "exists": true,
+        "modified": "2025-11-17T01:33:28.665Z",
+        "recent": true
+      },
+      {
+        "name": "rolling-test.js",
+        "exists": true,
+        "modified": "2025-11-17T01:33:28.666Z",
+        "recent": true
+      },
+      {
+        "name": "shared-lookback.js",
+        "exists": true,
+        "modified": "2025-11-17T01:33:28.665Z",
+        "recent": true
+      }
+    ],
+    "overall": []
+  }
+}

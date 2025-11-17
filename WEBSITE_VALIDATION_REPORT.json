@@ -1,0 +1,53 @@
+{
+  "timestamp": "2025-11-17T01:45:01.735Z",
+  "type": "local-validation",
+  "summary": {
+    "total_checks": 7,
+    "passed": 7,
+    "success_rate": "100.0"
+  },
+  "details": {
+    "accessibility": [
+      {
+        "name": "Resource: batch-optimization.js",
+        "passed": true
+      },
+      {
+        "name": "Resource: rolling-test.js",
+        "passed": true
+      },
+      {
+        "name": "Resource: shared-lookback.js",
+        "passed": true
+      }
+    ],
+    "performance": [],
+    "functionality": [
+      {
+        "name": "P1 日誌完整性 - batch-optimization",
+        "passed": true
+      },
+      {
+        "name": "P1 日誌完整性 - rolling-test",
+        "passed": true
+      },
+      {
+        "name": "P2 日誌完整性 - batch-optimization",
+        "passed": true
+      },
+      {
+        "name": "P2 日誌完整性 - rolling-test",
+        "passed": true
+      }
+    ]
+  },
+  "next_steps": [
+    "1. 清除瀏覽器緩存 (Ctrl+Shift+Delete)",
+    "2. 訪問網站: https://test-lazybacktest.netlify.app",
+    "3. 打開 F12 Console",
+    "4. 執行批量優化 → 驗證 P1/P2 日誌",
+    "5. 執行滾動測試 → 驗證 P1/P2 日誌",
+    "6. 對比 lookbackDays 值一致性",
+    "7. 檢查 Console 無紅色錯誤"
+  ]
+}

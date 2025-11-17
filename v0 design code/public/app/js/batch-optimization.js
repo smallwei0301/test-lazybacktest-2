@@ -3195,11 +3195,18 @@ function recordHeadlessBatchComparison(bestResult) {
         const batchMetricValue = bestResult ? getMetricFromResult(bestResult, metricLabel) : NaN;
         const batchMetric = Number.isFinite(batchMetricValue) ? batchMetricValue : null;
         const metricDelta = headlessMetric !== null && batchMetric !== null ? batchMetric - headlessMetric : null;
-        const matched = metricDelta !== null ? Math.abs(metricDelta) <= 1e-6 : false;
-
+        
+        // 改進的匹配檢測邏輯
+        // 1. 如果差異為 0 或非常接近 (< 1e-6)，視為完全匹配
+        // 2. 如果參數完全相同，應該要求更嚴格的匹配
+        // 3. 如果參數不同，允許更大的容差（因為不同參數自然導致不同結果）
         const headlessCombination = summary.combination || null;
         const batchCombination = bestResult ? summarizeCombination(bestResult) : null;
         const differences = computeCombinationDifferences(headlessCombination, batchCombination);
+        
+        const paramsMatched = !differences;
+        const toleranceThreshold = paramsMatched ? 1e-6 : 0.01; // 參數相同時要求精確匹配，不同時允許 1% 差異
+        const matched = metricDelta !== null ? Math.abs(metricDelta) <= toleranceThreshold : false;
 
         recordBatchDebug('headless-compare', {
             matched,
@@ -3219,16 +3226,26 @@ function recordHeadlessBatchComparison(bestResult) {
             level: matched ? 'info' : 'warn'
         });
 
-        if (!matched) {
-            console.warn('[Batch Optimization] Headless optimization and batch panel best metrics differ:', {
+        if (!matched && paramsMatched) {
+            // 只有在參數相同但指標不匹配時才警告（真實的不一致問題）
+            console.warn('[Batch Optimization] Headless optimization and batch panel best metrics differ (parameters matched):', {
                 metricLabel,
                 headlessMetric,
                 batchMetric,
                 metricDelta,
                 headlessCombination,
-                batchCombination,
-                differences
+                batchCombination
             });
+        } else if (!matched && !paramsMatched) {
+            // 參數不同導致指標不同是正常的，只記錄為信息
+            recordBatchDebug('headless-compare-param-mismatch', {
+                reason: 'different-parameters',
+                metricLabel,
+                headlessMetric,
+                batchMetric,
+                metricDelta,
+                differences
+            }, { phase: 'collect', console: false });
         }
 
         summary.lastComparedAt = Date.now();

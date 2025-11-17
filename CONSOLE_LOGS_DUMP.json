@@ -1,0 +1,75 @@
+{
+  "timestamp": "2025-11-17T02:13:15.986Z",
+  "totalLogs": 16,
+  "logs": [
+    {
+      "type": "warn",
+      "text": "cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation"
+    },
+    {
+      "type": "log",
+      "text": "[Main] DOM loaded, initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[Main] Initialization completed"
+    },
+    {
+      "type": "log",
+      "text": "Chart object: function"
+    },
+    {
+      "type": "log",
+      "text": "Available Chart plugins: JSHandle@array"
+    },
+    {
+      "type": "log",
+      "text": "[Loader] DOMContentLoaded event fired."
+    },
+    {
+      "type": "log",
+      "text": "[Loader] Set workerUrl to: js/worker.js"
+    },
+    {
+      "type": "log",
+      "text": "[Loader] 策略清單暖身完成: bollinger_breakout, bollinger_reversal, cover_bollinger_breakout, cover_fixed_stop_loss, cover_k_d_cross, cover_ma_above, cover_ma_cross, cover_macd_cross, cover_price_breakout, cover_rsi_oversold, cover_trailing_stop, cover_turtle_breakout, cover_volume_spike, cover_williams_oversold, fixed_stop_loss, k_d_cross, k_d_cross_exit, ma_above, ma_below, ma_cross, ma_cross_exit, macd_cross, macd_cross_exit, price_breakdown, price_breakout, rsi_overbought, rsi_oversold, short_bollinger_reversal, short_k_d_cross, short_ma_below, short_ma_cross, short_macd_cross, short_price_breakdown, short_rsi_overbought, short_turtle_stop_loss, short_volume_spike, short_williams_overbought, trailing_stop, turtle_breakout, turtle_stop_loss, volume_spike, volume_spike_exit, williams_overbought, williams_oversold"
+    },
+    {
+      "type": "log",
+      "text": "[Fees] Stock 預設費率 for 2330 -> Buy: 0.1425%, Sell+Tax: 0.4425%"
+    },
+    {
+      "type": "log",
+      "text": "[Main] Initial setup complete."
+    },
+    {
+      "type": "log",
+      "text": "[Loader] Loader script finished."
+    },
+    {
+      "type": "log",
+      "text": "[Batch Optimization] Initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[Batch Optimization] Strategy options generated successfully"
+    },
+    {
+      "type": "log",
+      "text": "[Batch Optimization] Events bound successfully"
+    },
+    {
+      "type": "log",
+      "text": "[Batch Optimization] Initialized successfully"
+    },
+    {
+      "type": "log",
+      "text": "[Market Switch] 市場切換功能已初始化"
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 0,
+    "logs": 15
+  }
+}
