@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
 document.addEventListener('DOMContentLoaded', () => {
     renderBlobUsageCard();
     initTrendAnalysisToggle();
+    initMultiStagePanel();
     updateDataSourceDisplay(null, null);
 });
 
@@ -730,7 +731,7 @@ const todaySuggestionUI = (() => {
             }
         }
         if (statsToggleLabel) {
-            statsToggleLabel.textContent = statsExpanded ? '收合部位概況' : '展開部位概況';
+            statsToggleLabel.textContent = statsExpanded ? '隱藏部位概況' : '顯示部位概況';
         }
     }
 
@@ -877,7 +878,7 @@ const todaySuggestionUI = (() => {
             ensureAreaVisible();
             showPlaceholderContent();
             setTone('neutral');
-            setText(labelEl, '尚未取得建議');
+            setText(labelEl, '尚未產生建議');
             setText(dateEl, '—');
             setText(messageEl, '—');
             setText(longEl, '—');
@@ -892,9 +893,9 @@ const todaySuggestionUI = (() => {
             ensureAreaVisible();
             showBodyContent();
             setTone('info');
-            setText(labelEl, '計算今日建議中...');
+            setText(labelEl, '取得今日建議中...');
             setText(dateEl, '—');
-            setText(messageEl, '資料計算中，請稍候');
+            setText(messageEl, '資料同步中，請稍候取得最新操作提示');
             setText(longEl, '—');
             setText(shortEl, '—');
             setText(positionEl, '—');
@@ -5341,6 +5342,7 @@ function escapeHtml(text) {
 const PERFORMANCE_TABLE_CONTAINER_ID = 'performance-table-container';
 const PERFORMANCE_CONTAINER_FLEX_CLASSES = ['flex', 'items-center', 'justify-center', 'border-dashed'];
 const PERFORMANCE_PLACEHOLDER_TEXT = '請先執行回測以生成期間績效數據。';
+const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
 
 function setPerformanceAnalysisPlaceholder(message = PERFORMANCE_PLACEHOLDER_TEXT) {
     const container = document.getElementById(PERFORMANCE_TABLE_CONTAINER_ID);
@@ -5355,6 +5357,18 @@ function setPerformanceAnalysisPlaceholder(message = PERFORMANCE_PLACEHOLDER_TEX
 function renderPerformanceAnalysis(result) {
     const container = document.getElementById(PERFORMANCE_TABLE_CONTAINER_ID);
     if (!container) return;
+    const parseValidDate = (value) => {
+        const timestamp = Date.parse(value);
+        return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+    };
+    const datasetDates = Array.isArray(result?.dates)
+        ? result.dates.map((value) => (typeof value === 'string' ? value : null)).filter(Boolean)
+        : [];
+    const datasetStart = datasetDates.length > 0 ? parseValidDate(datasetDates[0]) : null;
+    const datasetEnd = datasetDates.length > 0 ? parseValidDate(datasetDates[datasetDates.length - 1]) : null;
+    const datasetYearSpan = datasetStart && datasetEnd && datasetEnd > datasetStart
+        ? Math.ceil((datasetEnd - datasetStart) / MS_PER_YEAR)
+        : 0;
     const subPeriodResults = (result && typeof result === 'object' && result.subPeriodResults)
         ? result.subPeriodResults
         : lastSubPeriodResults;
@@ -5378,14 +5392,16 @@ function renderPerformanceAnalysis(result) {
 
     appendPeriod('1M', '最近一個月');
     appendPeriod('6M', '最近六個月');
-    for (let year = 1; year <= yearsSetting; year += 1) {
+    const desiredYearRows = Math.max(yearsSetting || 0, datasetYearSpan, 1);
+    const effectiveYearRows = Math.min(desiredYearRows, 50);
+    for (let year = 1; year <= effectiveYearRows; year += 1) {
         const key = `${year}Y`;
         const label = `最近${year === 1 ? '一年' : `${year}年`}`;
         appendPeriod(key, label);
     }
 
-    const hasResult = periodEntries.some((entry) => entry.data !== null);
-    if (!hasResult) {
+    const visiblePeriodEntries = periodEntries.filter((entry) => entry.data !== null);
+    if (visiblePeriodEntries.length === 0) {
         setPerformanceAnalysisPlaceholder('尚無足夠期間績效資料，請延長期間或縮小 N。');
         return;
     }
@@ -5443,7 +5459,7 @@ function renderPerformanceAnalysis(result) {
     const headerCells = metrics
         .map((metric) => `<th scope="col" class="px-3 py-2 font-medium text-center whitespace-nowrap">${escapeHtml(metric.label)}</th>`)
         .join('');
-    const bodyRows = periodEntries
+    const bodyRows = visiblePeriodEntries
         .map((entry) => {
             const cells = metrics
                 .map((metric) => {
@@ -6079,9 +6095,10 @@ function initTrendAnalysisToggle() {
         card.dataset.collapsed = expanded ? 'false' : 'true';
         if (indicator) {
             indicator.classList.toggle('open', expanded);
+            indicator.textContent = expanded ? '－' : '＋';
         }
         if (labelEl) {
-            labelEl.textContent = expanded ? '收合分析' : '展開分析';
+            labelEl.textContent = expanded ? '隱藏趨勢總覽' : '顯示趨勢總覽';
             labelEl.classList.toggle('open', expanded);
         }
         if (legend) {
@@ -6096,6 +6113,47 @@ function initTrendAnalysisToggle() {
     toggleBtn.addEventListener('click', () => {
         applyState(!expanded);
     });
+}
+
+function initMultiStagePanel() {
+    const toggleBtn = document.getElementById('multiStageToggle');
+    const content = document.getElementById('multiStageContent');
+    const icon = document.getElementById('multiStageToggleIcon');
+    if (!toggleBtn || !content) return;
+
+    let expanded = false;
+
+    const applyState = (open) => {
+        expanded = Boolean(open);
+        content.classList.toggle('hidden', !expanded);
+        content.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        toggleBtn.setAttribute('aria-label', expanded ? '隱藏多次進出場設定' : '顯示多次進出場設定');
+        if (icon) {
+            icon.textContent = expanded ? '－' : '＋';
+        }
+    };
+
+    toggleBtn.addEventListener('click', () => {
+        applyState(!expanded);
+    });
+
+    window.lazybacktestMultiStagePanel = {
+        open() {
+            applyState(true);
+        },
+        close() {
+            applyState(false);
+        },
+        toggle() {
+            applyState(!expanded);
+        },
+        isOpen() {
+            return expanded;
+        },
+    };
+
+    applyState(false);
 }
 
 function initSensitivityCollapse(rootEl) {
@@ -7185,6 +7243,19 @@ function displayBacktestResult(result) {
             '分數 ≥ 70 視為穩健；40～69 建議延長樣本，<40 則需謹慎。'
         ].filter(Boolean);
         const stabilityTooltip = stabilityTooltipLines.join('<br>');
+
+        const stabilityStageHint = (() => {
+            if (!Number.isFinite(overallScore)) {
+                return '資料仍不足，等待更多擾動樣本。';
+            }
+            if (overallScore >= 70) {
+                return '穩定度穩健';
+            }
+            if (overallScore >= 40) {
+                return '建議延長測試區間';
+            }
+            return '策略穩定度不佳';
+        })();
         let directionSafeTooltip = null;
         const directionAdvice = (() => {
             const positiveAbs = Number.isFinite(overallPositive) ? Math.abs(overallPositive) : null;
@@ -7241,7 +7312,7 @@ function displayBacktestResult(result) {
                             </span>
                         </div>
                         <p class="text-3xl font-bold ${scoreClass(overallScore)}">${formatScore(overallScore)}</p>
-                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">結合漂移與 Sharpe 下滑，分數越高代表策略越耐震。</p>
+                        <p class="text-xs" style="color: var(--muted-foreground); line-height: 1.6;">${stabilityStageHint}</p>
                     </div>
                 </div>
                 <div class="p-6 rounded-xl border shadow-sm" style="background: linear-gradient(135deg, color-mix(in srgb, var(--secondary) 8%, var(--background)) 0%, color-mix(in srgb, var(--secondary) 4%, var(--background)) 100%); border-color: color-mix(in srgb, var(--secondary) 25%, transparent);">
@@ -9384,13 +9455,15 @@ function collectStrategyMetricSnapshot(fallbackMetrics) {
     const latestLabelKey = trendSummary?.latest?.label || null;
     let latestReturn = null;
     let latestCoverage = null;
+    if (Number.isFinite(trendSummary?.latest?.returnPct)) {
+        latestReturn = Number(trendSummary.latest.returnPct);
+    }
     if (latestLabelKey && trendSummary?.aggregatedByType && trendSummary.aggregatedByType[latestLabelKey]) {
         const stats = trendSummary.aggregatedByType[latestLabelKey];
-        if (Number.isFinite(stats?.returnPct)) latestReturn = Number(stats.returnPct);
+        if (latestReturn === null && Number.isFinite(stats?.returnPct)) {
+            latestReturn = Number(stats.returnPct);
+        }
         if (Number.isFinite(stats?.coveragePct)) latestCoverage = Number(stats.coveragePct);
-    }
-    if (latestReturn === null && Number.isFinite(trendSummary?.latest?.returnPct)) {
-        latestReturn = Number(trendSummary.latest.returnPct);
     }
 
     const rollingScore = normaliseMetricNumber(rollingAggregate?.score);

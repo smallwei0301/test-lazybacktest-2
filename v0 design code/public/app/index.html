@@ -870,7 +870,7 @@
                                     </div>
                                     <div class="card-content space-y-4">
                                         <div>
-                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票與指數代碼 (非即時資訊)</label>
+                                            <label for="stockNo" class="block text-xs font-medium text-foreground mb-1" style="color: var(--foreground);">台灣/美國股票與指數代碼</label>
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <div class="flex-1 min-w-[160px] sm:min-w-[200px]">
                                                     <input
@@ -902,6 +902,9 @@
                                             <div id="stockNameDisplay" class="mt-1 text-xs" style="display: none;">
                                                 <!-- 股票名稱和市場切換提示將顯示在這裡 -->
                                             </div>
+                                            <p class="mt-1 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">
+                                                資料以每日 Netlify Blob 同步，非即時盤中報價，請依照更新時間調整。
+                                            </p>
                                             <div
                                                 id="pricePipelineSteps"
                                                 class="mt-1 hidden space-y-1"
@@ -1227,6 +1230,14 @@
                                             </div>
                                         </div>
 
+                                        <p class="mt-3 text-xs" style="color: var(--muted-foreground);">
+                                            不確定每個選項代表什麼？請訪問我們的
+                                            <a href="/guide#strategy-guide" class="text-primary underline-offset-4 hover:underline" style="color: var(--primary);">
+                                                策略指南
+                                            </a>
+                                            。
+                                        </p>
+
                                         <!-- Short Selling Option -->
                                         <div class="border-t pt-4" style="border-color: var(--border);">
                                             <label class="flex items-center mb-4">
@@ -1350,7 +1361,7 @@
                                 </div>
                                 <div class="card-content pt-0 space-y-4">
                                     <div id="today-suggestion-empty" class="today-suggestion-empty">
-                                        執行回測後將依最新資料推導今日的操作指引
+                                        執行回測後會根據最新策略檢核與市場動態提供今日操作建議
                                     </div>
                                     <div id="today-suggestion-body" class="today-suggestion-body hidden">
                                         <div id="today-suggestion-banner" class="today-suggestion-highlight">
@@ -1369,7 +1380,7 @@
                                                 aria-controls="today-suggestion-stats-wrapper"
                                             >
                                                 <span class="toggle-indicator">＋</span>
-                                                <span class="toggle-label">展開部位概況</span>
+                                                <span class="toggle-label">顯示部位概況</span>
                                             </button>
                                         </div>
                                         <div id="today-suggestion-stats-wrapper" class="today-suggestion-stats-wrapper hidden" aria-hidden="true">
@@ -1657,7 +1668,7 @@
                                                 <i data-lucide="line-chart" class="lucide-sm" aria-hidden="true"></i>
                                                 <span>趨勢區間評估</span>
                                             </span>
-                                            <span class="text-xs text-muted-foreground" data-trend-toggle-label>展開分析</span>
+                                            <span class="text-xs text-muted-foreground" data-trend-toggle-label>顯示趨勢總覽</span>
                                         </button>
                                     </div>
                                     <div id="trend-analysis-content" class="card-content space-y-4 hidden" aria-hidden="true">
@@ -1691,7 +1702,7 @@
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed hidden" style="color: var(--muted-foreground);"></p>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示牛市・高波動／盤整／熊市・高波動三態的覆蓋率、複利報酬與 Sigmoid 補償統計。
+                                            執行回測後會顯示牛市・高波動／盤整／熊市・高波動三態的覆蓋率、當期複利報酬與 Sigmoid 補償統計，並同時呈現各態時的總報酬。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>
@@ -2181,20 +2192,22 @@
                                                                     </button>
                                                                 </div>
                                                             </div>
-                                                            <div class="flex flex-wrap items-center gap-2">
-                                                                <button id="batch-save-results" class="px-3 py-1 text-xs font-medium rounded border transition-colors" style="background-color: var(--primary); color: var(--primary-foreground); border-color: color-mix(in srgb, var(--primary) 70%, transparent);">
+                                                            <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                                                                <button id="batch-save-results" class="px-3 py-1 text-xs font-medium rounded border transition-colors whitespace-nowrap" style="background-color: var(--primary); color: var(--primary-foreground); border-color: color-mix(in srgb, var(--primary) 70%, transparent);">
                                                                     儲存結果
                                                                 </button>
-                                                                <div class="flex items-center gap-2">
-                                                                    <select id="batch-saved-results" class="px-3 py-1 border border-border rounded text-xs bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground); min-width: 13rem;">
+                                                                <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                                                    <select id="batch-saved-results" class="px-3 py-1 border border-border rounded text-xs bg-input text-foreground" style="border-color: var(--border); background-color: var(--input); color: var(--foreground); min-width: 9rem;">
                                                                         <option value="">選擇已儲存結果...</option>
                                                                     </select>
-                                                                    <button id="batch-load-saved-results" class="px-2 py-1 text-xs rounded border transition-colors" style="border-color: var(--border); background-color: var(--background); color: var(--foreground);" disabled>
-                                                                        載入
-                                                                    </button>
-                                                                    <button id="batch-delete-saved-results" class="px-2 py-1 text-xs rounded border transition-colors" style="border-color: var(--border); background-color: var(--background); color: var(--muted-foreground);" disabled>
-                                                                        刪除
-                                                                    </button>
+                                                                    <div class="flex gap-2 items-stretch">
+                                                                        <button id="batch-load-saved-results" class="px-2 py-1 text-xs rounded border transition-colors whitespace-nowrap" style="border-color: var(--border); background-color: var(--background); color: var(--foreground);" disabled>
+                                                                            載入
+                                                                        </button>
+                                                                        <button id="batch-delete-saved-results" class="px-2 py-1 text-xs rounded border transition-colors whitespace-nowrap" style="border-color: var(--border); background-color: var(--background); color: var(--muted-foreground);" disabled>
+                                                                            刪除
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
