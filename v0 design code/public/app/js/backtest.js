@@ -1625,7 +1625,7 @@ function buildStrategyAdviceFlow(result = {}) {
         if (totalTrades < 10) {
             advice.push('交易筆數少於10筆，請延長期間或放寬策略條件。');
         } else {
-            advice.push('交易樣本充足，請檢查交易記錄確認執行品質。');
+            advice.push('交易樣本充足，資料區間充足。');
         }
     }
 
@@ -1646,7 +1646,7 @@ function buildStrategyAdviceFlow(result = {}) {
         if (score !== null && score >= 70 && (averageDrift === null || averageDrift <= ANNUALIZED_SENSITIVITY_THRESHOLDS.driftStable)) {
             advice.push('敏感度穩健，請排程定期重跑並更新策略備註。');
         } else if (score !== null && score >= 40) {
-            advice.push('敏感度普通，建議調整擾動步長並再次優化。');
+            advice.push('敏感度普通，建議新增停損、分段進出場，或增加測試區間並再次優化。');
         } else if (score !== null) {
             advice.push('敏感度偏危險，請縮小參數範圍並搭配滾動測試。');
         } else if (scenarioCount !== null && scenarioCount < 10) {
@@ -1763,7 +1763,7 @@ function resolveStrategyStatusTitle(diff) {
         return '恭喜！你找到了比較好的獲利策略！';
     }
     if (diff <= -1.5) {
-        return '建議你，還是直接買入該股票並直接持有就好了。';
+        return '建議你，還是買入該股票並直接持有就好了。';
     }
     if (diff >= 0) {
         return '你的策略獲利比較好一點唷！';
