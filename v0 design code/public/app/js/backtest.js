@@ -1795,19 +1795,19 @@ const TREND_PROMOTION_GAIN = 0.28;
 
 const TREND_STYLE_MAP = {
     bullHighVol: {
-        label: '牛市・高波動',
+        label: '多頭強勢',
         overlay: 'rgba(239, 68, 68, 0.2)',
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
     },
     rangeBound: {
-        label: '盤整區域',
+        label: '盤整區間',
         overlay: 'rgba(148, 163, 184, 0.18)',
         accent: '#475569',
         border: 'rgba(148, 163, 184, 0.38)',
     },
     bearHighVol: {
-        label: '熊市・高波動',
+        label: '空頭強勢',
         overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
@@ -3470,18 +3470,46 @@ function renderTrendSummary() {
     const container = document.getElementById('trend-summary-container');
     const placeholder = document.getElementById('trend-summary-placeholder');
     const metaEl = document.getElementById('trend-summary-meta');
+    const parameterDetailsEl = document.getElementById('trend-parameter-details');
     if (!container || !placeholder) return;
     if (!summary) {
         container.innerHTML = '';
         placeholder.classList.remove('hidden');
         if (metaEl) metaEl.classList.add('hidden');
+        if (parameterDetailsEl) {
+            parameterDetailsEl.innerHTML = '';
+        }
         return;
     }
     placeholder.classList.add('hidden');
     const order = ['bullHighVol', 'rangeBound', 'bearHighVol'];
     const latestLabel = summary.latest?.label || null;
     const latestDateLabel = formatTrendLatestDate(summary.latest?.date);
-    container.innerHTML = order.map((key) => {
+    const totalLogReturn = Object.values(summary.aggregatedByType || {}).reduce((acc, entry) => {
+        const value = Number.isFinite(entry?.logReturnSum) ? entry.logReturnSum : 0;
+        return acc + value;
+    }, 0);
+    const totalReturnPct = Number.isFinite(totalLogReturn)
+        ? Math.expm1(totalLogReturn) * 100
+        : null;
+    const totalReturnText = Number.isFinite(totalReturnPct)
+        ? formatPercentSigned(totalReturnPct, 2)
+        : '—';
+    const totalDays = Number.isFinite(summary.totalDays) ? summary.totalDays : 0;
+    const coverageSummary = Number.isFinite(summary.coverage?.actualTrendPct)
+        && Number.isFinite(summary.coverage?.actualRangePct)
+        ? formatPercentPlain(summary.coverage.actualTrendPct + summary.coverage.actualRangePct, 1)
+        : '—';
+    const totalBlock = `
+        <div class="trend-summary-total mb-3 rounded-lg border px-4 py-3" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); background: color-mix(in srgb, var(--muted) 6%, var(--background));">
+            <div class="flex items-center justify-between text-[11px]" style="color: var(--muted-foreground);">
+                <div>總報酬 ${latestDateLabel ? `(${latestDateLabel})` : ''}</div>
+                <div>${totalDays ? `${totalDays} 日` : '—'} / ${coverageSummary}</div>
+            </div>
+            <div class="text-2xl font-semibold mt-1" style="color: var(--foreground);">${totalReturnText}</div>
+            <div class="text-[11px] mt-1" style="color: var(--muted-foreground);">整體覆蓋 ${coverageSummary}，含 ${totalDays} 日</div>
+        </div>`;
+    const cardMarkup = order.map((key) => {
         const style = TREND_STYLE_MAP[key] || {};
         const stats = summary.aggregatedByType?.[key] || { segments: 0, days: 0, coveragePct: 0, returnPct: null };
         const coverageText = formatPercentPlain(stats.coveragePct || 0, 1);
@@ -3505,6 +3533,28 @@ function renderTrendSummary() {
             <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
         </div>`;
     }).join('');
+    container.innerHTML = totalBlock + cardMarkup;
+    if (parameterDetailsEl) {
+        const thresholds = trendAnalysisState.thresholds || computeTrendThresholds(
+            trendAnalysisState.sensitivity,
+            trendAnalysisState.calibration,
+        );
+        const formatNumber = (value, digits = 1) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
+        const formatPercent = (value, digits = 1) => (Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : '—');
+        const detailRows = [
+            { label: '滑桿值', value: formatNumber(thresholds.sensitivity, 1) },
+            { label: '有效敏感度', value: formatNumber(thresholds.effectiveSensitivity, 1) },
+            { label: 'ADX 門檻（趨勢 / 盤整）', value: `${formatNumber(thresholds.adxTrend, 1)} / ${formatNumber(thresholds.adxFlat, 1)}` },
+            { label: '布林通道（趨勢 / 盤整）', value: `${formatPercent(thresholds.bollTrend)} / ${formatPercent(thresholds.bollFlat)}` },
+            { label: 'ATR 比率（趨勢 / 盤整）', value: `${formatPercent(thresholds.atrTrend)} / ${formatPercent(thresholds.atrFlat)}` },
+            { label: '段長 / 平滑窗', value: `${Number.isFinite(thresholds.minSegmentLength) ? thresholds.minSegmentLength : '—'} / ${Number.isFinite(thresholds.smoothingWindow) ? thresholds.smoothingWindow : '—'}` },
+            { label: '趨勢 / 盤整目標', value: `${formatPercent(thresholds.targetTrendCoverage)} / ${formatPercent(thresholds.targetRangeCoverage)}` },
+            { label: 'Sigmoid 補償下限', value: formatPercent(thresholds.promotionFloor) },
+        ];
+        parameterDetailsEl.innerHTML = detailRows
+            .map((row) => `<div class="flex items-center justify-between" style="color: var(--muted-foreground);"><span>${row.label}</span><span>${row.value}</span></div>`)
+            .join('');
+    }
     if (metaEl) {
         const avgConfidence = Number.isFinite(summary.averageConfidence)
             ? formatPercentPlain(summary.averageConfidence * 100, 1)
@@ -3545,8 +3595,10 @@ function renderTrendSummary() {
             <span>盤整覆蓋：${rangeText}</span>
             <span>校準峰值：滑桿 ${calibrationSliderText}／等效 ${calibrationEffectiveText}／信心 ${calibrationScoreText}</span>
             <span>Sigmoid 補償：${promotionsText}／${statusText}</span>
+            <span>總報酬：${totalReturnText}</span>
         </div>`;
     }
+    initSensitivityCollapse(document.getElementById('trend-analysis-content'));
 }
 
 function recomputeTrendAnalysis(options = {}) {
@@ -6161,6 +6213,8 @@ function initSensitivityCollapse(rootEl) {
     const toggleBtn = scope.querySelector('[data-sensitivity-toggle]');
     const body = scope.querySelector('[data-sensitivity-body]');
     if (!toggleBtn || !body) return;
+    if (toggleBtn.dataset.sensitivityInitialized === 'true') return;
+    toggleBtn.dataset.sensitivityInitialized = 'true';
     const indicator = toggleBtn.querySelector('.toggle-indicator');
     const label = toggleBtn.querySelector('.toggle-label');
     let expanded = false;

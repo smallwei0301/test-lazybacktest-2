@@ -903,7 +903,7 @@
                                                 <!-- 股票名稱和市場切換提示將顯示在這裡 -->
                                             </div>
                                             <p class="mt-1 text-[11px] text-muted-foreground" style="color: var(--muted-foreground);">
-                                                資料以每日 Netlify Blob 同步，非即時盤中報價，請依照更新時間調整。
+                                                資料以每日同步，非即時盤中報價，請依照官方更新時間調整。
                                             </p>
                                             <div
                                                 id="pricePipelineSteps"
@@ -1640,7 +1640,7 @@
                                         <div id="trend-legend" class="mt-3 hidden flex items-center gap-3 text-xs text-muted-foreground overflow-x-auto whitespace-nowrap" aria-hidden="true">
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
-                                                <span>牛市・高波動</span>
+                                                <span>多頭強勢</span>
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.38);"></span>
@@ -1648,7 +1648,7 @@
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
-                                                <span>熊市・高波動</span>
+                                                <span>空頭強勢</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1673,20 +1673,20 @@
                                     </div>
                                     <div id="trend-analysis-content" class="card-content space-y-4 hidden" aria-hidden="true">
                                         <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                            將價格序列拆成牛市・高波動、熊市・高波動與盤整三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
+                                            將價格序列拆成多頭強勢、空頭強勢與盤整區間三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
                                         </p>
                                         <div id="trend-card-legend" class="flex items-center gap-3 text-xs text-muted-foreground overflow-x-auto whitespace-nowrap">
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
-                                                <span>牛市・高波動</span>
+                                                <span>多頭強勢</span>
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.38);"></span>
-                                                <span>盤整區域</span>
+                                                <span>盤整區間</span>
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
-                                                <span>熊市・高波動</span>
+                                                <span>空頭強勢</span>
                                             </div>
                                         </div>
                                         <div class="space-y-2">
@@ -1701,8 +1701,20 @@
                                             </div>
                                             <p id="trend-threshold-text" class="text-[11px] leading-relaxed hidden" style="color: var(--muted-foreground);"></p>
                                         </div>
+                                        <div class="trend-param-panel rounded-lg border" style="border-color: var(--border); background-color: color-mix(in srgb, var(--muted) 4%, transparent);">
+                                            <div class="flex items-center justify-between px-4 py-3" style="color: var(--foreground);">
+                                                <div class="text-xs font-semibold">參數焦點</div>
+                                                <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
+                                                    <span class="toggle-indicator">＋</span>
+                                                    <span class="toggle-label">展開參數細節</span>
+                                                </button>
+                                            </div>
+                                            <div class="sensitivity-collapse-body hidden px-4 pb-4" data-sensitivity-body aria-hidden="true">
+                                                <div id="trend-parameter-details" class="grid gap-3 text-[11px] text-muted-foreground"></div>
+                                            </div>
+                                        </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示牛市・高波動／盤整／熊市・高波動三態的覆蓋率、當期複利報酬與 Sigmoid 補償統計，並同時呈現各態時的總報酬。
+                                            執行回測後會顯示多頭強勢／盤整區間／空頭強勢三態的覆蓋率、當期複利報酬與 Sigmoid 補償統計，並同時呈現各態時的總報酬。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>
