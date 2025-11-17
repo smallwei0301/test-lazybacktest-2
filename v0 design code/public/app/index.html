@@ -1596,9 +1596,6 @@
                                                 <span id="strategy-status-diff" class="text-xs font-semibold hidden" style="color: var(--muted-foreground);"></span>
                                             </div>
                                             <h3 id="strategy-status-title" class="text-lg font-semibold" style="color: var(--foreground);">尚未產出策略摘要</h3>
-                                            <p id="strategy-status-subtitle" class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                                完成第一次回測後，這裡會顯示策略與買入持有的落差、主要指標檢查結果，以及下一步的優先動作。
-                                            </p>
                                         </div>
                                     </div>
                                     <div class="card-content space-y-3">
@@ -1706,7 +1703,7 @@
                                                 <div class="text-xs font-semibold">參數焦點</div>
                                                 <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
                                                     <span class="toggle-indicator">＋</span>
-                                                    <span class="toggle-label">展開敏感度表格</span>
+                                                    <span class="toggle-label">展開參數細節</span>
                                                 </button>
                                             </div>
                                             <div class="sensitivity-collapse-body hidden px-4 pb-4" data-sensitivity-body aria-hidden="true">
@@ -1799,10 +1796,17 @@
                                     <div class="card-header pb-3">
                                         <h4 class="card-title text-sm font-semibold">評估邏輯與建議</h4>
                                     </div>
-                                    <div class="card-content space-y-3 text-sm" style="color: var(--muted-foreground);">
-                                        <p>• 進場測試覆蓋單段滿倉、兩段拉回加碼、三段金字塔與倒金字塔等常見配置，出場則評估等分分批、前重後輕與梯形獲利方式；每一組配置都會再套用「價格回落加碼 / 策略訊號再觸發」與「價格走高分批出場 / 策略訊號再觸發」條件，總計最多 4 × 42 組測試。若進場或出場僅有單段 100% 配置，系統會自動略過條件排列僅執行一次基準測試，加快評估速度。</p>
-                                        <p>• 排序以年化報酬為主、夏普比率為次、最大回撤為輔，若報酬相近會優先推薦回撤較小且風險調整後報酬較佳的組合。</p>
-                                        <p>• 結果表新增「進場條件」「出場條件」欄位，協助辨識使用價格或訊號觸發；套用推薦分段時會同步更新對應條件，仍可再微調百分比或模式，建議重新回測確認與個人風險承受度是否一致。</p>
+                                    <div class="card-content">
+                                        <details class="space-y-3 text-sm text-sm leading-relaxed" style="color: var(--muted-foreground);">
+                                            <summary class="cursor-pointer text-sm font-medium" style="color: var(--foreground);">
+                                                展開評估邏輯與建議
+                                            </summary>
+                                            <div class="space-y-3 pt-3">
+                                                <p>• 進場測試覆蓋單段滿倉、兩段拉回加碼、三段金字塔與倒金字塔等常見配置，出場則評估等分分批、前重後輕與梯形獲利方式；每一組配置都會再套用「價格回落加碼 / 策略訊號再觸發」與「價格走高分批出場 / 策略訊號再觸發」條件，總計最多 4 × 42 組測試。若進場或出場僅有單段 100% 配置，系統會自動略過條件排列僅執行一次基準測試，加快評估速度。</p>
+                                                <p>• 排序以年化報酬為主、夏普比率為次、最大回撤為輔，若報酬相近會優先推薦回撤較小且風險調整後報酬較佳的組合。</p>
+                                                <p>• 結果表新增「進場條件」「出場條件」欄位，協助辨識使用價格或訊號觸發；套用推薦分段時會同步更新對應條件，仍可再微調百分比或模式，建議重新回測確認與個人風險承受度是否一致。</p>
+                                            </div>
+                                        </details>
                                     </div>
                                 </div>
                             </div>

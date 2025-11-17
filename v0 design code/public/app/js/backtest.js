@@ -1437,12 +1437,24 @@ function buildStrategyComparisonSummary(result) {
             line = `策略總報酬率 ${formatPercentSigned(strategyReturn, 2)}，買入持有 ${formatPercentSigned(buyHoldReturn, 2)}，差距維持在 ${diffText} 個百分點內。建議延長觀察區間或搭配其他指標確認方向。`;
         }
     }
-    return {
-        strategyReturn,
-        buyHoldReturn,
-        diff,
-        line,
-    };
+        const strategyAnnualized = Number.isFinite(result?.annualizedReturn)
+            ? Number(result.annualizedReturn)
+            : null;
+        const buyHoldAnnualized = Number.isFinite(result?.buyHoldAnnualizedReturn)
+            ? Number(result.buyHoldAnnualizedReturn)
+            : null;
+        const annualizedDiff = Number.isFinite(strategyAnnualized) && Number.isFinite(buyHoldAnnualized)
+            ? strategyAnnualized - buyHoldAnnualized
+            : null;
+        return {
+            strategyReturn,
+            buyHoldReturn,
+            diff,
+            line,
+            strategyAnnualized,
+            buyHoldAnnualized,
+            annualizedDiff,
+        };
 }
 
 // Patch Tag: LB-ADVICE-OVERFIT-20240829A
@@ -1745,15 +1757,32 @@ function determineStrategyStatusState(diff, comparisonAvailable) {
     return 'behind';
 }
 
+function resolveStrategyStatusTitle(diff) {
+    if (!Number.isFinite(diff)) return null;
+    if (diff >= 1.5) {
+        return '恭喜！你找到了比較好的獲利策略！';
+    }
+    if (diff <= -1.5) {
+        return '建議你，還是直接買入該股票並直接持有就好了。';
+    }
+    if (diff >= 0) {
+        return '你的策略獲利比較好一點唷！';
+    }
+    return '加油，再多加觀察看看這個策略。';
+}
+
 function updateStrategyStatusCard(result) {
     if (!strategyStatusElements.card) return;
     const comparison = buildStrategyComparisonSummary(result || {});
-    const comparisonAvailable = Number.isFinite(comparison.strategyReturn) && Number.isFinite(comparison.buyHoldReturn);
-    const state = determineStrategyStatusState(comparison.diff, comparisonAvailable);
+    const comparisonAvailable = Number.isFinite(comparison.annualizedDiff);
+    const state = determineStrategyStatusState(comparison.annualizedDiff, comparisonAvailable);
     const diffText = '';
     const detailLines = buildStrategyAdviceFlow(result || {});
 
+    const titleOverride = resolveStrategyStatusTitle(comparison.annualizedDiff);
+
     applyStrategyStatusState(state, {
+        titleOverride,
         diffText,
         detail: {
             emphasisedLine: null,
@@ -3074,7 +3103,7 @@ function enforceMinSegmentLength(labels, minLength) {
     return result;
 }
 
-function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
+function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns, strategyEquity) {
     const length = Array.isArray(labels) ? labels.length : 0;
     const aggregated = {};
     const returnCounts = {};
@@ -3088,6 +3117,7 @@ function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
             returnPct: null,
             strategyReturnPct: null,
             strategyDays: 0,
+            strategyContribution: 0,
         };
         returnCounts[key] = 0;
     });
@@ -3098,9 +3128,16 @@ function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
     let current = labels[0];
     let start = 0;
     let totalDays = 0;
+    let prevStrategyEquity = 1;
     for (let i = 0; i < length; i += 1) {
+        const equity = Number.isFinite(strategyEquity?.[i]) ? strategyEquity[i] : null;
         const label = labels[i];
-        if (!label || !TREND_STYLE_MAP[label]) continue;
+        if (!label || !TREND_STYLE_MAP[label]) {
+            if (Number.isFinite(equity)) {
+                prevStrategyEquity = equity;
+            }
+            continue;
+        }
         totalDays += 1;
         aggregated[label].days += 1;
         if (Number.isFinite(logReturns?.[i])) {
@@ -3110,6 +3147,11 @@ function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
         if (Number.isFinite(strategyLogReturns?.[i])) {
             aggregated[label].strategyLogReturnSum += strategyLogReturns[i];
             aggregated[label].strategyDays += 1;
+        }
+        if (Number.isFinite(equity)) {
+            const previousEquity = Number.isFinite(prevStrategyEquity) ? prevStrategyEquity : equity;
+            aggregated[label].strategyContribution += equity - previousEquity;
+            prevStrategyEquity = equity;
         }
         if (i === 0) {
             current = label;
@@ -3145,10 +3187,14 @@ function buildSegmentsAndAggregate(labels, logReturns, strategyLogReturns) {
         }
         if (entry.strategyDays > 0) {
             entry.strategyReturnPct = Math.expm1(entry.strategyLogReturnSum) * 100;
+            if (Number.isFinite(entry.strategyContribution)) {
+                entry.strategyReturnPct = entry.strategyContribution * 100;
+            }
         } else {
             entry.strategyReturnPct = null;
             entry.strategyLogReturnSum = null;
         }
+        delete entry.strategyContribution;
         entry.coveragePct = totalDays > 0 ? (entry.days / totalDays) * 100 : 0;
     });
     return { segments, aggregated, totalDays };
@@ -3261,6 +3307,10 @@ function prepareRegimeBaseData(result, options = {}) {
         return Number.isFinite(raw) ? raw : null;
     });
     const strategyLogReturns = computeStrategyLogReturns(strategyReturns);
+    const strategyEquity = strategyReturns.map((value) => {
+        if (!Number.isFinite(value)) return null;
+        return 1 + (value / 100);
+    });
     const atrSeries = computeATRSeries(highs, lows, closes, 14);
     const atrRatio = atrSeries.map((atr, idx) => {
         const close = closes[idx];
@@ -3323,6 +3373,7 @@ function prepareRegimeBaseData(result, options = {}) {
         volumes,
         logReturns,
         strategyLogReturns,
+        strategyEquity,
         atrSeries,
         atrRatio,
         bollWidth,
@@ -3385,7 +3436,12 @@ function classifyRegimes(base, thresholds) {
         promotions += coverageResult.promotions;
     }
     const enforced = working;
-    const aggregation = buildSegmentsAndAggregate(enforced, base.logReturns, base.strategyLogReturns);
+    const aggregation = buildSegmentsAndAggregate(
+        enforced,
+        base.logReturns,
+        base.strategyLogReturns,
+        base.strategyEquity,
+    );
     const averageConfidence = computeAverageConfidence(enforced, posteriors, labelToState);
     const bullCoverage = aggregation.aggregated?.bullHighVol?.coveragePct || 0;
     const bearCoverage = aggregation.aggregated?.bearHighVol?.coveragePct || 0;
@@ -3534,15 +3590,21 @@ function renderTrendSummary() {
     const latestDateLabel = formatTrendLatestDate(summary.latest?.date);
     const aggregatedEntries = Object.values(summary.aggregatedByType || {});
     const hasStrategyData = aggregatedEntries.some((entry) => Number.isFinite(entry?.strategyReturnPct));
-    const totalLogReturn = aggregatedEntries.reduce((acc, entry) => {
-        const value = hasStrategyData
-            ? entry?.strategyLogReturnSum
-            : entry?.logReturnSum;
-        return Number.isFinite(value) ? acc + value : acc;
-    }, 0);
-    const totalReturnPct = Number.isFinite(totalLogReturn)
-        ? Math.expm1(totalLogReturn) * 100
-        : null;
+    let totalReturnPct = null;
+    if (hasStrategyData) {
+        totalReturnPct = aggregatedEntries.reduce((acc, entry) => {
+            const value = Number(entry?.strategyReturnPct);
+            return Number.isFinite(value) ? acc + value : acc;
+        }, 0);
+    } else {
+        const totalLogReturn = aggregatedEntries.reduce((acc, entry) => {
+            const value = Number.isFinite(entry?.logReturnSum) ? entry.logReturnSum : 0;
+            return acc + value;
+        }, 0);
+        totalReturnPct = Number.isFinite(totalLogReturn)
+            ? Math.expm1(totalLogReturn) * 100
+            : null;
+    }
     const totalReturnText = Number.isFinite(totalReturnPct)
         ? formatPercentSigned(totalReturnPct, 2)
         : '—';
@@ -6294,7 +6356,7 @@ function initSensitivityCollapse(rootEl) {
             indicator.textContent = expanded ? '－' : '＋';
         }
         if (label) {
-            label.textContent = expanded ? '收合敏感度表格' : '展開敏感度表格';
+            label.textContent = expanded ? '收合參數細節' : '展開參數細節';
         }
     };
 
@@ -7500,7 +7562,7 @@ function displayBacktestResult(result) {
             <div class="sensitivity-collapse-controls flex justify-end mt-4">
                 <button type="button" class="sensitivity-collapse-toggle inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 border rounded-full" data-sensitivity-toggle aria-expanded="false" style="border-color: color-mix(in srgb, var(--border) 70%, transparent); color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); background: color-mix(in srgb, var(--background) 95%, transparent);">
                     <span class="toggle-indicator">＋</span>
-                    <span class="toggle-label">展開敏感度表格</span>
+                    <span class="toggle-label">展開參數細節</span>
                 </button>
             </div>
             <div class="space-y-4 sensitivity-collapse-body hidden" data-sensitivity-body aria-hidden="true">
