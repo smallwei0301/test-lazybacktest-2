@@ -93,9 +93,6 @@ export function SiteFooter() {
                 </li>
               ))}
             </ul>
-            <p className="mt-4 text-xs" style={{ color: '#9ca3af' }}>
-              「股票回測」會直接帶您進入目前使用中的快速回測頁面，與首頁按下「立即開始回測」相同。
-            </p>
           </div>
 
           <div>

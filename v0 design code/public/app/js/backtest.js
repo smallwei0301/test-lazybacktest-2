@@ -1772,16 +1772,15 @@ function determineStrategyStatusState(diff, comparisonAvailable) {
 
 function resolveStrategyStatusTitle(diff) {
     if (!Number.isFinite(diff)) return null;
-    const diffText = formatPercentSigned(diff, 2);
-    const absDiff = Math.abs(diff);
-    if (absDiff >= STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
-        return diff >= 0
-            ? `年化報酬 ${diffText}，大幅領先買入持有，請留意回撤與風控維持優勢。`
-            : `年化報酬 ${diffText}，明顯弱於買入持有，建議檢視交易條件或直接調整策略。`;
+    if (diff >= STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
+        return '恭喜！你找到了比較好的獲利策略！';
+    }
+    if (diff <= -STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
+        return '建議你，還是買入該股票並直接持有就好了。';
     }
     return diff >= 0
-        ? `年化報酬略高 ${diffText}，可再觀察是否能持續領先買入持有。`
-        : `年化報酬略低 ${diffText}，建議多留意風控與策略穩定度。`;
+        ? '你的策略獲利比較好一點唷！'
+        : '加油，再多加觀察看看這個策略。';
 }
 
 function updateStrategyStatusCard(result) {
@@ -1837,7 +1836,7 @@ const TREND_PROMOTION_GAIN = 0.28;
 
 const TREND_STYLE_MAP = {
     bullHighVol: {
-        label: ' 上漲時高波動',
+        label: '高波動上漲',
         overlay: 'rgba(239, 68, 68, 0.2)',
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
@@ -3656,7 +3655,13 @@ function renderTrendSummary() {
     }).join('');
     const distributionHeading = `
         <div class="text-sm font-semibold mb-2" style="color: var(--foreground);">策略總報酬分布</div>`;
-    container.innerHTML = distributionHeading + cardMarkup;
+    const cardGrid = `<div class="grid gap-3 md:grid-cols-3">${cardMarkup}</div>`;
+    container.innerHTML = `
+        <div class="space-y-3">
+            ${distributionHeading}
+            ${cardGrid}
+        </div>
+    `;
     const coverage = summary.coverage || {};
     const avgConfidence = Number.isFinite(summary.averageConfidence)
         ? formatPercentPlain(summary.averageConfidence * 100, 1)
@@ -8321,8 +8326,8 @@ function renderChart(result) {
             const profit = Number(tradePair.profit);
             const color = Number.isFinite(profit)
                 ? profit >= 0
-                    ? '#16a34a'
-                    : '#dc2626'
+                    ? '#a855f7'
+                    : '#2563eb'
                 : '#6b7280';
             segments.push({ data: points, color });
         });
@@ -8336,7 +8341,7 @@ function renderChart(result) {
         datasets.push({
             label: '股價',
             data: priceData,
-            borderColor: '#3b82f6',
+            borderColor: '#000000',
             borderWidth: 2,
             tension: 0.1,
             pointRadius: 0,
@@ -8351,7 +8356,7 @@ function renderChart(result) {
                 label: `trade-segment-${idx}`,
                 data: segment.data,
                 borderColor: segment.color,
-                borderWidth: 3,
+                borderWidth: 4,
                 tension: 0.1,
                 pointRadius: 0,
                 fill: false,

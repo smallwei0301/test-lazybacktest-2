@@ -10,7 +10,6 @@ import {
   BarChart3,
   Zap,
   CheckCircle,
-  Star,
   Users,
   ArrowRight,
   Play,
@@ -103,9 +102,6 @@ export default function HomePage() {
         {/* </CHANGE> */}
         <div className="container mx-auto px-4 relative">
           <div className="max-w-5xl mx-auto text-center">
-            <Badge variant="outline" className="mb-6 border-primary text-primary px-6 py-2">
-              專為不會寫程式的投資人設計
-            </Badge>
             <h1 className="text-4xl lg:text-6xl font-bold text-foreground mb-6 text-balance leading-tight">
               不會寫程式，也能找出
               <br />
@@ -125,12 +121,15 @@ export default function HomePage() {
                 </Button>
               </a>
               <Button
+                asChild
                 variant="outline"
                 size="lg"
                 className="text-lg px-8 py-7 border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground bg-transparent group"
               >
-                <Play className="mr-2 h-5 w-5" />
-                先看看範例策略與回測報告
+                <Link href="/guide">
+                  <Play className="mr-2 h-5 w-5" />
+                  先看看使用教學
+                </Link>
               </Button>
             </div>
 
@@ -146,10 +145,6 @@ export default function HomePage() {
                 <span className="font-medium">平台回測次數超過 100,000 次</span>
               </div>
               <div className="h-4 w-px bg-border"></div>
-              <div className="flex items-center gap-2">
-                <Star className="h-5 w-5 text-accent fill-accent" />
-                <span className="font-medium">用戶平均滿意度：4.9 / 5</span>
-              </div>
             </div>
           </div>
         </div>
@@ -427,10 +422,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-20">
             <Badge variant="outline" className="mb-4 border-primary text-primary px-6 py-2">
-              競品分析
+              產品特色
             </Badge>
             <h2 className="text-4xl lg:text-5xl font-bold text-foreground mb-6 text-balance">
-              為什麼選擇 LazyBacktest？
+              為什麼使用 LazyBacktest？
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">與市面上主流回測平台的功能對比</p>
           </div>
@@ -818,10 +813,6 @@ export default function HomePage() {
                 </div>
 
                 <div className="bg-card rounded-xl p-6 border-2 border-primary/30">
-                  <h4 className="text-xl font-bold text-foreground mb-4 flex items-center justify-center gap-2">
-                    <Target className="h-6 w-6 text-primary" />
-                    為什麼選擇 LazyBacktest？
-                  </h4>
                   <div className="grid md:grid-cols-2 gap-6 text-left">
                     <div className="space-y-3">
                       <div className="flex items-start gap-3">
@@ -1095,13 +1086,24 @@ export default function HomePage() {
               {/* </CHANGE> */}
             </div>
 
-            <div className="mt-16 text-center">
+            <div className="mt-16 flex flex-col sm:flex-row justify-center gap-4">
               <a href="/app/index.html">
                 <Button size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground">
                   進入回測 App
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Button>
               </a>
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="text-primary hover:bg-primary/10 border-primary"
+              >
+                <Link href="/guide">
+                  <Play className="mr-2 h-5 w-5" />
+                  使用教學
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -1120,18 +1122,13 @@ export default function HomePage() {
           <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
             <Card className="p-8 bg-card hover:shadow-xl transition-shadow border-2">
               <CardContent className="pt-0">
-                <div className="flex items-center gap-1 mb-6">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="h-5 w-5 text-accent fill-accent" />
-                  ))}
-                </div>
                 <p className="text-muted-foreground mb-6 leading-relaxed">
                   「我完全不會寫程式，以前只會看技術線圖亂猜。用 LazyBacktest
                   之後，我第一次知道自己常用的那個策略，其實長期報酬很不穩。現在下單前，我都會先跑一次回測，心裡踏實很多。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center">
-                    <span className="text-primary-foreground font-semibold">王</span>
+                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
+                    <img src="/app/avatars/avatar-1.svg" alt="Q版用戶1" className="w-full h-full object-cover" />
                   </div>
                   <div>
                     <p className="font-semibold text-foreground">王先生</p>
@@ -1143,17 +1140,12 @@ export default function HomePage() {
 
             <Card className="p-8 bg-card hover:shadow-xl transition-shadow border-2 border-primary">
               <CardContent className="pt-0">
-                <div className="flex items-center gap-1 mb-6">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="h-5 w-5 text-accent fill-accent" />
-                  ))}
-                </div>
                 <p className="text-muted-foreground mb-6 leading-relaxed">
                   「以前要花好幾個晚上慢慢調參數，還要做紀錄。現在我直接一次勾一堆參數區間給系統跑，十分鐘就有結果。省下來的時間，我拿去思考策略邏輯本身，而不是在那邊重複按回測。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-accent rounded-full flex items-center justify-center">
-                    <span className="text-accent-foreground font-semibold">李</span>
+                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
+                    <img src="/app/avatars/avatar-2.svg" alt="Q版用戶2" className="w-full h-full object-cover" />
                   </div>
                   <div>
                     <p className="font-semibold text-foreground">李小姐</p>
@@ -1165,18 +1157,13 @@ export default function HomePage() {
 
             <Card className="p-8 bg-card hover:shadow-xl transition-shadow border-2">
               <CardContent className="pt-0">
-                <div className="flex items-center gap-1 mb-6">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="h-5 w-5 text-accent fill-accent" />
-                  ))}
-                </div>
                 <p className="text-muted-foreground mb-6 leading-relaxed">
                   「用了 LazyBacktest
                   才發現，我原本以為很厲害的『神奇指標組合』，其實只是少數幾段行情表現很好而已。這讓我學會用更理性的方式看待策略，而不是只看漂亮的單一績效圖。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center">
-                    <span className="text-primary-foreground font-semibold">陳</span>
+                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
+                    <img src="/app/avatars/avatar-3.svg" alt="Q版用戶3" className="w-full h-full object-cover" />
                   </div>
                   <div>
                     <p className="font-semibold text-foreground">陳先生</p>

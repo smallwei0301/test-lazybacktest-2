@@ -17,11 +17,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const shouldIncludeAnalytics = process.env.VERCEL === "1"
+
   return (
     <html lang="zh-TW">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
         <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
-        <Analytics />
+        {shouldIncludeAnalytics && <Analytics />}
       </body>
     </html>
   )
