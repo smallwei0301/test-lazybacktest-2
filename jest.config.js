@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'jsdom',
   roots: ['<rootDir>'],
   testMatch: ['**/__tests__/**/*.ts?(x)', '**/?(*.)+(spec|test).ts?(x)'],
+  modulePathIgnorePatterns: ['/node_modules/', '/\.netlify/functions-serve/'],
   collectCoverageFrom: [
     '**/*.{ts,tsx}',
     '!**/*.d.ts',

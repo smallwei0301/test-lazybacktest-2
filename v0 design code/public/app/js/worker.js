@@ -5092,6 +5092,11 @@ async function tryFetchRangeFromBlob({
   let startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
   let endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
 
+  // 診斷日誌：Blob 讀取結果
+  console.log(
+    `[Worker] ${stockNo} Blob 範圍讀取: 從 ${firstDate} 到 ${lastDate} (${deduped.length} 筆), startGap=${startGap}, endGap=${endGap}`,
+  );
+
   const blobMeta = payload?.meta || {};
   rangeFetchInfo.years = Array.isArray(blobMeta.years) ? blobMeta.years : [];
   rangeFetchInfo.yearKeys = Array.isArray(blobMeta.yearKeys) ? blobMeta.yearKeys : [];
@@ -5111,10 +5116,27 @@ async function tryFetchRangeFromBlob({
   const todayUtcMonth = now.getUTCMonth();
   const todayUtcDate = now.getUTCDate();
   const todayUtcMs = Date.UTC(todayUtcYear, todayUtcMonth, todayUtcDate);
-  const endUtcYear = endDateObj.getUTCFullYear();
-  const endUtcMonth = endDateObj.getUTCMonth();
-  const isCurrentMonthRequest =
-    endUtcYear === todayUtcYear && endUtcMonth === todayUtcMonth;
+  
+  // 🔧 修復：使用結束日期本身來判斷是否為當月請求，而不是依賴 UTC 時間
+  // 因為 endDate 已經是用戶指定的日期，我們應該直接檢查它是否表示當月
+  const endDateISO = endDate; // 例如 "2025-11-18"
+  const endDateParts = endDateISO?.split('-') || [];
+  const endYear = parseInt(endDateParts[0], 10);
+  const endMonth = parseInt(endDateParts[1], 10);
+  
+  // 使用 UTC 時間計算當前年月
+  const todayISO = new Date(todayUtcMs).toISOString().split('T')[0]; // 例如 "2025-11-18"
+  const todayParts = todayISO.split('-');
+  const todayYear = parseInt(todayParts[0], 10);
+  const todayMonth = parseInt(todayParts[1], 10);
+  
+  // 判斷結束日期的年月是否與今天年月相同
+  const isCurrentMonthRequest = (endYear === todayYear && endMonth === todayMonth);
+  
+  // 診斷日誌：日期判斷
+  console.log(
+    `[Worker] ${stockNo} 日期檢查: endDate=${endDate}, today=${todayISO}, endMonth=${endMonth}, todayMonth=${todayMonth}, isCurrentMonth=${isCurrentMonthRequest}`,
+  );
   let targetLatestISO = null;
   let currentMonthGapDays = null;
   if (isCurrentMonthRequest) {
@@ -5147,9 +5169,19 @@ async function tryFetchRangeFromBlob({
     const patchStartISO = lastDate ? addDaysIso(lastDate, 1) : targetLatestISO;
     const gapDateISO = targetLatestISO;
     
+    // 診斷日誌：進入補齊邏輯
+    console.log(
+      `[Worker] ${stockNo} 進入當月補齊邏輯: lastDate=${lastDate}, targetLatestISO=${targetLatestISO}, gap=${normalizedCurrentMonthGap}天`,
+    );
+    
     // 使用新邏輯判斷是否應該進行補齊
     const patchDecision = shouldPatchCurrentMonthGap(stockNo, lastDate, gapDateISO);
     const shouldPerformPatch = patchDecision.shouldPatch;
+    
+    // 診斷日誌：決策結果
+    console.log(
+      `[Worker] ${stockNo} 補齊決策: shouldPatch=${shouldPerformPatch}, reason=${patchDecision.reason}, cacheTTL=${patchDecision.cacheTTL}`,
+    );
     
     // 初始化補齊診斷信息
     rangeFetchInfo.patchDecision = patchDecision;
@@ -5170,6 +5202,9 @@ async function tryFetchRangeFromBlob({
           `[Worker] ${stockNo} 補齊快取命中 (${gapDateISO}, TTL: ${patchDecision.cacheTTL}ms)`,
         );
         if (Array.isArray(cachedPatchResult.rows) && cachedPatchResult.rows.length > 0) {
+          console.log(
+            `[Worker] ${stockNo} 從快取補齊 ${cachedPatchResult.rows.length} 筆資料`,
+          );
           deduped = dedupeAndSortData(deduped.concat(cachedPatchResult.rows));
           lastDate = deduped[deduped.length - 1]?.date || null;
           normalizedCurrentMonthGap = 0;
@@ -5177,6 +5212,9 @@ async function tryFetchRangeFromBlob({
         rangeFetchInfo.patch = cachedPatchResult.diagnostics || patchDecision;
       } else {
         // 執行新的補齊請求
+        console.log(
+          `[Worker] ${stockNo} 執行補齊請求: ${patchStartISO}~${targetLatestISO}`,
+        );
         const patchResult = await fetchCurrentMonthGapPatch({
           stockNo,
           marketKey,
@@ -5188,6 +5226,10 @@ async function tryFetchRangeFromBlob({
           fallbackForceSource,
         });
         
+        console.log(
+          `[Worker] ${stockNo} 補齊結果: status=${patchResult.diagnostics?.status}, rows=${patchResult.rows?.length || 0}`,
+        );
+        
         // 記錄補齊結果到快取
         recordPatchAttempt(stockNo, gapDateISO, patchResult, patchDecision.cacheTTL);
         
@@ -5198,6 +5240,9 @@ async function tryFetchRangeFromBlob({
         };
         
         if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
+          console.log(
+            `[Worker] ${stockNo} 成功補齊 ${patchResult.rows.length} 筆資料，合併到現有資料`,
+          );
           deduped = dedupeAndSortData(deduped.concat(patchResult.rows));
           firstDate = deduped[0]?.date || null;
           lastDate = deduped[deduped.length - 1]?.date || null;
@@ -5238,6 +5283,9 @@ async function tryFetchRangeFromBlob({
           }
         } else {
           // 補齊失敗，改為「部分資料」而非等待
+          console.warn(
+            `[Worker] ${stockNo} 補齊無資料: status=${patchResult.diagnostics?.status}`,
+          );
           if (rangeFetchInfo.patch.status === 'success' || !rangeFetchInfo.patch.status) {
             rangeFetchInfo.patch.status = 'partial-fetch';
             rangeFetchInfo.patch.reason = 'patch-returned-empty';
