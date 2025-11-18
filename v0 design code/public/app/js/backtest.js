@@ -89,6 +89,17 @@ let lastPositionStates = [];
 let lastDatasetDiagnostics = null;
 let lastRecentYearsSetting = null;
 
+const CHART_MODES = {
+    RETURNS: 'returns',
+    PRICE: 'price',
+};
+let currentChartMode = CHART_MODES.RETURNS;
+let chartHasPriceData = false;
+const PRICE_TICK_FORMATTER = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 });
+function formatPriceTick(value) {
+    return Number.isFinite(value) ? PRICE_TICK_FORMATTER.format(value) : '';
+}
+
 const ensureAIBridge = () => {
     if (typeof window === 'undefined') return null;
     if (!window.lazybacktestAIBridge || typeof window.lazybacktestAIBridge !== 'object') {
@@ -1277,6 +1288,8 @@ const STRATEGY_STATUS_CONFIG = {
     },
 };
 
+const STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD = 2;
+
 const strategyStatusElements = (() => {
     if (typeof document === 'undefined') {
         return {};
@@ -1748,10 +1761,10 @@ function determineStrategyStatusState(diff, comparisonAvailable) {
     if (!Number.isFinite(diff)) {
         return 'missing';
     }
-    if (Math.abs(diff) < 1.5) {
+    if (Math.abs(diff) < STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
         return 'tie';
     }
-    if (diff >= 1.5) {
+    if (diff >= STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
         return 'leading';
     }
     return 'behind';
@@ -1759,16 +1772,16 @@ function determineStrategyStatusState(diff, comparisonAvailable) {
 
 function resolveStrategyStatusTitle(diff) {
     if (!Number.isFinite(diff)) return null;
-    if (diff >= 1.5) {
-        return '恭喜！你找到了比較好的獲利策略！';
+    const diffText = formatPercentSigned(diff, 2);
+    const absDiff = Math.abs(diff);
+    if (absDiff >= STRATEGY_STATUS_ANNUALIZED_DIFF_THRESHOLD) {
+        return diff >= 0
+            ? `年化報酬 ${diffText}，大幅領先買入持有，請留意回撤與風控維持優勢。`
+            : `年化報酬 ${diffText}，明顯弱於買入持有，建議檢視交易條件或直接調整策略。`;
     }
-    if (diff <= -1.5) {
-        return '建議你，還是買入該股票並直接持有就好了。';
-    }
-    if (diff >= 0) {
-        return '你的策略獲利比較好一點唷！';
-    }
-    return '加油，再多加觀察看看這個策略。';
+    return diff >= 0
+        ? `年化報酬略高 ${diffText}，可再觀察是否能持續領先買入持有。`
+        : `年化報酬略低 ${diffText}，建議多留意風控與策略穩定度。`;
 }
 
 function updateStrategyStatusCard(result) {
@@ -1824,7 +1837,7 @@ const TREND_PROMOTION_GAIN = 0.28;
 
 const TREND_STYLE_MAP = {
     bullHighVol: {
-        label: '強勢上漲',
+        label: ' 上漲時高波動',
         overlay: 'rgba(239, 68, 68, 0.2)',
         accent: '#dc2626',
         border: 'rgba(239, 68, 68, 0.38)',
@@ -1836,7 +1849,7 @@ const TREND_STYLE_MAP = {
         border: 'rgba(148, 163, 184, 0.38)',
     },
     bearHighVol: {
-        label: '強勢下跌',
+        label: ' 下跌時高波動',
         overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
@@ -3613,15 +3626,6 @@ function renderTrendSummary() {
         && Number.isFinite(summary.coverage?.actualRangePct)
         ? formatPercentPlain(summary.coverage.actualTrendPct + summary.coverage.actualRangePct, 1)
         : '—';
-    const totalBlock = `
-        <div class="trend-summary-total mb-3 rounded-lg border px-4 py-3" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); background: color-mix(in srgb, var(--muted) 6%, var(--background));">
-            <div class="flex items-center justify-between text-[11px]" style="color: var(--muted-foreground);">
-                <div>總報酬 ${latestDateLabel ? `(${latestDateLabel})` : ''}</div>
-                <div>${totalDays ? `${totalDays} 日` : '—'} / ${coverageSummary}</div>
-            </div>
-            <div class="text-2xl font-semibold mt-1" style="color: var(--foreground);">${totalReturnText}</div>
-            <div class="text-[11px] mt-1" style="color: var(--muted-foreground);">整體覆蓋 ${coverageSummary}，含 ${totalDays} 日</div>
-        </div>`;
     const cardMarkup = order.map((key) => {
         const style = TREND_STYLE_MAP[key] || {};
         const stats = summary.aggregatedByType?.[key]
@@ -3636,7 +3640,7 @@ function renderTrendSummary() {
         const accent = style.accent || 'var(--foreground)';
         const label = style.label || key;
         const latestTag = latestLabel === key && latestDateLabel
-            ? `<span class="trend-summary-latest-date">（${latestDateLabel}）</span>`
+            ? `<span class="trend-summary-latest-date">（預估${latestDateLabel}當日趨勢）</span>`
             : '';
         return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
             <div class="flex items-center justify-between gap-3">
@@ -3651,8 +3655,8 @@ function renderTrendSummary() {
         </div>`;
     }).join('');
     const distributionHeading = `
-        <div class="text-[11px] font-semibold mb-2" style="color: var(--foreground);">策略總報酬分布</div>`;
-    container.innerHTML = totalBlock + distributionHeading + cardMarkup;
+        <div class="text-sm font-semibold mb-2" style="color: var(--foreground);">策略總報酬分布</div>`;
+    container.innerHTML = distributionHeading + cardMarkup;
     const coverage = summary.coverage || {};
     const avgConfidence = Number.isFinite(summary.averageConfidence)
         ? formatPercentPlain(summary.averageConfidence * 100, 1)
@@ -6298,26 +6302,27 @@ function initTrendAnalysisToggle() {
 }
 
 function initMultiStagePanel() {
-    const toggleBtn = document.getElementById('multiStageToggle');
+    const checkbox = document.getElementById('multiStageToggle');
     const content = document.getElementById('multiStageContent');
-    const icon = document.getElementById('multiStageToggleIcon');
-    if (!toggleBtn || !content) return;
+    const panel = document.getElementById('multiStagePanel');
+    if (!checkbox || !content) return;
 
-    let expanded = false;
+    let expanded = Boolean(checkbox.checked);
 
     const applyState = (open) => {
         expanded = Boolean(open);
         content.classList.toggle('hidden', !expanded);
         content.setAttribute('aria-hidden', expanded ? 'false' : 'true');
-        toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        toggleBtn.setAttribute('aria-label', expanded ? '隱藏多次進出場設定' : '顯示多次進出場設定');
-        if (icon) {
-            icon.textContent = expanded ? '－' : '＋';
+        checkbox.checked = expanded;
+        checkbox.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        checkbox.setAttribute('aria-label', expanded ? '隱藏多次進出場設定' : '顯示多次進出場設定');
+        if (panel) {
+            panel.dataset.multiStageEnabled = expanded ? 'true' : 'false';
         }
     };
 
-    toggleBtn.addEventListener('click', () => {
-        applyState(!expanded);
+    checkbox.addEventListener('change', () => {
+        applyState(checkbox.checked);
     });
 
     window.lazybacktestMultiStagePanel = {
@@ -6335,7 +6340,7 @@ function initMultiStagePanel() {
         },
     };
 
-    applyState(false);
+    applyState(expanded);
 }
 
 function initSensitivityCollapse(rootEl) {
@@ -7077,6 +7082,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
+document.addEventListener('DOMContentLoaded', initChartModeToggle);
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
@@ -8185,6 +8191,8 @@ function renderChart(result) {
     }
     
     if (!result || !result.dates || result.dates.length === 0) {
+        chartHasPriceData = false;
+        updateChartModeControls();
         chartContainer.innerHTML = `<div class="text-center text-muted py-8" style="color: var(--muted-foreground);"><i data-lucide="bar-chart-3" class="lucide w-12 h-12 mx-auto mb-2 opacity-50"></i><p>無法渲染圖表：數據不足。</p></div>`;
         // Re-initialize Lucide icons
         if (typeof lucide !== 'undefined' && lucide.createIcons) {
@@ -8209,49 +8217,283 @@ function renderChart(result) {
     
     const dates = result.dates;
     const check = (v) => v !== null && !isNaN(v) && isFinite(v);
-    const validReturns = result.strategyReturns.map((v, i) => ({ index: i, value: check(v) ? parseFloat(v) : null })).filter(item => item.value !== null);
+    const strategyReturns = Array.isArray(result.strategyReturns) ? result.strategyReturns : [];
+    const validReturns = strategyReturns.map((v, i) => ({ index: i, value: check(v) ? parseFloat(v) : null })).filter(item => item.value !== null);
     
     if (validReturns.length === 0) {
         console.warn("[Main] No valid strategy return data points to render chart.");
+        chartHasPriceData = false;
+        updateChartModeControls();
         return;
     }
     
     const firstValidReturnIndex = validReturns[0].index;
     const lastValidReturnIndex = validReturns[validReturns.length - 1].index;
+
+    const priceByDate = new Map();
+    if (Array.isArray(visibleStockData)) {
+        visibleStockData.forEach((row) => {
+            const date = row?.date;
+            const closeValue = Number(row?.close);
+            if (date && Number.isFinite(closeValue)) {
+                priceByDate.set(date, closeValue);
+            }
+        });
+    }
+
+    const getPriceAtIndex = (index) => {
+        if (!Number.isFinite(index) || index < 0 || index >= dates.length) return null;
+        const date = dates[index];
+        if (!date) return null;
+        const cached = priceByDate.get(date);
+        return Number.isFinite(cached) ? cached : null;
+    };
+
+    const priceSeries = dates.map((_, idx) => getPriceAtIndex(idx));
+    const hasPriceData = priceSeries.some((value) => Number.isFinite(value));
+    chartHasPriceData = hasPriceData;
+    if (!hasPriceData && currentChartMode === CHART_MODES.PRICE) {
+        currentChartMode = CHART_MODES.RETURNS;
+    }
+    const isPriceMode = currentChartMode === CHART_MODES.PRICE;
     
+    const returnsValueAt = (index) => {
+        if (!Number.isFinite(index) || index < 0 || index >= strategyReturns.length) {
+            return null;
+        }
+        const candidate = strategyReturns[index];
+        return check(candidate) ? parseFloat(candidate) : null;
+    };
+    const priceValueAt = (index) => getPriceAtIndex(index);
+    const getValueForMode = (index) => (isPriceMode ? priceValueAt(index) : returnsValueAt(index));
     const filterSignals = (signals) => {
-        return (signals || []).filter(s => s.index >= firstValidReturnIndex && s.index <= lastValidReturnIndex && check(result.strategyReturns[s.index])).map(s => ({ x: dates[s.index], y: result.strategyReturns[s.index] }));
+        if (!Array.isArray(signals)) return [];
+        return signals
+            .map((signal) => {
+                const signalIndex = Number.isFinite(signal?.index) ? signal.index : -1;
+                if (signalIndex < firstValidReturnIndex || signalIndex > lastValidReturnIndex) {
+                    return null;
+                }
+                const value = getValueForMode(signalIndex);
+                if (!Number.isFinite(value)) {
+                    return null;
+                }
+                return { x: dates[signalIndex], y: value };
+            })
+            .filter(Boolean);
     };
     
     const buySigs = filterSignals(result.chartBuySignals);
     const sellSigs = filterSignals(result.chartSellSignals);
-    const shortSigs = filterSignals(result.chartShortSignals);
-    const coverSigs = filterSignals(result.chartCoverSignals);
-    const stratData = result.strategyReturns.map(v => check(v) ? parseFloat(v) : null);
-    const bhData = result.buyHoldReturns.map(v => check(v) ? parseFloat(v) : null);
-    
-    const datasets = [
-        { label: '買入並持有 %', data: bhData, borderColor: '#6b7280', borderWidth: 1.5, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true },
-        { label: '策略 %', data: stratData, borderColor: '#3b82f6', borderWidth: 2, tension: 0.1, pointRadius: 0, yAxisID: 'y', spanGaps: true }
-    ];
-    
-    if (buySigs.length > 0) {
-        datasets.push({ type:'scatter', label:'買入', data:buySigs, backgroundColor:'#ef4444', radius:6, pointStyle:'triangle', rotation:0, yAxisID:'y' });
+    let shortSigs = [];
+    let coverSigs = [];
+    if (!isPriceMode && result.enableShorting) {
+        shortSigs = filterSignals(result.chartShortSignals);
+        coverSigs = filterSignals(result.chartCoverSignals);
     }
-    if (sellSigs.length > 0) {
-        datasets.push({ type:'scatter', label:'賣出', data:sellSigs, backgroundColor:'#22c55e', radius:6, pointStyle:'triangle', rotation:180, yAxisID:'y' });
-    }
-    if (result.enableShorting) {
-        if (shortSigs.length > 0) {
-            datasets.push({ type:'scatter', label:'做空', data:shortSigs, backgroundColor:'#f59e0b', radius:7, pointStyle:'rectRot', yAxisID:'y' });
+
+    const resolveTradeIndex = (entry) => {
+        if (!entry) return -1;
+        if (Number.isFinite(entry.index)) {
+            return entry.index;
         }
-        if (coverSigs.length > 0) {
-            datasets.push({ type:'scatter', label:'回補', data:coverSigs, backgroundColor:'#8b5cf6', radius:7, pointStyle:'rect', yAxisID:'y' });
+        if (typeof entry.date === 'string') {
+            return dates.indexOf(entry.date);
+        }
+        return -1;
+    };
+
+    const buildTradeSegments = () => {
+        const trades = Array.isArray(result.completedTrades) ? result.completedTrades : [];
+        const segments = [];
+        trades.forEach((tradePair) => {
+            if (!tradePair || !tradePair.entry || !tradePair.exit) return;
+            const startIndex = resolveTradeIndex(tradePair.entry);
+            const endIndex = resolveTradeIndex(tradePair.exit);
+            if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) return;
+            const points = [];
+            for (let idx = startIndex; idx <= endIndex; idx += 1) {
+                const price = getPriceAtIndex(idx);
+                if (!Number.isFinite(price)) continue;
+                points.push({ x: dates[idx], y: price });
+            }
+            if (points.length < 2) return;
+            const profit = Number(tradePair.profit);
+            const color = Number.isFinite(profit)
+                ? profit >= 0
+                    ? '#16a34a'
+                    : '#dc2626'
+                : '#6b7280';
+            segments.push({ data: points, color });
+        });
+        return segments;
+    };
+
+    const buyHoldReturns = Array.isArray(result.buyHoldReturns) ? result.buyHoldReturns : [];
+    const datasets = [];
+    if (isPriceMode) {
+        const priceData = priceSeries.map((value) => (Number.isFinite(value) ? value : null));
+        datasets.push({
+            label: '股價',
+            data: priceData,
+            borderColor: '#3b82f6',
+            borderWidth: 2,
+            tension: 0.1,
+            pointRadius: 0,
+            yAxisID: 'y',
+            spanGaps: true,
+            order: 0,
+        });
+
+        const tradeSegments = buildTradeSegments();
+        tradeSegments.forEach((segment, idx) => {
+            datasets.push({
+                label: `trade-segment-${idx}`,
+                data: segment.data,
+                borderColor: segment.color,
+                borderWidth: 3,
+                tension: 0.1,
+                pointRadius: 0,
+                fill: false,
+                yAxisID: 'y',
+                spanGaps: false,
+                order: 1,
+            });
+        });
+
+        if (buySigs.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: '買入',
+                data: buySigs,
+                backgroundColor: '#ef4444',
+                radius: 6,
+                pointStyle: 'triangle',
+                rotation: 0,
+                yAxisID: 'y',
+                order: 2,
+            });
+        }
+        if (sellSigs.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: '賣出',
+                data: sellSigs,
+                backgroundColor: '#22c55e',
+                radius: 6,
+                pointStyle: 'triangle',
+                rotation: 180,
+                yAxisID: 'y',
+                order: 2,
+            });
+        }
+    } else {
+        const stratData = strategyReturns.map((v) => (check(v) ? parseFloat(v) : null));
+        const bhData = buyHoldReturns.map((v) => (check(v) ? parseFloat(v) : null));
+        datasets.push({
+            label: '買入並持有 %',
+            data: bhData,
+            borderColor: '#6b7280',
+            borderWidth: 1.5,
+            tension: 0.1,
+            pointRadius: 0,
+            yAxisID: 'y',
+            spanGaps: true,
+        });
+        datasets.push({
+            label: '策略 %',
+            data: stratData,
+            borderColor: '#3b82f6',
+            borderWidth: 2,
+            tension: 0.1,
+            pointRadius: 0,
+            yAxisID: 'y',
+            spanGaps: true,
+        });
+
+        if (buySigs.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: '買入',
+                data: buySigs,
+                backgroundColor: '#ef4444',
+                radius: 6,
+                pointStyle: 'triangle',
+                rotation: 0,
+                yAxisID: 'y',
+            });
+        }
+        if (sellSigs.length > 0) {
+            datasets.push({
+                type: 'scatter',
+                label: '賣出',
+                data: sellSigs,
+                backgroundColor: '#22c55e',
+                radius: 6,
+                pointStyle: 'triangle',
+                rotation: 180,
+                yAxisID: 'y',
+            });
+        }
+        if (result.enableShorting) {
+            if (shortSigs.length > 0) {
+                datasets.push({
+                    type: 'scatter',
+                    label: '做空',
+                    data: shortSigs,
+                    backgroundColor: '#f59e0b',
+                    radius: 7,
+                    pointStyle: 'rectRot',
+                    yAxisID: 'y',
+                });
+            }
+            if (coverSigs.length > 0) {
+                datasets.push({
+                    type: 'scatter',
+                    label: '回補',
+                    data: coverSigs,
+                    backgroundColor: '#8b5cf6',
+                    radius: 7,
+                    pointStyle: 'rect',
+                    yAxisID: 'y',
+                });
+            }
         }
     }
     
     // 確保插件已註冊
     console.log('Creating chart with plugins:', Chart.registry.plugins.items);
+    const yAxisConfig = isPriceMode
+        ? {
+            type: 'linear',
+            display: true,
+            position: 'left',
+            title: {
+                display: true,
+                text: '股價 (NT$)',
+            },
+            ticks: {
+                callback: (value) => formatPriceTick(value),
+            },
+            grid: {
+                color: '#e5e7eb',
+            },
+        }
+        : {
+            type: 'linear',
+            display: true,
+            position: 'left',
+            title: {
+                display: true,
+                text: '收益率 (%)',
+            },
+            ticks: {
+                callback: (value) => (Number.isFinite(value) ? `${value}%` : ''),
+            },
+            grid: {
+                color: '#e5e7eb',
+            },
+        };
     
     stockChart = new Chart(ctx, {
         type: 'line',
@@ -8275,7 +8517,11 @@ function renderChart(result) {
                 },
                 legend: {
                     position: 'top',
-                    labels: { usePointStyle: true }
+                    labels: {
+                        usePointStyle: true,
+                        filter: (legendItem) =>
+                            !(legendItem && typeof legendItem.text === 'string' && legendItem.text.startsWith('trade-segment')),
+                    },
                 },
                 tooltip: {
                     mode: 'index',
@@ -8298,21 +8544,7 @@ function renderChart(result) {
                 }
             },
             scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: {
-                        display: true,
-                        text: '收益率 (%)'
-                    },
-                    ticks: {
-                        callback: v => v + '%'
-                    },
-                    grid: {
-                        color: '#e5e7eb'
-                    }
-                },
+                y: yAxisConfig,
                 x: {
                     type: 'category',
                     grid: {
@@ -8376,6 +8608,41 @@ function renderChart(result) {
     canvas.addEventListener('contextmenu', (e) => {
         e.preventDefault();
     });
+    updateChartModeControls();
+}
+
+function updateChartModeControls() {
+    const toggleBtn = document.getElementById('chartModeToggle');
+    const labelEl = document.getElementById('chartModeLabel');
+    if (!toggleBtn || !labelEl) return;
+    const isPriceMode = currentChartMode === CHART_MODES.PRICE;
+    toggleBtn.disabled = !chartHasPriceData && !isPriceMode;
+    toggleBtn.setAttribute('aria-pressed', isPriceMode ? 'true' : 'false');
+    toggleBtn.textContent = isPriceMode ? '切換到報酬率模式' : '切換到股價模式';
+    let labelText = isPriceMode ? '當前：股價模式' : '當前：報酬率模式';
+    if (!chartHasPriceData) {
+        labelText += '（缺乏價格資料）';
+    }
+    labelEl.textContent = labelText;
+}
+
+function initChartModeToggle() {
+    const toggleBtn = document.getElementById('chartModeToggle');
+    if (!toggleBtn) return;
+    toggleBtn.addEventListener('click', () => {
+        if (!chartHasPriceData && currentChartMode === CHART_MODES.RETURNS) {
+            return;
+        }
+        currentChartMode = currentChartMode === CHART_MODES.PRICE ? CHART_MODES.RETURNS : CHART_MODES.PRICE;
+        if (currentChartMode === CHART_MODES.PRICE && !chartHasPriceData) {
+            currentChartMode = CHART_MODES.RETURNS;
+        }
+        updateChartModeControls();
+        if (lastOverallResult) {
+            renderChart(lastOverallResult);
+        }
+    });
+    updateChartModeControls();
 }
 // 優化專用進度顯示函數
 function showOptimizationProgress(message) {

@@ -14194,15 +14194,6 @@ self.onmessage = async function (e) {
       if (typeof dataLagDays === "number" && dataLagDays > 0) {
         developerNotes.push(`最新資料為 ${displayLatestDate}，距今日 ${dataLagDays} 日。`);
       }
-      if (
-        params.endDate &&
-        datasetLastDate &&
-        datasetLastDate > params.endDate
-      ) {
-        notes.push(
-          `已延伸資料至 ${datasetLastDate}，超過原設定結束日 ${params.endDate}。`,
-        );
-      }
       if (evaluationMeta && evaluationMeta.fallback) {
         issueCode = evaluationMeta.fallbackReason || "final_evaluation_degraded";
         const fallbackFromDate =

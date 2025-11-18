@@ -1,5 +1,11 @@
 {
   "extends": [
     "next/core-web-vitals"
+  ],
+  "ignorePatterns": [
+    "public/app/js/backtest_corrupted.js",
+    "public/batch-optimization.js",
+    "public/app/js/worker_backup*.js",
+    "public/app/js/worker_backup_before*.js"
   ]
 }

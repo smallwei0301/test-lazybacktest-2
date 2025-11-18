@@ -381,33 +381,29 @@ window.lazybacktestStagedExit = {
 const multiStagePanelController = (() => {
     const state = {
         container: null,
-        toggle: null,
-        icon: null,
+        checkbox: null,
         content: null,
         expanded: false,
     };
 
     const ensureElements = () => {
-        if (state.container && state.toggle && state.icon && state.content) {
+        if (state.container && state.checkbox && state.content) {
             return true;
         }
         state.container = document.getElementById('multiStagePanel');
-        state.toggle = document.getElementById('multiStageToggle');
-        state.icon = document.getElementById('multiStageToggleIcon');
+        state.checkbox = document.getElementById('multiStageToggle');
         state.content = document.getElementById('multiStageContent');
-        return Boolean(state.container && state.toggle && state.icon && state.content);
+        return Boolean(state.container && state.checkbox && state.content);
     };
 
     const applyState = () => {
         if (!ensureElements()) return;
         const expanded = Boolean(state.expanded);
-        state.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        if (expanded) {
-            state.content.classList.remove('hidden');
-            state.icon.textContent = '−';
-        } else {
-            state.content.classList.add('hidden');
-            state.icon.textContent = '+';
+        state.checkbox.checked = expanded;
+        state.checkbox.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        state.content.classList.toggle('hidden', !expanded);
+        if (state.container) {
+            state.container.dataset.multiStageEnabled = expanded ? 'true' : 'false';
         }
     };
 
@@ -422,15 +418,14 @@ const multiStagePanelController = (() => {
 
     const bindEvents = () => {
         if (!ensureElements()) return;
-        state.toggle.addEventListener('click', (event) => {
-            event.preventDefault();
-            toggle();
+        state.checkbox.addEventListener('change', (event) => {
+            setExpanded(event.target.checked);
         });
     };
 
     const init = () => {
         if (!ensureElements()) return;
-        state.expanded = state.toggle.getAttribute('aria-expanded') === 'true';
+        state.expanded = state.checkbox.checked;
         bindEvents();
         applyState();
     };
