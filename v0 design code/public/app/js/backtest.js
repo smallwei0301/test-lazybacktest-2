@@ -136,12 +136,14 @@ function setVisibleStockData(data) {
 
 function normaliseStrategyIdForRole(role, strategyId) {
     if (!strategyId) return strategyId;
-    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normalise === 'function') {
-        return window.LazyStrategyId.normalise(role, strategyId);
-    }
-    const table = window.LazyStrategyId?.map?.[role];
-    if (table && table[strategyId]) {
-        return table[strategyId];
+    if (typeof window !== 'undefined' && window.LazyStrategyId) {
+        if (typeof window.LazyStrategyId.normalise === 'function') {
+            return window.LazyStrategyId.normalise(role, strategyId);
+        }
+        const table = window.LazyStrategyId.map?.[role];
+        if (table && table[strategyId]) {
+            return table[strategyId];
+        }
     }
     if (role === 'exit' && ['ma_cross', 'macd_cross', 'k_d_cross', 'ema_cross'].includes(strategyId)) {
         return `${strategyId}_exit`;
@@ -157,14 +159,16 @@ function normaliseStrategyIdForRole(role, strategyId) {
 
 function normaliseStrategyIdAny(strategyId) {
     if (!strategyId) return strategyId;
-    if (typeof window !== 'undefined' && window.LazyStrategyId && typeof window.LazyStrategyId.normaliseAny === 'function') {
-        return window.LazyStrategyId.normaliseAny(strategyId);
-    }
-    const maps = window.LazyStrategyId?.map || {};
-    for (const role of Object.keys(maps)) {
-        const migrated = maps[role]?.[strategyId];
-        if (migrated) {
-            return migrated;
+    if (typeof window !== 'undefined' && window.LazyStrategyId) {
+        if (typeof window.LazyStrategyId.normaliseAny === 'function') {
+            return window.LazyStrategyId.normaliseAny(strategyId);
+        }
+        const maps = window.LazyStrategyId.map || {};
+        for (const role of Object.keys(maps)) {
+            const migrated = maps[role]?.[strategyId];
+            if (migrated) {
+                return migrated;
+            }
         }
     }
     const exitCandidate = normaliseStrategyIdForRole('exit', strategyId);
@@ -2833,62 +2837,6 @@ function mapStatesToRegimes(model) {
     return { labelToState, stateToLabel, descriptors };
 }
 
-// Compute HMM assignments for each available observation using only past data
-// observations: array of feature rows (one per valid index)
-// indices: original indices in the full date series that correspond to observations
-// totalDates: total length of the full date series (for result sizing)
-// options: { minSamples, windowSize, maxIterations, tolerance }
-function computeOnlineHMMAssignments(observations, indices, totalDates, options = {}) {
-    const minSamples = Math.max(3, Number.isFinite(options.minSamples) ? Math.round(options.minSamples) : 16);
-    const windowSize = Number.isFinite(options.windowSize) && options.windowSize > 0 ? Math.round(options.windowSize) : Infinity;
-    const maxIterations = Math.max(1, Number.isFinite(options.maxIterations) ? Math.round(options.maxIterations) : 100);
-    const tolerance = Number.isFinite(options.tolerance) ? options.tolerance : 1e-4;
-
-    const assignments = new Array(totalDates).fill(null);
-    const posteriors = new Array(totalDates).fill(null);
-    let lastModel = null;
-    let lastMapping = null;
-    let lastNormalization = null;
-
-    if (!Array.isArray(observations) || observations.length === 0) {
-        return { assignments, posteriors, lastModel, lastMapping, lastNormalization };
-    }
-
-    for (let seqIndex = 0; seqIndex < observations.length; seqIndex += 1) {
-        const obsCount = seqIndex + 1;
-        if (obsCount < minSamples) continue;
-        const start = Number.isFinite(windowSize) && windowSize !== Infinity
-            ? Math.max(0, seqIndex + 1 - windowSize)
-            : 0;
-        const windowObs = observations.slice(start, seqIndex + 1);
-        if (windowObs.length < minSamples) continue;
-        const normalization = normalizeObservationMatrix(windowObs);
-        if (!normalization || !Array.isArray(normalization.normalized) || normalization.normalized.length < minSamples) {
-            continue;
-        }
-        const model = trainFourStateHMM(normalization.normalized, { maxIterations, tolerance });
-        if (!model) continue;
-        const mapping = mapStatesToRegimes(model) || {};
-        const reverseMap = mapping.stateToLabel || {};
-        const lastSeqIndex = Array.isArray(model.sequence) ? model.sequence.length - 1 : -1;
-        const stateIndex = lastSeqIndex >= 0 ? model.sequence[lastSeqIndex] : null;
-        const label = Number.isInteger(stateIndex) ? reverseMap[stateIndex] : null;
-        const targetIndex = indices[seqIndex];
-        if (Number.isInteger(targetIndex)) {
-            assignments[targetIndex] = label || null;
-            const posteriorRow = Array.isArray(model.posteriors) && Array.isArray(model.posteriors[model.posteriors.length - 1])
-                ? model.posteriors[model.posteriors.length - 1].slice()
-                : null;
-            if (posteriorRow) posteriors[targetIndex] = posteriorRow;
-        }
-        lastModel = model;
-        lastMapping = mapping;
-        lastNormalization = normalization;
-    }
-
-    return { assignments, posteriors, lastModel, lastMapping, lastNormalization };
-}
-
 function combineDirectionVol(direction, volatility) {
     if (volatility === 'low') {
         return 'rangeBound';
@@ -3391,38 +3339,29 @@ function prepareRegimeBaseData(result, options = {}) {
             indices.push(i);
         }
     }
-    // Compute HMM assignments incrementally using only past data (no future leakage)
     let normalization = null;
     let hmmModel = null;
+    if (observations.length >= 16) {
+        normalization = normalizeObservationMatrix(observations);
+        hmmModel = trainFourStateHMM(normalization.normalized, { maxIterations: 100, tolerance: 1e-4 });
+    }
     const hmmAssignments = new Array(dates.length).fill(null);
     const hmmPosteriors = new Array(dates.length).fill(null);
     let mapping = null;
-    if (observations.length > 0) {
-        const online = computeOnlineHMMAssignments(
-            observations,
-            indices,
-            dates.length,
-            {
-                minSamples: options.minSamples || 16,
-                windowSize: options.hmmWindowSize || Infinity,
-                maxIterations: 100,
-                tolerance: 1e-4,
-            },
-        );
-        if (online) {
-            // copy returned assignments/posteriors into arrays sized by dates
-            for (let i = 0; i < dates.length; i += 1) {
-                if (online.assignments && i < online.assignments.length) {
-                    hmmAssignments[i] = online.assignments[i];
-                }
-                if (online.posteriors && i < online.posteriors.length) {
-                    hmmPosteriors[i] = online.posteriors[i];
-                }
+    if (hmmModel) {
+        mapping = mapStatesToRegimes(hmmModel);
+        const reverseMap = mapping?.stateToLabel || {};
+        indices.forEach((targetIndex, seqIndex) => {
+            const stateIndex = Array.isArray(hmmModel.sequence) ? hmmModel.sequence[seqIndex] : null;
+            const label = Number.isInteger(stateIndex) ? reverseMap[stateIndex] : null;
+            hmmAssignments[targetIndex] = label || null;
+            const posteriorRow = Array.isArray(hmmModel.posteriors?.[seqIndex])
+                ? hmmModel.posteriors[seqIndex].slice()
+                : null;
+            if (posteriorRow) {
+                hmmPosteriors[targetIndex] = posteriorRow;
             }
-            hmmModel = online.lastModel || null;
-            mapping = online.lastMapping || null;
-            normalization = online.lastNormalization || null;
-        }
+        });
     }
 
     return {

@@ -474,6 +474,11 @@ let workerLastDataset = null;
 let workerLastMeta = null;
 let pendingNextDayTrade = null; // 隔日交易追蹤變數
 
+// 當月補齊快取：記錄同一支股票同一天的補齊嘗試，避免重複呼叫
+const patchAttemptCache = new Map(); // Key: `${stockNo}|${gapDate}`, Value: { result, timestamp }
+const PATCH_CACHE_TTL_SAME_DAY_MS = 5 * 60 * 1000; // 同一交易日，5 分鐘內不重複
+const PATCH_CACHE_TTL_MISSING_TRADE_MS = 60 * 60 * 1000; // 缺少前一交易日資料，1 小時內不重複
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COVERAGE_GAP_TOLERANCE_DAYS = 6;
 const CRITICAL_START_GAP_TOLERANCE_DAYS = 7;
@@ -487,6 +492,7 @@ const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
 const SENSITIVITY_ABSOLUTE_MULTIPLIERS = [1, 2];
 const SENSITIVITY_MAX_SCENARIOS_PER_PARAM = 8;
 const NETLIFY_BLOB_RANGE_TIMEOUT_MS = 2500;
+const TW_AFTERNOON_CUTOFF_HOUR = 14; // 台灣下午兩點 (14:00) 之後才能補齊當日資料
 
 const ANNUALIZED_SENSITIVITY_THRESHOLDS = Object.freeze({
   driftStable: 6,
@@ -2338,6 +2344,199 @@ function getMarketKey(marketType) {
 
 function getPriceModeKey(adjusted) {
   return adjusted ? "ADJ" : "RAW";
+}
+
+/**
+ * 取得台灣時區的當前時間（小時）
+ * @returns {number} 0-23 之間的小時數
+ */
+function getCurrentTWHour() {
+  const now = new Date();
+  // 將 UTC 時間轉換為台灣時間（UTC+8）
+  const utcHours = now.getUTCHours();
+  const utcMinutes = now.getUTCMinutes();
+  const utcSeconds = now.getUTCSeconds();
+  const utcTotalSeconds = utcHours * 3600 + utcMinutes * 60 + utcSeconds;
+  const twTotalSeconds = utcTotalSeconds + (8 * 3600);
+  const twTotalSecondsAdjusted = twTotalSeconds % (24 * 3600);
+  return Math.floor(twTotalSecondsAdjusted / 3600);
+}
+
+/**
+ * 判斷給定日期是否為台灣的正常交易日（不含周六日）
+ * @param {string|Date} dateISO ISO 格式日期 (YYYY-MM-DD) 或 Date 物件
+ * @returns {boolean} true 若為交易日（周一至周五）
+ */
+function isTWTradingDay(dateISO) {
+  let date;
+  if (typeof dateISO === 'string') {
+    date = new Date(dateISO);
+  } else if (dateISO instanceof Date) {
+    date = dateISO;
+  } else {
+    return false;
+  }
+  
+  if (Number.isNaN(date.getTime())) return false;
+  
+  // 使用 getUTCDay() 以避免時區混淆
+  // 0=Sunday, 1=Monday, ..., 6=Saturday
+  const dayOfWeek = date.getUTCDay();
+  return dayOfWeek >= 1 && dayOfWeek <= 5; // 周一至周五
+}
+
+/**
+ * 取得前一個台灣交易日（ISO 格式）
+ * @param {string|Date} dateISO ISO 格式日期 (YYYY-MM-DD) 或 Date 物件
+ * @returns {string|null} 前一交易日的 ISO 格式 (YYYY-MM-DD)，若無法計算則返回 null
+ */
+function getPreviousTWTradingDay(dateISO) {
+  let date;
+  if (typeof dateISO === 'string') {
+    date = new Date(dateISO);
+  } else if (dateISO instanceof Date) {
+    date = new Date(dateISO);
+  } else {
+    return null;
+  }
+  
+  if (Number.isNaN(date.getTime())) return null;
+  
+  // 回溯最多 3 天（以防連假）
+  for (let i = 1; i <= 3; i++) {
+    const prevDate = new Date(date);
+    prevDate.setUTCDate(prevDate.getUTCDate() - i);
+    if (isTWTradingDay(prevDate)) {
+      return prevDate.toISOString().split('T')[0];
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * 判斷是否應該嘗試補齊當月最新資料
+ * 邏輯：
+ *   1. 若最後一筆資料為前一個交易日，且目前台灣時間 >= 14:00，則進行補齊（快取 5 分鐘）
+ *   2. 若最後一筆資料為前一個交易日，但目前台灣時間 < 14:00，則不補齊（資料未更新）
+ *   3. 若最後一筆資料不是前一個交易日，則進行補齊（快取 1 小時）
+ * 
+ * @param {string} stockNo 股票代碼
+ * @param {string} lastDataISO 最後一筆資料的日期 (YYYY-MM-DD)
+ * @param {string} targetEndISO 目標結束日期 (YYYY-MM-DD)，通常是當日
+ * @returns {object} { shouldPatch: boolean, reason: string, cacheTTL: number }
+ */
+function shouldPatchCurrentMonthGap(stockNo, lastDataISO, targetEndISO) {
+  // 若最後資料日期不存在或等於目標日期，不需補齊
+  if (!lastDataISO || lastDataISO >= targetEndISO) {
+    return { shouldPatch: false, reason: 'data-up-to-date', cacheTTL: 0 };
+  }
+  
+  const prevTradingDay = getPreviousTWTradingDay(targetEndISO);
+  
+  // 無法取得前一交易日
+  if (!prevTradingDay) {
+    return { shouldPatch: false, reason: 'cannot-determine-prev-trading-day', cacheTTL: 0 };
+  }
+  
+  // 情況 1：最後資料為前一交易日
+  if (lastDataISO === prevTradingDay) {
+    const currentHour = getCurrentTWHour();
+    
+    if (currentHour >= TW_AFTERNOON_CUTOFF_HOUR) {
+      // 已過下午兩點，可以補齊
+      return {
+        shouldPatch: true,
+        reason: 'after-2pm-can-fetch-today-data',
+        cacheTTL: PATCH_CACHE_TTL_SAME_DAY_MS
+      };
+    } else {
+      // 未過下午兩點，資料未更新
+      return {
+        shouldPatch: false,
+        reason: 'before-2pm-data-not-updated-yet',
+        cacheTTL: 0
+      };
+    }
+  }
+  
+  // 情況 2：最後資料不是前一交易日（更早的資料）
+  return {
+    shouldPatch: true,
+    reason: 'missing-previous-trading-day-data',
+    cacheTTL: PATCH_CACHE_TTL_MISSING_TRADE_MS
+  };
+}
+
+/**
+ * 檢查補齊快取，判斷是否應該跳過本次補齊
+ * @param {string} stockNo 股票代碼
+ * @param {string} gapDateISO 補齊目標日期 (YYYY-MM-DD)
+ * @returns {boolean} true 若快取仍有效（應跳過）；false 若應進行補齊
+ */
+function isPatchCacheSuspended(stockNo, gapDateISO) {
+  const cacheKey = `${stockNo}|${gapDateISO}`;
+  const cached = patchAttemptCache.get(cacheKey);
+  
+  if (!cached) return false;
+  
+  const age = Date.now() - cached.timestamp;
+  if (age < cached.ttl) {
+    // 快取仍有效
+    return true;
+  }
+  
+  // 快取已過期，清除
+  patchAttemptCache.delete(cacheKey);
+  return false;
+}
+
+/**
+ * 紀錄補齊嘗試到快取
+ * @param {string} stockNo 股票代碼
+ * @param {string} gapDateISO 補齊目標日期 (YYYY-MM-DD)
+ * @param {object} result 補齊結果 { rows: [...], diagnostics: {...} }
+ * @param {number} ttl 快取有效期 (毫秒)
+ */
+function recordPatchAttempt(stockNo, gapDateISO, result, ttl) {
+  const cacheKey = `${stockNo}|${gapDateISO}`;
+  patchAttemptCache.set(cacheKey, {
+    result,
+    timestamp: Date.now(),
+    ttl
+  });
+  
+  // 定期清理過期快取（每 100 筆操作）
+  if (patchAttemptCache.size % 100 === 0) {
+    const now = Date.now();
+    for (const [key, value] of patchAttemptCache.entries()) {
+      if ((now - value.timestamp) >= value.ttl) {
+        patchAttemptCache.delete(key);
+      }
+    }
+  }
+}
+
+/**
+ * 嘗試從快取取得補齊結果
+ * @param {string} stockNo 股票代碼
+ * @param {string} gapDateISO 補齊目標日期 (YYYY-MM-DD)
+ * @returns {object|null} 快取的補齊結果，或 null 若快取無效
+ */
+function getPatchAttemptFromCache(stockNo, gapDateISO) {
+  const cacheKey = `${stockNo}|${gapDateISO}`;
+  const cached = patchAttemptCache.get(cacheKey);
+  
+  if (!cached) return null;
+  
+  const age = Date.now() - cached.timestamp;
+  if (age < cached.ttl) {
+    return cached.result;
+  }
+  
+  // 快取已過期
+  patchAttemptCache.delete(cacheKey);
+  return null;
 }
 
 function getMonthlyStaleRevalidateMs(marketKey) {
@@ -4946,70 +5145,112 @@ async function tryFetchRangeFromBlob({
     normalizedCurrentMonthGap > 0
   ) {
     const patchStartISO = lastDate ? addDaysIso(lastDate, 1) : targetLatestISO;
-    const patchResult = await fetchCurrentMonthGapPatch({
-      stockNo,
-      marketKey,
-      gapStartISO: patchStartISO,
-      gapEndISO: targetLatestISO,
-      startDateObj,
-      endDateObj,
-      primaryForceSource,
-      fallbackForceSource,
-    });
-    rangeFetchInfo.patch = patchResult.diagnostics || {
-      status: "unknown",
+    const gapDateISO = targetLatestISO;
+    
+    // 使用新邏輯判斷是否應該進行補齊
+    const patchDecision = shouldPatchCurrentMonthGap(stockNo, lastDate, gapDateISO);
+    const shouldPerformPatch = patchDecision.shouldPatch;
+    
+    // 初始化補齊診斷信息
+    rangeFetchInfo.patchDecision = patchDecision;
+    rangeFetchInfo.patch = {
+      status: "skipped",
+      reason: patchDecision.reason,
       start: patchStartISO,
       end: targetLatestISO,
     };
-    fetchDiagnostics.patch = rangeFetchInfo.patch;
-    if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
-      deduped = dedupeAndSortData(deduped.concat(patchResult.rows));
-      firstDate = deduped[0]?.date || null;
-      lastDate = deduped[deduped.length - 1]?.date || null;
-      firstDateObj = firstDate ? new Date(firstDate) : null;
-      lastDateObj = lastDate ? new Date(lastDate) : null;
-      startGapRaw = firstDateObj
-        ? differenceInDays(firstDateObj, startDateObj)
-        : null;
-      endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
-      startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
-      endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
-      if (targetLatestISO && lastDate) {
-        if (lastDate < targetLatestISO) {
-          const targetLatestObj = new Date(targetLatestISO);
-          const lastDateObjForGap = new Date(lastDate);
-          const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
-          currentMonthGapDays = Number.isFinite(gapDays)
-            ? Math.max(0, gapDays)
+    
+    if (shouldPerformPatch) {
+      // 檢查快取，避免重複補齊
+      const cachedPatchResult = getPatchAttemptFromCache(stockNo, gapDateISO);
+      
+      if (cachedPatchResult) {
+        // ✅ 使用快取的補齊結果
+        console.log(
+          `[Worker] ${stockNo} 補齊快取命中 (${gapDateISO}, TTL: ${patchDecision.cacheTTL}ms)`,
+        );
+        if (Array.isArray(cachedPatchResult.rows) && cachedPatchResult.rows.length > 0) {
+          deduped = dedupeAndSortData(deduped.concat(cachedPatchResult.rows));
+          lastDate = deduped[deduped.length - 1]?.date || null;
+          normalizedCurrentMonthGap = 0;
+        }
+        rangeFetchInfo.patch = cachedPatchResult.diagnostics || patchDecision;
+      } else {
+        // 執行新的補齊請求
+        const patchResult = await fetchCurrentMonthGapPatch({
+          stockNo,
+          marketKey,
+          gapStartISO: patchStartISO,
+          gapEndISO: targetLatestISO,
+          startDateObj,
+          endDateObj,
+          primaryForceSource,
+          fallbackForceSource,
+        });
+        
+        // 記錄補齊結果到快取
+        recordPatchAttempt(stockNo, gapDateISO, patchResult, patchDecision.cacheTTL);
+        
+        rangeFetchInfo.patch = patchResult.diagnostics || {
+          status: "unknown",
+          start: patchStartISO,
+          end: targetLatestISO,
+        };
+        
+        if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
+          deduped = dedupeAndSortData(deduped.concat(patchResult.rows));
+          firstDate = deduped[0]?.date || null;
+          lastDate = deduped[deduped.length - 1]?.date || null;
+          firstDateObj = firstDate ? new Date(firstDate) : null;
+          lastDateObj = lastDate ? new Date(lastDate) : null;
+          startGapRaw = firstDateObj
+            ? differenceInDays(firstDateObj, startDateObj)
             : null;
+          endGapRaw = lastDateObj ? differenceInDays(endDateObj, lastDateObj) : null;
+          startGap = Number.isFinite(startGapRaw) ? Math.max(0, startGapRaw) : null;
+          endGap = Number.isFinite(endGapRaw) ? Math.max(0, endGapRaw) : null;
+          if (targetLatestISO && lastDate) {
+            if (lastDate < targetLatestISO) {
+              const targetLatestObj = new Date(targetLatestISO);
+              const lastDateObjForGap = new Date(lastDate);
+              const gapDays = differenceInDays(targetLatestObj, lastDateObjForGap);
+              currentMonthGapDays = Number.isFinite(gapDays)
+                ? Math.max(0, gapDays)
+                : null;
+            } else {
+              currentMonthGapDays = 0;
+            }
+          }
+          normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
+            ? currentMonthGapDays
+            : null;
+
+          // 補齊成功後，非同步觸發後端重建/持久化 year-cache（best-effort）
+          try {
+            const persistUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&marketType=${encodeURIComponent(marketKey)}&cacheBust=${Date.now()}`;
+            fetch(persistUrl, { method: 'GET' }).then(() => {
+              /* persisted trigger sent */
+            }).catch(() => {
+              /* ignore persistence failures */
+            });
+          } catch (persistErr) {
+            console.warn('[Worker] trigger year-cache persist failed:', persistErr);
+          }
         } else {
-          currentMonthGapDays = 0;
+          // 補齊失敗，改為「部分資料」而非等待
+          if (rangeFetchInfo.patch.status === 'success' || !rangeFetchInfo.patch.status) {
+            rangeFetchInfo.patch.status = 'partial-fetch';
+            rangeFetchInfo.patch.reason = 'patch-returned-empty';
+          }
         }
       }
-      normalizedCurrentMonthGap = Number.isFinite(currentMonthGapDays)
-        ? currentMonthGapDays
-        : null;
-
-      // 若補抓成功（取得新資料），非同步觸發後端重建/持久化 year-cache（best-effort）
-      try {
-        const persistUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&marketType=${encodeURIComponent(marketKey)}&cacheBust=${Date.now()}`;
-        // fire-and-forget, don't await - best-effort to persist the updated slices
-        fetch(persistUrl, { method: 'GET' }).then(() => {
-          /* persisted trigger sent */
-        }).catch(() => {
-          /* ignore persistence failures */
-        });
-      } catch (persistErr) {
-        console.warn('[Worker] trigger year-cache persist failed:', persistErr);
-      }
-      rangeFetchInfo.rowCount = deduped.length;
-      rangeFetchInfo.firstDate = firstDate;
-      rangeFetchInfo.lastDate = lastDate;
-      rangeFetchInfo.startGapDays = Number.isFinite(startGap) ? startGap : null;
-      rangeFetchInfo.endGapDays = Number.isFinite(endGap) ? endGap : null;
+    } else {
+      // 不應進行補齊
+      console.log(
+        `[Worker] ${stockNo} 當月補齊被跳過 (原因: ${patchDecision.reason})`,
+      );
     }
-  } else {
-    rangeFetchInfo.patch = { status: "not-required" };
+    
     fetchDiagnostics.patch = rangeFetchInfo.patch;
   }
 
@@ -5037,13 +5278,45 @@ async function tryFetchRangeFromBlob({
     Number.isFinite(normalizedCurrentMonthGap) &&
     normalizedCurrentMonthGap > 0
   ) {
-    rangeFetchInfo.status = "current-month-stale";
-    rangeFetchInfo.reason = "current-month-gap";
-    console.warn(
-      `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
-        lastDate || "N/A"
-      } < expected=${targetLatestISO})，等待當日補齊。`,
-    );
+    // 根據補齊狀態決定最終的警告信息
+    if (rangeFetchInfo.patch?.status === 'partial-fetch') {
+      // 補齊被嘗試但未成功 → 告知用戶為部分資料
+      rangeFetchInfo.status = "partial-fetch";
+      rangeFetchInfo.reason = "patch-failed";
+      console.warn(
+        `[Worker] ${stockNo} 當月補齊未成功 (${lastDate || "N/A"} < ${targetLatestISO})，使用部分資料。原因: ${rangeFetchInfo.patch.reason || 'unknown'}`,
+      );
+    } else if (rangeFetchInfo.patchDecision?.shouldPatch === false) {
+      // 補齊被主動跳過（尚未過下午2點或其他原因）
+      const reason = rangeFetchInfo.patchDecision?.reason;
+      if (reason === 'before-2pm-data-not-updated-yet') {
+        rangeFetchInfo.status = "current-month-pending";
+        console.log(
+          `[Worker] ${stockNo} 當前台灣時間未過下午2點 (14:00)，官方資料未更新，使用現有資料。`,
+        );
+      } else if (reason === 'missing-previous-trading-day-data') {
+        rangeFetchInfo.status = "current-month-stale";
+        console.warn(
+          `[Worker] ${stockNo} 當月缺少前一交易日資料，補齊中...`,
+        );
+      } else {
+        rangeFetchInfo.status = "current-month-stale";
+        console.warn(
+          `[Worker] ${stockNo} 當月補齊被跳過 (${reason})，缺少 ${normalizedCurrentMonthGap} 天資料 (last=${
+            lastDate || "N/A"
+          } < expected=${targetLatestISO})`,
+        );
+      }
+    } else {
+      // 補齊尚未完成或狀態不明
+      rangeFetchInfo.status = "current-month-stale";
+      rangeFetchInfo.reason = "current-month-gap";
+      console.warn(
+        `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
+          lastDate || "N/A"
+        } < expected=${targetLatestISO})，等待當日補齊。`,
+      );
+    }
   } else {
     rangeFetchInfo.status = "success";
     delete rangeFetchInfo.reason;
