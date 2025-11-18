@@ -6916,7 +6916,27 @@ function buildPriceInspectorDownloadStatsHtml(stats) {
         ? `${(lastEvent.format || 'UNK').toUpperCase()} ・ ${lastEvent.stockNo || lastEvent.market || '未知'} ・ ${new Date(lastEvent.timestamp).toLocaleTimeString('zh-TW', { hour12: false })}`
         : '尚無下載紀錄';
     const resourceLabel = totalBytes > 0 ? `${(totalBytes / 1024).toFixed(1)} KB` : '尚未紀錄資源';
-    return `<div class="space-y-1">\n                <div class="text-[11px]" style="color: var(--muted-foreground);">下載總數：${total} 次 ・ CSV：${csvCount} 次 ・ JSON：${jsonCount} 次</div>\n                <div class="text-[11px]" style="color: var(--muted-foreground);">資源耗用：${resourceLabel} ・ 最近更新：${updatedAt}</div>\n                <div class="text-[11px]" style="color: var(--muted-foreground);">最近事件：${escapeHtml(lastEventLabel)}</div>\n            </div>`;
+    const maxCount = Math.max(csvCount, jsonCount, 1);
+    const buildBar = (label, count, color) => {
+        const width = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+        const safeWidth = count > 0 ? Math.max(6, width) : 0;
+        return `<div class="space-y-1" role="group" aria-label="${escapeHtml(label)} 下載：${count} 次">
+                <div class="flex items-center justify-between text-[11px]"><span style="color: var(--foreground);">${escapeHtml(label)}</span><span style="color: var(--muted-foreground);">${count} 次</span></div>
+                <div class="h-2 rounded-full bg-muted/40 overflow-hidden" style="background-color: color-mix(in srgb, var(--muted) 60%, transparent);">
+                    <div class="h-2 rounded-full" style="width: ${safeWidth}%; background-color: ${color}; transition: width 200ms ease;"></div>
+                </div>
+            </div>`;
+    };
+    const chartSection = `<div class="space-y-2 mt-1" aria-label="下載格式分布">
+            ${buildBar('CSV', csvCount, 'color-mix(in srgb, var(--primary) 90%, black)')}
+            ${buildBar('JSON', jsonCount, 'color-mix(in srgb, var(--accent) 90%, black)')}
+        </div>`;
+    return `<div class="space-y-2">
+                <div class="text-[11px]" style="color: var(--muted-foreground);">下載總數：${total} 次 ・ CSV：${csvCount} 次 ・ JSON：${jsonCount} 次</div>
+                <div class="text-[11px]" style="color: var(--muted-foreground);">資源耗用：${resourceLabel} ・ 最近更新：${updatedAt}</div>
+                ${chartSection}
+                <div class="text-[11px]" style="color: var(--muted-foreground);">最近事件：${escapeHtml(lastEventLabel)}</div>
+            </div>`;
 }
 
 function updatePriceInspectorStatsSection(panel, force = false) {
@@ -7051,6 +7071,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     refreshPriceInspectorControls();
+    initPriceInspectorDownloadMenu();
 });
 
 document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
