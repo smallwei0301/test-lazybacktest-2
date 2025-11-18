@@ -6981,8 +6981,10 @@ function buildPriceInspectorDownloadContent(format) {
     const csvLines = records.map((record) =>
         tableModel.headerConfig.map((cfg) => escapeCsvValue(record[cfg.key] ?? '')).join(',')
     );
+    const csvBody = [headerLine, ...csvLines].join('\r\n');
+    const csvContent = `\ufeff${csvBody}`;
     return {
-        content: [headerLine, ...csvLines].join('\r\n'),
+        content: csvContent,
         mime: 'text/csv;charset=utf-8',
         filename: `${baseName}.csv`,
         context,
