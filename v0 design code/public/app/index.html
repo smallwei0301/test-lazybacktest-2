@@ -3450,14 +3450,34 @@
                         <h2 class="text-sm font-semibold">區間價格明細</h2>
                         <p id="priceInspectorSubtitle" class="text-[11px] mt-1" style="color: var(--muted-foreground);"></p>
                     </div>
-                    <button
-                        type="button"
-                        id="closePriceInspector"
-                        class="text-[11px] px-2 py-1 rounded-md border"
-                        style="border-color: var(--border); color: var(--muted-foreground); background-color: var(--background);"
-                    >
-                        關閉
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="relative" id="priceInspectorDownloadControl">
+                            <button
+                                type="button"
+                                id="priceInspectorDownloadToggle"
+                                class="px-3 py-1.5 text-[11px] font-medium rounded-md border transition-colors"
+                                style="border-color: var(--border); color: var(--foreground); background-color: var(--background);"
+                            >
+                                下載表格
+                            </button>
+                            <div
+                                id="priceInspectorDownloadMenu"
+                                class="hidden absolute right-0 mt-2 w-36 rounded-lg border bg-background shadow-lg"
+                                style="border-color: var(--border); z-index: 10;"
+                            >
+                                <button type="button" data-download-format="csv" class="w-full text-left px-3 py-2 text-[11px] hover:bg-muted/20" style="color: var(--foreground);">CSV (.csv)</button>
+                                <button type="button" data-download-format="json" class="w-full text-left px-3 py-2 text-[11px] hover:bg-muted/20" style="color: var(--foreground);">JSON (.json)</button>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            id="closePriceInspector"
+                            class="text-[11px] px-2 py-1 rounded-md border"
+                            style="border-color: var(--border); color: var(--muted-foreground); background-color: var(--background);"
+                        >
+                            關閉
+                        </button>
+                    </div>
                 </div>
                 <div class="flex-1 overflow-hidden">
                     <div

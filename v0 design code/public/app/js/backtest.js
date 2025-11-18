@@ -5779,8 +5779,10 @@ function renderPriceInspectorDebug() {
             <span style="color: var(--foreground);">${escapeHtml(step.label)}${detailText}${reasonText}</span>
         </div>`;
     }).join('');
-    panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}</div>`;
+    const statsPlaceholder = `<div data-download-stats class="text-[11px]" style="color: var(--muted-foreground);">下載統計載入中⋯</div>`;
+    panel.innerHTML = `<div class="space-y-2">${summaryLine}${stepsHtml}${statsPlaceholder}</div>`;
     panel.classList.remove('hidden');
+    updatePriceInspectorStatsSection(panel);
 }
 
 const dataDiagnosticsState = { open: false };
@@ -6540,9 +6542,9 @@ function formatIndicatorNumericValue(value, column) {
     return Number(value).toFixed(digits);
 }
 
-function renderIndicatorCell(columnGroup, rowIndex) {
+function buildIndicatorCellLines(columnGroup, rowIndex) {
     if (!columnGroup || !Array.isArray(columnGroup.columns) || columnGroup.columns.length === 0) {
-        return '—';
+        return [];
     }
     const lines = [];
     columnGroup.columns.forEach((col) => {
@@ -6552,13 +6554,25 @@ function renderIndicatorCell(columnGroup, rowIndex) {
             const textValue = rawValue !== null && rawValue !== undefined && rawValue !== ''
                 ? String(rawValue)
                 : '—';
-            lines.push(`${escapeHtml(col.label)}: ${escapeHtml(textValue)}`);
+            lines.push(`${col.label}: ${textValue}`);
         } else {
             const formatted = formatIndicatorNumericValue(rawValue, col);
-            lines.push(`${escapeHtml(col.label)}: ${formatted}`);
+            lines.push(`${col.label}: ${formatted}`);
         }
     });
-    return lines.length > 0 ? lines.join('<br>') : '—';
+    return lines;
+}
+
+function formatIndicatorCellText(columnGroup, rowIndex) {
+    const lines = buildIndicatorCellLines(columnGroup, rowIndex);
+    if (!lines.length) return '—';
+    return lines.join(' ｜ ');
+}
+
+function renderIndicatorCell(columnGroup, rowIndex) {
+    const lines = buildIndicatorCellLines(columnGroup, rowIndex);
+    if (!lines.length) return '—';
+    return lines.map((line) => escapeHtml(line)).join('<br>');
 }
 
 function formatStageModeLabel(mode, type) {
@@ -6586,12 +6600,12 @@ function resolveStageModeDisplay(stageCandidate, stageMode, type) {
     return explicitLabel || fallbackLabel || '—';
 }
 
-function renderStageStateCell(state, context) {
-    if (!state || typeof state !== 'object') return '—';
+function buildStageStateLines(state, context) {
+    if (!state || typeof state !== 'object') return [];
     const type = context?.type === 'exit' ? 'exit' : 'entry';
     const parts = [];
     const modeLabel = formatStageModeLabel(state.mode, type);
-    if (modeLabel) parts.push(escapeHtml(modeLabel));
+    if (modeLabel) parts.push(modeLabel);
 
     if (type === 'entry') {
         if (Number.isFinite(state.filledStages) && Number.isFinite(state.totalStages)) {
@@ -6636,39 +6650,47 @@ function renderStageStateCell(state, context) {
         }
     }
 
-    if (parts.length === 0) return '—';
-    return parts.map((part) => escapeHtml(part)).join('<br>');
+    return parts;
 }
 
-function openPriceInspectorModal() {
-    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
-        showError('尚未取得價格資料，請先執行回測。');
-        return;
-    }
-    const modal = document.getElementById('priceInspectorModal');
-    const tbody = document.getElementById('priceInspectorTableBody');
-    const subtitle = document.getElementById('priceInspectorSubtitle');
-    if (!modal || !tbody) return;
+function renderStageStateCell(state, context) {
+    const lines = buildStageStateLines(state, context);
+    if (!lines.length) return '—';
+    return lines.map((part) => escapeHtml(part)).join('<br>');
+}
 
+function formatStageStateText(state, context) {
+    const lines = buildStageStateLines(state, context);
+    if (!lines.length) return '—';
+    return lines.join(' ｜ ');
+}
+
+function getPriceInspectorContext() {
     const sourceLabel = resolvePriceInspectorSourceLabel();
-    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
-    const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
-    if (subtitle) {
-        const marketLabel = (lastFetchSettings?.market || lastFetchSettings?.marketType || currentMarket || 'TWSE').toUpperCase();
-        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
-        subtitle.textContent = subtitleParts.join(' ・ ');
-    }
-    renderPriceInspectorDebug();
-
-    // Patch Tag: LB-PRICE-INSPECTOR-20250512A
-    const headerRow = document.getElementById('priceInspectorHeaderRow');
-    const indicatorColumns = collectPriceInspectorIndicatorColumns();
-    const longEntryStageStates = Array.isArray(lastOverallResult?.longEntryStageStates)
+    const entryStageStates = Array.isArray(lastOverallResult?.longEntryStageStates)
         ? lastOverallResult.longEntryStageStates
         : [];
-    const longExitStageStates = Array.isArray(lastOverallResult?.longExitStageStates)
+    const exitStageStates = Array.isArray(lastOverallResult?.longExitStageStates)
         ? lastOverallResult.longExitStageStates
         : [];
+    const stockNo = lastFetchSettings?.stockNo
+        || lastOverallResult?.stockNo
+        || lastOverallResult?.symbol
+        || null;
+    const market = (lastFetchSettings?.market
+        || lastFetchSettings?.marketType
+        || currentMarket
+        || 'TWSE').toUpperCase();
+    return {
+        sourceLabel,
+        entryStageStates,
+        exitStageStates,
+        stockNo,
+        market,
+    };
+}
+
+function buildPriceInspectorHeaderConfig(indicatorColumns) {
     const baseHeaderConfig = [
         { key: 'date', label: '日期', align: 'left' },
         { key: 'open', label: '開盤', align: 'right' },
@@ -6678,8 +6700,14 @@ function openPriceInspectorModal() {
         { key: 'close', label: '還原收盤', align: 'right' },
         { key: 'factor', label: '還原因子', align: 'right' },
     ];
-    indicatorColumns.forEach((col) => {
-        baseHeaderConfig.push({ key: col.key, label: col.header, align: 'left', isIndicator: true, series: col.series });
+    (Array.isArray(indicatorColumns) ? indicatorColumns : []).forEach((col) => {
+        baseHeaderConfig.push({
+            key: col.key,
+            label: col.header,
+            align: 'left',
+            isIndicator: true,
+            series: col.series,
+        });
     });
     baseHeaderConfig.push(
         { key: 'longEntryStage', label: '多單進場分段', align: 'left' },
@@ -6691,16 +6719,21 @@ function openPriceInspectorModal() {
         { key: 'volume', label: '(千股)量', align: 'right' },
         { key: 'source', label: '價格來源', align: 'left' },
     );
+    return baseHeaderConfig;
+}
 
-    if (headerRow) {
-        headerRow.innerHTML = baseHeaderConfig
-            .map((cfg) => `<th class="px-3 py-2 text-${cfg.align} font-medium">${escapeHtml(cfg.label)}</th>`)
-            .join('');
+function buildPriceInspectorTableModel(context = {}) {
+    const indicatorColumns = collectPriceInspectorIndicatorColumns();
+    const headerConfig = buildPriceInspectorHeaderConfig(indicatorColumns);
+    const rows = [];
+    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
+        return { headerConfig, rows };
     }
-
-    const totalColumns = baseHeaderConfig.length;
-
+    const entryStageStates = Array.isArray(context.entryStageStates) ? context.entryStageStates : [];
+    const exitStageStates = Array.isArray(context.exitStageStates) ? context.exitStageStates : [];
+    const sourceLabel = typeof context.sourceLabel === 'string' ? context.sourceLabel : '';
     const formatNumber = (value, digits = 2) => (Number.isFinite(value) ? Number(value).toFixed(digits) : '—');
+    const formatVolume = (value) => (Number.isFinite(value) ? Number(value).toLocaleString('zh-TW') : '—');
     const formatFactor = (value) => (Number.isFinite(value) && value !== 0 ? Number(value).toFixed(6) : '—');
     const computeRawClose = (row) => {
         if (!row) return null;
@@ -6723,59 +6756,105 @@ function openPriceInspectorModal() {
         const raw = Number(row.close) / factor;
         return Number.isFinite(raw) ? raw : Number(row.close);
     };
-    const rowsHtml = visibleStockData
-        .map((row, rowIndex) => {
-            const volumeLabel = Number.isFinite(row?.volume)
-                ? Number(row.volume).toLocaleString('zh-TW')
-                : '—';
-            const factor = Number(row?.adjustedFactor);
-            const closeValue = Number(row?.close);
-            const rawCloseValue = computeRawClose(row);
-            const rawCloseText = formatNumber(rawCloseValue);
-            const closeText = formatNumber(closeValue);
-            const factorText = formatFactor(factor);
-            const hasFactor = Number.isFinite(factor) && Math.abs(factor) > 0;
-            let formulaText = '—';
-            if (closeText !== '—') {
-                if (hasFactor && rawCloseText !== '—' && factorText !== '—') {
-                    formulaText = `${rawCloseText} × ${factorText} = ${closeText}`;
-                } else {
-                    formulaText = `${closeText}（未調整）`;
-                }
+
+    visibleStockData.forEach((row, rowIndex) => {
+        const volumeLabel = formatVolume(row?.volume);
+        const factor = Number(row?.adjustedFactor);
+        const closeValue = Number(row?.close);
+        const rawCloseValue = computeRawClose(row);
+        const rawCloseText = formatNumber(rawCloseValue);
+        const closeText = formatNumber(closeValue);
+        const factorText = formatFactor(factor);
+        const hasFactor = Number.isFinite(factor) && Math.abs(factor) > 0;
+        let formulaText = '—';
+        if (closeText !== '—') {
+            if (hasFactor && rawCloseText !== '—' && factorText !== '—') {
+                formulaText = `${rawCloseText} × ${factorText} = ${closeText}`;
+            } else {
+                formulaText = `${closeText}（未調整）`;
             }
-            const rowSource =
-                typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
-                    ? row.priceSource.trim()
-                    : sourceLabel || '—';
-            const indicatorCells = indicatorColumns
-                .map((col) =>
-                    `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`
-                )
-                .join('');
-            const entryStageState = longEntryStageStates[rowIndex] || null;
-            const exitStageState = longExitStageStates[rowIndex] || null;
-            const entryStageCell = renderStageStateCell(entryStageState, { type: 'entry' });
-            const exitStageCell = renderStageStateCell(exitStageState, { type: 'exit' });
-            const positionLabel = lastPositionStates[rowIndex] || '空手';
-            return `
-                <tr>
-                    <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.high)}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.low)}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
-                    <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
-                    ${indicatorCells}
-                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${entryStageCell}</td>
-                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${exitStageCell}</td>
-                    <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(positionLabel)}</td>
-                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
-                    <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
-                    <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
-                </tr>`;
-        })
-        .join('');
+        }
+        const rowSource =
+            typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
+                ? row.priceSource.trim()
+                : sourceLabel || '—';
+        const entryStageState = entryStageStates[rowIndex] || null;
+        const exitStageState = exitStageStates[rowIndex] || null;
+        const indicatorCellsHtml = indicatorColumns
+            .map((col) => `<td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${renderIndicatorCell(col.series, rowIndex)}</td>`)
+            .join('');
+        const entryStageText = formatStageStateText(entryStageState, { type: 'entry' });
+        const exitStageText = formatStageStateText(exitStageState, { type: 'exit' });
+        const positionLabel = lastPositionStates[rowIndex] || '空手';
+        const rowHtml = `
+            <tr>
+                <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.high)}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.low)}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--foreground);">${rawCloseText}</td>
+                <td class="px-3 py-2 text-right font-medium" style="color: var(--foreground);">${closeText}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${factorText}</td>
+                ${indicatorCellsHtml}
+                <td class="px-3 py-2 text-left" style="color: var(--foreground);">${renderStageStateCell(entryStageState, { type: 'entry' })}</td>
+                <td class="px-3 py-2 text-left" style="color: var(--foreground);">${renderStageStateCell(exitStageState, { type: 'exit' })}</td>
+                <td class="px-3 py-2 text-left" style="color: var(--foreground);">${escapeHtml(positionLabel)}</td>
+                <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
+                <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
+                <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
+            </tr>`;
+        const values = {
+            date: row?.date || '',
+            open: formatNumber(row?.open),
+            high: formatNumber(row?.high),
+            low: formatNumber(row?.low),
+            rawClose: rawCloseText,
+            close: closeText,
+            factor: factorText,
+            longEntryStage: entryStageText,
+            longExitStage: exitStageText,
+            position: positionLabel,
+            formula: formulaText,
+            volume: volumeLabel,
+            source: rowSource,
+        };
+        indicatorColumns.forEach((col) => {
+            values[col.key] = formatIndicatorCellText(col.series, rowIndex);
+        });
+        rows.push({ html: rowHtml, values });
+    });
+    return { headerConfig, rows };
+}
+
+function openPriceInspectorModal() {
+    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
+        showError('尚未取得價格資料，請先執行回測。');
+        return;
+    }
+    const modal = document.getElementById('priceInspectorModal');
+    const tbody = document.getElementById('priceInspectorTableBody');
+    const subtitle = document.getElementById('priceInspectorSubtitle');
+    if (!modal || !tbody) return;
+
+    const context = getPriceInspectorContext();
+    const modeKey = (lastFetchSettings?.priceMode || (lastFetchSettings?.adjustedPrice ? 'adjusted' : 'raw') || 'raw').toString().toLowerCase();
+    const modeLabel = modeKey === 'adjusted' ? '顯示還原後價格' : '顯示原始收盤價';
+    if (subtitle) {
+        const marketLabel = context.market;
+        const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
+        subtitle.textContent = subtitleParts.join(' ・ ');
+    }
+    renderPriceInspectorDebug();
+
+    const headerRow = document.getElementById('priceInspectorHeaderRow');
+    const tableModel = buildPriceInspectorTableModel(context);
+    if (headerRow) {
+        headerRow.innerHTML = tableModel.headerConfig
+            .map((cfg) => `<th class="px-3 py-2 text-${cfg.align} font-medium">${escapeHtml(cfg.label)}</th>`)
+            .join('');
+    }
+    const totalColumns = tableModel.headerConfig.length;
+    const rowsHtml = tableModel.rows.map((entry) => entry.html).join('');
 
     tbody.innerHTML =
         rowsHtml ||
@@ -6793,6 +6872,164 @@ function closePriceInspectorModal() {
     if (!modal) return;
     modal.classList.add('hidden');
     document.body.classList.remove('overflow-hidden');
+}
+
+const PRICE_INSPECTOR_DOWNLOAD_STATS_TTL = 60 * 1000;
+let priceInspectorDownloadStatsCache = null;
+let priceInspectorDownloadStatsLastFetch = 0;
+
+async function refreshPriceInspectorDownloadStats(force = false) {
+    const now = Date.now();
+    if (!force && priceInspectorDownloadStatsCache && (now - priceInspectorDownloadStatsLastFetch) < PRICE_INSPECTOR_DOWNLOAD_STATS_TTL) {
+        return priceInspectorDownloadStatsCache;
+    }
+    try {
+        const response = await fetch('/.netlify/functions/price-inspector-download', {
+            method: 'GET',
+            cache: 'no-cache',
+        });
+        if (response.ok) {
+            const payload = await response.json().catch(() => null);
+            const stats = payload?.stats || payload || null;
+            if (stats) {
+                priceInspectorDownloadStatsCache = stats;
+                priceInspectorDownloadStatsLastFetch = now;
+            }
+        }
+    } catch (error) {
+        console.warn('[PriceInspector] 下載統計讀取失敗:', error);
+    }
+    return priceInspectorDownloadStatsCache;
+}
+
+function buildPriceInspectorDownloadStatsHtml(stats) {
+    if (!stats) {
+        return '下載統計載入中⋯';
+    }
+    const total = Number(stats.totalDownloads || stats.total || 0);
+    const csvCount = Number(stats.byFormat?.csv || 0);
+    const jsonCount = Number(stats.byFormat?.json || 0);
+    const totalBytes = Number(stats.totalBytes || 0);
+    const updatedAt = stats.updatedAt ? new Date(stats.updatedAt).toLocaleString('zh-TW') : '—';
+    const lastEvent = Array.isArray(stats.lastEvents) && stats.lastEvents.length > 0 ? stats.lastEvents[0] : null;
+    const lastEventLabel = lastEvent
+        ? `${(lastEvent.format || 'UNK').toUpperCase()} ・ ${lastEvent.stockNo || lastEvent.market || '未知'} ・ ${new Date(lastEvent.timestamp).toLocaleTimeString('zh-TW', { hour12: false })}`
+        : '尚無下載紀錄';
+    const resourceLabel = totalBytes > 0 ? `${(totalBytes / 1024).toFixed(1)} KB` : '尚未紀錄資源';
+    return `<div class="space-y-1">\n                <div class="text-[11px]" style="color: var(--muted-foreground);">下載總數：${total} 次 ・ CSV：${csvCount} 次 ・ JSON：${jsonCount} 次</div>\n                <div class="text-[11px]" style="color: var(--muted-foreground);">資源耗用：${resourceLabel} ・ 最近更新：${updatedAt}</div>\n                <div class="text-[11px]" style="color: var(--muted-foreground);">最近事件：${escapeHtml(lastEventLabel)}</div>\n            </div>`;
+}
+
+function updatePriceInspectorStatsSection(panel, force = false) {
+    if (!panel) return;
+    const placeholder = panel.querySelector('[data-download-stats]');
+    if (!placeholder) return;
+    refreshPriceInspectorDownloadStats(force).then((stats) => {
+        placeholder.innerHTML = buildPriceInspectorDownloadStatsHtml(stats);
+    });
+}
+
+function escapeCsvValue(value) {
+    const text = value ?? '';
+    const escaped = String(text).replace(/"/g, '""');
+    if (/["\r\n,]/.test(escaped)) {
+        return `"${escaped}"`;
+    }
+    return escaped;
+}
+
+function buildPriceInspectorDownloadContent(format) {
+    const normalizedFormat = format === 'json' ? 'json' : 'csv';
+    const context = getPriceInspectorContext();
+    const tableModel = buildPriceInspectorTableModel(context);
+    if (!tableModel.rows.length) return null;
+    const records = tableModel.rows.map((entry) => entry.values);
+    const baseNameParts = ['price-table'];
+    if (context.stockNo) {
+        baseNameParts.push(context.stockNo.replace(/[^0-9A-Za-z]/g, ''));
+    }
+    baseNameParts.push(new Date().toISOString().slice(0, 10));
+    const baseName = baseNameParts.join('-').toLowerCase();
+    if (normalizedFormat === 'json') {
+        return {
+            content: JSON.stringify(records, null, 2),
+            mime: 'application/json;charset=utf-8',
+            filename: `${baseName}.json`,
+            context,
+        };
+    }
+    const headerLine = tableModel.headerConfig.map((cfg) => escapeCsvValue(cfg.label)).join(',');
+    const csvLines = records.map((record) =>
+        tableModel.headerConfig.map((cfg) => escapeCsvValue(record[cfg.key] ?? '')).join(',')
+    );
+    return {
+        content: [headerLine, ...csvLines].join('\r\n'),
+        mime: 'text/csv;charset=utf-8',
+        filename: `${baseName}.csv`,
+        context,
+    };
+}
+
+function downloadPriceInspectorTable(format) {
+    const payload = buildPriceInspectorDownloadContent(format);
+    if (!payload) {
+        showError('目前尚無價格資料可供下載。');
+        return;
+    }
+    const blob = new Blob([payload.content], { type: payload.mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = payload.filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    reportPriceInspectorDownloadUsage(format, blob.size, payload.context);
+    const panel = document.getElementById('priceInspectorDebugPanel');
+    updatePriceInspectorStatsSection(panel, true);
+}
+
+async function reportPriceInspectorDownloadUsage(format, sizeBytes, context = {}) {
+    if (typeof fetch !== 'function') return;
+    const payload = {
+        format,
+        sizeBytes: Number(sizeBytes) || 0,
+        stockNo: context.stockNo || null,
+        market: context.market || currentMarket || 'TWSE',
+        timestamp: Date.now(),
+    };
+    try {
+        await fetch('/.netlify/functions/price-inspector-download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+    } catch (error) {
+        console.warn('[PriceInspector] 下載事件上報失敗:', error);
+    }
+}
+
+function initPriceInspectorDownloadMenu() {
+    const control = document.getElementById('priceInspectorDownloadControl');
+    const toggle = document.getElementById('priceInspectorDownloadToggle');
+    const menu = document.getElementById('priceInspectorDownloadMenu');
+    if (!control || !toggle || !menu) return;
+    toggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.classList.toggle('hidden');
+    });
+    menu.addEventListener('click', (event) => {
+        const target = event.target.closest('[data-download-format]');
+        if (!target) return;
+        event.preventDefault();
+        const format = target.dataset.downloadFormat;
+        downloadPriceInspectorTable(format);
+        menu.classList.add('hidden');
+    });
+    document.addEventListener('click', (event) => {
+        if (!control.contains(event.target)) {
+            menu.classList.add('hidden');
+        }
+    });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
