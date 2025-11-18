@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <!-- Version: LB-HOMEPAGE-20261031A -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LazyBacktest｜不用寫程式也能找到最穩定的台股策略</title>
+  <meta name="description" content="LazyBacktest 首頁：自動測上百組策略、用數據告訴你什麼方法最穩定。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap"
+    rel="stylesheet"
+  />
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      font-family: "Inter", "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #ecfeff 0%, #f5f5ff 45%, #ffffff 100%);
+      color: #0f172a;
+    }
+    .glass-card {
+      backdrop-filter: blur(14px);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 10px 45px rgba(15, 23, 42, 0.08);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(14, 165, 233, 0.12);
+      color: #0369a1;
+    }
+  </style>
+</head>
+<body class="antialiased">
+  <header class="relative overflow-hidden">
+    <div class="absolute inset-0 -z-10 h-full w-full">
+      <div class="absolute inset-y-0 right-[-20%] hidden h-[120%] w-[55%] rotate-6 rounded-full bg-gradient-to-br from-cyan-100 via-sky-100 to-blue-200 blur-3xl md:block"></div>
+    </div>
+    <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+      <a href="/" class="flex items-center gap-2 text-lg font-bold text-slate-900">
+        <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-600 text-white shadow-lg shadow-cyan-200">LB</span>
+        LazyBacktest
+      </a>
+      <div class="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
+        <a href="#pain-points" class="hover:text-cyan-700">回測痛點</a>
+        <a href="#solutions" class="hover:text-cyan-700">我們的解法</a>
+        <a href="#features" class="hover:text-cyan-700">功能亮點</a>
+        <a href="#testimonials" class="hover:text-cyan-700">用戶回饋</a>
+      </div>
+      <a
+        href="/index.html"
+        class="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-slate-300 transition hover:bg-slate-700"
+      >立即回測</a>
+    </nav>
+    <div class="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-16 pt-10 lg:grid-cols-[1.05fr_0.95fr]">
+      <div class="space-y-6">
+        <span class="badge">不用寫程式，10 分鐘找到最佳策略</span>
+        <h1 class="text-4xl font-black leading-tight text-slate-900 sm:text-5xl">
+          不懂程式？也能找到最穩定、最會賺的股票策略。
+        </h1>
+        <p class="text-lg leading-relaxed text-slate-600">
+          LazyBacktest 幫你自動測上百組組合，用數據告訴你：「這個方法真的有效」。你只要有想法，剩下的交給我們。
+        </p>
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div class="glass-card rounded-2xl border border-white/50 p-4 text-slate-700">
+            <div class="text-2xl font-bold text-slate-900">2,000+</div>
+            <p class="text-sm">位用戶一致好評</p>
+          </div>
+          <div class="glass-card rounded-2xl border border-white/50 p-4 text-slate-700">
+            <div class="text-2xl font-bold text-slate-900">80%</div>
+            <p class="text-sm">投資人發現原本策略不穩定</p>
+          </div>
+          <div class="glass-card rounded-2xl border border-white/50 p-4 text-slate-700">
+            <div class="text-2xl font-bold text-slate-900">90%</div>
+            <p class="text-sm">平均節省回測時間</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <a
+            href="/index.html"
+            class="inline-flex items-center justify-center rounded-full bg-cyan-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-200 transition hover:bg-cyan-700"
+          >立即體驗，一鍵找到最強策略</a>
+          <p class="text-sm text-slate-500">你不需要是工程師，只要有策略想法，我們幫你測出結果。</p>
+        </div>
+      </div>
+      <div class="relative mx-auto w-full max-w-xl">
+        <div class="glass-card relative overflow-hidden rounded-3xl border border-white/60 p-8 shadow-xl">
+          <div class="mb-6 flex items-center gap-3">
+            <span class="rounded-full bg-cyan-500/10 p-3 text-cyan-600">🧠</span>
+            <div>
+              <p class="text-sm font-semibold text-cyan-600">智能回測引擎</p>
+              <p class="text-lg font-bold text-slate-900">LazyBacktest 自動探索所有組合</p>
+            </div>
+          </div>
+          <ul class="space-y-4 text-sm text-slate-600">
+            <li class="flex items-start gap-3"><span class="mt-1 text-lg">✅</span><span>輸入股票代號，系統自動帶出所有常用指標的進出場條件。</span></li>
+            <li class="flex items-start gap-3"><span class="mt-1 text-lg">✅</span><span>一次跑完 RSI、KD、均線、MACD 等上百種組合，給你完整比較。</span></li>
+            <li class="flex items-start gap-3"><span class="mt-1 text-lg">✅</span><span>報表直接顯示報酬、虧損、勝率、穩定度，告訴你哪組最值得。</span></li>
+          </ul>
+          <div class="mt-6 rounded-2xl bg-slate-900 px-6 py-5 text-white">
+            <p class="text-sm uppercase tracking-wide text-white/70">熱銷活動</p>
+            <p class="mt-2 text-xl font-bold">4.9 / 5 平均滿意度，超過 100,000 次回測紀錄</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="bg-white">
+    <section id="pain-points" class="bg-gradient-to-b from-white to-slate-50 py-20">
+      <div class="mx-auto max-w-5xl px-6">
+        <h2 class="text-center text-3xl font-black text-slate-900">用戶最常遇到的挫折，我們都懂</h2>
+        <p class="mt-4 text-center text-lg text-slate-600">從好奇、嘗試到放棄的過程，LazyBacktest 全部幫你整理好。</p>
+        <div class="mt-12 grid gap-8 lg:grid-cols-3">
+          <article class="glass-card rounded-3xl border border-white/60 p-7 shadow-lg">
+            <h3 class="flex items-center gap-2 text-xl font-semibold text-slate-900">
+              😩 「我只是想知道這招到底有沒有效」
+            </h3>
+            <p class="mt-4 text-sm leading-relaxed text-slate-600">
+              一開始只是想驗證 RSI 30/70 的想法，卻卡在資料來源、參數設定、每次重跑還要等半天，看到陌生圖表更是一頭霧水。
+            </p>
+            <ul class="mt-6 space-y-2 text-sm text-slate-500">
+              <li>· 到底去哪裡抓資料？</li>
+              <li>· 調整參數為什麼要重跑一次？</li>
+              <li>· 勝率、曲線看不懂，只好放棄。</li>
+            </ul>
+          </article>
+          <article class="glass-card rounded-3xl border border-white/60 p-7 shadow-lg">
+            <h3 class="flex items-center gap-2 text-xl font-semibold text-slate-900">
+              💸 「別人說回測很重要，但我根本不知道怎麼開始」
+            </h3>
+            <p class="mt-4 text-sm leading-relaxed text-slate-600">
+              財經 Youtuber 說不能亂跟單，可是 TradingView 要寫公式、FinLab 要寫 Python、XQ 也找不到設定，最後只好用感覺買。
+            </p>
+            <p class="mt-6 text-sm text-slate-500">
+              超過 8 成散戶都在用沒驗證過的策略，報酬不穩定還容易虧損。
+            </p>
+          </article>
+          <article class="glass-card rounded-3xl border border-white/60 p-7 shadow-lg">
+            <h3 class="flex items-center gap-2 text-xl font-semibold text-slate-900">
+              🧱 「我不是不想學，只是太難了」
+            </h3>
+            <p class="mt-4 text-sm leading-relaxed text-slate-600">
+              想變得理性，但工具複雜又難懂。只想測個策略卻卡在流程，結果搞半天還不確定數據正不正確。
+            </p>
+            <p class="mt-6 text-sm text-slate-500">
+              LazyBacktest 的誕生，就是要把複雜流程變得像滑 IG 一樣簡單。
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="solutions" class="py-20">
+      <div class="mx-auto max-w-5xl px-6">
+        <h2 class="text-center text-3xl font-black text-slate-900">LazyBacktest 的溫暖解方</h2>
+        <p class="mt-4 text-center text-lg text-slate-600">把你的挫折對照我們提供的幫助，每一項都是站在使用者的角度設計。</p>
+        <div class="mt-10 overflow-hidden rounded-3xl border border-slate-200 shadow-lg">
+          <div class="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
+            <div class="bg-slate-900 p-6 text-white">
+              <h3 class="text-lg font-semibold">你遇到的問題</h3>
+            </div>
+            <div class="bg-cyan-600/90 p-6 text-white">
+              <h3 class="text-lg font-semibold">LazyBacktest 幫你解決</h3>
+            </div>
+            <div class="p-6 text-sm font-medium text-slate-700">我不會寫程式</div>
+            <div class="p-6 text-sm text-slate-600">完全圖形化操作，像滑 IG 一樣簡單</div>
+            <div class="p-6 text-sm font-medium text-slate-700">不知道怎麼選參數</div>
+            <div class="p-6 text-sm text-slate-600">系統自動幫你測全部組合，直接告訴你哪組最好</div>
+            <div class="p-6 text-sm font-medium text-slate-700">報表看不懂</div>
+            <div class="p-6 text-sm text-slate-600">清楚圖表顯示報酬、虧損、勝率，不用自己算</div>
+            <div class="p-6 text-sm font-medium text-slate-700">測一次太花時間</div>
+            <div class="p-6 text-sm text-slate-600">一鍵批量測試，同時跑上百組策略</div>
+            <div class="p-6 text-sm font-medium text-slate-700">怕結果不準</div>
+            <div class="p-6 text-sm text-slate-600">使用台灣證交所真實歷史資料，數據可靠可重現</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="bg-slate-900 py-20 text-white">
+      <div class="mx-auto max-w-5xl px-6">
+        <h2 class="text-center text-3xl font-black">功能亮點：把複雜的事交給我們</h2>
+        <div class="mt-12 grid gap-8 md:grid-cols-2">
+          <article class="rounded-3xl bg-white/5 p-8">
+            <h3 class="text-xl font-semibold">💡 一鍵回測</h3>
+            <p class="mt-3 text-sm text-white/80">
+              輸入股票代號，我們自動把各種進出場條件跑過一遍，結果用圖表呈現，不必寫程式、不用整理 Excel。
+            </p>
+          </article>
+          <article class="rounded-3xl bg-white/5 p-8">
+            <h3 class="text-xl font-semibold">🧠 智能找出最佳策略</h3>
+            <p class="mt-3 text-sm text-white/80">
+              系統自動挑出最穩定、最會賺的組合，就像身邊多了一位專業研究員，幫你把所有可能都比過。
+            </p>
+          </article>
+          <article class="rounded-3xl bg-white/5 p-8">
+            <h3 class="text-xl font-semibold">📊 報酬與風險自動分析</h3>
+            <p class="mt-3 text-sm text-white/80">
+              不必懂統計，我們幫你算報酬率、最大虧損、勝率、穩定度，一眼就懂策略的真實表現。
+            </p>
+          </article>
+          <article class="rounded-3xl bg-white/5 p-8">
+            <h3 class="text-xl font-semibold">⚙️ 批量優化</h3>
+            <p class="mt-3 text-sm text-white/80">
+              RSI、KD、均線、MACD 一次全部測完，系統自動排名誰表現最好、誰最穩定，節省你大量試錯時間。
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-white py-20">
+      <div class="mx-auto max-w-5xl px-6">
+        <h2 class="text-center text-3xl font-black text-slate-900">為什麼大家都選 LazyBacktest？</h2>
+        <div class="mt-12 overflow-hidden rounded-3xl border border-slate-200 shadow-lg">
+          <table class="w-full table-auto text-sm text-slate-700">
+            <thead class="bg-slate-900 text-left text-white">
+              <tr>
+                <th class="px-6 py-4 font-semibold">項目</th>
+                <th class="px-6 py-4 font-semibold">LazyBacktest</th>
+                <th class="px-6 py-4 font-semibold">傳統工具</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-slate-200">
+                <td class="px-6 py-4 font-semibold">操作方式</td>
+                <td class="px-6 py-4">🟢 點一點就能回測</td>
+                <td class="px-6 py-4">🔴 需要會寫程式</td>
+              </tr>
+              <tr class="border-t border-slate-200">
+                <td class="px-6 py-4 font-semibold">台股支援</td>
+                <td class="px-6 py-4">🟢 支援上市櫃全股票</td>
+                <td class="px-6 py-4">⚠️ 部分需付費</td>
+              </tr>
+              <tr class="border-t border-slate-200">
+                <td class="px-6 py-4 font-semibold">找最佳參數</td>
+                <td class="px-6 py-4">🟢 自動找出最優組合</td>
+                <td class="px-6 py-4">🔴 需手動一個一個測</td>
+              </tr>
+              <tr class="border-t border-slate-200">
+                <td class="px-6 py-4 font-semibold">結果呈現</td>
+                <td class="px-6 py-4">🟢 自動生成清楚圖表</td>
+                <td class="px-6 py-4">⚠️ 需要自己整理報表</td>
+              </tr>
+              <tr class="border-t border-slate-200">
+                <td class="px-6 py-4 font-semibold">價格</td>
+                <td class="px-6 py-4">🟢 免費使用</td>
+                <td class="px-6 py-4">💸 多數收費</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="testimonials" class="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 py-20 text-white">
+      <div class="mx-auto max-w-5xl px-6">
+        <h2 class="text-center text-3xl font-black">聽聽用戶怎麼說</h2>
+        <div class="mt-12 grid gap-8 md:grid-cols-3">
+          <article class="rounded-3xl bg-white/10 p-8 shadow-lg">
+            <p class="text-2xl">⭐️⭐️⭐️⭐️⭐️</p>
+            <p class="mt-4 text-sm text-white/80">
+              「我不懂 Python，但我第一次自己回測成功，超爽！」
+            </p>
+            <p class="mt-6 text-xs uppercase tracking-wider text-white/60">小陳（上班族投資新手）</p>
+          </article>
+          <article class="rounded-3xl bg-white/10 p-8 shadow-lg">
+            <p class="text-2xl">⭐️⭐️⭐️⭐️⭐️</p>
+            <p class="mt-4 text-sm text-white/80">
+              「以前要花三天測十個參數，現在十分鐘搞定。系統還幫我自動排出哪組最穩，超方便。」
+            </p>
+            <p class="mt-6 text-xs uppercase tracking-wider text-white/60">May（理財系學生）</p>
+          </article>
+          <article class="rounded-3xl bg-white/10 p-8 shadow-lg">
+            <p class="text-2xl">⭐️⭐️⭐️⭐️⭐️</p>
+            <p class="mt-4 text-sm text-white/80">
+              「用了 LazyBacktest 才知道，我以前那個『神策略』其實根本不穩定。」
+            </p>
+            <p class="mt-6 text-xs uppercase tracking-wider text-white/60">阿偉（股市愛好者）</p>
+          </article>
+        </div>
+        <div class="mt-12 grid gap-6 rounded-3xl border border-white/10 bg-white/5 p-8 text-sm text-white/80 md:grid-cols-3">
+          <div class="flex flex-col gap-1">
+            <span class="text-lg font-semibold text-white">4.9 / 5</span>
+            <span>平均滿意度</span>
+          </div>
+          <div class="flex flex-col gap-1">
+            <span class="text-lg font-semibold text-white">2,000+</span>
+            <span>用戶已使用</span>
+          </div>
+          <div class="flex flex-col gap-1">
+            <span class="text-lg font-semibold text-white">100,000+</span>
+            <span>回測紀錄</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bg-white py-20">
+    <div class="mx-auto flex max-w-5xl flex-col items-center gap-8 px-6 text-center">
+      <h2 class="text-3xl font-black text-slate-900">讓數據告訴你，什麼策略真的有效</h2>
+      <p class="max-w-2xl text-base leading-relaxed text-slate-600">
+        LazyBacktest 讓你不用寫程式，也能輕鬆驗證策略、看懂數據。投資不再是猜方向，而是用最簡單的方式掌握真實表現。
+      </p>
+      <a
+        href="/index.html"
+        class="inline-flex items-center justify-center rounded-full bg-cyan-600 px-7 py-3 text-base font-semibold text-white shadow-lg shadow-cyan-200 transition hover:bg-cyan-700"
+      >立即免費體驗，一鍵開始回測</a>
+      <p class="text-xs text-slate-400">© LazyBacktest. 保留所有權利。</p>
+    </div>
+  </footer>
+</body>
+</html>
