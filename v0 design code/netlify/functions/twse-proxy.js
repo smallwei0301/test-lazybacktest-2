@@ -878,7 +878,11 @@ export default async (req) => {
         };
 
         return new Response(JSON.stringify(body), {
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+            },
         });
     } catch (error) {
         console.error('[TWSE Proxy v10.2] 發生未預期錯誤:', error);

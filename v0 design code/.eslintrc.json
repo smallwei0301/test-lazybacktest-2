@@ -1,11 +1,4 @@
 {
-  "extends": [
-    "next/core-web-vitals"
-  ],
-  "ignorePatterns": [
-    "public/app/js/backtest_corrupted.js",
-    "public/batch-optimization.js",
-    "public/app/js/worker_backup*.js",
-    "public/app/js/worker_backup_before*.js"
-  ]
+  "movedTo": "dev-config/.eslintrc.json",
+  "note": "ESLint 設定已移到 v0 design code/dev-config/；請在確認後刪除此檔以避免重複。"
 }

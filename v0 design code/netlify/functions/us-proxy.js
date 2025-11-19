@@ -562,7 +562,11 @@ export default async (req) => {
         if (mode === 'info') {
             const info = await fetchUSStockInfo(stockNo);
             return new Response(JSON.stringify(info), {
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                },
             });
         }
 
@@ -629,7 +633,11 @@ export default async (req) => {
                 source: payload.source || payload.dataSource || null,
             }),
             {
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                },
             },
         );
     } catch (error) {

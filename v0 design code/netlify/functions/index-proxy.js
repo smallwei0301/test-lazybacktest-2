@@ -248,7 +248,11 @@ export default async (req) => {
             const cached = await readInfoCache(store, stockNo);
             if (cached && cached.data) {
                 return new Response(JSON.stringify(cached.data), {
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                        'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                    },
                 });
             }
             const info = await fetchYahooIndexMeta(stockNo);
@@ -259,7 +263,11 @@ export default async (req) => {
             };
             await writeInfoCache(store, stockNo, { data: payload });
             return new Response(JSON.stringify(payload), {
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                },
             });
         }
 
@@ -286,7 +294,11 @@ export default async (req) => {
             const cached = await readPriceCache(store, cacheKey);
             if (cached) {
                 return new Response(JSON.stringify(cached.data), {
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                        'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                    },
                 });
             }
         }
@@ -300,7 +312,11 @@ export default async (req) => {
         };
         await writePriceCache(store, cacheKey, { data: responsePayload });
         return new Response(JSON.stringify(responsePayload), {
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+                'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+            },
         });
     } catch (error) {
         console.error('[Index Proxy] 發生錯誤:', error);

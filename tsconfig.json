@@ -10,8 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "resolveJsonModule": true,
-    "lib": ["DOM", "ES2020"],
-    "types": ["jest", "@testing-library/jest-dom"]
+    "lib": ["DOM", "ES2020"]
   },
   "include": ["v0 design code/**/*.ts", "v0 design code/**/*.d.ts"],
   "exclude": ["node_modules", "v0 design code/.next", "v0 design code/public"]

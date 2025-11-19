@@ -1,35 +1,4 @@
-const coreWebVitalsConfig = require("eslint-config-next/core-web-vitals");
-
-const ignorePatterns = [
-  "public/app/js/backtest_corrupted.js",
-  "public/batch-optimization.js",
-  "public/app/js/worker_backup*.js",
-  "public/app/js/worker_backup_before*.js",
-];
-
-const legacyPaths = [
-  "app/**/*.{ts,tsx}",
-  "components/**/*.{ts,tsx}",
-  "hooks/**/*.{ts,tsx}",
-  "lib/**/*.js",
-  "netlify/**/*.js",
-  "public/**/*.{js,ts,tsx,d.ts}",
-];
-
-module.exports = [
-  {
-    ignores: ignorePatterns,
-  },
-  ...coreWebVitalsConfig,
-  {
-    rules: {
-      "no-unused-vars": "warn",
-    },
-  },
-  ...legacyPaths.map((pattern) => ({
-    files: [pattern],
-    rules: {
-      "no-unused-vars": "off",
-    },
-  })),
-];
+// ESLint 設定已移動到:
+// v0 design code/dev-config/eslint.config.js
+// 若需還原，請從該位置複製回本檔案。
+module.exports = require('./dev-config/eslint.config.js');
