@@ -2754,6 +2754,16 @@ async function optimizeCombinationIterative(combination, config, options = {}) {
         riskManagement: combination.riskManagement
     };
 
+    // 強制使用系統預設參數作為初始迭代起點，確保結果一致性
+    if (currentCombo.buyStrategy && strategyDescriptions?.[currentCombo.buyStrategy]?.defaultParams) {
+        console.log(`[Batch Optimization] Resetting entry params to defaults for ${currentCombo.buyStrategy}`);
+        currentCombo.buyParams = { ...strategyDescriptions[currentCombo.buyStrategy].defaultParams };
+    }
+    if (currentCombo.sellStrategy && strategyDescriptions?.[currentCombo.sellStrategy]?.defaultParams) {
+        console.log(`[Batch Optimization] Resetting exit params to defaults for ${currentCombo.sellStrategy}`);
+        currentCombo.sellParams = { ...strategyDescriptions[currentCombo.sellStrategy].defaultParams };
+    }
+
     recordBatchDebug('combo-iteration-start', {
         combination: summarizeCombination(currentCombo),
         maxIterations,
