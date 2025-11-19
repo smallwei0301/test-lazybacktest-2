@@ -301,10 +301,20 @@
     const stopLoss = Number.isFinite(stopLossRaw) && stopLossRaw >= 0 && stopLossRaw <= 100 ? stopLossRaw : 0;
     const takeProfitRaw = toNumber(options.takeProfit);
     const takeProfit = Number.isFinite(takeProfitRaw) && takeProfitRaw >= 0 ? takeProfitRaw : 0;
-    const entryStages = sanitizeStagePercentages(options.entryStages, [positionSize]);
-    const exitStages = sanitizeStagePercentages(options.exitStages, [100]);
-    const entryStagingMode = options.entryStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
-    const exitStagingMode = options.exitStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
+    let entryStages = sanitizeStagePercentages(options.entryStages, [positionSize]);
+    let exitStages = sanitizeStagePercentages(options.exitStages, [100]);
+    let entryStagingMode = options.entryStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
+    let exitStagingMode = options.exitStagingMode === 'ratio' ? 'ratio' : 'signal_repeat';
+    const multiStageEnabled =
+      typeof options.multiStageEnabled === 'boolean'
+        ? options.multiStageEnabled
+        : entryStages.length > 1 || exitStages.length > 1;
+    if (!multiStageEnabled) {
+      entryStages = [positionSize];
+      exitStages = [100];
+      entryStagingMode = 'signal_repeat';
+      exitStagingMode = 'signal_repeat';
+    }
 
     const strategyDsl = buildStrategyDslFromOptions({
       entryStrategy,
@@ -331,6 +341,7 @@
       exitStrategy,
       entryParams,
       exitParams,
+      multiStageEnabled,
       entryStages,
       entryStagingMode,
       exitStages,

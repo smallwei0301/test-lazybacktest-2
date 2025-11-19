@@ -36,6 +36,28 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
     overflowPenaltySlope: 4,
 });
 
+const STAGING_MODE_LABELS = Object.freeze({
+    entry: Object.freeze({
+        signal_repeat: '訊號重複執行',
+        price_pullback: '價格回測分批',
+    }),
+    exit: Object.freeze({
+        signal_repeat: '訊號重複出場',
+        price_rally: '價格急漲出場',
+    }),
+});
+
+function describeStagingModeLabel(role, modeKey) {
+    if (!modeKey) {
+        return '訊號重複';
+    }
+    const table = STAGING_MODE_LABELS[role];
+    if (table && table[modeKey]) {
+        return table[modeKey];
+    }
+    return modeKey;
+}
+
 function resolveDriftPenaltyBandLabel(band, stable, caution) {
     switch (band) {
         case 'comfort':
@@ -1808,9 +1830,9 @@ resetStrategyStatusCard();
 
 const YEAR_STORAGE_VERSION = 'LB-CACHE-TIER-20250720A';
 const YEAR_STORAGE_PREFIX = 'LB_YEAR_DATA_CACHE_V20250720A';
-const YEAR_STORAGE_TW_TTL_MS = 1000 * 60 * 60 * 24 * 3;
-const YEAR_STORAGE_US_TTL_MS = 1000 * 60 * 60 * 24 * 1;
-const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 2;
+const YEAR_STORAGE_TW_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const YEAR_STORAGE_US_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const YEAR_STORAGE_DEFAULT_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 
 const BLOB_LEDGER_STORAGE_KEY = 'LB_BLOB_LEDGER_V20250720A';
 const BLOB_LEDGER_VERSION = 'LB-CACHE-TIER-20250720A';
@@ -6854,6 +6876,10 @@ function openPriceInspectorModal() {
         const subtitleParts = [`${modeLabel}`, marketLabel, `${visibleStockData.length} 筆`];
         subtitle.textContent = subtitleParts.join(' ・ ');
     }
+    const dataNoteEl = document.getElementById('priceInspectorDateNote');
+    if (dataNoteEl) {
+        dataNoteEl.textContent = '若超過當日14:00 卻無獲得台股當日資訊，請關閉並重新開啟瀏覽器。';
+    }
     renderPriceInspectorDebug();
 
     const headerRow = document.getElementById('priceInspectorHeaderRow');
@@ -7210,6 +7236,26 @@ function displayBacktestResult(result) {
         shortEntryDesc = strategyDescriptions[shortEntryKey] || { name: shortEntryKey || result.shortEntryStrategy, desc: 'N/A' };
         shortExitDesc = strategyDescriptions[shortExitKey] || { name: shortExitKey || result.shortExitStrategy, desc: 'N/A' };
     }
+    const formatStageValue = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return null;
+        if (Math.abs(num - Math.round(num)) < 0.01) {
+            return `${Math.round(num)}%`;
+        }
+        return `${num.toFixed(1).replace(/\.0$/, '')}%`;
+    };
+    const formatStageList = (values, fallback) => {
+        if (!Array.isArray(values) || values.length === 0) return fallback;
+        const formatted = values
+            .map((value) => formatStageValue(value))
+            .filter((value) => Boolean(value));
+        return formatted.length > 0 ? formatted.join(' / ') : fallback;
+    };
+    const multiStageEnabled = Boolean(result.multiStageEnabled);
+    const entryStageSummary = formatStageList(result.entryStages, '100%');
+    const exitStageSummary = formatStageList(result.exitStages, '100%');
+    const entryModeLabel = describeStagingModeLabel('entry', result.entryStagingMode);
+    const exitModeLabel = describeStagingModeLabel('exit', result.exitStagingMode);
     const avgP = result.completedTrades?.length > 0 ? result.completedTrades.reduce((s, t) => s + (t.profit||0), 0) / result.completedTrades.length : 0; const maxCL = result.maxConsecutiveLosses || 0; const bhR = parseFloat(result.buyHoldReturns?.[result.buyHoldReturns.length - 1] ?? 0); const bhAnnR = result.buyHoldAnnualizedReturn ?? 0; const sharpe = result.sharpeRatio?.toFixed(2) ?? 'N/A'; const sortino = result.sortinoRatio ? (isFinite(result.sortinoRatio) ? result.sortinoRatio.toFixed(2) : '∞') : 'N/A'; const maxDD = result.maxDrawdown?.toFixed(2) ?? 0; const totalTrades = result.tradesCount ?? 0; const winTrades = result.winTrades ?? 0; const winR = totalTrades > 0 ? (winTrades / totalTrades * 100).toFixed(1) : 0; const returnRate = result.returnRate ?? 0; const annualizedReturn = result.annualizedReturn ?? 0; const finalValue = result.finalValue ?? result.initialCapital; const sensitivityData = result.sensitivityAnalysis ?? result.parameterSensitivity ?? result.sensitivityData ?? null; let annReturnRatioStr = 'N/A'; let sharpeRatioStr = 'N/A'; if (result.annReturnHalf1 !== null && result.annReturnHalf2 !== null && result.annReturnHalf1 !== 0) { annReturnRatioStr = (result.annReturnHalf2 / result.annReturnHalf1).toFixed(2); } if (result.sharpeHalf1 !== null && result.sharpeHalf2 !== null && result.sharpeHalf1 !== 0) { sharpeRatioStr = (result.sharpeHalf2 / result.sharpeHalf1).toFixed(2); } const overfittingTooltip = "將回測期間前後對半分，計算兩段各自的總報酬率與夏普值，再計算其比值 (後段/前段)。比值接近 1 較佳，代表策略績效在不同時期較穩定。一般認為 > 0.5 可接受。"; let performanceHtml = `
         <div class="mb-8">
             <h4 class="text-lg font-semibold mb-6" style="color: var(--foreground);">績效指標</h4>
@@ -7963,6 +8009,18 @@ function displayBacktestResult(result) {
                     <div class="text-center">
                         <p class="text-sm text-indigo-600 font-medium mb-3">⏰ 買賣時間點</p>
                         <p class="text-base font-semibold text-gray-800">${result.tradeTiming==='open'?'隔日開盤':'當日收盤'}</p>
+                    </div>
+                </div>
+                <div class="bg-fuchsia-50 p-6 rounded-xl border border-fuchsia-200 shadow-sm">
+                    <div class="text-center space-y-2">
+                        <p class="text-sm font-medium text-fuchsia-600">多次進出場</p>
+                        <p class="text-base font-semibold ${multiStageEnabled ? 'text-emerald-600' : 'text-muted-foreground'}">
+                            ${multiStageEnabled ? '已啟用' : '未啟用'}
+                        </p>
+                        <div class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
+                            <p>進場：${entryStageSummary}｜${entryModeLabel}</p>
+                            <p>出場：${exitStageSummary}｜${exitModeLabel}</p>
+                        </div>
                     </div>
                 </div>
                 <div class="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm">
@@ -10660,6 +10718,7 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
                 exitParams: settings.exitParams,
                 exitStages: settings.exitStages,
                 exitStagingMode: settings.exitStagingMode,
+                multiStageEnabled: settings.multiStageEnabled,
                 enableShorting: settings.enableShorting, 
                 shortEntryStrategy: settings.shortEntryStrategy, 
                 shortEntryParams: settings.shortEntryParams, 
@@ -10687,6 +10746,23 @@ function saveStrategyToLocalStorage(name, settings, metrics) {
         } 
         return false; 
     } 
+}
+
+function resolveMultiStageEnabledFromSettings(settings) {
+    if (!settings || typeof settings !== 'object') {
+        return false;
+    }
+    if (typeof settings.multiStageEnabled === 'boolean') {
+        return settings.multiStageEnabled;
+    }
+    const countValidStages = (values) => {
+        if (!Array.isArray(values)) return 0;
+        return values.filter((value) => {
+            const num = Number(value);
+            return Number.isFinite(num) && num > 0;
+        }).length;
+    };
+    return countValidStages(settings.entryStages) > 1 || countValidStages(settings.exitStages) > 1;
 }
 function deleteStrategyFromLocalStorage(name) { try { const strategies = getSavedStrategies(); if (strategies[name]) { delete strategies[name]; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); return true; } return false; } catch (e) { console.error("刪除策略時發生錯誤:", e); showError(`刪除策略失敗: ${e.message}`); return false; } }
 function populateSavedStrategiesDropdown() { 
@@ -10787,6 +10863,12 @@ function saveStrategy() {
     }
 }
 function loadStrategy() { const selectElement = document.getElementById('loadStrategySelect'); const strategyName = selectElement.value; if (!strategyName) { showInfo("請先從下拉選單選擇要載入的策略。"); return; } const strategies = getSavedStrategies(); const strategyData = strategies[strategyName]; if (!strategyData || !strategyData.settings) { showError(`載入策略 "${strategyName}" 失敗：找不到策略數據。`); return; } let settings = strategyData.settings; const migratedSettings = migrateStrategySettings(settings); if (migratedSettings !== settings) { settings = migratedSettings; strategyData.settings = migratedSettings; strategies[strategyName] = strategyData; localStorage.setItem(SAVED_STRATEGIES_KEY, JSON.stringify(strategies)); } console.log(`[Main] Loading strategy: ${strategyName}`, settings); try { document.getElementById('stockNo').value = settings.stockNo || '2330'; setDefaultFees(settings.stockNo || '2330'); document.getElementById('startDate').value = settings.startDate || ''; document.getElementById('endDate').value = settings.endDate || ''; document.getElementById('initialCapital').value = settings.initialCapital || 100000; document.getElementById('recentYears').value = 5; const tradeTimingInput = document.querySelector(`input[name="tradeTiming"][value="${settings.tradeTiming || 'close'}"]`); if (tradeTimingInput) tradeTimingInput.checked = true; document.getElementById('buyFee').value = (settings.buyFee !== undefined) ? settings.buyFee : (document.getElementById('buyFee').value || 0.1425); document.getElementById('sellFee').value = (settings.sellFee !== undefined) ? settings.sellFee : (document.getElementById('sellFee').value || 0.4425); document.getElementById('positionSize').value = settings.positionSize || 100;
+        const multiStageEnabledSetting = resolveMultiStageEnabledFromSettings(settings);
+        if (window.lazybacktestMultiStageToggle && typeof window.lazybacktestMultiStageToggle.setEnabled === 'function') {
+            window.lazybacktestMultiStageToggle.setEnabled(multiStageEnabledSetting);
+        } else if (typeof setMultiStageToggleState === 'function') {
+            setMultiStageToggleState(multiStageEnabledSetting);
+        }
         if (window.lazybacktestStagedEntry) {
             if (Array.isArray(settings.entryStages) && settings.entryStages.length > 0 && typeof window.lazybacktestStagedEntry.setValues === 'function') {
                 window.lazybacktestStagedEntry.setValues(settings.entryStages);

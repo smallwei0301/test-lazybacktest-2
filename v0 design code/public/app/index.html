@@ -1067,17 +1067,20 @@
                                         </div>
 
                                         <div class="space-y-2" id="multiStagePanel">
-                                            <label class="flex items-center mb-4">
+                                            <label class="flex items-center gap-2 mb-4">
                                                 <input
                                                     type="checkbox"
                                                     id="multiStageToggle"
-                                                    class="mr-2 h-4 w-4 text-accent border border-border rounded-sm focus:ring-accent"
+                                                    class="h-4 w-4 text-accent border border-border rounded-sm focus:ring-accent"
                                                     style="border-color: var(--border); color: var(--accent);"
                                                     aria-controls="multiStageContent"
                                                     aria-expanded="false"
                                                     aria-label="啟用多次進出場"
                                                 />
-                                                <span class="text-xs font-medium text-foreground" style="color: var(--foreground);">啟用多次進出場</span>
+                                                <span class="flex items-center gap-1 text-xs font-medium text-foreground" style="color: var(--foreground);">
+                                                    <i data-lucide="layers" class="lucide-sm inline text-accent"></i>
+                                                    啟用多次進出場
+                                                </span>
                                             </label>
                                             <div
                                                 id="multiStageContent"
@@ -3464,6 +3467,7 @@
                     <div>
                         <h2 class="text-sm font-semibold">區間價格明細</h2>
                         <p id="priceInspectorSubtitle" class="text-[11px] mt-1" style="color: var(--muted-foreground);"></p>
+                        <p id="priceInspectorDateNote" class="text-[10px] mt-0.5" style="color: var(--muted-foreground);"></p>
                     </div>
                     <div class="flex items-center gap-2">
                         <div class="relative" id="priceInspectorDownloadControl">

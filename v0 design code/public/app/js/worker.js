@@ -486,6 +486,7 @@ const MONTH_STALE_REVALIDATE_TW_MS = 1000 * 60 * 60 * 18; // 台股/上櫃：約
 const MONTH_STALE_REVALIDATE_US_MS = 1000 * 60 * 60 * 12; // 美股：預設 12 小時內刷新
 const MONTH_STALE_REVALIDATE_DEFAULT_MS = 1000 * 60 * 60 * 18;
 const STALE_RANGE_TOUCH_TOLERANCE_MS = DAY_MS / 2;
+const NON_CURRENT_MONTH_STALE_REVALIDATE_MS = 1000 * 60 * 60 * 24 * 7; // 一週快取
 const SENSITIVITY_GRID_VERSION = "LB-SENSITIVITY-GRID-20260810A";
 const SENSITIVITY_SCORE_VERSION = "LB-SENSITIVITY-METRIC-20250730A";
 const SENSITIVITY_RELATIVE_STEPS = [0.05, 0.1, 0.2];
@@ -5867,6 +5868,7 @@ async function fetchStockData(
   });
 
   const months = enumerateMonths(startDateObj, endDateObj);
+  const requestedMonthKey = `${endDateObj.getUTCFullYear()}-${pad2(endDateObj.getUTCMonth() + 1)}`;
   if (months.length === 0) {
     fetchDiagnostics.usedCache = false;
     fetchDiagnostics.overview = summariseDatasetRows([], {
@@ -5940,6 +5942,7 @@ async function fetchStockData(
 
   async function processMonth(monthInfo) {
     try {
+      const isCurrentMonth = monthInfo.monthKey === requestedMonthKey;
       let monthEntry = getMonthlyCacheEntry(
         marketKey,
         stockNo,
@@ -6027,7 +6030,9 @@ async function fetchStockData(
         forcedRepairRanges.map((range) => `${range.start}-${range.end}`),
       );
       const targetEndExclusive = isoToUTC(monthInfo.rangeEndISO) + DAY_MS;
-      const staleRevalidateMs = getMonthlyStaleRevalidateMs(marketKey);
+      const staleRevalidateMs = isCurrentMonth
+        ? getMonthlyStaleRevalidateMs(marketKey)
+        : NON_CURRENT_MONTH_STALE_REVALIDATE_MS;
       const monthSourceFlags = new Set(
         monthEntry.sources instanceof Set
           ? Array.from(monthEntry.sources)
@@ -6056,6 +6061,7 @@ async function fetchStockData(
             ? monthEntry.lastForcedReloadAt
             : 0;
           const staleReloadDue =
+            isCurrentMonth &&
             touchesRangeEnd &&
             staleRevalidateMs > 0 &&
             lastUpdatedMs > 0 &&
@@ -8336,6 +8342,10 @@ function runStrategy(data, params, options = {}) {
     }
     const exitStageMode =
       typeof exitStagingMode === "string" ? exitStagingMode : "signal_repeat";
+    const multiStageEnabled =
+      typeof params.multiStageEnabled === "boolean"
+        ? params.multiStageEnabled
+        : entryStagePercents.length > 1 || exitStagePercents.length > 1;
 
   if (!data || n === 0) throw new Error("回測數據無效");
   const dates = data.map((d) => d.date);
@@ -8842,7 +8852,11 @@ function runStrategy(data, params, options = {}) {
         exitStrategy: params.exitStrategy,
         entryParams: params.entryParams,
         entryStages: entryStagePercents.slice(),
+        entryStagingMode: entryStageMode,
         exitParams: params.exitParams,
+        exitStages: exitStagePercents.slice(),
+        exitStagingMode: exitStageMode,
+        multiStageEnabled,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -11890,6 +11904,7 @@ function runStrategy(data, params, options = {}) {
         exitParams: params.exitParams,
         exitStages: exitStagePercents.slice(),
         exitStagingMode: exitStageMode,
+        multiStageEnabled,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,

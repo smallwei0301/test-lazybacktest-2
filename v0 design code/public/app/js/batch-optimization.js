@@ -1778,6 +1778,13 @@ function prepareBaseParamsForOptimization(source) {
     clone.shortExitParams = clone.shortExitParams && typeof clone.shortExitParams === 'object' ? { ...clone.shortExitParams } : {};
     clone.entryStages = Array.isArray(clone.entryStages) ? [...clone.entryStages] : [];
     clone.exitStages = Array.isArray(clone.exitStages) ? [...clone.exitStages] : [];
+    if (typeof clone.multiStageEnabled !== 'boolean') {
+        const entryStageCount = Array.isArray(clone.entryStages) ? clone.entryStages.length : 0;
+        const exitStageCount = Array.isArray(clone.exitStages) ? clone.exitStages.length : 0;
+        clone.multiStageEnabled = entryStageCount > 1 || exitStageCount > 1;
+    } else {
+        clone.multiStageEnabled = Boolean(clone.multiStageEnabled);
+    }
     return clone;
 }
 
@@ -2920,7 +2927,7 @@ async function optimizeStrategyWithInternalConvergence(strategy, strategyType, s
                 : getBacktestParams();
 
             if (baseParamsOverride) {
-                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages', 'multiStageEnabled'].forEach((key) => {
                     if (baseParamsOverride[key] !== undefined) {
                         baseParams[key] = Array.isArray(baseParamsOverride[key])
                             ? [...baseParamsOverride[key]]
@@ -3447,7 +3454,7 @@ async function executeBacktestForCombination(combination, options = {}) {
                 : getBacktestParams();
 
             if (baseParamsOverride) {
-                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages'].forEach((key) => {
+                ['stockNo', 'startDate', 'endDate', 'market', 'marketType', 'adjustedPrice', 'splitAdjustment', 'tradeTiming', 'initialCapital', 'positionSize', 'enableShorting', 'entryStages', 'exitStages', 'multiStageEnabled'].forEach((key) => {
                     if (baseParamsOverride[key] !== undefined) {
                         params[key] = Array.isArray(baseParamsOverride[key])
                             ? [...baseParamsOverride[key]]

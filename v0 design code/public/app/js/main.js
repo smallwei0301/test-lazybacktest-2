@@ -448,6 +448,35 @@ window.lazybacktestMultiStagePanel = {
     isOpen: () => multiStagePanelController.isOpen(),
 };
 
+function getMultiStageToggleElement() {
+    return document.getElementById('multiStageToggle');
+}
+
+function isMultiStageToggleEnabled() {
+    const checkbox = getMultiStageToggleElement();
+    return Boolean(checkbox?.checked);
+}
+
+function setMultiStageToggleState(enabled) {
+    const checkbox = getMultiStageToggleElement();
+    if (!checkbox) return;
+    const targetState = Boolean(enabled);
+    const previousState = checkbox.checked;
+    checkbox.checked = targetState;
+    if (previousState === targetState) {
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+    }
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+if (typeof window !== 'undefined') {
+    window.lazybacktestMultiStageToggle = {
+        isEnabled: () => isMultiStageToggleEnabled(),
+        setEnabled: (value) => setMultiStageToggleState(value),
+    };
+}
+
 // --- Data Source Tester (LB-DATASOURCE-20241005A) ---
 const dataSourceTesterState = {
     open: false,
@@ -5274,19 +5303,19 @@ function getBacktestParams() {
     const stagedEntryValues = (window.lazybacktestStagedEntry && typeof window.lazybacktestStagedEntry.getValues === 'function')
         ? window.lazybacktestStagedEntry.getValues()
         : [];
-    const entryStages = Array.isArray(stagedEntryValues) && stagedEntryValues.length > 0
+    let entryStages = Array.isArray(stagedEntryValues) && stagedEntryValues.length > 0
         ? stagedEntryValues.filter((value) => Number.isFinite(value) && value > 0)
         : [positionSize];
     const entryStagingModeSelect = document.getElementById('entryStagingMode');
-    const entryStagingMode = entryStagingModeSelect?.value || 'signal_repeat';
+    let entryStagingMode = entryStagingModeSelect?.value || 'signal_repeat';
     const stagedExitValues = (window.lazybacktestStagedExit && typeof window.lazybacktestStagedExit.getValues === 'function')
         ? window.lazybacktestStagedExit.getValues()
         : [];
-    const exitStages = Array.isArray(stagedExitValues) && stagedExitValues.length > 0
+    let exitStages = Array.isArray(stagedExitValues) && stagedExitValues.length > 0
         ? stagedExitValues.filter((value) => Number.isFinite(value) && value > 0)
         : [100];
     const exitStagingModeSelect = document.getElementById('exitStagingMode');
-    const exitStagingMode = exitStagingModeSelect?.value || 'signal_repeat';
+    let exitStagingMode = exitStagingModeSelect?.value || 'signal_repeat';
     const stopLoss = parseFloat(document.getElementById('stopLoss')?.value) || 0;
     const takeProfit = parseFloat(document.getElementById('takeProfit')?.value) || 0;
     const tradeTiming = document.querySelector('input[name="tradeTiming"]:checked')?.value || 'close';
@@ -5327,6 +5356,16 @@ function getBacktestParams() {
     const rawMarket = normalizeMarketValue(marketSelect?.value || currentMarket || 'TWSE');
     const market = isIndexSymbol(stockNo) ? 'INDEX' : rawMarket;
     const priceMode = adjustedPrice ? 'adjusted' : 'raw';
+
+    const multiStageEnabled = typeof isMultiStageToggleEnabled === 'function'
+        ? isMultiStageToggleEnabled()
+        : true;
+    if (!multiStageEnabled) {
+        entryStages = [positionSize];
+        exitStages = [100];
+        entryStagingMode = 'signal_repeat';
+        exitStagingMode = 'signal_repeat';
+    }
 
     const strategyDsl = buildStrategyDslFromParams({
         entryStrategy,
@@ -5372,6 +5411,7 @@ function getBacktestParams() {
         entryStages,
         strategyDsl,
         recentYears,
+        multiStageEnabled,
     };
 }
 const TAIWAN_STOCK_PATTERN = /^\d{4,6}[A-Z0-9]?$/;
