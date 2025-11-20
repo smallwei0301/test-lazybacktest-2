@@ -1,14 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, PlusCircle, ImagePlus, List, LayoutGrid, Calculator, BarChart3, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Eye, EyeOff, X } from "lucide-react"
+import { Trash2, PlusCircle, ImagePlus, List, LayoutGrid, Calculator, BarChart3, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Eye, EyeOff, X, Pencil, Check, RotateCcw, Loader2, Plus } from "lucide-react"
 import Link from "next/link"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
@@ -33,6 +33,8 @@ interface Sale {
 interface Dividend {
   date: string
   dividend: number
+  originalDate?: string
+  isOverridden?: boolean
 }
 
 interface Settings {
@@ -53,9 +55,426 @@ interface ToastNotification {
   show: boolean
 }
 
+interface StockData {
+  price: number | null
+  priceDate: string | null
+  stockName: string | null
+  priceStatus: string
+  dividends: Dividend[]
+  dividendStatus: string
+}
+
+interface TransactionCycle {
+  stockId: string
+  isHistorical: boolean
+  purchases: Stock[]
+  sales: Sale[]
+  cycleId: string
+}
+
 const BUY_FEE_RATE = 0.001425
 const DEFAULT_SELL_FEE_STOCK = 0.001425 + 0.003
 const DEFAULT_SELL_FEE_ETF = 0.001425 + 0.001
+
+function sanitizeForId(text: string) {
+  if (!text) return ""
+  return text.replace(/[^\w\u4e00-\u9fa5-]/g, "_")
+}
+
+async function fetchStockData(stockId: string): Promise<StockData> {
+  if (stockId.includes("(需手動更正)")) {
+    return {
+      price: null,
+      priceDate: "N/A",
+      stockName: stockId.replace("(需手動更正)", ""),
+      priceStatus: "failed",
+      dividends: [],
+      dividendStatus: "failed",
+    }
+  }
+
+  let price: number | null = null
+  let priceDate: string | null = null
+  let stockName: string | null = null
+  let priceStatus = "ok"
+  let dividends: Dividend[] = []
+  let dividendStatus = "ok"
+
+  const proxyUrl = "https://corsproxy.io/?"
+  let tickerSuffix = ".TW"
+  if (stockId.toUpperCase().endsWith("B")) {
+    tickerSuffix = ".TWO"
+  } else if (stockId.length === 4 && !stockId.startsWith("00")) {
+    const otcPrefixes = ["3", "4", "5", "6", "8"]
+    if (otcPrefixes.includes(stockId[0])) {
+      tickerSuffix = ".TWO"
+    }
+  }
+  const yahooTicker = `${stockId}${tickerSuffix}`
+
+  // Source 1: TWSE MIS API
+  try {
+    const tseUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${stockId}.tw`
+    const otcUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_${stockId}.tw`
+
+    const parseTwseData = (data: any) => {
+      if (data.msgArray && data.msgArray.length > 0) {
+        const info = data.msgArray[0]
+        if (info.n) {
+          stockName = info.n
+        }
+        const rawDate = info.d
+        if (rawDate && rawDate.length === 8) {
+          const formattedDateStr = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`
+          priceDate = new Date(formattedDateStr).toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" })
+        } else {
+          priceDate = "N/A"
+        }
+        const currentPrice = Number.parseFloat(info.z)
+        if (!isNaN(currentPrice) && currentPrice > 0) {
+          price = currentPrice
+          return true
+        }
+      }
+      return false
+    }
+
+    let response = await fetch(`${proxyUrl}${encodeURIComponent(tseUrl)}`)
+    let data = await response.json()
+    if (!parseTwseData(data)) {
+      response = await fetch(`${proxyUrl}${encodeURIComponent(otcUrl)}`)
+      data = await response.json()
+      parseTwseData(data)
+    }
+    if (price === null) {
+      priceStatus = "nodata"
+    }
+  } catch (e) {
+    console.error(`Source 1 (MIS) failed for ${stockId}:`, e)
+    priceStatus = "failed"
+  }
+
+  // Source 2: Yahoo Finance
+  if (priceStatus !== "ok") {
+    try {
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?range=5d&interval=1d`
+      const response = await fetch(`${proxyUrl}${encodeURIComponent(yahooUrl)}`)
+      const data = await response.json()
+      if (data.chart.result && data.chart.result[0]) {
+        const result = data.chart.result[0]
+        const closePrices = result.indicators.quote[0].close
+        const timestamps = result.timestamp
+        for (let i = timestamps.length - 1; i >= 0; i--) {
+          if (closePrices[i] !== null && timestamps[i] !== null) {
+            price = closePrices[i]
+            const date = new Date(timestamps[i] * 1000)
+            priceDate = date.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" })
+            priceStatus = "historical"
+            if (!stockName) {
+              stockName = result.meta.shortName || result.meta.symbol
+            }
+            break
+          }
+        }
+      }
+      if (price === null) {
+        priceStatus = "failed"
+      }
+    } catch (e) {
+      console.error(`Source 2 (Yahoo) failed for ${stockId}:`, e)
+      priceStatus = "failed"
+    }
+  }
+
+  // Source 3: TWSE Daily
+  if (priceStatus === "failed" || priceStatus === "nodata") {
+    try {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const y_str = yesterday.getFullYear()
+      const m_str = String(yesterday.getMonth() + 1).padStart(2, "0")
+      const d_str = String(yesterday.getDate()).padStart(2, "0")
+      const dateStr = `${y_str}${m_str}${d_str}`
+      const twseDailyUrl = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${dateStr}&type=ALLBUT0999`
+      const response = await fetch(`${proxyUrl}${encodeURIComponent(twseDailyUrl)}`)
+      const data = await response.json()
+      if (data.stat === "OK" && data.data9) {
+        const stockInfo = data.data9.find((item: any[]) => item[0].trim() === stockId)
+        if (stockInfo) {
+          const closePrice = Number.parseFloat(stockInfo[8].replace(/,/g, ""))
+          if (!isNaN(closePrice) && closePrice > 0) {
+            price = closePrice
+            priceDate = `${m_str}/${d_str}`
+            priceStatus = "historical"
+            if (!stockName) stockName = stockInfo[1].trim()
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Source 3 (TWSE Daily) failed for ${stockId}:`, e)
+    }
+  }
+
+  // Source 4: FinMind API
+  if (priceStatus === "failed" || priceStatus === "nodata") {
+    try {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const dateStr = yesterday.toISOString().split("T")[0]
+      const finmindUrl = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${dateStr}&end_date=${dateStr}`
+      const response = await fetch(finmindUrl)
+      const data = await response.json()
+      if (data.data && data.data.length > 0 && data.data[0].close) {
+        price = data.data[0].close
+        priceDate = new Date(data.data[0].date).toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" })
+        priceStatus = "historical"
+      }
+    } catch (e) {
+      console.error(`Source 4 (Finmind) failed for ${stockId}:`, e)
+    }
+  }
+
+  // Dividends
+  try {
+    const startDate = new Date()
+    startDate.setFullYear(startDate.getFullYear() - 5)
+    const period1 = Math.floor(startDate.getTime() / 1000)
+    const period2 = Math.floor(new Date().getTime() / 1000)
+    const yahooDivUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?period1=${period1}&period2=${period2}&interval=1d&events=div`
+    const response = await fetch(`${proxyUrl}${encodeURIComponent(yahooDivUrl)}`)
+    if (response.ok) {
+      const data = await response.json()
+      if (
+        data.chart.result &&
+        data.chart.result[0] &&
+        data.chart.result[0].events &&
+        data.chart.result[0].events.dividends
+      ) {
+        const dividendEvents = data.chart.result[0].events.dividends
+        dividends = Object.values(dividendEvents).map((event: any) => ({
+          date: new Date(event.date * 1000).toISOString().split("T")[0],
+          dividend: event.amount,
+        }))
+        dividendStatus = "ok"
+      } else {
+        dividendStatus = "nodata"
+      }
+    } else {
+      console.warn(`Yahoo Dividend API for ${stockId} returned status: ${response.status}`)
+      dividendStatus = "failed"
+    }
+  } catch (e) {
+    console.error(`Failed to fetch dividends for ${stockId}:`, e)
+    dividendStatus = "failed"
+  }
+
+  if (price === null) priceStatus = "failed"
+  return { price, priceDate, stockName, priceStatus, dividends, dividendStatus }
+}
+
+function getSellFeeRate(stockId: string, feeSettings: Record<string, number>) {
+  if (feeSettings[stockId]) {
+    return feeSettings[stockId]
+  }
+  return stockId.startsWith("00") ? DEFAULT_SELL_FEE_ETF : DEFAULT_SELL_FEE_STOCK
+}
+
+function calculateStockMetrics(stock: Stock, currentPrice: number, finalDividends: Dividend[]) {
+  const totalShares = stock.shares * 1000
+  const totalCost = stock.price * totalShares * (1 + BUY_FEE_RATE)
+  const stockDividends = finalDividends.filter((d) => new Date(d.date) >= new Date(stock.date))
+  const cumulativeDividend = stockDividends.reduce((acc, curr) => acc + curr.dividend * totalShares, 0)
+  const avgHoldingCost = totalShares > 0 ? (totalCost - cumulativeDividend) / totalShares : 0
+  const currentValue = currentPrice * totalShares
+  const returnAmount = currentValue + cumulativeDividend - totalCost
+  const returnRate = totalCost > 0 ? (returnAmount / totalCost) * 100 : 0
+  
+  const oneYearAgo = new Date()
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+  const lastYearTotalDividendPerShare = finalDividends
+    .filter((d) => new Date(d.date) > oneYearAgo)
+    .reduce((sum, d) => sum + d.dividend, 0)
+  const projectedAnnualDividend = lastYearTotalDividendPerShare * totalShares
+
+  return {
+    ...stock,
+    totalCost,
+    dividends: stockDividends,
+    cumulativeDividend,
+    avgHoldingCost,
+    currentValue,
+    returnAmount,
+    returnRate,
+    projectedAnnualDividend,
+  }
+}
+
+function calculateGroupMetrics(transactions: any[], stockId: string, manualOverrides: Record<string, any>) {
+  const group = {
+    id: stockId,
+    totalShares: 0,
+    totalCost: 0,
+    cumulativeDividend: 0,
+    currentValue: 0,
+    projectedAnnualDividend: 0,
+    returnAmount: 0,
+    returnRate: 0,
+    avgHoldingCost: 0,
+    dividends: [] as Dividend[],
+  }
+
+  const allDividends: Dividend[] = []
+  transactions.forEach((tx) => {
+    group.totalShares += tx.shares
+    group.totalCost += tx.totalCost
+    group.cumulativeDividend += tx.cumulativeDividend
+    group.currentValue += tx.currentValue
+    group.projectedAnnualDividend += tx.projectedAnnualDividend
+    allDividends.push(...tx.dividends)
+  })
+
+  const uniqueDividends = new Map()
+  allDividends.forEach(d => {
+      const key = d.originalDate || d.date
+      uniqueDividends.set(key, d)
+  })
+  
+  group.dividends = Array.from(uniqueDividends.values()).sort(
+    (a: Dividend, b: Dividend) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  )
+
+  if (manualOverrides[stockId]?.projected !== undefined) {
+    group.projectedAnnualDividend = manualOverrides[stockId].projected
+  }
+
+  const totalSharesInUnits = group.totalShares * 1000
+  group.avgHoldingCost = totalSharesInUnits > 0 ? (group.totalCost - group.cumulativeDividend) / totalSharesInUnits : 0
+  group.returnAmount = group.currentValue + group.cumulativeDividend - group.totalCost
+  group.returnRate = group.totalCost > 0 ? (group.returnAmount / group.totalCost) * 100 : 0
+
+  return group
+}
+
+function processTransactions(
+  stockId: string,
+  originalPurchases: Stock[],
+  originalSales: Sale[],
+  finalDividends: Dividend[],
+  feeSettings: Record<string, number>
+) {
+  let totalRealizedPL = 0
+  let totalRealizedDividends = 0
+  const salesHistory: Sale[] = []
+  const sellFeeRate = getSellFeeRate(stockId, feeSettings)
+  
+  const purchaseQueue = JSON.parse(JSON.stringify(originalPurchases)).sort(
+    (a: Stock, b: Stock) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  )
+  
+  const sortedSales = [...(originalSales || [])].sort(
+    (a: Sale, b: Sale) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  )
+
+  for (const sale of sortedSales) {
+    let sharesToSell = sale.shares * 1000
+    const saleProceeds = sale.price * sharesToSell
+    let costOfSoldShares = 0
+
+    while (sharesToSell > 0 && purchaseQueue.length > 0) {
+      const currentPurchaseLot = purchaseQueue[0]
+      const sharesAvailableInLot = currentPurchaseLot.shares * 1000
+      const sharesToTakeFromLot = Math.min(sharesToSell, sharesAvailableInLot)
+
+      const purchaseDate = new Date(currentPurchaseLot.date)
+      const saleDate = new Date(sale.date)
+
+      const relevantDividends = finalDividends.filter((d) => {
+        const exDivDate = new Date(d.date)
+        return exDivDate >= purchaseDate && exDivDate < saleDate
+      })
+
+      totalRealizedDividends += relevantDividends.reduce((acc, curr) => acc + curr.dividend * sharesToTakeFromLot, 0)
+
+      const costPerShareInLot = currentPurchaseLot.price * (1 + BUY_FEE_RATE)
+      costOfSoldShares += sharesToTakeFromLot * costPerShareInLot
+
+      currentPurchaseLot.shares = (sharesAvailableInLot - sharesToTakeFromLot) / 1000
+      sharesToSell -= sharesToTakeFromLot
+
+      if (currentPurchaseLot.shares <= 1e-9) {
+        purchaseQueue.shift()
+      }
+    }
+
+    const saleFee = saleProceeds * sellFeeRate
+    const realizedPLForThisSale = saleProceeds - costOfSoldShares - saleFee
+    totalRealizedPL += realizedPLForThisSale
+    salesHistory.push({ ...sale, realizedPL: realizedPLForThisSale })
+  }
+
+  return {
+    realizedPL: totalRealizedPL,
+    realizedDividends: totalRealizedDividends,
+    remainingPurchases: purchaseQueue,
+    salesHistory,
+  }
+}
+
+function groupTransactionsIntoCycles(allPurchases: Stock[], allSales: Record<string, Sale[]>) {
+  const cycles: TransactionCycle[] = []
+  const purchasesById = allPurchases.reduce((acc, p) => {
+    if (!acc[p.id]) acc[p.id] = []
+    acc[p.id].push(p)
+    return acc
+  }, {} as Record<string, Stock[]>)
+
+  for (const stockId in purchasesById) {
+    const stockPurchases = purchasesById[stockId].map((p) => ({ ...p, type: "purchase" }))
+    const stockSales = (allSales[stockId] || []).map((s) => ({ ...s, type: "sale" }))
+    
+    const allTransactions = [...stockPurchases, ...stockSales].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    )
+
+    let activePurchases: Stock[] = []
+    let activeSales: Sale[] = []
+    let currentShares = 0
+
+    for (const tx of allTransactions) {
+      if ((tx as any).type === "purchase") {
+        activePurchases.push(tx as Stock)
+        currentShares += tx.shares
+      } else {
+        activeSales.push(tx as Sale)
+        currentShares -= tx.shares
+
+        if (currentShares < 1e-9) {
+          cycles.push({
+            stockId: stockId,
+            isHistorical: true,
+            purchases: JSON.parse(JSON.stringify(activePurchases)),
+            sales: JSON.parse(JSON.stringify(activeSales)),
+            cycleId: `${stockId}-${tx.date}`,
+          })
+          activePurchases = []
+          activeSales = []
+          currentShares = 0
+        }
+      }
+    }
+
+    if (activePurchases.length > 0) {
+      cycles.push({
+        stockId: stockId,
+        isHistorical: false,
+        purchases: activePurchases,
+        sales: activeSales,
+        cycleId: `${stockId}-active`,
+      })
+    }
+  }
+  return cycles
+}
 
 export default function StockRecordsPage() {
   const [portfolio, setPortfolio] = useState<Stock[]>([])
@@ -70,6 +489,10 @@ export default function StockRecordsPage() {
     financialPlan: {},
     hideZeroGainRows: false,
   })
+
+  const [stockPrices, setStockPrices] = useState<Record<string, number>>({})
+  const [loading, setLoading] = useState(false)
+  const [processing, setProcessing] = useState(false)
 
   const [stockId, setStockId] = useState("")
   const [purchaseDate, setPurchaseDate] = useState("")
@@ -91,10 +514,15 @@ export default function StockRecordsPage() {
     loadData()
   }, [])
 
-  // Auto-save when data changes
   useEffect(() => {
     saveData()
   }, [portfolio, sales, feeSettings, settings])
+
+  useEffect(() => {
+    if (portfolio.length > 0) {
+      fetchPrices()
+    }
+  }, [portfolio])
 
   const showToast = (
     message: string,
@@ -156,6 +584,26 @@ export default function StockRecordsPage() {
     }
   }
 
+  const fetchPrices = async () => {
+    if (loading) return
+    setLoading(true)
+    const uniqueIds = Array.from(new Set(portfolio.map((s) => s.id)))
+    const newPrices = { ...stockPrices }
+
+    for (const id of uniqueIds) {
+      try {
+        const data = await fetchStockData(id)
+        if (data && data.price !== null) {
+          newPrices[id] = data.price
+        }
+      } catch (e) {
+        console.error(`Failed to fetch price for ${id}`, e)
+      }
+    }
+    setStockPrices(newPrices)
+    setLoading(false)
+  }
+
   const handleAddStock = (e: React.FormEvent) => {
     e.preventDefault()
     if (!stockId || !purchaseDate || !purchaseShares || !purchasePrice) return
@@ -172,7 +620,6 @@ export default function StockRecordsPage() {
     const updatedPortfolio = [...portfolio, newStock]
     setPortfolio(updatedPortfolio)
 
-    // Reset form
     setStockId("")
     setPurchaseShares("")
     setPurchasePrice("")
@@ -204,14 +651,80 @@ export default function StockRecordsPage() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    let apiKey = localStorage.getItem("geminiApiKey")
+    if (!apiKey) {
+      apiKey = prompt("請輸入 Google Gemini API Key:")
+      if (!apiKey) return
+      localStorage.setItem("geminiApiKey", apiKey)
+    }
+
     setImageUploadText("辨識中...")
     setImageUploadLoading(true)
 
     try {
-      // Simulate image processing
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      showToast("圖片辨識功能需要API金鑰設定", "error")
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      
+      const base64Data = base64.split(',')[1]
+      
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+              contents: [{
+                  parts: [
+                      { text: "請分析這張股票交易圖片，回傳JSON格式：[{id: '股票代號', date: 'YYYY-MM-DD', shares: 股數(number), price: 單價(number), type: 'buy'|'sell'}]。只回傳JSON，不要有其他文字。" },
+                      { inline_data: { mime_type: file.type, data: base64Data } }
+                  ]
+              }]
+          })
+      })
+      
+      const data = await response.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!text) throw new Error("No response from Gemini")
+      
+      const jsonStr = text.replace(/```json|```/g, '').trim()
+      const transactions = JSON.parse(jsonStr)
+      
+      const newPortfolio = [...portfolio]
+      const newSales = { ...sales }
+      let addedCount = 0
+
+      for (const tx of transactions) {
+          if (tx.type === 'buy') {
+              newPortfolio.push({
+                  uuid: crypto.randomUUID(),
+                  id: tx.id,
+                  date: tx.date,
+                  shares: tx.shares / 1000,
+                  price: tx.price,
+                  manualDividends: []
+              })
+              addedCount++
+          } else if (tx.type === 'sell') {
+              if (!newSales[tx.id]) newSales[tx.id] = []
+              newSales[tx.id].push({
+                  uuid: crypto.randomUUID(),
+                  date: tx.date,
+                  shares: tx.shares / 1000,
+                  price: tx.price,
+                  realizedPL: 0 
+              })
+              addedCount++
+          }
+      }
+      
+      setPortfolio(newPortfolio)
+      setSales(newSales)
+      showToast(`成功辨識並新增 ${addedCount} 筆交易`)
+
     } catch (error) {
+      console.error(error)
       showToast("圖片辨識失敗", "error")
     } finally {
       setImageUploadText("圖片輸入")
@@ -246,7 +759,6 @@ export default function StockRecordsPage() {
     }
   }
 
-  // Calculate yearly summary by fiscal year
   const calculateYearlySummary = () => {
     if (portfolio.length === 0) {
       return []
@@ -270,7 +782,6 @@ export default function StockRecordsPage() {
       let year = stockDate.getFullYear()
       const month = stockDate.getMonth() + 1
 
-      // Adjust year for fiscal year calculation
       if (month < fiscalYearStart) {
         year -= 1
       }
@@ -292,12 +803,10 @@ export default function StockRecordsPage() {
       yearlyData[yearKey].totalInvestment += cost
       yearlyData[yearKey].totalShares += stock.shares
 
-      // Add dividends
       stock.manualDividends.forEach((div) => {
         yearlyData[yearKey].totalDividends += div.dividend * stock.shares
       })
 
-      // Add realized P&L from sales
       const stockSales = sales[stock.uuid] || []
       stockSales.forEach((sale) => {
         const saleDate = new Date(sale.date)
@@ -316,7 +825,6 @@ export default function StockRecordsPage() {
     return Object.values(yearlyData).sort((a, b) => a.year.localeCompare(b.year))
   }
 
-  // Calculate financial plan
   const handleCalculateFinancialPlan = () => {
     const initialAge = document.getElementById("initialAge") as HTMLInputElement
     const initialInvestmentYear = document.getElementById("initialInvestmentYear") as HTMLInputElement
@@ -349,7 +857,6 @@ export default function StockRecordsPage() {
       return
     }
 
-    // Calculate compound interest
     let currentBalance = initialAmount
     const plan: Array<{
       year: number
@@ -392,11 +899,38 @@ export default function StockRecordsPage() {
   const yearlySummary = calculateYearlySummary()
   const metrics = calculatePortfolioMetrics()
 
+  // Group portfolio by ID for display
+  const groupedPortfolio = useMemo(() => {
+    const groups: Record<string, any> = {}
+    const uniqueIds = Array.from(new Set(portfolio.map(p => p.id)))
+    
+    uniqueIds.forEach(id => {
+        const stockTransactions = portfolio.filter(p => p.id === id)
+        const stockSales = sales[id] || []
+        // We need dividends here. For now, empty or manual.
+        // In v0.9, dividends are fetched. We need to integrate that.
+        // But for now, let's just use manual dividends attached to stock.
+        const dividends: Dividend[] = [] 
+        stockTransactions.forEach(s => dividends.push(...s.manualDividends))
+        
+        const group = calculateGroupMetrics(stockTransactions.map(s => ({
+            ...s,
+            totalCost: s.price * s.shares * 1000 * (1 + BUY_FEE_RATE),
+            cumulativeDividend: 0, // Simplified for now
+            currentValue: (stockPrices[id] || s.price) * s.shares * 1000,
+            projectedAnnualDividend: 0,
+            dividends: s.manualDividends
+        })), id, settings.manualOverrides)
+        
+        groups[id] = group
+    })
+    return groups
+  }, [portfolio, sales, stockPrices, settings.manualOverrides])
+
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader activePath="/stock-records" backLink={{ href: "/backtest", label: "回到回測工具" }} />
 
-      {/* Toast Notifications - Responsive */}
       <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 space-y-2 z-50 max-w-xs sm:max-w-sm">
         {toasts.map((toast) => (
           <div
@@ -536,22 +1070,6 @@ export default function StockRecordsPage() {
                   required
                 />
               </div>
-              <div className="space-y-1 sm:space-y-2">
-                <Label htmlFor="purchasePrice" className="text-xs sm:text-sm font-medium text-foreground">
-                  購買成本 (每股)
-                </Label>
-                <Input
-                  id="purchasePrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={purchasePrice}
-                  onChange={(e) => setPurchasePrice(e.target.value)}
-                  placeholder="例如: 688.5"
-                  className="border-muted-foreground/20 focus:border-primary text-sm"
-                  required
-                />
-              </div>
               <Button type="submit" size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground h-10 sm:h-12 text-xs sm:text-sm">
                 <PlusCircle className="mr-1 sm:mr-2 h-4 sm:h-5 w-4 sm:w-5" />
                 新增
@@ -641,7 +1159,6 @@ export default function StockRecordsPage() {
                   </div>
                 </div>
 
-                {/* Stock List */}
                 <div
                   className={
                     settings.isCompactMode ? "space-y-3" : "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"
@@ -722,7 +1239,6 @@ export default function StockRecordsPage() {
           </CardContent>
         </Card>
 
-        {/* Summary Section */}
         <Card className="mb-8">
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 gap-4">
@@ -797,7 +1313,6 @@ export default function StockRecordsPage() {
           </CardContent>
         </Card>
 
-        {/* Financial Planning */}
         <Card className="mb-8">
           <CardHeader>
             <CardTitle className="text-2xl">財務規劃</CardTitle>
@@ -834,13 +1349,35 @@ export default function StockRecordsPage() {
               計算並同步目標
             </Button>
             <div className="overflow-x-auto">
-              <p className="text-muted-foreground text-center py-4">請輸入完整的規劃參數。</p>
+              {settings.financialPlan.projections ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-4">年份</th>
+                      <th className="text-left py-2 px-4">年齡</th>
+                      <th className="text-right py-2 px-4">預估資產</th>
+                      <th className="text-right py-2 px-4">年度收益</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settings.financialPlan.projections.map((p: any, i: number) => (
+                      <tr key={i} className="border-b hover:bg-muted/50">
+                        <td className="py-2 px-4">{p.year}</td>
+                        <td className="py-2 px-4">{p.age}</td>
+                        <td className="text-right py-2 px-4">${p.balance.toLocaleString()}</td>
+                        <td className="text-right py-2 px-4 text-green-600">+${p.yearlyGain.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="text-muted-foreground text-center py-4">請輸入完整的規劃參數。</p>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Add Dividend Modal */}
       {showAddDividendModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <Card className="w-full max-w-md">
@@ -888,7 +1425,6 @@ export default function StockRecordsPage() {
         </div>
       )}
 
-      {/* Confirm Delete Modal */}
       {showConfirmDeleteModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <Card className="w-full max-w-md">
@@ -909,7 +1445,6 @@ export default function StockRecordsPage() {
           </Card>
         </div>
       )}
-      {/* Footer */}
       <SiteFooter />
     </div>
   )
