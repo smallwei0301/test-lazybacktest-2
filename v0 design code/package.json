@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "start": "next start"
+    "start": "next start",
+    "generate-data": "node scripts/generate-seo-data.js"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

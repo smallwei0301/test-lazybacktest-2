@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Configuration
-const OUTPUT_DIR = path.join(__dirname, '..', 'v0 design code', 'data');
+const OUTPUT_DIR = path.join(__dirname, '..', 'data');
 const OUTPUT_FILE = path.join(OUTPUT_DIR, 'seo_mock_data.json');
 
 // Ensure output directory exists
@@ -25,7 +25,7 @@ const STRATEGIES = [
     { id: 'macd', name: 'MACD 趨勢策略', type: 'Trend' },
     { id: 'kd', name: 'KD 黃金交叉', type: 'Momentum' },
     { id: 'bollinger', name: '布林通道突破', type: 'Volatility' },
-    { id: 'ma_crossover', name: '均線穿越策略', type: 'Trend' },
+    { id: 'ma', name: '均線穿越策略', type: 'Trend' },
 ];
 
 // Stock definitions
@@ -42,20 +42,28 @@ const STOCKS = [
 
 // Generate mock data
 const generateData = () => {
-    const today = new Date();
-
     return STOCKS.map(stock => {
-        const stockStrategies = STRATEGIES.map(strategy => {
-            // Generate realistic looking performance data
-            const winRate = parseFloat(random(45, 75).toFixed(1));
-            const roi = parseFloat(random(10, 150).toFixed(1));
-            const tradeCount = randomInt(15, 50);
+        // 1. Pick a random Champion Strategy for this stock
+        const championIndex = randomInt(0, STRATEGIES.length);
+        const championStrategyDef = STRATEGIES[championIndex];
 
-            // Generate recent trades
+        const stockStrategies = STRATEGIES.map((strategy, index) => {
+            const isChampion = index === championIndex;
+
+            // Generate trades
             const trades = [];
-            let currentDate = new Date(today);
+            const currentDate = new Date();
+            const tradeCount = randomInt(5, 20);
 
-            for (let i = 0; i < 5; i++) {
+            // Win rate and ROI logic
+            // Champion gets better stats
+            const baseWinRate = isChampion ? 70 : 40;
+            const winRate = parseFloat(random(baseWinRate, baseWinRate + 20).toFixed(1));
+
+            const baseRoi = isChampion ? 20 : -10;
+            const roi = parseFloat(random(baseRoi, baseRoi + 40).toFixed(1));
+
+            for (let i = 0; i < tradeCount; i++) {
                 // Go back random days
                 currentDate.setDate(currentDate.getDate() - randomInt(2, 10));
 
@@ -63,7 +71,7 @@ const generateData = () => {
                 const returnPct = isWin ? random(2, 8) : random(-5, -1);
 
                 trades.push({
-                    date: formatDate(currentDate),
+                    date: formatDate(new Date(currentDate)),
                     type: Math.random() > 0.5 ? 'BUY' : 'SELL',
                     price: randomInt(100, 1000),
                     return: parseFloat(returnPct.toFixed(1)),
@@ -73,6 +81,7 @@ const generateData = () => {
 
             // Determine last signal
             const lastSignal = Math.random() > 0.5 ? 'BUY' : 'SELL';
+            const lastSignalDate = formatDate(new Date()); // Always today
 
             return {
                 id: strategy.id,
@@ -82,8 +91,14 @@ const generateData = () => {
                 roi,
                 tradeCount,
                 lastSignal,
-                lastSignalDate: formatDate(today), // Dynamic date as requested
-                trades: trades
+                lastSignalDate,
+                trades: trades,
+                // Add Champion Data for comparison
+                champion: {
+                    name: championStrategyDef.name,
+                    winRate: parseFloat(random(68, 78).toFixed(1)), // Consistent with champion logic
+                    roi: parseFloat(random(30, 60).toFixed(1))
+                }
             };
         });
 
@@ -101,7 +116,7 @@ try {
     console.log(`Successfully generated SEO mock data at: ${OUTPUT_FILE}`);
     console.log(`Total stocks: ${data.length}`);
     console.log(`Strategies per stock: ${data[0].strategies.length}`);
-    console.log(`Last signal date set to: ${data[0].strategies[0].lastSignalDate}`);
+    console.log(`Sample Champion for 2330: ${data[0].strategies[0].champion.name} (Win Rate: ${data[0].strategies[0].champion.winRate}%)`);
 } catch (error) {
     console.error('Error generating data:', error);
     process.exit(1);
