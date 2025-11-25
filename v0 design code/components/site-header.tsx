@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 
 const navItems = [
   { href: "/", label: "首頁" },
+  { href: "/stocks", label: "個股策略庫" },
   { href: "/guide", label: "使用教學" },
   { href: "/faq", label: "常見問題" },
   { href: "/community", label: "社群討論" },

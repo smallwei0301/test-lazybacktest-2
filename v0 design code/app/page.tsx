@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Play,
   Target,
+  TrendingUp,
   Sparkles,
   LineChart,
   X,
@@ -126,9 +127,9 @@ export default function HomePage() {
                 size="lg"
                 className="text-lg px-8 py-7 border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground bg-transparent group"
               >
-                <Link href="/guide">
-                  <Play className="mr-2 h-5 w-5" />
-                  先看看使用教學
+                <Link href="/stocks">
+                  <TrendingUp className="mr-2 h-5 w-5" />
+                  瀏覽個股策略庫
                 </Link>
               </Button>
             </div>
@@ -1127,9 +1128,7 @@ export default function HomePage() {
                   之後，我第一次知道自己常用的那個策略，其實長期報酬很不穩。現在下單前，我都會先跑一次回測，心裡踏實很多。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
-                    <img src="/app/avatars/avatar-1.svg" alt="Q版用戶1" className="w-full h-full object-cover" />
-                  </div>
+
                   <div>
                     <p className="font-semibold text-foreground">王先生</p>
                     <p className="text-muted-foreground text-sm">上班族投資新手</p>
@@ -1144,9 +1143,7 @@ export default function HomePage() {
                   「以前要花好幾個晚上慢慢調參數，還要做紀錄。現在我直接一次勾一堆參數區間給系統跑，十分鐘就有結果。省下來的時間，我拿去思考策略邏輯本身，而不是在那邊重複按回測。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
-                    <img src="/app/avatars/avatar-2.svg" alt="Q版用戶2" className="w-full h-full object-cover" />
-                  </div>
+
                   <div>
                     <p className="font-semibold text-foreground">李小姐</p>
                     <p className="text-muted-foreground text-sm">有一年交易經驗的使用者</p>
@@ -1162,9 +1159,7 @@ export default function HomePage() {
                   才發現，我原本以為很厲害的『神奇指標組合』，其實只是少數幾段行情表現很好而已。這讓我學會用更理性的方式看待策略，而不是只看漂亮的單一績效圖。」
                 </p>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary/30">
-                    <img src="/app/avatars/avatar-3.svg" alt="Q版用戶3" className="w-full h-full object-cover" />
-                  </div>
+
                   <div>
                     <p className="font-semibold text-foreground">陳先生</p>
                     <p className="text-muted-foreground text-sm">自學投資者</p>
