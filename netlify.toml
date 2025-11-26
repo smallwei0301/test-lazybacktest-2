@@ -1,13 +1,12 @@
-# Netlify 配置 - LazyBacktest 主應用
-# Next.js 應用位於 v0 design code 目錄
+# Netlify configuration - LazyBacktest main app
+# Next.js site lives within the `v0 design code` directory
 
 [build]
   base = "v0 design code"
   command = "npm run build"
   functions = "netlify/functions"
   publish = ".next"
-  # 下面這行指令的意思是：「忽略構建的條件是什麼？」
-  # 我們回傳 "false" 代表：「永遠不要忽略，永遠都要構建！」
+  # Always build; do not skip deploys.
   ignore = "false"
 
 [[plugins]]
