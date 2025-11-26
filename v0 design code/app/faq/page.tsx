@@ -9,15 +9,15 @@ import { SiteFooter } from "@/components/site-footer"
 
 export const metadata: Metadata = {
   title: "LazyBacktest 常見問題｜操作、資料與支援",
-  description: "整理 LazyBacktest 使用時最常被問到的 9 個問題，包含費用、資料來源、匯出方式、股票紀錄與社群留言板說明。",
+  description: "整理 懶人回測Lazybacktest 使用時最常被問到的 9 個問題，包含費用、資料來源、匯出方式、股票紀錄與社群留言板說明。",
 }
 
 const faqItems = [
   {
     id: "free",
-    question: "LazyBacktest 真的完全免費嗎？",
+    question: "懶人回測Lazybacktest 真的完全免費嗎？",
     answer:
-      "是的，LazyBacktest 的核心功能（回測引擎、參數優化、AI 預測、股票紀錄）目前皆為免費開放。若日後推出付費進階版，會事先公告並保留既有免費方案。",
+      "是的，懶人回測Lazybacktest 的核心功能（回測引擎、參數優化、AI 預測、股票紀錄）目前皆為免費開放。若日後推出付費進階版，會事先公告並保留既有免費方案。",
   },
   {
     id: "coding",

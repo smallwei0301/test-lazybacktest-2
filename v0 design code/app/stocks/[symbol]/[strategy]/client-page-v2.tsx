@@ -70,30 +70,54 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
   else if (sId === 'RSI' || sName.includes('RSI')) strategyKey = 'RSI'
 
   // 2. Determine Performance Context
-  const getPerformanceContext = (s: Strategy, stock: Stock) => {
-    const mdd = s.maxDrawdown || 15
-    const bhRoi = stock.buyAndHoldRoi || 5
+  const getDetailedContext = (s: Strategy, stock: Stock) => {
+    const mdd = s.maxDrawdown || 15 // Default mock MDD if missing
+    const bhRoi = stock.buyAndHoldRoi || 5 // Default mock B&H if missing
+    
+    // Thresholds: ROI > 10%, MDD < 20%
+    const isHighWinRate = s.winRate > 60
+    const isHighRoi = s.roi > 10
+    const isLowDrawdown = mdd < 20
+    const beatsBuyAndHold = s.roi > bhRoi
+    
     let score = 0
     
-    if (s.roi > bhRoi + 10) score += 2
-    else if (s.roi > bhRoi) score += 1
-    else if (s.roi < 0) score -= 2
-    else score -= 1
+    // ROI Criteria (vs B&H)
+    if (s.roi > bhRoi + 10) score += 2 // Significantly outperforms B&H
+    else if (s.roi > bhRoi) score += 1 // Outperforms B&H
+    else if (s.roi < 0) score -= 2 // Negative return
+    else score -= 1 // Underperforms B&H
 
-    if (s.winRate > 60) score += 1
+    // WinRate Criteria
+    if (isHighWinRate) score += 1
     else if (s.winRate < 40) score -= 1
 
-    if (mdd < 10) score += 1
-    else if (mdd > 20) score -= 1
+    // MDD Criteria
+    // < 20% : Excellent (+1)
+    // 20% - 30% : Average (0)
+    // > 30% : Poor (-1)
+    if (mdd < 20) score += 1
+    else if (mdd > 30) score -= 1
 
-    if (score >= 3) return 'excellent'
-    if (score >= 1) return 'good'
-    if (score >= -1) return 'average'
-    return 'poor'
+    let category: 'excellent' | 'good' | 'average' | 'poor' = 'poor'
+    if (score >= 3) category = 'excellent'
+    else if (score >= 1) category = 'good'
+    else if (score >= -1) category = 'average'
+    
+    return {
+      isHighWinRate,
+      isHighRoi,
+      isLowDrawdown,
+      beatsBuyAndHold,
+      score,
+      category,
+      mdd,
+      bhRoi
+    }
   }
 
-  const performanceContext = getPerformanceContext(strategy, stock)
-  const roiCategory = performanceContext
+  const performanceContext = getDetailedContext(strategy, stock)
+  const roiCategory = performanceContext.category
 
   // 3. Get Strategy Texts
   // @ts-ignore

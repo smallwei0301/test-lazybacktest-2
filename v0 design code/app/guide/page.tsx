@@ -10,7 +10,7 @@ import { SiteFooter } from "@/components/site-footer"
 
 export const metadata: Metadata = {
   title: "LazyBacktest 使用教學｜6 個步驟完成回測",
-  description: "透過圖解學會 LazyBacktest 的所有功能：從一鍵回測、進階參數設定、風險管理到 AI 預測與紀錄比對。",
+  description: "透過圖解學會 懶人回測Lazybacktest 的所有功能：從一鍵回測、進階參數設定、風險管理到 AI 預測與紀錄比對。",
 }
 
 const steps = [
@@ -30,7 +30,7 @@ const steps = [
     id: 2,
     title: "調整基本設定：股票代號、期間與資金",
     description:
-      "進入「基本設定」分頁後，依序輸入股票代碼、回測起訖日期以及初始資金。LazyBacktest 預設顯示最近三年的台股交易日，您也可以直接從下拉選單套用常用期間。",
+      "進入「基本設定」分頁後，依序輸入股票代碼、回測起訖日期以及初始資金。懶人回測Lazybacktest 預設顯示最近三年的台股交易日，您也可以直接從下拉選單套用常用期間。",
     image: "/guide/step-2.svg",
     tip: "設定完成後按下「套用最近 N 年」能快速切換測試範圍，記得每次修改都要再次執行回測以更新結果。",
     links: [
@@ -213,7 +213,7 @@ export default function GuidePage() {
             <Badge variant="outline" className="mb-4 border-primary text-primary">
               Step by Step 教學
             </Badge>
-            <h1 className="text-4xl font-bold text-foreground md:text-5xl">6 個步驟，完整掌握 LazyBacktest</h1>
+            <h1 className="text-4xl font-bold text-foreground md:text-5xl">6 個步驟，完整掌握 懶人回測Lazybacktest</h1>
             <p className="mt-4 text-lg text-muted-foreground md:text-xl">
               每張圖都標記了功能所在的位置，依照順序操作就能完成回測、儲存紀錄並啟用 AI 優化。
             </p>

@@ -109,7 +109,7 @@ export default function HomePage() {
               <span className="text-primary">最穩定、最會賺的股票策略</span>
             </h1>
             <p className="text-lg lg:text-xl text-muted-foreground mb-8 max-w-3xl mx-auto text-pretty leading-relaxed">
-              LazyBacktest 幫你自動測試上百種參數組合，用台股真實歷史資料，告訴你「這個方法到底有沒有效」。
+              懶人回測Lazybacktest 幫你自動測試上百種參數組合，用台股真實歷史資料，告訴你「這個方法到底有沒有效」。
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12">
               <a href="/app/index.html">
@@ -314,7 +314,7 @@ export default function HomePage() {
                           </p>
                           <div className="bg-primary/5 rounded-lg p-4 border-l-4 border-primary mb-4">
                             <p className="text-foreground font-semibold mb-3">
-                              LazyBacktest 誕生的目的很單純：讓這件事變簡單。
+                              懶人回測Lazybacktest 誕生的目的很單純：讓這件事變簡單。
                             </p>
                             <p className="text-muted-foreground text-sm leading-relaxed mb-3">
                               一鍵輸入股票代號，我們幫你跑完所有組合，清楚告訴你：
@@ -412,7 +412,7 @@ export default function HomePage() {
                   這些情況往往不是因為你不夠認真，而是缺少一個簡單好用的工具，讓你可以在下單之前，就先用數據驗證自己的想法。
                 </p>
                 <p className="text-foreground font-semibold mt-4 text-lg">
-                  LazyBacktest 希望幫你的，不是給你「明牌」，而是給你一套「自己檢驗策略」的能力。
+                  懶人回測Lazybacktest 希望幫你的，不是給你「明牌」，而是給你一套「自己檢驗策略」的能力。
                 </p>
               </div>
             </div>
@@ -426,7 +426,7 @@ export default function HomePage() {
               產品特色
             </Badge>
             <h2 className="text-4xl lg:text-5xl font-bold text-foreground mb-6 text-balance">
-              為什麼使用 LazyBacktest？
+              為什麼使用 懶人回測Lazybacktest？
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto">與市面上主流回測平台的功能對比</p>
           </div>
@@ -451,7 +451,7 @@ export default function HomePage() {
                             </div>
                           </div>
                         </div>
-                        <span className="text-primary">LazyBacktest</span>
+                        <span className="text-primary">懶人回測Lazybacktest</span>
                       </div>
                     </th>
                     <th className="p-6 text-center text-muted-foreground font-semibold border-b-2 border-border">
@@ -691,7 +691,7 @@ export default function HomePage() {
                       </div>
                     </div>
                   </div>
-                  <h3 className="text-xl font-bold text-primary">LazyBacktest</h3>
+                  <h3 className="text-xl font-bold text-primary">懶人回測Lazybacktest</h3>
                 </div>
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -785,7 +785,7 @@ export default function HomePage() {
 
             <div className="mt-12 text-center">
               <div className="bg-gradient-to-br from-primary/10 via-accent/5 to-primary/5 rounded-2xl p-8 border-2 border-primary/20">
-                <h3 className="text-2xl font-bold text-foreground mb-4">LazyBacktest 的核心優勢</h3>
+                <h3 className="text-2xl font-bold text-foreground mb-4">懶人回測Lazybacktest 的核心優勢</h3>
                 <p className="text-lg text-muted-foreground mb-8">
                   我們專注於讓「不會寫程式的投資人」也能輕鬆使用專業回測工具
                 </p>

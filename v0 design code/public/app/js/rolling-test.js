@@ -2,7 +2,7 @@
 // Patch Tag: LB-ROLLING-TEST-20260709A
 /* global getBacktestParams, cachedStockData, cachedDataStore, buildCacheKey, lastDatasetDiagnostics, lastOverallResult, lastFetchSettings, computeCoverageFromRows, formatDate, workerUrl, showError, showInfo */
 
-(function() {
+(function () {
     const state = {
         initialized: false,
         running: false,
@@ -382,6 +382,9 @@
         state.running = false;
         ensureProgressPanelVisible(state.results.length > 0);
         setRollingProgressSpinnerActive(false);
+        if (typeof stopLoadingMascotRequests === 'function') {
+            stopLoadingMascotRequests();
+        }
         if (state.cancelled) {
             setAlert('滾動測試已中止，可重新調整參數後再試。', 'warning');
         } else if (state.results.length > 0) {
@@ -912,9 +915,11 @@
                     { text: formatProbability(summary.oosPassRatio), align: 'right' },
                     { text: formatScore(summary.statWeight), align: 'right' },
                     { text: formatScorePoints(summary.windowScore), align: 'right' },
-                    { text: Number.isFinite(summary.baselineAnnualizedReturn)
-                        ? formatPercent(summary.baselineAnnualizedReturn)
-                        : '—', align: 'right' },
+                    {
+                        text: Number.isFinite(summary.baselineAnnualizedReturn)
+                            ? formatPercent(summary.baselineAnnualizedReturn)
+                            : '—', align: 'right'
+                    },
                 ];
                 cells.forEach((cell) => {
                     const td = document.createElement('td');
@@ -2777,28 +2782,28 @@
 
         // ✅ P1 改進: 使用統一的策略 lookback 計算邏輯
         const sharedUtils = (typeof lazybacktestShared === 'object' && lazybacktestShared) ? lazybacktestShared : null;
-        
+
         let paramsForLookback = { ...clone };
-        
+
         if (sharedUtils && typeof sharedUtils.getRequiredLookbackForStrategies === 'function') {
             // 收集滾動測試使用的策略 ID
             const selectedStrategies = [];
-            
+
             if (clone.entryStrategy) selectedStrategies.push(clone.entryStrategy);
             if (clone.exitStrategy) selectedStrategies.push(clone.exitStrategy);
             if (clone.shortEntryStrategy) selectedStrategies.push(clone.shortEntryStrategy);
             if (clone.shortExitStrategy) selectedStrategies.push(clone.shortExitStrategy);
-            
+
             // 使用新的統一函數計算所需 lookback
             if (selectedStrategies.length > 0) {
                 const requiredLookbackDays = sharedUtils.getRequiredLookbackForStrategies(
                     selectedStrategies,
                     { minBars: 90, multiplier: 2 }
                 );
-                
+
                 // 用計算出的 lookback 覆蓋原有值
                 paramsForLookback.lookbackDays = requiredLookbackDays;
-                
+
                 console.log(`[Rolling Test] P1: Calculated lookback for strategies [${selectedStrategies.join(', ')}]: ${requiredLookbackDays} days`);
             }
         }
@@ -2846,10 +2851,10 @@
         if (typeof sharedUtils.resolveDataWindow === 'function') {
             windowDecision = sharedUtils.resolveDataWindow(params, windowOptions);
         }
-        
+
         // ✅ P2 改進: 優先使用已提供的 lookbackDays（來自策略計算）
         let lookbackDays = null;
-        
+
         // 第一優先級: 使用已提供的 lookbackDays（來自 P1 的策略計算）
         if (Number.isFinite(params.lookbackDays) && params.lookbackDays > 0) {
             lookbackDays = params.lookbackDays;
@@ -2876,7 +2881,7 @@
                 ? sharedUtils.estimateLookbackBars(fallbackMaxPeriod, { minBars: 90, multiplier: 2 })
                 : Math.max(90, fallbackMaxPeriod * 2);
         }
-        
+
         const effectiveStartDate = windowDecision?.effectiveStartDate
             || params.effectiveStartDate
             || params.startDate
@@ -3304,25 +3309,25 @@
                     baselineSnapshots,
                     cachedData: cachedWindowData,
                 });
-                    if (combinationOutcome) {
-                        if (combinationOutcome.params) {
-                            if (combinationOutcome.params.entryParams) {
-                                outputParams.entryParams = { ...combinationOutcome.params.entryParams };
-                                workingParams.entryParams = { ...combinationOutcome.params.entryParams };
-                            }
-                            if (combinationOutcome.params.exitParams) {
-                                outputParams.exitParams = { ...combinationOutcome.params.exitParams };
-                                workingParams.exitParams = { ...combinationOutcome.params.exitParams };
-                            }
-                            if ('stopLoss' in combinationOutcome.params) {
-                                outputParams.stopLoss = combinationOutcome.params.stopLoss;
-                                workingParams.stopLoss = combinationOutcome.params.stopLoss;
-                            }
-                            if ('takeProfit' in combinationOutcome.params) {
-                                outputParams.takeProfit = combinationOutcome.params.takeProfit;
-                                workingParams.takeProfit = combinationOutcome.params.takeProfit;
-                            }
+                if (combinationOutcome) {
+                    if (combinationOutcome.params) {
+                        if (combinationOutcome.params.entryParams) {
+                            outputParams.entryParams = { ...combinationOutcome.params.entryParams };
+                            workingParams.entryParams = { ...combinationOutcome.params.entryParams };
                         }
+                        if (combinationOutcome.params.exitParams) {
+                            outputParams.exitParams = { ...combinationOutcome.params.exitParams };
+                            workingParams.exitParams = { ...combinationOutcome.params.exitParams };
+                        }
+                        if ('stopLoss' in combinationOutcome.params) {
+                            outputParams.stopLoss = combinationOutcome.params.stopLoss;
+                            workingParams.stopLoss = combinationOutcome.params.stopLoss;
+                        }
+                        if ('takeProfit' in combinationOutcome.params) {
+                            outputParams.takeProfit = combinationOutcome.params.takeProfit;
+                            workingParams.takeProfit = combinationOutcome.params.takeProfit;
+                        }
+                    }
                     if (Array.isArray(combinationOutcome.scopeResults)) {
                         combinationOutcome.scopeResults.forEach((result) => {
                             if (result.error && !summary.error) summary.error = result.error;
