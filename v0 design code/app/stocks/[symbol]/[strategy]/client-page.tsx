@@ -194,7 +194,7 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
           strategy.roi < 5 
             ? "目前的低報酬可能源於近期市場震盪或策略參數與當前股性不合。" 
             : "高報酬顯示該策略成功捕捉到了近期的趨勢波動。"
-        } 透過 Lazybacktest 的參數優化，我們可以找到更適合 ${stock.name} 的參數設定。`
+        } 透過 懶人回測Lazybacktest 的參數優化，我們可以找到更適合 ${stock.name} 的參數設定。`
       },
       {
         q: `此策略的最大風險（最大回撤）是多少？`,

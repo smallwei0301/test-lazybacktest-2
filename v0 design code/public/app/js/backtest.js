@@ -8719,11 +8719,11 @@ function updateChartModeControls() {
         labelText += '（缺乏價格資料）';
     }
     labelEl.textContent = labelText;
-    const priceLegendEl = document.getElementById('priceModeLegend');
-    if (priceLegendEl) {
+    const chartLegendEl = document.getElementById('chartModeLegend');
+    if (chartLegendEl) {
         const showPriceLegend = isPriceMode && chartHasPriceData;
-        priceLegendEl.classList.toggle('hidden', !showPriceLegend);
-        priceLegendEl.setAttribute('aria-hidden', showPriceLegend ? 'false' : 'true');
+        chartLegendEl.classList.toggle('hidden', !showPriceLegend);
+        chartLegendEl.setAttribute('aria-hidden', showPriceLegend ? 'false' : 'true');
     }
 }
 
