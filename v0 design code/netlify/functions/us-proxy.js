@@ -564,8 +564,8 @@ export default async (req) => {
             return new Response(JSON.stringify(info), {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                    'Cache-Control': 'public, max-age=604800, s-maxage=604800',
+                    'Netlify-CDN-Cache-Control': 'public, s-maxage=604800',
                 },
             });
         }
@@ -622,6 +622,13 @@ export default async (req) => {
             await writeCache(store, cacheKey, payload);
         }
 
+        // [Dynamic Caching Strategy]
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const isHistorical = range && range.end < today;
+        const cacheTTL = isHistorical ? 31536000 : 3600;
+        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
         return new Response(
             JSON.stringify({
                 stockName: payload.stockName || stockNo,
@@ -635,8 +642,8 @@ export default async (req) => {
             {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                    'Cache-Control': cacheControlHeader,
+                    'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
                 },
             },
         );

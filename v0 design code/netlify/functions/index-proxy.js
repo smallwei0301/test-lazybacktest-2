@@ -250,8 +250,8 @@ export default async (req) => {
                 return new Response(JSON.stringify(cached.data), {
                     headers: {
                         'Content-Type': 'application/json',
-                        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                        'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+                        'Netlify-CDN-Cache-Control': 'public, s-maxage=86400',
                     },
                 });
             }
@@ -265,8 +265,8 @@ export default async (req) => {
             return new Response(JSON.stringify(payload), {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                    'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                    'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+                    'Netlify-CDN-Cache-Control': 'public, s-maxage=86400',
                 },
             });
         }
@@ -293,11 +293,19 @@ export default async (req) => {
         if (!bypassCache) {
             const cached = await readPriceCache(store, cacheKey);
             if (cached) {
+                // [Dynamic Caching Strategy]
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const endDateObj = endISO ? new Date(endISO) : new Date();
+                const isHistorical = !Number.isNaN(endDateObj.getTime()) && endDateObj < today;
+                const cacheTTL = isHistorical ? 31536000 : 3600;
+                const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
                 return new Response(JSON.stringify(cached.data), {
                     headers: {
                         'Content-Type': 'application/json',
-                        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                        'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                        'Cache-Control': cacheControlHeader,
+                        'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
                     },
                 });
             }
@@ -311,11 +319,19 @@ export default async (req) => {
             source: 'Yahoo Finance',
         };
         await writePriceCache(store, cacheKey, { data: responsePayload });
+        // [Dynamic Caching Strategy]
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const endDateObj = endISO ? new Date(endISO) : new Date();
+        const isHistorical = !Number.isNaN(endDateObj.getTime()) && endDateObj < today;
+        const cacheTTL = isHistorical ? 31536000 : 3600;
+        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
         return new Response(JSON.stringify(responsePayload), {
             headers: {
                 'Content-Type': 'application/json',
-                'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                'Cache-Control': cacheControlHeader,
+                'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
             },
         });
     } catch (error) {

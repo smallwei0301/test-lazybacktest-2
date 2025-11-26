@@ -934,12 +934,12 @@ export default async (req) => {
                             } catch (error) {
                                 console.warn('[TPEX Proxy v10.2] FinMind 主來源失敗:', error.message);
                                 try {
-                                yahooLabel = await persistYahooEntries(
-                                    store,
-                                    stockNo,
-                                    await fetchYahooDaily(stockNo, startDate, endDate),
-                                    false,
-                                );
+                                    yahooLabel = await persistYahooEntries(
+                                        store,
+                                        stockNo,
+                                        await fetchYahooDaily(stockNo, startDate, endDate),
+                                        false,
+                                    );
                                 } catch (yahooError) {
                                     console.error('[TPEX Proxy v10.2] Yahoo 備援失敗:', yahooError);
                                     return new Response(
@@ -999,11 +999,19 @@ export default async (req) => {
             dataSource: summariseSources(sourceFlags, adjusted),
         };
 
+        // [Dynamic Caching Strategy]
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const isHistorical = endDate < today;
+        const cacheTTL = isHistorical ? 31536000 : 3600;
+        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
         return new Response(JSON.stringify(body), {
             headers: {
                 'Content-Type': 'application/json',
-                'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                'Cache-Control': cacheControlHeader,
+                'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
             },
         });
     } catch (error) {

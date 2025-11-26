@@ -726,7 +726,7 @@ export default async (req) => {
                         await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE (強制)' });
                         payload = await readCache(store, cacheKey);
                         sourceFlags.add('TWSE (強制)');
-                        
+
                         // 強制 TWSE 抓取成功後，也觸發 year-cache 重建
                         triggerYearCacheRefresh(stockNo, month);
                     } catch (error) {
@@ -778,7 +778,7 @@ export default async (req) => {
                                     true,
                                 );
                                 yahooHydrated = true;
-                                
+
                                 // Yahoo 調整價也寫入月快取後，觸發 year-cache 重建
                                 if (Array.isArray(months) && months.length > 0) {
                                     const monthForTrigger = months[0];
@@ -803,7 +803,7 @@ export default async (req) => {
                             await writeCache(store, cacheKey, { stockName: fresh.stockName, aaData: fresh.aaData, dataSource: 'TWSE' });
                             payload = await readCache(store, cacheKey);
                             sourceFlags.add('TWSE');
-                            
+
                             // 月快取寫入成功後，非同步觸發 year-cache 重建 (best-effort)
                             triggerYearCacheRefresh(stockNo, month);
                         } catch (error) {
@@ -818,7 +818,7 @@ export default async (req) => {
                                         endDate.toISOString().split('T')[0],
                                     );
                                     finmindHydrated = true;
-                                    
+
                                     // FinMind 備援也寫入月快取後，觸發 year-cache 重建
                                     if (Array.isArray(months) && months.length > 0) {
                                         const monthForTrigger = months[0];
@@ -877,11 +877,19 @@ export default async (req) => {
             dataSource: summariseSources(sourceFlags),
         };
 
+        // [Dynamic Caching Strategy]
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const isHistorical = endDate < today;
+        const cacheTTL = isHistorical ? 31536000 : 3600;
+        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
         return new Response(JSON.stringify(body), {
             headers: {
                 'Content-Type': 'application/json',
-                'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-                'Netlify-CDN-Cache-Control': 'public, s-maxage=3600',
+                'Cache-Control': cacheControlHeader,
+                'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
             },
         });
     } catch (error) {
