@@ -583,6 +583,32 @@
                                                 <div id="dataSourceDisplay" class="px-3 py-3 space-y-2 text-[11px]" style="color: var(--foreground);"></div>
                                             </div>
                                         </div>
+                                        <div class="space-y-2" id="developerDownloadUsageContainer">
+                                            <div class="flex items-center justify-between">
+                                                <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
+                                                    <i data-lucide="database" class="lucide w-4 h-4"></i>
+                                                    <span>下載用量追蹤</span>
+                                                </div>
+                                                <button
+                                                    id="developerDownloadUsageRefreshBtn"
+                                                    type="button"
+                                                    class="px-2 py-1 text-[11px] font-semibold rounded-md border transition-colors flex items-center gap-1"
+                                                    style="color: var(--foreground); border-color: var(--border); background-color: var(--background);"
+                                                    aria-label="重新整理下載用量"
+                                                >
+                                                    <i data-lucide="rotate-ccw" class="lucide w-4 h-4"></i>
+                                                    <span>刷新</span>
+                                                </button>
+                                            </div>
+                                            <div class="rounded-md border bg-white/70 shadow-sm" style="border-color: var(--border);">
+                                                <div class="px-3 py-2 text-[11px]" style="color: var(--muted-foreground);">
+                                                    監控整個網站使用者的價格下載次數與伺服器傳輸量。
+                                                </div>
+                                                <div id="developerDownloadUsageStats" class="px-3 pb-3 pt-1 space-y-2 text-[11px]" style="color: var(--foreground);">
+                                                    下載統計載入中⋯
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div class="space-y-2" id="batchDebugLogContainer">
                                             <div class="flex items-center justify-between">
                                             <div class="text-sm font-medium flex items-center gap-2" style="color: var(--foreground);">
@@ -1653,6 +1679,20 @@
                                                 style="color: var(--muted-foreground);"
                                             ></span>
                                         </div>
+                                        <div
+                                            id="priceModeLegend"
+                                            class="mt-2 hidden flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
+                                            aria-hidden="true"
+                                        >
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.45);"></span>
+                                                <span>紫色：上漲段</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(37, 99, 235, 0.2); border-color: rgba(37, 99, 235, 0.45);"></span>
+                                                <span>藍色：下跌段</span>
+                                            </div>
+                                        </div>
                                         <div id="trend-legend" class="mt-3 hidden flex items-center gap-3 text-xs text-muted-foreground overflow-x-auto whitespace-nowrap" aria-hidden="true">
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.38);"></span>
@@ -1664,7 +1704,7 @@
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
-                                                <span>高波動下跌</span>
+                                                <span> 高波動下跌</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1688,7 +1728,7 @@
                                     </div>
                                     <div id="trend-analysis-content" class="card-content space-y-4 hidden" aria-hidden="true">
                                         <p class="text-xs leading-relaxed" style="color: var(--muted-foreground);">
-                                            這張卡片將價格序列拆成上漲時高波動、盤整區間與下跌時高波動三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
+                                            這張卡片將價格序列拆成上漲時高波動、盤整區間與 高波動下跌三態，結合 ADX、布林帶寬與 ATR 比率作為趨勢／盤整門檻，並以二維 HMM 訓練趨勢狀態；滑桿 0→10 經 1000 組覆蓋率測試校準，可快速切換預設最佳值 5 附近的信心門檻，數值越高門檻越寬鬆、趨勢覆蓋越接近 80% 以上。
                                         </p>
                                         <div id="trend-card-legend" class="flex items-center gap-3 text-xs text-muted-foreground overflow-x-auto whitespace-nowrap">
                                             <div class="flex items-center gap-2 shrink-0">
@@ -1701,7 +1741,7 @@
                                             </div>
                                             <div class="flex items-center gap-2 shrink-0">
                                                 <span class="w-3 h-3 rounded-sm border" style="background-color: rgba(34, 197, 94, 0.2); border-color: rgba(34, 197, 94, 0.35);"></span>
-                                                <span> 下跌時高波動</span>
+                                                <span> 高波動下跌</span>
                                             </div>
                                         </div>
                                         <div class="space-y-2">
@@ -1729,7 +1769,7 @@
                                             </div>
                                         </div>
                                         <div id="trend-summary-placeholder" class="rounded-lg border border-dashed p-4 text-xs" style="border-color: color-mix(in srgb, var(--border) 80%, transparent); color: var(--muted-foreground);">
-                                            執行回測後會顯示上漲時高波動／盤整區間／下跌時高波動三態的覆蓋率、當期複利報酬與 Sigmoid 補償統計，並同時呈現各態時的總報酬。
+                                            執行回測後會顯示上漲時高波動／盤整區間／ 高波動下跌三態的覆蓋率、當期複利報酬與 Sigmoid 補償統計，並同時呈現各態時的總報酬。
                                         </div>
                                         <div id="trend-summary-meta" class="hidden text-[11px]" style="color: var(--muted-foreground);"></div>
                                         <div id="trend-summary-container" class="trend-summary-grid"></div>
@@ -2317,7 +2357,7 @@
                                                     <div class="flex items-start gap-2 justify-between">
                                                         <label class="flex-1 flex flex-col gap-1 text-xs font-medium" style="color: var(--foreground);">
                                                             滾動測試次數
-                                                            <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="2" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
+                                                            <input id="rolling-window-count" data-rolling-input type="number" min="1" max="24" step="1" value="3" class="px-3 py-2 border border-border rounded-md bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm" style="border-color: var(--border); background-color: var(--input);" />
                                                             <span class="text-[11px] font-normal" style="color: var(--muted-foreground);">系統會依據目前回測區間與預設比例自動調整訓練與測試長度。</span>
                                                         </label>
                                                         <button type="button" id="rolling-window-mode-toggle" class="px-3 py-1.5 text-xs font-semibold border border-border rounded-md transition-colors" style="color: var(--primary); border-color: color-mix(in srgb, var(--primary) 45%, transparent);">改用手動視窗</button>

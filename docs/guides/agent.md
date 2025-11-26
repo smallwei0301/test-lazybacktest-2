@@ -1,4 +1,4 @@
-# Lazybacktest 綜合診斷、暖身與價格治理手冊（版本 LB-GUIDE-20250610B）
+# 懶人回測Lazybacktest 綜合診斷、暖身與價格治理手冊（版本 LB-GUIDE-20250610B）
 
 ## Codex Agent 使用守則
 
@@ -7,7 +7,7 @@
 - 每次回覆都必須使用繁體中文並維持高資訊密度，這是不可違反的規則。
 
 ## 背景與適用範圍
-Lazybacktest 部署於 Netlify，主要服務台灣上市櫃與 ETF 回測，每日瀏覽量約 1 萬、活躍用戶約 6,000。核心流程如下：
+懶人回測Lazybacktest 部署於 Netlify，主要服務台灣上市櫃與 ETF 回測，每日瀏覽量約 1 萬、活躍用戶約 6,000。核心流程如下：
 1. **主執行緒** 依策略參數計算暖身（lookback）天數與資料抓取起點，建立 Worker 訊息並維護快取。
 2. **Web Worker** 依暖身起點向 Proxy 逐月取得股價，合併月度 coverage，執行指標與回測邏輯，回傳診斷。
 3. **前端 UI** 以使用者起始日切片顯示績效、價格表、指標值與倉位狀態，並提供測試卡片協助除錯。
@@ -89,7 +89,7 @@ Lazybacktest 部署於 Netlify，主要服務台灣上市櫃與 ETF 回測，每
 
 ---
 
-## 5. Lazybacktest AI 開發後檢討（LB-POSTMORTEM-20240522A）
+## 5. 懶人回測Lazybacktest AI 開發後檢討（LB-POSTMORTEM-20240522A）
 
 ### 本次發生的問題概述
 - **拆分還原因子未套用到價格區間**：雖成功抓到 `TaiwanStockSplitPrice`，但價格區間仍僅使用股息還原因子。

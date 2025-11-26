@@ -13,14 +13,14 @@ export const STRATEGY_WIKI = {
         <section>
           <h3 class="text-xl font-bold text-foreground mb-3">RSI 的黃金交叉與死亡交叉</h3>
           <p class="leading-relaxed">
-            在 Lazybacktest 的回測系統中，我們採用更具實戰意義的策略。傳統上，RSI 超過 70 被視為超買（賣出訊號），低於 30 被視為超賣（買進訊號）。然而，在強勢趨勢中，RSI 可能會長時間停留在超買區。因此，我們也測試了 RSI 突破 50 中軸線的趨勢跟隨策略，這往往能捕捉到更大的波段行情。
+            在 懶人回測Lazybacktest 的回測系統中，我們採用更具實戰意義的策略。傳統上，RSI 超過 70 被視為超買（賣出訊號），低於 30 被視為超賣（買進訊號）。然而，在強勢趨勢中，RSI 可能會長時間停留在超買區。因此，我們也測試了 RSI 突破 50 中軸線的趨勢跟隨策略，這往往能捕捉到更大的波段行情。
           </p>
         </section>
 
         <section>
           <h3 class="text-xl font-bold text-foreground mb-3">RSI 在台股的適用性</h3>
           <p class="leading-relaxed">
-            根據歷史數據，RSI 在台股的大型權值股（如台積電、聯發科）上表現較為穩定，因為這些股票的流動性高，較不易被人為操縱。然而，對於中小型股，RSI 容易出現鈍化現象。這也是為什麼我們建議投資人參考 Lazybacktest 的「冠軍策略」，透過參數優化來克服指標鈍化的問題。
+            根據歷史數據，RSI 在台股的大型權值股（如台積電、聯發科）上表現較為穩定，因為這些股票的流動性高，較不易被人為操縱。然而，對於中小型股，RSI 容易出現鈍化現象。這也是為什麼我們建議投資人參考 懶人回測Lazybacktest 的「冠軍策略」，透過參數優化來克服指標鈍化的問題。
           </p>
         </section>
       </div>
@@ -40,7 +40,7 @@ export const STRATEGY_WIKI = {
         <section>
           <h3 class="text-xl font-bold text-foreground mb-3">MACD 的交易訊號</h3>
           <p class="leading-relaxed">
-            最常見的 MACD 訊號是「黃金交叉」（快線向上突破慢線，視為買進）和「死亡交叉」（快線向下跌破慢線，視為賣出）。此外，柱狀圖由負轉正也常被視為多頭力道增強的訊號。Lazybacktest 的回測會驗證這些訊號在特定個股上的有效性。
+            最常見的 MACD 訊號是「黃金交叉」（快線向上突破慢線，視為買進）和「死亡交叉」（快線向下跌破慢線，視為賣出）。此外，柱狀圖由負轉正也常被視為多頭力道增強的訊號。懶人回測Lazybacktest 的回測會驗證這些訊號在特定個股上的有效性。
           </p>
         </section>
 
@@ -67,7 +67,7 @@ export const STRATEGY_WIKI = {
         <section>
           <h3 class="text-xl font-bold text-foreground mb-3">KD 的高檔鈍化</h3>
           <p class="leading-relaxed">
-            KD 指標最著名的特性是「高檔鈍化」與「低檔鈍化」。在強勢多頭行情中，K 值與 D 值可能會長時間維持在 80 以上，這時不應視為賣出訊號，反而可能是強勢持有的訊號。Lazybacktest 的冠軍策略往往能精準識別這種鈍化帶來的獲利機會。
+            KD 指標最著名的特性是「高檔鈍化」與「低檔鈍化」。在強勢多頭行情中，K 值與 D 值可能會長時間維持在 80 以上，這時不應視為賣出訊號，反而可能是強勢持有的訊號。懶人回測Lazybacktest 的冠軍策略往往能精準識別這種鈍化帶來的獲利機會。
           </p>
         </section>
       </div>
@@ -93,7 +93,7 @@ export const STRATEGY_WIKI = {
       </div>
     `
   },
-  "MA_Crossover": {
+  "MovingAverage": {
     title: "什麼是均線穿越策略？",
     content: `
       <div class="space-y-6 text-muted-foreground">
@@ -107,7 +107,7 @@ export const STRATEGY_WIKI = {
         <section>
           <h3 class="text-xl font-bold text-foreground mb-3">均線策略的滯後性</h3>
           <p class="leading-relaxed">
-            均線是落後指標，這意味著它確認趨勢時，價格通常已經走了一段距離。雖然這能確保我們站在趨勢的一方，但也可能錯失最佳進場點。透過 Lazybacktest 的大數據運算，我們可以找到每檔股票最適配的均線週期組合，將滯後性的影響降到最低。
+            均線是落後指標，這意味著它確認趨勢時，價格通常已經走了一段距離。雖然這能確保我們站在趨勢的一方，但也可能錯失最佳進場點。透過 懶人回測Lazybacktest 的大數據運算，我們可以找到每檔股票最適配的均線週期組合，將滯後性的影響降到最低。
           </p>
         </section>
       </div>

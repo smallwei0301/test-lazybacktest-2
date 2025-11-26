@@ -1870,7 +1870,7 @@ const TREND_STYLE_MAP = {
         border: 'rgba(148, 163, 184, 0.38)',
     },
     bearHighVol: {
-        label: ' 下跌時高波動',
+        label: ' 高波動下跌',
         overlay: 'rgba(34, 197, 94, 0.2)',
         accent: '#16a34a',
         border: 'rgba(34, 197, 94, 0.35)',
@@ -3663,13 +3663,14 @@ function renderTrendSummary() {
         const latestTag = latestLabel === key && latestDateLabel
             ? `<span class="trend-summary-latest-date">（預估${latestDateLabel}當日趨勢）</span>`
             : '';
+        const labelMarkup = `<strong class="truncate" style="display: inline-block; max-width: 100%;">${label}</strong>${latestTag}`;
         return `<div class="trend-summary-item" style="border-color: ${borderColor}; background: ${background};">
             <div class="flex items-center justify-between gap-3">
-                <div class="flex items-center gap-2" style="color: ${accent};">
+                <div class="flex items-center gap-2 min-w-0" style="color: ${accent};">
                     <span class="trend-summary-chip" style="background-color: ${background}; border-color: ${accent};"></span>
-                    <strong>${label}</strong>${latestTag}
+                    ${labelMarkup}
                 </div>
-                <span class="trend-summary-meta">${stats.segments} 段</span>
+                <span class="trend-summary-meta min-w-0 text-right">${stats.segments} 段</span>
             </div>
             <div class="trend-summary-value" style="color: ${accent};">${returnText}</div>
             <div class="trend-summary-meta">覆蓋 ${coverageText} ／ ${stats.days} 日</div>
@@ -6984,6 +6985,31 @@ function updatePriceInspectorStatsSection(panel, force = false) {
     });
 }
 
+function updateDeveloperDownloadUsage(force = false) {
+    const statsEl = document.getElementById('developerDownloadUsageStats');
+    if (!statsEl) return;
+    statsEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">下載統計載入中⋯</div>';
+    refreshPriceInspectorDownloadStats(force).then((stats) => {
+        if (!stats) {
+            statsEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">下載統計載入中⋯</div>';
+            return;
+        }
+        const intro = '<div class="text-[11px]" style="color: var(--muted-foreground);">此資料顯示全部網站使用者的價格下載次數與伺服器傳輸量。</div>';
+        const statsHtml = buildPriceInspectorDownloadStatsHtml(stats);
+        statsEl.innerHTML = `<div class="space-y-2">${intro}${statsHtml}</div>`;
+    });
+}
+
+function initDeveloperDownloadUsageControls() {
+    const refreshBtn = document.getElementById('developerDownloadUsageRefreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            updateDeveloperDownloadUsage(true);
+        });
+    }
+    updateDeveloperDownloadUsage();
+}
+
 function escapeCsvValue(value) {
     const text = value ?? '';
     const escaped = String(text).replace(/"/g, '""');
@@ -7114,6 +7140,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 document.addEventListener('DOMContentLoaded', initDataDiagnosticsPanel);
 document.addEventListener('DOMContentLoaded', initChartModeToggle);
+document.addEventListener('DOMContentLoaded', initDeveloperDownloadUsageControls);
+document.addEventListener('developerAreaVisibilityChanged', (event) => {
+    if (event?.detail?.expanded) {
+        updateDeveloperDownloadUsage();
+    }
+});
 
 function handleBacktestResult(result, stockName, dataSource) {
     console.log("[Main] Executing latest version of handleBacktestResult (v2).");
@@ -8687,6 +8719,12 @@ function updateChartModeControls() {
         labelText += '（缺乏價格資料）';
     }
     labelEl.textContent = labelText;
+    const priceLegendEl = document.getElementById('priceModeLegend');
+    if (priceLegendEl) {
+        const showPriceLegend = isPriceMode && chartHasPriceData;
+        priceLegendEl.classList.toggle('hidden', !showPriceLegend);
+        priceLegendEl.setAttribute('aria-hidden', showPriceLegend ? 'false' : 'true');
+    }
 }
 
 function initChartModeToggle() {

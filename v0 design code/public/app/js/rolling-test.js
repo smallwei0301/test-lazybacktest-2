@@ -47,7 +47,7 @@
     const WALK_FORWARD_EFFICIENCY_BASELINE = 67;
     const DEFAULT_OPTIMIZATION_ITERATIONS = 6;
     const DEFAULT_WINDOW_RATIO = { training: 36, testing: 12, step: 6 };
-    const DEFAULT_WINDOW_COUNT = 2;
+    const DEFAULT_WINDOW_COUNT = 3;
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
     const DAYS_PER_YEAR = 252;
     const STRICT_SR_BENCHMARK_ANNUALIZED = 1;

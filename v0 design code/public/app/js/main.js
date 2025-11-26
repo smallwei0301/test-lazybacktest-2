@@ -4333,12 +4333,21 @@ function initDeveloperAreaToggle() {
 
     let expanded = false;
 
+    const dispatchDeveloperAreaEvent = (isOpen) => {
+        document.dispatchEvent(
+            new CustomEvent('developerAreaVisibilityChanged', {
+                detail: { expanded: Boolean(isOpen) },
+            })
+        );
+    };
+
     const applyState = (open) => {
         expanded = Boolean(open);
         wrapper.classList.toggle('hidden', !expanded);
         wrapper.setAttribute('aria-hidden', expanded ? 'false' : 'true');
         toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
         toggleBtn.classList.toggle('developer-toggle-active', expanded);
+        dispatchDeveloperAreaEvent(expanded);
     };
 
     applyState(false);
