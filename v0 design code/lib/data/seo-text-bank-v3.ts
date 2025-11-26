@@ -14,6 +14,23 @@ export const SEO_TEXT_BANK = {
     "想要在 **{name}** 上獲利，光靠直覺是不夠的，你需要的是經過驗證的策略。"
   ],
 
+  // 轉折語氣 (Transitions)
+  transitions: [
+    "此外，",
+    "值得注意的是，",
+    "然而，",
+    "更重要的是，",
+    "從另一個角度來看，",
+    "數據同時顯示，"
+  ],
+
+  // 小標題 (Sub-headings)
+  subHeadings: {
+    analysis: "深入數據分析",
+    risk: "風險與機會評估",
+    summary: "策略總結"
+  },
+
   // 2. 現狀分析 (Reality Check) - 依據策略名稱分流
   strategies: {
     

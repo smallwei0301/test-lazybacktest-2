@@ -32,7 +32,7 @@ type Strategy = {
   type: string
   winRate: number
   roi: number
-  maxDrawdown?: number // Added for modular logic
+  maxDrawdown?: number
   tradeCount: number
   lastSignal: string
   lastSignalDate: string
@@ -43,7 +43,7 @@ type Strategy = {
 type Stock = {
   symbol: string
   name: string
-  buyAndHoldRoi: number // Added B&H ROI
+  buyAndHoldRoi: number
   strategies: Strategy[]
 }
 
@@ -58,77 +58,53 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
   const [narrative, setNarrative] = useState<string[]>([])
   const [mounted, setMounted] = useState(false)
 
-  // 1. Identify Strategy Type (Deterministic)
-  let strategyKey = 'RSI' // Default
+  // 1. Identify Strategy Type
+  let strategyKey = 'RSI'
   const sId = strategy.id.toUpperCase()
   const sName = strategy.name.toUpperCase()
   
-  // Explicit checks for ID and Name - ORDER MATTERS! Check MACD before MA to avoid false match
   if (sId === 'MACD' || sName.includes('MACD')) strategyKey = 'MACD'
   else if (sId === 'MA' || sId === 'MA_CROSSOVER' || sName.includes('均線') || sName.includes(' MA') || sName === 'MA') strategyKey = 'MovingAverage'
   else if (sId === 'KD' || sId === 'STOCHASTIC' || sName.includes('KD')) strategyKey = 'KD'
   else if (sId === 'BOLLINGER' || sName.includes('BOLLINGER') || sName.includes('布林')) strategyKey = 'Bollinger'
   else if (sId === 'RSI' || sName.includes('RSI')) strategyKey = 'RSI'
 
-  // 2. Determine Performance Context (Modular Logic: ROI, WinRate, MDD, B&H)
-  const getDetailedContext = (s: Strategy, stock: Stock) => {
-    const mdd = s.maxDrawdown || 15 // Default mock MDD if missing
-    const bhRoi = stock.buyAndHoldRoi || 5 // Default mock B&H if missing
-    
-    // Thresholds: ROI > 10%, MDD < 20%
-    const isHighWinRate = s.winRate > 60
-    const isHighRoi = s.roi > 10
-    const isLowDrawdown = mdd < 20
-    const beatsBuyAndHold = s.roi > bhRoi
-
+  // 2. Determine Performance Context
+  const getPerformanceContext = (s: Strategy, stock: Stock) => {
+    const mdd = s.maxDrawdown || 15
+    const bhRoi = stock.buyAndHoldRoi || 5
     let score = 0
     
-    // ROI Criteria (vs B&H)
-    if (s.roi > bhRoi + 10) score += 2 // Significantly outperforms B&H
-    else if (s.roi > bhRoi) score += 1 // Outperforms B&H
-    else if (s.roi < 0) score -= 2 // Negative return
-    else score -= 1 // Underperforms B&H
+    if (s.roi > bhRoi + 10) score += 2
+    else if (s.roi > bhRoi) score += 1
+    else if (s.roi < 0) score -= 2
+    else score -= 1
 
-    // WinRate Criteria
-    if (isHighWinRate) score += 1
+    if (s.winRate > 60) score += 1
     else if (s.winRate < 40) score -= 1
 
-    // MDD Criteria
     if (mdd < 10) score += 1
     else if (mdd > 20) score -= 1
 
-    let category: 'excellent' | 'good' | 'average' | 'poor' = 'poor'
-    if (score >= 3) category = 'excellent'
-    else if (score >= 1) category = 'good'
-    else if (score >= -1) category = 'average'
-    
-    return {
-      isHighWinRate,
-      isHighRoi,
-      isLowDrawdown,
-      beatsBuyAndHold,
-      score,
-      category,
-      mdd,
-      bhRoi
-    }
+    if (score >= 3) return 'excellent'
+    if (score >= 1) return 'good'
+    if (score >= -1) return 'average'
+    return 'poor'
   }
 
-  const context = getDetailedContext(strategy, stock)
-  const roiCategory = context.category
+  const performanceContext = getPerformanceContext(strategy, stock)
+  const roiCategory = performanceContext
 
-  // 3. Get Strategy Texts (Now in render scope)
+  // 3. Get Strategy Texts
   // @ts-ignore
   let strategyTexts = SEO_TEXT_BANK?.strategies?.[strategyKey]
   
-  // Fallback to RSI if text not found to prevent blank page
   if (!strategyTexts) {
     console.warn(`Strategy text not found for key: ${strategyKey}, falling back to RSI`)
     // @ts-ignore
     strategyTexts = SEO_TEXT_BANK?.strategies?.['RSI']
   }
 
-  // Generate AI Narrative on mount to avoid hydration mismatch
   useEffect(() => {
     if (!strategyTexts) {
       console.error(`Strategy text not found for key: ${strategyKey}`)
@@ -142,11 +118,8 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
     
     const replaceVars = (text: string) => {
       if (!text) return ""
-      // Remove ** bold markers first
-      let cleanText = text.replace(/\*\*/g, "")
-      
-      return cleanText
-        .replace(/{name}/g, stock.name || "") // No spaces added
+      return text
+        .replace(/{name}/g, stock.name || "")
         .replace(/{symbol}/g, stock.symbol || "")
         .replace(/{strategy}/g, strategy.name || "")
         .replace(/{winRate}/g, (strategy.winRate || 0).toString())
@@ -158,7 +131,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
 
     const p1 = replaceVars(getRandom(SEO_TEXT_BANK.openers || []))
     
-    // Helper to safely get text or fallback to 'poor' if specific category missing
     const getText = (layer: any) => {
       if (!layer) return ""
       const texts = layer[roiCategory] || layer['poor'] || layer['average'] || []
@@ -172,7 +144,8 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
     const layer5 = strategyTexts ? getText(strategyTexts.layer5_pain) : ""
 
     // 5. Twist Logic
-    const isHighPerformance = strategy.roi > (stock.buyAndHoldRoi || 0);
+    const bh = stock.buyAndHoldRoi || 0;
+    const isHighPerformance = strategy.roi > bh;
     let twistContext = SEO_TEXT_BANK.twists.recovery;
     if (isHighPerformance) {
       twistContext = SEO_TEXT_BANK.twists.upgrade;
@@ -181,57 +154,13 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
     const p3 = replaceVars(getRandom(twistContext))
     const p4 = replaceVars(getRandom(SEO_TEXT_BANK.calls))
 
-    // Transitions
-    // @ts-ignore
-    const transitions = SEO_TEXT_BANK.transitions || ["此外，", "值得注意的是，", "然而，"]
-    const getTransition = () => getRandom(transitions)
-
-    // Sub-headings
-    // @ts-ignore
-    const subHeadings = SEO_TEXT_BANK.subHeadings || { analysis: "深入數據分析", risk: "風險與機會評估" }
-
-    // Structure: 
-    // Layer 1
-    // [Sub-heading 1]
-    // Layer 2
-    // Layer 3
-    // [Sub-heading 2]
-    // Layer 4
-    // ...
-
-    const narrativeStructure = [
-      { type: 'text', content: p1 },
-      { type: 'text', content: layer1 },
-      { type: 'heading', content: subHeadings.analysis },
-      { type: 'text', content: `${getTransition()}${layer2}` },
-      { type: 'text', content: layer3 },
-      { type: 'heading', content: subHeadings.risk },
-      { type: 'text', content: `${getTransition()}${layer4}` },
-      { type: 'text', content: layer5 },
-      { type: 'text', content: p3 },
-      { type: 'text', content: p4 }
-    ]
-
-    // Flatten for simple rendering, but we need to handle headings in the render loop
-    // For now, we'll store objects in state or just strings with a marker? 
-    // Let's store strings, but use a special prefix for headings to render them differently?
-    // Or better, change state to store objects.
-    // To minimize breaking changes in this step, let's just use a marker "### " for headings
-    
-    const finalNarrative = narrativeStructure.map(item => {
-      if (item.type === 'heading') return `### ${item.content}`
-      return item.content
-    })
-
-    setNarrative(finalNarrative)
+    setNarrative([p1, layer1, layer2, layer3, layer4, layer5, p3, p4])
     setMounted(true)
   }, [stock, strategy, strategyKey, roiCategory, strategyTexts])
 
-  // Wiki Content
   const wikiKey = strategyKey
   const wikiContent = STRATEGY_WIKI[wikiKey as keyof typeof STRATEGY_WIKI]
 
-  // Chart Data
   const chartData = Array.from({ length: 30 }, (_, i) => {
     const date = new Date()
     date.setDate(date.getDate() - (29 - i))
@@ -241,69 +170,46 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
     }
   })
 
-  // Dynamic H1 Title Logic
   const currentYear = new Date().getFullYear()
-  const isOutperforming = context.beatsBuyAndHold
+  const bhRoi = stock.buyAndHoldRoi || 5
+  const isOutperforming = strategy.roi > bhRoi
   const statusQuestion = isOutperforming ? "真的準嗎" : "失效了嗎"
   const adverb = isOutperforming ? "高達" : (strategy.roi < 0 ? "僅" : "為")
 
-  // Date Ranges
   const today = new Date()
   const oneYearAgo = new Date(today)
   oneYearAgo.setFullYear(today.getFullYear() - 1)
   const dateRangeStr = `${oneYearAgo.toISOString().split('T')[0]} - ${today.toISOString().split('T')[0]}`
   const updateDateStr = today.toISOString().split('T')[0]
 
-  // Dynamic QA Logic
   const getQAs = () => {
-    const qas = []
-    
-    // Q1: Suitability
-    qas.push({
-      q: `${stock.name} 目前適合用 ${strategy.name} 操作嗎？`,
-      a: `根據回測數據，${strategy.name} 在 ${stock.name} 上的年化報酬率為 ${strategy.roi}%。${
-        context.beatsBuyAndHold
-          ? `此策略表現優於買入持有 (${context.bhRoi}%)，顯示其能有效捕捉波段獲利。` 
-          : `此策略表現落後於買入持有 (${context.bhRoi}%)，建議觀望或調整參數。`
-      }`
-    })
-
-    // Q2: Win Rate vs ROI
-    if (context.isHighWinRate && !context.isHighRoi) {
-      qas.push({
-        q: `為什麼勝率高 (${strategy.winRate}%) 但報酬率普通？`,
-        a: `這通常代表策略雖然常賺錢，但每次獲利幅度不大，或是停損設定較為嚴格。這類策略適合保守型投資人，資金曲線較為平滑。`
-      })
-    } else if (!context.isHighWinRate && context.isHighRoi) {
-      qas.push({
-        q: `勝率只有 ${strategy.winRate}%，為什麼報酬率這麼高？`,
-        a: `這是典型的「大賺小賠」策略。雖然交易次數中虧損居多，但只要抓到一次大波段，就能抵銷多次小虧損並創造可觀獲利。`
-      })
-    } else {
-      qas.push({
-        q: `此策略的風險報酬比如何？`,
-        a: `目前策略勝率為 ${strategy.winRate}%，年化報酬率 ${strategy.roi}%。${
-          context.score >= 1 ? "整體表現穩健，風險報酬比優良。" : "目前數據顯示風險較高，建議縮小部位操作。"
+    const qas = [
+      {
+        q: `${stock.name} 目前適合用 ${strategy.name} 操作嗎？`,
+        a: `根據我們的回測數據，${strategy.name} 在 ${stock.name} 上的年化報酬率為 ${strategy.roi}%，而同期買入並持有的年化報酬率為 ${bhRoi}%。${
+          strategy.roi > bhRoi 
+            ? "此策略表現優於單純買入持有，顯示其能有效捕捉波段獲利並避開部分下跌風險，值得參考。" 
+            : "此策略表現不如單純買入持有，建議您重新檢視參數設定，或參考我們的「冠軍策略」以獲得更佳的風險報酬比。"
         }`
-      })
-    }
-
-    // Q3: Drawdown
-    qas.push({
-      q: `此策略的最大風險（最大回撤）是多少？`,
-      a: `歷史最大回撤為 ${context.mdd}%。${
-        context.isLowDrawdown
-          ? "此數值在安全範圍內 (<20%)，顯示策略控管風險能力佳。"
-          : "此數值偏高 (>20%)，投資人需評估自身風險承受度，或設定更嚴格的停損機制。"
-      }`
-    })
-
+      },
+      {
+        q: `為什麼 ${strategy.name} 的年化報酬率${strategy.roi < bhRoi ? "輸給" : "贏過"}買入持有？`,
+        a: `策略的優劣取決於是否能適應當前的市場慣性。${
+          strategy.roi < bhRoi 
+            ? "目前的落後可能源於策略過度交易導致手續費侵蝕獲利，或是參數對於近期的盤整/趨勢反應遲鈍。" 
+            : "能擊敗買入持有，通常代表策略成功避開了市場的主要修正段，並在趨勢確立時果斷進場。"
+        } Lazybacktest 的核心價值就在於透過數據驗證，幫您找出真正能戰勝大盤的策略組合。`
+      },
+      {
+        q: `此策略的最大風險（最大回撤）是多少？`,
+        a: `除了年化報酬率，最大回撤 (Max Drawdown) 也是關鍵指標。雖然目前數據顯示年化報酬為 ${strategy.roi}%，但投資人仍需注意歷史最大回撤是否在可承受範圍內。冠軍策略通常會針對回撤進行優化，以提供更平滑的資金曲線。`
+      }
+    ]
     return qas
   }
 
-  if (!mounted) return null // Prevent hydration mismatch
+  if (!mounted) return null
 
-  // Safe trades access
   const safeTrades = Array.isArray(strategy?.trades) ? strategy.trades : []
 
   return (
@@ -311,7 +217,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
       <SiteHeader activePath="/stocks" backLink={{ href: "/stocks", label: "返回個股列表" }} />
       
       <main className="container mx-auto px-4 py-8 max-w-5xl">
-        {/* Breadcrumbs */}
         <nav className="flex items-center text-sm text-muted-foreground mb-8 overflow-x-auto whitespace-nowrap">
           <Link href="/" className="hover:text-primary transition-colors">首頁</Link>
           <span className="mx-2">/</span>
@@ -324,7 +229,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
           <span className="text-muted-foreground">{strategy.name}</span>
         </nav>
 
-        {/* Layer 1: AI Narrative (The Narrative) */}
         <article className="prose prose-lg dark:prose-invert max-w-none mb-16">
           <h1 className="text-3xl md:text-5xl font-bold mb-2 leading-tight">
             {stock.symbol} {stock.name}：{strategy.name} 指標{statusQuestion}？
@@ -337,24 +241,18 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
               <div className="bg-primary/10 p-2 rounded-full mt-1 hidden md:block">
                 <AlertCircle className="h-6 w-6 text-primary" />
               </div>
-              <div className="space-y-4 text-lg leading-relaxed text-muted-foreground w-full">
-                {narrative.map((text, index) => {
-                  if (text.startsWith("### ")) {
-                    return <h3 key={index} className="text-xl font-bold text-foreground mt-6 mb-2">{text.replace("### ", "")}</h3>
-                  }
-                  return (
-                    <p key={index} dangerouslySetInnerHTML={{ 
-                      __html: text 
-                    }} />
-                  )
-                })}
+              <div className="space-y-4 text-lg leading-relaxed text-muted-foreground">
+                {narrative.map((paragraph, index) => (
+                  <p key={index} dangerouslySetInnerHTML={{ 
+                    __html: paragraph.replace(/\*\*(.*?)\*\*/g, '<strong class="text-foreground font-semibold">$1</strong>') 
+                  }} />
+                ))}
               </div>
             </div>
           </div>
           <p className="text-xs text-muted-foreground text-right">文章更新日期：{updateDateStr}</p>
         </article>
 
-        {/* Layer 2: Data PK & Hook (The Hook) */}
         <section className="mb-20">
           <div className="text-center mb-10">
             <h2 className="text-3xl font-bold mb-4">策略競技場：數據會說話</h2>
@@ -364,12 +262,10 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
           </div>
 
           <div className="relative grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* VS Badge */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 hidden md:flex items-center justify-center w-20 h-20 bg-background rounded-full border-4 border-muted shadow-2xl">
               <span className="text-3xl font-black text-muted-foreground italic">VS</span>
             </div>
 
-            {/* Left Column: Current Strategy (Free) */}
             <Card className="border-2 hover:border-primary/30 transition-all duration-300 shadow-lg">
               <CardHeader className="bg-muted/20 border-b pb-4">
                 <Badge variant="secondary" className="w-fit mb-2">當前瀏覽</Badge>
@@ -380,25 +276,14 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div className="text-center p-4 bg-background rounded-lg border">
                     <div className="text-sm text-muted-foreground mb-1">勝率</div>
-                    <div className={`text-3xl font-bold ${context.isHighWinRate ? 'text-green-500' : ''}`}>{strategy.winRate}%</div>
+                    <div className="text-3xl font-bold">{strategy.winRate}%</div>
                   </div>
                   <div className="text-center p-4 bg-background rounded-lg border">
                     <div className="text-sm text-muted-foreground mb-1">年化報酬率</div>
-                    <div className={`text-3xl font-bold ${context.isHighRoi ? 'text-primary' : ''}`}>{strategy.roi > 0 ? '+' : ''}{strategy.roi}%</div>
+                    <div className="text-3xl font-bold text-primary">+{strategy.roi}%</div>
                   </div>
                 </div>
                 
-                {/* Analyst Comment */}
-                <div className="mb-6 p-3 bg-muted/50 rounded text-sm text-center italic">
-                  "
-                  {context.isHighWinRate && context.isHighRoi ? "高勝率且高報酬的黃金策略！" :
-                   context.isHighWinRate ? "勝率穩定，適合保守型操作。" :
-                   context.isHighRoi ? "爆發力強，但需忍受波動。" :
-                   "表現平平，建議參考冠軍策略。"}
-                  "
-                </div>
-
-                {/* Mini Chart */}
                 <div className="h-[150px] w-full mb-6">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
@@ -421,7 +306,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
               </CardContent>
             </Card>
 
-            {/* Right Column: Champion Strategy (Locked) */}
             <Card className="border-2 border-yellow-500/50 bg-gradient-to-br from-yellow-500/5 to-transparent relative overflow-hidden shadow-xl shadow-yellow-500/10">
               <div className="absolute top-0 right-0 bg-yellow-500 text-white text-xs px-3 py-1 rounded-bl-lg font-bold">
                 績效王
@@ -450,7 +334,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
                   </div>
                 </div>
 
-                {/* Transaction Table with Blur Hook */}
                 <div className="border rounded-lg overflow-hidden bg-background/60 backdrop-blur-sm mb-6 relative">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
@@ -474,7 +357,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
                           </td>
                         </tr>
                       ))}
-                      {/* Blurred Row */}
                       <tr className={`relative ${strategy.lastSignal === 'BUY' ? 'bg-red-500/5' : 'bg-green-500/5'}`}>
                         <td className="p-3 font-mono filter blur-sm select-none">{strategy.lastSignalDate}</td>
                         <td className="p-3 filter blur-sm select-none">
@@ -482,7 +364,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
                         </td>
                         <td className="p-3 text-right font-mono filter blur-sm select-none">????</td>
                         
-                        {/* Overlay Button */}
                         <td className="absolute inset-0 flex items-center justify-center z-10">
                            <Button 
                             size="sm" 
@@ -503,7 +384,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
           </div>
         </section>
 
-        {/* Layer 3: Dynamic FAQ */}
         <section className="mb-16 max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6 text-center">常見問題：{stock.name} 投資指南</h2>
           <div className="space-y-4">
@@ -520,19 +400,6 @@ export default function StrategyClientPage({ stock, strategy }: StrategyClientPa
           </div>
         </section>
 
-        {/* Navigation Buttons */}
-        <section className="mb-16 flex flex-col sm:flex-row gap-4 justify-center">
-          <Button variant="outline" size="lg" onClick={() => window.history.back()}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> 回到上一頁
-          </Button>
-          <Button size="lg" asChild>
-            <Link href={`/stocks/${stock.symbol}`}>
-              {stock.name} 的更多策略 <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          </Button>
-        </section>
-
-        {/* Layer 4: Static Wiki */}
         <section className="bg-muted/30 rounded-2xl p-8 md:p-12">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center gap-3 mb-8">

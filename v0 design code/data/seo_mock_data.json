@@ -2,553 +2,616 @@
   {
     "symbol": "2330",
     "name": "台積電",
-    "buyAndHoldRoi": 15.5,
+    "buyAndHoldRoi": 9.1,
     "strategies": [
       {
         "id": "rsi",
         "name": "RSI 反轉策略",
         "type": "Reversal",
-        "winRate": 56.9,
-        "roi": -0.6,
-        "tradeCount": 17,
-        "lastSignal": "SELL",
+        "winRate": 48.5,
+        "roi": 27.9,
+        "tradeCount": 10,
+        "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-23",
+            "date": "2025-11-22",
             "type": "BUY",
-            "price": 466,
-            "return": 7.6,
+            "price": 715,
+            "return": -1.6,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-17",
-            "type": "SELL",
-            "price": 899,
-            "return": 5.8,
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 771,
+            "return": 2.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-13",
+            "date": "2025-11-12",
             "type": "SELL",
-            "price": 338,
-            "return": -4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-11",
-            "type": "SELL",
-            "price": 860,
-            "return": -2.5,
+            "price": 638,
+            "return": 5.1,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-09",
             "type": "BUY",
-            "price": 398,
-            "return": -2.1,
+            "price": 392,
+            "return": 2.2,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-04",
+            "date": "2025-11-05",
             "type": "BUY",
-            "price": 220,
-            "return": 2.5,
+            "price": 145,
+            "return": 6.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-03",
+            "type": "SELL",
+            "price": 358,
+            "return": 2.6,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-28",
             "type": "BUY",
-            "price": 878,
-            "return": 3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-20",
-            "type": "SELL",
-            "price": 688,
-            "return": 7.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-18",
-            "type": "BUY",
-            "price": 353,
-            "return": 6.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-10",
-            "type": "BUY",
-            "price": 584,
+            "price": 630,
             "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "SELL",
+            "price": 352,
+            "return": 4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 559,
+            "return": 4.8,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-05",
             "type": "SELL",
-            "price": 150,
-            "return": -1.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-02",
-            "type": "SELL",
-            "price": 928,
-            "return": -2.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-26",
-            "type": "BUY",
-            "price": 487,
-            "return": 5.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-17",
-            "type": "SELL",
-            "price": 926,
-            "return": 6.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "BUY",
-            "price": 884,
-            "return": 5.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-03",
-            "type": "SELL",
-            "price": 130,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-26",
-            "type": "SELL",
-            "price": 560,
-            "return": 5.9,
+            "price": 623,
+            "return": 6.8,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 76.6,
-          "roi": 34.4
+          "name": "均線穿越策略",
+          "winRate": 74,
+          "roi": 53.8
         }
       },
       {
         "id": "macd",
         "name": "MACD 趨勢策略",
         "type": "Trend",
-        "winRate": 83.5,
-        "roi": 45.1,
-        "tradeCount": 19,
+        "winRate": 51.4,
+        "roi": -8.9,
+        "tradeCount": 11,
         "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-24",
+            "date": "2025-11-19",
             "type": "BUY",
-            "price": 340,
-            "return": 7,
+            "price": 818,
+            "return": 5.5,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-15",
-            "type": "BUY",
-            "price": 953,
-            "return": 6.7,
+            "date": "2025-11-12",
+            "type": "SELL",
+            "price": 397,
+            "return": -2.4,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-07",
-            "type": "BUY",
-            "price": 741,
-            "return": 4.1,
+            "type": "SELL",
+            "price": 931,
+            "return": -3.8,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-05",
             "type": "SELL",
-            "price": 805,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 610,
+            "price": 434,
             "return": 2.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-22",
-            "type": "BUY",
-            "price": 845,
-            "return": 3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-14",
-            "type": "BUY",
-            "price": 558,
-            "return": 3.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-11",
-            "type": "BUY",
-            "price": 506,
-            "return": 2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-03",
+            "date": "2025-10-28",
             "type": "SELL",
-            "price": 910,
-            "return": 6,
+            "price": 244,
+            "return": -3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-25",
+            "type": "BUY",
+            "price": 500,
+            "return": 6.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "SELL",
+            "price": 754,
+            "return": 7.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 581,
+            "return": -4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-09",
+            "type": "BUY",
+            "price": 559,
+            "return": -3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-01",
+            "type": "BUY",
+            "price": 276,
+            "return": 3.3,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-26",
             "type": "BUY",
-            "price": 425,
-            "return": 7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-20",
-            "type": "SELL",
-            "price": 121,
-            "return": -4.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-17",
-            "type": "BUY",
-            "price": 673,
-            "return": 5.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-15",
-            "type": "BUY",
-            "price": 802,
-            "return": 7.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-06",
-            "type": "SELL",
-            "price": 669,
-            "return": 5.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-03",
-            "type": "BUY",
-            "price": 925,
-            "return": 4.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-27",
-            "type": "BUY",
-            "price": 605,
-            "return": 3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-18",
-            "type": "SELL",
-            "price": 358,
-            "return": 2.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-09",
-            "type": "SELL",
-            "price": 457,
-            "return": -2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-06",
-            "type": "BUY",
-            "price": 910,
-            "return": 3,
+            "price": 239,
+            "return": 7.1,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 69.6,
-          "roi": 34.3
+          "name": "均線穿越策略",
+          "winRate": 68.5,
+          "roi": 55.7
         }
       },
       {
         "id": "kd",
         "name": "KD 黃金交叉",
         "type": "Momentum",
-        "winRate": 49.4,
-        "roi": 10.4,
-        "tradeCount": 6,
+        "winRate": 51.9,
+        "roi": 17.5,
+        "tradeCount": 18,
         "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-21",
+            "date": "2025-11-19",
             "type": "BUY",
-            "price": 358,
-            "return": 2.1,
+            "price": 230,
+            "return": 4.2,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-12",
-            "type": "BUY",
-            "price": 483,
-            "return": 4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
-            "type": "BUY",
-            "price": 163,
-            "return": 2.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
-            "type": "BUY",
-            "price": 822,
-            "return": 5.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-28",
-            "type": "BUY",
-            "price": 137,
-            "return": 3.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "BUY",
-            "price": 547,
+            "date": "2025-11-14",
+            "type": "SELL",
+            "price": 424,
             "return": -4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-11",
+            "type": "SELL",
+            "price": 137,
+            "return": 2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 712,
+            "return": -2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-31",
+            "type": "BUY",
+            "price": 998,
+            "return": 3.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-25",
+            "type": "SELL",
+            "price": 419,
+            "return": 7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "BUY",
+            "price": 355,
+            "return": 3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-10",
+            "type": "SELL",
+            "price": 244,
+            "return": 2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "BUY",
+            "price": 915,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-29",
+            "type": "BUY",
+            "price": 515,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "BUY",
+            "price": 464,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "BUY",
+            "price": 149,
+            "return": -4.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
+            "type": "SELL",
+            "price": 146,
+            "return": 2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-06",
+            "type": "BUY",
+            "price": 540,
+            "return": 7.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-02",
+            "type": "SELL",
+            "price": 575,
+            "return": -1.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-24",
+            "type": "BUY",
+            "price": 590,
+            "return": 7.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-18",
+            "type": "SELL",
+            "price": 847,
+            "return": -3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-15",
+            "type": "SELL",
+            "price": 951,
+            "return": -2,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 77.8,
-          "roi": 50
+          "name": "均線穿越策略",
+          "winRate": 70.3,
+          "roi": 30.7
         }
       },
       {
         "id": "bollinger",
         "name": "布林通道突破",
         "type": "Volatility",
-        "winRate": 50.4,
-        "roi": 4.3,
+        "winRate": 55,
+        "roi": 4.4,
         "tradeCount": 19,
         "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-20",
+            "date": "2025-11-21",
             "type": "BUY",
-            "price": 523,
-            "return": 6.3,
+            "price": 728,
+            "return": 3.3,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-12",
-            "type": "BUY",
-            "price": 602,
-            "return": -4.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
+            "date": "2025-11-13",
             "type": "SELL",
-            "price": 767,
-            "return": -2,
+            "price": 704,
+            "return": -3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-04",
+            "date": "2025-11-08",
             "type": "BUY",
-            "price": 107,
+            "price": 763,
+            "return": 6.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-31",
+            "type": "BUY",
+            "price": 571,
+            "return": 4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "BUY",
+            "price": 586,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "BUY",
+            "price": 685,
             "return": -2.9,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-29",
+            "date": "2025-10-15",
             "type": "SELL",
-            "price": 524,
-            "return": 4.2,
+            "price": 291,
+            "return": 4.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-20",
+            "date": "2025-10-12",
             "type": "SELL",
-            "price": 831,
-            "return": 2.8,
+            "price": 625,
+            "return": 3.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-14",
-            "type": "SELL",
-            "price": 171,
-            "return": -1.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-08",
-            "type": "SELL",
-            "price": 503,
-            "return": -4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
-            "type": "SELL",
-            "price": 316,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-02",
+            "date": "2025-10-03",
             "type": "BUY",
-            "price": 598,
-            "return": -1.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-27",
-            "type": "SELL",
-            "price": 366,
-            "return": 6.9,
+            "price": 978,
+            "return": 5.2,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-25",
-            "type": "BUY",
-            "price": 902,
-            "return": 6.6,
+            "type": "SELL",
+            "price": 956,
+            "return": -1.4,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-17",
+            "date": "2025-09-23",
             "type": "SELL",
-            "price": 111,
-            "return": -1.1,
+            "price": 412,
+            "return": 2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-14",
+            "type": "SELL",
+            "price": 785,
+            "return": 3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "BUY",
+            "price": 641,
+            "return": -3.1,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-09",
-            "type": "SELL",
-            "price": 350,
-            "return": 2.5,
+            "type": "BUY",
+            "price": 237,
+            "return": -4.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-08-31",
+            "date": "2025-09-05",
             "type": "BUY",
-            "price": 990,
+            "price": 685,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-03",
+            "type": "BUY",
+            "price": 821,
+            "return": 7.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-28",
+            "type": "BUY",
+            "price": 681,
             "return": 6.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-08-22",
+            "date": "2025-08-24",
             "type": "SELL",
-            "price": 819,
-            "return": 2.1,
+            "price": 657,
+            "return": 4.3,
             "status": "CLOSED"
           },
           {
             "date": "2025-08-19",
             "type": "BUY",
-            "price": 573,
-            "return": 2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-12",
-            "type": "SELL",
-            "price": 503,
-            "return": -3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-09",
-            "type": "BUY",
-            "price": 229,
-            "return": -3.6,
+            "price": 939,
+            "return": -1.1,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 76.3,
-          "roi": 53.3
+          "name": "均線穿越策略",
+          "winRate": 71.5,
+          "roi": 41.7
         }
       },
       {
         "id": "ma",
         "name": "均線穿越策略",
         "type": "Trend",
-        "winRate": 55.9,
-        "roi": 0,
-        "tradeCount": 5,
-        "lastSignal": "BUY",
+        "winRate": 87.5,
+        "roi": 29.7,
+        "tradeCount": 17,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-18",
-            "type": "BUY",
-            "price": 534,
-            "return": 6.5,
+            "date": "2025-11-21",
+            "type": "SELL",
+            "price": 423,
+            "return": 2,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-13",
+            "date": "2025-11-14",
             "type": "BUY",
-            "price": 582,
-            "return": 3.7,
+            "price": 388,
+            "return": -3.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-08",
+            "date": "2025-11-09",
             "type": "BUY",
-            "price": 455,
-            "return": 5.8,
+            "price": 510,
+            "return": 5.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-05",
+            "type": "SELL",
+            "price": 334,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 469,
+            "return": 7,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-30",
-            "type": "BUY",
-            "price": 759,
-            "return": -3.1,
+            "type": "SELL",
+            "price": 272,
+            "return": 2.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-25",
+            "date": "2025-10-21",
+            "type": "SELL",
+            "price": 341,
+            "return": 2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-12",
             "type": "BUY",
-            "price": 161,
-            "return": 5.6,
+            "price": 833,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "BUY",
+            "price": 796,
+            "return": 2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-02",
+            "type": "BUY",
+            "price": 674,
+            "return": 7.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-28",
+            "type": "SELL",
+            "price": 764,
+            "return": -1.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "SELL",
+            "price": 921,
+            "return": 5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "BUY",
+            "price": 210,
+            "return": 2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "BUY",
+            "price": 200,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-05",
+            "type": "BUY",
+            "price": 450,
+            "return": 4.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-02",
+            "type": "BUY",
+            "price": 962,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-26",
+            "type": "SELL",
+            "price": 962,
+            "return": -2.1,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 71.4,
-          "roi": 48.3
+          "name": "均線穿越策略",
+          "winRate": 74.8,
+          "roi": 58.9
         }
       }
     ]
@@ -556,532 +619,532 @@
   {
     "symbol": "2603",
     "name": "長榮",
-    "buyAndHoldRoi": 10.4,
+    "buyAndHoldRoi": 4.2,
     "strategies": [
       {
         "id": "rsi",
         "name": "RSI 反轉策略",
         "type": "Reversal",
-        "winRate": 53.1,
-        "roi": 29.7,
-        "tradeCount": 5,
-        "lastSignal": "BUY",
+        "winRate": 55,
+        "roi": 28.6,
+        "tradeCount": 15,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-23",
-            "type": "SELL",
-            "price": 690,
-            "return": -1.1,
+            "date": "2025-11-24",
+            "type": "BUY",
+            "price": 250,
+            "return": 4.3,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-17",
+            "date": "2025-11-18",
             "type": "SELL",
-            "price": 624,
-            "return": 5.3,
+            "price": 499,
+            "return": 6.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-13",
+            "date": "2025-11-16",
+            "type": "SELL",
+            "price": 931,
+            "return": 4.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-12",
             "type": "BUY",
-            "price": 552,
-            "return": 5.1,
+            "price": 464,
+            "return": 6.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-09",
+            "date": "2025-11-07",
             "type": "SELL",
-            "price": 352,
-            "return": -2.7,
+            "price": 980,
+            "return": -4.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-31",
+            "date": "2025-11-05",
+            "type": "BUY",
+            "price": 434,
+            "return": -4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 188,
+            "return": 7.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-29",
             "type": "SELL",
-            "price": 779,
-            "return": -2,
+            "price": 113,
+            "return": 2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-25",
+            "type": "SELL",
+            "price": 172,
+            "return": -2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
+            "type": "BUY",
+            "price": 510,
+            "return": 6.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 333,
+            "return": 4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-08",
+            "type": "SELL",
+            "price": 298,
+            "return": 5.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-03",
+            "type": "BUY",
+            "price": 675,
+            "return": 5.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-26",
+            "type": "SELL",
+            "price": 879,
+            "return": 4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-18",
+            "type": "BUY",
+            "price": 338,
+            "return": 5.6,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "均線穿越策略",
-          "winRate": 69.2,
-          "roi": 48.4
+          "name": "MACD 趨勢策略",
+          "winRate": 74.3,
+          "roi": 36.8
         }
       },
       {
         "id": "macd",
         "name": "MACD 趨勢策略",
         "type": "Trend",
-        "winRate": 43.5,
-        "roi": 27.9,
-        "tradeCount": 9,
+        "winRate": 85.7,
+        "roi": 52.7,
+        "tradeCount": 10,
         "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-19",
-            "type": "SELL",
-            "price": 799,
-            "return": 2.6,
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 860,
+            "return": -3.3,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-11",
+            "date": "2025-11-16",
+            "type": "SELL",
+            "price": 144,
+            "return": 4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-12",
             "type": "BUY",
-            "price": 760,
-            "return": -3.3,
+            "price": 240,
+            "return": 3.8,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-06",
             "type": "SELL",
-            "price": 943,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "SELL",
             "price": 277,
-            "return": -2.2,
+            "return": 7.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-27",
-            "type": "BUY",
-            "price": 945,
-            "return": -1.2,
+            "date": "2025-11-02",
+            "type": "SELL",
+            "price": 698,
+            "return": 2.2,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-25",
-            "type": "BUY",
-            "price": 630,
-            "return": -4,
+            "date": "2025-10-30",
+            "type": "SELL",
+            "price": 224,
+            "return": 4.2,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-21",
-            "type": "BUY",
-            "price": 867,
-            "return": 5.9,
+            "type": "SELL",
+            "price": 714,
+            "return": 2.1,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-16",
-            "type": "SELL",
-            "price": 765,
-            "return": 3.2,
+            "type": "BUY",
+            "price": 761,
+            "return": 3.9,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-13",
+            "date": "2025-10-14",
             "type": "BUY",
-            "price": 340,
-            "return": -3.6,
+            "price": 789,
+            "return": -4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "SELL",
+            "price": 795,
+            "return": -1.2,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "均線穿越策略",
-          "winRate": 74.3,
-          "roi": 33.5
+          "name": "MACD 趨勢策略",
+          "winRate": 71.5,
+          "roi": 55.4
         }
       },
       {
         "id": "kd",
         "name": "KD 黃金交叉",
         "type": "Momentum",
-        "winRate": 53.8,
-        "roi": 2.4,
-        "tradeCount": 19,
+        "winRate": 52.3,
+        "roi": 4.8,
+        "tradeCount": 15,
         "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-19",
-            "type": "SELL",
-            "price": 187,
-            "return": -2.9,
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 231,
+            "return": 3.7,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 246,
-            "return": -2.9,
-            "status": "CLOSED"
-          },
-          {
             "date": "2025-11-11",
+            "type": "SELL",
+            "price": 303,
+            "return": -4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "SELL",
+            "price": 823,
+            "return": -2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
             "type": "BUY",
-            "price": 461,
-            "return": -2.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "SELL",
-            "price": 443,
-            "return": 6.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
-            "type": "SELL",
-            "price": 529,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "SELL",
-            "price": 925,
-            "return": 3.6,
+            "price": 313,
+            "return": 5.6,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-28",
-            "type": "SELL",
-            "price": 370,
-            "return": -3.8,
+            "type": "BUY",
+            "price": 327,
+            "return": -3.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-22",
+            "date": "2025-10-24",
             "type": "BUY",
-            "price": 327,
-            "return": -1.1,
+            "price": 665,
+            "return": -3.3,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-17",
             "type": "BUY",
-            "price": 895,
-            "return": -3.2,
+            "price": 126,
+            "return": -2.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-08",
+            "date": "2025-10-13",
             "type": "SELL",
-            "price": 633,
-            "return": -3,
+            "price": 545,
+            "return": -1.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-03",
+            "date": "2025-10-11",
             "type": "BUY",
-            "price": 225,
-            "return": 6.1,
+            "price": 273,
+            "return": 7.9,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-28",
-            "type": "BUY",
-            "price": 814,
-            "return": 6.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
+            "date": "2025-10-07",
             "type": "SELL",
-            "price": 746,
-            "return": -3.6,
+            "price": 543,
+            "return": 5.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-19",
+            "date": "2025-09-29",
             "type": "BUY",
-            "price": 399,
-            "return": 4.2,
+            "price": 867,
+            "return": 3.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-16",
+            "date": "2025-09-22",
             "type": "BUY",
-            "price": 282,
-            "return": 5.8,
+            "price": 870,
+            "return": 5.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "SELL",
+            "price": 928,
+            "return": 7.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
+            "type": "SELL",
+            "price": 501,
+            "return": 5.3,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-09",
             "type": "SELL",
-            "price": 608,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-06",
-            "type": "BUY",
-            "price": 760,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-02",
-            "type": "BUY",
-            "price": 281,
-            "return": -4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-30",
-            "type": "BUY",
-            "price": 579,
-            "return": 2.3,
+            "price": 945,
+            "return": -4.3,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "均線穿越策略",
-          "winRate": 73.5,
-          "roi": 44.4
+          "name": "MACD 趨勢策略",
+          "winRate": 72.4,
+          "roi": 43.9
         }
       },
       {
         "id": "bollinger",
         "name": "布林通道突破",
         "type": "Volatility",
-        "winRate": 51.2,
-        "roi": 19.4,
-        "tradeCount": 16,
+        "winRate": 54.7,
+        "roi": 18.7,
+        "tradeCount": 18,
         "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-18",
-            "type": "SELL",
-            "price": 500,
-            "return": 3.5,
+            "date": "2025-11-24",
+            "type": "BUY",
+            "price": 959,
+            "return": -4.5,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-15",
-            "type": "SELL",
-            "price": 444,
-            "return": 4.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-12",
-            "type": "SELL",
-            "price": 867,
-            "return": 6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
+            "date": "2025-11-20",
             "type": "BUY",
-            "price": 260,
-            "return": 2.6,
+            "price": 227,
+            "return": -4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-16",
+            "type": "BUY",
+            "price": 407,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-11",
+            "type": "SELL",
+            "price": 404,
+            "return": 3.6,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-03",
-            "type": "BUY",
-            "price": 403,
+            "type": "SELL",
+            "price": 950,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "SELL",
+            "price": 390,
+            "return": 4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
+            "type": "SELL",
+            "price": 414,
             "return": -4.4,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-28",
-            "type": "SELL",
-            "price": 550,
-            "return": 4.3,
+            "date": "2025-10-16",
+            "type": "BUY",
+            "price": 193,
+            "return": 6.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-24",
-            "type": "SELL",
-            "price": 621,
-            "return": 2.5,
+            "date": "2025-10-13",
+            "type": "BUY",
+            "price": 791,
+            "return": 6.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-22",
+            "date": "2025-10-10",
             "type": "SELL",
-            "price": 436,
-            "return": 4.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-14",
-            "type": "SELL",
-            "price": 885,
-            "return": 3.8,
+            "price": 168,
+            "return": 4.8,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-07",
-            "type": "BUY",
-            "price": 602,
-            "return": 7.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-05",
-            "type": "BUY",
-            "price": 506,
-            "return": 4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
             "type": "SELL",
-            "price": 889,
-            "return": 3,
+            "price": 180,
+            "return": 7.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-29",
-            "type": "SELL",
-            "price": 168,
-            "return": 8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-27",
-            "type": "SELL",
-            "price": 942,
-            "return": 7.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-20",
+            "date": "2025-10-03",
             "type": "BUY",
-            "price": 210,
+            "price": 868,
+            "return": -3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "BUY",
+            "price": 255,
+            "return": 5.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
+            "type": "SELL",
+            "price": 834,
             "return": 3.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-17",
+            "date": "2025-09-12",
+            "type": "SELL",
+            "price": 123,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-03",
             "type": "BUY",
-            "price": 566,
-            "return": -2.3,
+            "price": 761,
+            "return": -4.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-27",
+            "type": "SELL",
+            "price": 333,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-21",
+            "type": "BUY",
+            "price": 958,
+            "return": 3.6,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "均線穿越策略",
-          "winRate": 71.7,
-          "roi": 50.5
+          "name": "MACD 趨勢策略",
+          "winRate": 70.4,
+          "roi": 40.9
         }
       },
       {
         "id": "ma",
         "name": "均線穿越策略",
         "type": "Trend",
-        "winRate": 70.2,
-        "roi": 59.4,
-        "tradeCount": 14,
-        "lastSignal": "BUY",
+        "winRate": 49.7,
+        "roi": 16.3,
+        "tradeCount": 5,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 419,
-            "return": 2,
+            "date": "2025-11-20",
+            "type": "SELL",
+            "price": 807,
+            "return": -1.2,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-11",
+            "date": "2025-11-12",
+            "type": "SELL",
+            "price": 456,
+            "return": 2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-06",
             "type": "BUY",
-            "price": 115,
-            "return": -1.6,
+            "price": 711,
+            "return": -4.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-08",
-            "type": "SELL",
-            "price": 289,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
+            "date": "2025-11-03",
             "type": "BUY",
-            "price": 135,
-            "return": 5.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "SELL",
-            "price": 582,
-            "return": -4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "SELL",
-            "price": 738,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "SELL",
-            "price": 288,
-            "return": 4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-12",
-            "type": "SELL",
-            "price": 719,
-            "return": -2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-06",
-            "type": "SELL",
-            "price": 417,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-03",
-            "type": "BUY",
-            "price": 259,
+            "price": 418,
             "return": -2.9,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-26",
+            "date": "2025-10-28",
             "type": "SELL",
-            "price": 986,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-17",
-            "type": "SELL",
-            "price": 408,
-            "return": -3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "SELL",
-            "price": 361,
-            "return": 7.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-04",
-            "type": "SELL",
-            "price": 349,
-            "return": -3.7,
+            "price": 626,
+            "return": 2.8,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "均線穿越策略",
-          "winRate": 70.2,
-          "roi": 52.4
+          "name": "MACD 趨勢策略",
+          "winRate": 68.1,
+          "roi": 33.9
         }
       }
     ]
@@ -1089,2318 +1152,480 @@
   {
     "symbol": "2454",
     "name": "聯發科",
-    "buyAndHoldRoi": 6.9,
+    "buyAndHoldRoi": -1.3,
     "strategies": [
       {
         "id": "rsi",
         "name": "RSI 反轉策略",
         "type": "Reversal",
-        "winRate": 57.7,
-        "roi": 19.9,
-        "tradeCount": 11,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-22",
-            "type": "SELL",
-            "price": 717,
-            "return": 2.9,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 986,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "SELL",
-            "price": 476,
-            "return": -2.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
-            "type": "BUY",
-            "price": 897,
-            "return": 6.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-05",
-            "type": "SELL",
-            "price": 305,
-            "return": 3.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-30",
-            "type": "SELL",
-            "price": 438,
-            "return": 3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-22",
-            "type": "SELL",
-            "price": 306,
-            "return": -3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-15",
-            "type": "BUY",
-            "price": 885,
-            "return": -2.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-12",
-            "type": "SELL",
-            "price": 431,
-            "return": -4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-09",
-            "type": "SELL",
-            "price": 120,
-            "return": -1.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
-            "type": "SELL",
-            "price": 322,
-            "return": 5.1,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "KD 黃金交叉",
-          "winRate": 77,
-          "roi": 40.3
-        }
-      },
-      {
-        "id": "macd",
-        "name": "MACD 趨勢策略",
-        "type": "Trend",
-        "winRate": 48.9,
-        "roi": -7.2,
-        "tradeCount": 10,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-23",
-            "type": "SELL",
-            "price": 869,
-            "return": 7.7,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-21",
-            "type": "BUY",
-            "price": 680,
-            "return": 6.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-16",
-            "type": "SELL",
-            "price": 632,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 548,
-            "return": -1.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "BUY",
-            "price": 435,
-            "return": 7.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-05",
-            "type": "BUY",
-            "price": 842,
-            "return": 5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "SELL",
-            "price": 468,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "SELL",
-            "price": 235,
-            "return": -2.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "SELL",
-            "price": 231,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-18",
-            "type": "BUY",
-            "price": 136,
-            "return": 7.2,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "KD 黃金交叉",
-          "winRate": 74,
-          "roi": 37.4
-        }
-      },
-      {
-        "id": "kd",
-        "name": "KD 黃金交叉",
-        "type": "Momentum",
-        "winRate": 80.5,
-        "roi": 41.9,
-        "tradeCount": 5,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 737,
-            "return": -2.3,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "SELL",
-            "price": 904,
-            "return": -3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 680,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-26",
-            "type": "BUY",
-            "price": 167,
-            "return": 4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-19",
-            "type": "SELL",
-            "price": 503,
-            "return": 5.3,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "KD 黃金交叉",
-          "winRate": 74.7,
-          "roi": 54.6
-        }
-      },
-      {
-        "id": "bollinger",
-        "name": "布林通道突破",
-        "type": "Volatility",
-        "winRate": 40,
-        "roi": 25,
-        "tradeCount": 12,
+        "winRate": 85.4,
+        "roi": 22.5,
+        "tradeCount": 19,
         "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
             "date": "2025-11-18",
             "type": "SELL",
-            "price": 934,
-            "return": -3.2,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 427,
-            "return": -4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 359,
-            "return": 5.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-01",
-            "type": "BUY",
-            "price": 440,
-            "return": -4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "BUY",
-            "price": 409,
-            "return": 3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-20",
-            "type": "SELL",
-            "price": 541,
-            "return": -2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-18",
-            "type": "SELL",
-            "price": 546,
-            "return": 6.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-13",
-            "type": "BUY",
-            "price": 389,
-            "return": 2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-07",
-            "type": "BUY",
-            "price": 383,
-            "return": 3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
-            "type": "SELL",
-            "price": 692,
-            "return": 7.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-26",
-            "type": "SELL",
-            "price": 853,
-            "return": 6.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-21",
-            "type": "BUY",
-            "price": 225,
-            "return": -1.5,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "KD 黃金交叉",
-          "winRate": 72.8,
-          "roi": 36.9
-        }
-      },
-      {
-        "id": "ma",
-        "name": "均線穿越策略",
-        "type": "Trend",
-        "winRate": 52.3,
-        "roi": 0.7,
-        "tradeCount": 7,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 268,
-            "return": 2.8,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-15",
-            "type": "SELL",
-            "price": 215,
-            "return": 3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "SELL",
-            "price": 708,
-            "return": 3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 638,
-            "return": -2.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "SELL",
-            "price": 995,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-22",
-            "type": "BUY",
-            "price": 696,
-            "return": -4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "BUY",
-            "price": 299,
-            "return": -3.1,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "KD 黃金交叉",
-          "winRate": 75.2,
-          "roi": 37.3
-        }
-      }
-    ]
-  },
-  {
-    "symbol": "2317",
-    "name": "鴻海",
-    "buyAndHoldRoi": 18.1,
-    "strategies": [
-      {
-        "id": "rsi",
-        "name": "RSI 反轉策略",
-        "type": "Reversal",
-        "winRate": 54.8,
-        "roi": 17.9,
-        "tradeCount": 14,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-24",
-            "type": "SELL",
-            "price": 855,
-            "return": -2.8,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-19",
-            "type": "BUY",
-            "price": 114,
-            "return": 5.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 873,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
-            "type": "BUY",
-            "price": 224,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-01",
-            "type": "BUY",
-            "price": 536,
-            "return": -3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "BUY",
-            "price": 572,
-            "return": -4.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "SELL",
-            "price": 663,
-            "return": 6.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "SELL",
-            "price": 833,
-            "return": 3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-11",
-            "type": "BUY",
-            "price": 934,
-            "return": 5.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
-            "type": "BUY",
-            "price": 177,
-            "return": -4.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
-            "type": "SELL",
-            "price": 981,
-            "return": 5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-22",
-            "type": "SELL",
-            "price": 412,
-            "return": 7.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-18",
-            "type": "BUY",
-            "price": 744,
-            "return": -2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-13",
-            "type": "SELL",
-            "price": 319,
-            "return": 3.3,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 76.6,
-          "roi": 53.1
-        }
-      },
-      {
-        "id": "macd",
-        "name": "MACD 趨勢策略",
-        "type": "Trend",
-        "winRate": 47.9,
-        "roi": 23.6,
-        "tradeCount": 16,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-19",
-            "type": "SELL",
-            "price": 383,
-            "return": -4.2,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "BUY",
-            "price": 713,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 936,
-            "return": -5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "BUY",
-            "price": 119,
-            "return": 2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-26",
-            "type": "SELL",
-            "price": 514,
-            "return": 3.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "BUY",
-            "price": 169,
-            "return": -2.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "BUY",
-            "price": 795,
-            "return": -3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-14",
-            "type": "SELL",
-            "price": 462,
-            "return": -4.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-06",
-            "type": "SELL",
-            "price": 200,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-28",
-            "type": "SELL",
-            "price": 970,
-            "return": 2.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
-            "type": "BUY",
-            "price": 723,
-            "return": 7.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-22",
-            "type": "BUY",
-            "price": 370,
-            "return": 5.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-18",
-            "type": "BUY",
-            "price": 313,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-09",
-            "type": "BUY",
-            "price": 654,
-            "return": 7.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-01",
-            "type": "BUY",
-            "price": 910,
-            "return": 2.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-25",
-            "type": "SELL",
-            "price": 645,
-            "return": -1.5,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 76.9,
-          "roi": 54.6
-        }
-      },
-      {
-        "id": "kd",
-        "name": "KD 黃金交叉",
-        "type": "Momentum",
-        "winRate": 53,
-        "roi": 9.6,
-        "tradeCount": 14,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-22",
-            "type": "BUY",
-            "price": 527,
+            "price": 996,
             "return": 6,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-18",
-            "type": "SELL",
-            "price": 863,
-            "return": -4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 466,
-            "return": 7.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "BUY",
-            "price": 731,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "SELL",
-            "price": 657,
-            "return": 6.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "SELL",
-            "price": 672,
-            "return": 4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-18",
-            "type": "BUY",
-            "price": 689,
-            "return": -3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "SELL",
-            "price": 896,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-13",
-            "type": "BUY",
-            "price": 531,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-09",
-            "type": "SELL",
-            "price": 827,
-            "return": 4.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-06",
-            "type": "SELL",
-            "price": 763,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-02",
-            "type": "SELL",
-            "price": 809,
-            "return": -3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-28",
-            "type": "BUY",
-            "price": 849,
-            "return": 2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
-            "type": "SELL",
-            "price": 703,
-            "return": -4.4,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 70.8,
-          "roi": 51.9
-        }
-      },
-      {
-        "id": "bollinger",
-        "name": "布林通道突破",
-        "type": "Volatility",
-        "winRate": 83.1,
-        "roi": 55.4,
-        "tradeCount": 5,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 163,
-            "return": 5.5,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-12",
-            "type": "BUY",
-            "price": 119,
-            "return": 5.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 342,
-            "return": 4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "SELL",
-            "price": 861,
-            "return": 2.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "SELL",
-            "price": 755,
-            "return": 2.8,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 74.4,
-          "roi": 47.8
-        }
-      },
-      {
-        "id": "ma",
-        "name": "均線穿越策略",
-        "type": "Trend",
-        "winRate": 48.1,
-        "roi": -6.5,
-        "tradeCount": 16,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-20",
-            "type": "BUY",
-            "price": 290,
-            "return": -2.4,
-            "status": "OPEN"
-          },
-          {
             "date": "2025-11-11",
             "type": "SELL",
-            "price": 746,
-            "return": 4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "BUY",
-            "price": 564,
-            "return": 2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 677,
-            "return": -4.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-23",
-            "type": "BUY",
-            "price": 388,
-            "return": -4.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-19",
-            "type": "SELL",
-            "price": 437,
-            "return": 3.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-15",
-            "type": "SELL",
-            "price": 451,
-            "return": 3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-08",
-            "type": "BUY",
-            "price": 377,
-            "return": -2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-30",
-            "type": "SELL",
-            "price": 423,
-            "return": -2.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-24",
-            "type": "BUY",
-            "price": 352,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-16",
-            "type": "BUY",
-            "price": 768,
-            "return": -3.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-13",
-            "type": "BUY",
-            "price": 743,
-            "return": 7.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-11",
-            "type": "BUY",
-            "price": 674,
-            "return": 4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-05",
-            "type": "SELL",
-            "price": 643,
-            "return": -4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-03",
-            "type": "BUY",
-            "price": 227,
-            "return": -1.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-27",
-            "type": "SELL",
-            "price": 191,
-            "return": 6,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 77.4,
-          "roi": 38.5
-        }
-      }
-    ]
-  },
-  {
-    "symbol": "0050",
-    "name": "元大台灣50",
-    "buyAndHoldRoi": 21.1,
-    "strategies": [
-      {
-        "id": "rsi",
-        "name": "RSI 反轉策略",
-        "type": "Reversal",
-        "winRate": 49.6,
-        "roi": 8.1,
-        "tradeCount": 18,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-19",
-            "type": "BUY",
-            "price": 580,
-            "return": -2,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-11",
-            "type": "BUY",
-            "price": 721,
-            "return": 6.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
-            "type": "BUY",
-            "price": 259,
-            "return": 6.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 869,
-            "return": -1.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-22",
-            "type": "SELL",
-            "price": 104,
-            "return": 3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-17",
-            "type": "BUY",
-            "price": 430,
-            "return": -1.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-09",
-            "type": "SELL",
-            "price": 381,
-            "return": 4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
-            "type": "SELL",
-            "price": 957,
-            "return": 5.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-23",
-            "type": "BUY",
-            "price": 218,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-18",
-            "type": "SELL",
-            "price": 770,
-            "return": 3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-15",
-            "type": "BUY",
-            "price": 300,
-            "return": -4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "SELL",
-            "price": 126,
-            "return": -4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-04",
-            "type": "SELL",
-            "price": 435,
-            "return": 6.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-02",
-            "type": "BUY",
-            "price": 896,
-            "return": 6.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-25",
-            "type": "BUY",
-            "price": 759,
-            "return": -3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-18",
-            "type": "SELL",
-            "price": 891,
-            "return": 4.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-09",
-            "type": "SELL",
-            "price": 532,
-            "return": 7.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-01",
-            "type": "BUY",
-            "price": 323,
-            "return": 5.6,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 74.4,
-          "roi": 37.4
-        }
-      },
-      {
-        "id": "macd",
-        "name": "MACD 趨勢策略",
-        "type": "Trend",
-        "winRate": 70.7,
-        "roi": 24.5,
-        "tradeCount": 16,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-24",
-            "type": "SELL",
-            "price": 376,
-            "return": -1.6,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-21",
-            "type": "SELL",
-            "price": 635,
-            "return": 2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 333,
-            "return": 4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "BUY",
-            "price": 756,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "BUY",
-            "price": 712,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "SELL",
-            "price": 500,
-            "return": -1.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "BUY",
-            "price": 881,
-            "return": 5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-15",
-            "type": "SELL",
-            "price": 324,
-            "return": 6.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-07",
-            "type": "BUY",
-            "price": 197,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
-            "type": "SELL",
-            "price": 909,
-            "return": -4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-27",
-            "type": "SELL",
-            "price": 131,
-            "return": -4.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-21",
-            "type": "SELL",
-            "price": 985,
-            "return": 7.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-12",
-            "type": "SELL",
-            "price": 170,
-            "return": 6.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-07",
-            "type": "SELL",
-            "price": 708,
-            "return": 3.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-29",
-            "type": "SELL",
-            "price": 820,
-            "return": -3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-27",
-            "type": "BUY",
-            "price": 915,
-            "return": 6.4,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 74,
-          "roi": 59.2
-        }
-      },
-      {
-        "id": "kd",
-        "name": "KD 黃金交叉",
-        "type": "Momentum",
-        "winRate": 51,
-        "roi": -3.4,
-        "tradeCount": 10,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-21",
-            "type": "BUY",
-            "price": 664,
-            "return": -1.5,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-13",
-            "type": "SELL",
-            "price": 833,
-            "return": 2.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-11",
-            "type": "SELL",
-            "price": 843,
-            "return": 7.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "SELL",
-            "price": 964,
-            "return": 7.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
-            "type": "BUY",
-            "price": 829,
+            "price": 581,
             "return": 3.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-30",
+            "date": "2025-11-03",
             "type": "SELL",
-            "price": 302,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "SELL",
-            "price": 467,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-15",
-            "type": "BUY",
-            "price": 693,
-            "return": -3.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-07",
-            "type": "SELL",
-            "price": 320,
-            "return": -1.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-02",
-            "type": "BUY",
-            "price": 613,
-            "return": 2.4,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 70.9,
-          "roi": 34
-        }
-      },
-      {
-        "id": "bollinger",
-        "name": "布林通道突破",
-        "type": "Volatility",
-        "winRate": 48.9,
-        "roi": -0.3,
-        "tradeCount": 9,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-18",
-            "type": "SELL",
-            "price": 920,
-            "return": 5,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-12",
-            "type": "SELL",
-            "price": 499,
-            "return": -1.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "SELL",
-            "price": 921,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-07",
-            "type": "BUY",
-            "price": 118,
-            "return": 2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "BUY",
-            "price": 366,
-            "return": -3.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "SELL",
-            "price": 395,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "SELL",
-            "price": 139,
-            "return": 5.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-18",
-            "type": "SELL",
-            "price": 545,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "BUY",
-            "price": 962,
-            "return": 6.5,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 77,
-          "roi": 33.6
-        }
-      },
-      {
-        "id": "ma",
-        "name": "均線穿越策略",
-        "type": "Trend",
-        "winRate": 53.9,
-        "roi": 10.3,
-        "tradeCount": 6,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 405,
-            "return": -1.3,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "BUY",
-            "price": 366,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "BUY",
-            "price": 341,
-            "return": 6.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-31",
-            "type": "SELL",
-            "price": 777,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "SELL",
-            "price": 831,
-            "return": 3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-23",
-            "type": "BUY",
-            "price": 378,
-            "return": 4.6,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 69.4,
-          "roi": 58.4
-        }
-      }
-    ]
-  },
-  {
-    "symbol": "2303",
-    "name": "聯電",
-    "buyAndHoldRoi": 2.3,
-    "strategies": [
-      {
-        "id": "rsi",
-        "name": "RSI 反轉策略",
-        "type": "Reversal",
-        "winRate": 47.4,
-        "roi": -7.6,
-        "tradeCount": 17,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-22",
-            "type": "SELL",
-            "price": 990,
-            "return": 6.1,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-20",
-            "type": "SELL",
-            "price": 499,
-            "return": 5.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-12",
-            "type": "SELL",
-            "price": 245,
-            "return": 3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "BUY",
-            "price": 501,
-            "return": 5.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-07",
-            "type": "BUY",
-            "price": 523,
-            "return": 7.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 228,
-            "return": 3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "BUY",
-            "price": 276,
-            "return": -2.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-13",
-            "type": "BUY",
-            "price": 890,
-            "return": 5.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-06",
-            "type": "BUY",
-            "price": 842,
-            "return": 6.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
-            "type": "SELL",
-            "price": 718,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-02",
-            "type": "BUY",
-            "price": 193,
-            "return": -3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-29",
-            "type": "BUY",
-            "price": 172,
-            "return": -4.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-20",
-            "type": "BUY",
-            "price": 143,
-            "return": 7.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-11",
-            "type": "BUY",
-            "price": 126,
-            "return": -3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "BUY",
-            "price": 148,
-            "return": -1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-31",
-            "type": "BUY",
-            "price": 152,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-26",
-            "type": "SELL",
-            "price": 730,
-            "return": -1.3,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 69.9,
-          "roi": 56.8
-        }
-      },
-      {
-        "id": "macd",
-        "name": "MACD 趨勢策略",
-        "type": "Trend",
-        "winRate": 56.5,
-        "roi": 8.1,
-        "tradeCount": 7,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-19",
-            "type": "BUY",
-            "price": 342,
-            "return": 2.4,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "SELL",
-            "price": 459,
-            "return": 3.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-12",
-            "type": "SELL",
-            "price": 589,
-            "return": -2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "SELL",
-            "price": 659,
-            "return": 5.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-04",
-            "type": "SELL",
-            "price": 509,
-            "return": 6.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-30",
-            "type": "SELL",
-            "price": 390,
-            "return": -3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-22",
-            "type": "SELL",
-            "price": 980,
-            "return": -2.8,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 74.9,
-          "roi": 58.7
-        }
-      },
-      {
-        "id": "kd",
-        "name": "KD 黃金交叉",
-        "type": "Momentum",
-        "winRate": 54.9,
-        "roi": 12.2,
-        "tradeCount": 14,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-22",
-            "type": "BUY",
-            "price": 165,
-            "return": -4.5,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 677,
-            "return": 8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 532,
-            "return": 4.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "SELL",
-            "price": 790,
-            "return": 7.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-01",
-            "type": "BUY",
-            "price": 650,
-            "return": 6.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-23",
-            "type": "SELL",
-            "price": 708,
-            "return": -1.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-15",
-            "type": "BUY",
-            "price": 874,
-            "return": -3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-10",
-            "type": "SELL",
-            "price": 794,
-            "return": 3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
-            "type": "BUY",
-            "price": 921,
-            "return": 3.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
-            "type": "BUY",
-            "price": 267,
-            "return": -2.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-16",
-            "type": "BUY",
-            "price": 238,
-            "return": 4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "SELL",
-            "price": 755,
-            "return": 6.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-30",
-            "type": "BUY",
-            "price": 126,
-            "return": 7.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-26",
-            "type": "SELL",
-            "price": 822,
-            "return": 2.4,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 71.8,
-          "roi": 42.3
-        }
-      },
-      {
-        "id": "bollinger",
-        "name": "布林通道突破",
-        "type": "Volatility",
-        "winRate": 83.9,
-        "roi": 56.2,
-        "tradeCount": 9,
-        "lastSignal": "SELL",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-19",
-            "type": "BUY",
-            "price": 557,
-            "return": -4.1,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "SELL",
-            "price": 695,
-            "return": 4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "SELL",
-            "price": 896,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 473,
-            "return": -2.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "BUY",
-            "price": 479,
-            "return": 5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-24",
-            "type": "BUY",
-            "price": 916,
-            "return": 5.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "SELL",
-            "price": 659,
-            "return": -3.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-07",
-            "type": "BUY",
-            "price": 694,
-            "return": 4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
-            "type": "SELL",
-            "price": 736,
-            "return": 7.7,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 75.9,
-          "roi": 33.2
-        }
-      },
-      {
-        "id": "ma",
-        "name": "均線穿越策略",
-        "type": "Trend",
-        "winRate": 41.2,
-        "roi": 13.9,
-        "tradeCount": 7,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-19",
-            "type": "BUY",
-            "price": 399,
-            "return": -1.7,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-16",
-            "type": "BUY",
-            "price": 522,
-            "return": -1.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 278,
-            "return": 7.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-10",
-            "type": "BUY",
-            "price": 900,
-            "return": -3.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
-            "type": "BUY",
-            "price": 242,
-            "return": -4.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "SELL",
-            "price": 511,
-            "return": -1.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-27",
-            "type": "BUY",
-            "price": 528,
-            "return": -3.9,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "布林通道突破",
-          "winRate": 68.4,
-          "roi": 48.3
-        }
-      }
-    ]
-  },
-  {
-    "symbol": "2881",
-    "name": "富邦金",
-    "buyAndHoldRoi": -1.2,
-    "strategies": [
-      {
-        "id": "rsi",
-        "name": "RSI 反轉策略",
-        "type": "Reversal",
-        "winRate": 79.3,
-        "roi": 30.5,
-        "tradeCount": 16,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 380,
-            "return": 2.5,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-15",
-            "type": "SELL",
-            "price": 968,
-            "return": 3.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "BUY",
-            "price": 547,
-            "return": 3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 620,
-            "return": 6.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "SELL",
-            "price": 434,
-            "return": -3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "BUY",
-            "price": 367,
-            "return": 6.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-17",
-            "type": "BUY",
-            "price": 836,
-            "return": 6.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-13",
-            "type": "BUY",
-            "price": 536,
-            "return": 2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-05",
-            "type": "SELL",
-            "price": 813,
-            "return": 7.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-28",
-            "type": "BUY",
-            "price": 692,
+            "price": 599,
             "return": 3.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-21",
-            "type": "BUY",
-            "price": 869,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-18",
-            "type": "SELL",
-            "price": 780,
-            "return": 3.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-12",
-            "type": "BUY",
-            "price": 190,
-            "return": 3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-08",
-            "type": "BUY",
-            "price": 757,
-            "return": 4.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-31",
-            "type": "SELL",
-            "price": 553,
-            "return": 6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-24",
-            "type": "BUY",
-            "price": 618,
-            "return": -2.7,
-            "status": "CLOSED"
-          }
-        ],
-        "champion": {
-          "name": "RSI 反轉策略",
-          "winRate": 77.8,
-          "roi": 34.7
-        }
-      },
-      {
-        "id": "macd",
-        "name": "MACD 趨勢策略",
-        "type": "Trend",
-        "winRate": 55.5,
-        "roi": 29.8,
-        "tradeCount": 13,
-        "lastSignal": "BUY",
-        "lastSignalDate": "2025-11-26",
-        "trades": [
-          {
-            "date": "2025-11-18",
-            "type": "BUY",
-            "price": 447,
-            "return": -3.6,
-            "status": "OPEN"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "BUY",
-            "price": 347,
-            "return": 2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-09",
-            "type": "SELL",
-            "price": 229,
-            "return": 6.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-01",
-            "type": "SELL",
-            "price": 341,
-            "return": -4.9,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-28",
             "type": "SELL",
-            "price": 576,
-            "return": -2.7,
+            "price": 851,
+            "return": 3.4,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-19",
             "type": "SELL",
-            "price": 911,
+            "price": 784,
+            "return": 6.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-17",
+            "type": "BUY",
+            "price": 258,
+            "return": 2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 210,
             "return": 7.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-10",
-            "type": "BUY",
-            "price": 544,
-            "return": 5.5,
+            "date": "2025-10-11",
+            "type": "SELL",
+            "price": 714,
+            "return": 4.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-06",
+            "date": "2025-10-02",
             "type": "SELL",
-            "price": 634,
-            "return": -4.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-30",
-            "type": "SELL",
-            "price": 780,
-            "return": -4.9,
+            "price": 938,
+            "return": -2.2,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-24",
             "type": "SELL",
-            "price": 384,
-            "return": -3,
+            "price": 910,
+            "return": 5.5,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-16",
-            "type": "BUY",
-            "price": 659,
-            "return": -1.1,
+            "type": "SELL",
+            "price": 625,
+            "return": 2,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-10",
-            "type": "SELL",
-            "price": 489,
-            "return": -1,
+            "date": "2025-09-13",
+            "type": "BUY",
+            "price": 925,
+            "return": -1.5,
             "status": "CLOSED"
           },
           {
             "date": "2025-09-07",
+            "type": "SELL",
+            "price": 127,
+            "return": 3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-29",
             "type": "BUY",
-            "price": 191,
-            "return": 6.6,
+            "price": 999,
+            "return": 4.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-26",
+            "type": "BUY",
+            "price": 757,
+            "return": 3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-18",
+            "type": "SELL",
+            "price": 991,
+            "return": 6.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-12",
+            "type": "SELL",
+            "price": 896,
+            "return": 4.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-10",
+            "type": "SELL",
+            "price": 558,
+            "return": 2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-02",
+            "type": "SELL",
+            "price": 168,
+            "return": 4.9,
             "status": "CLOSED"
           }
         ],
         "champion": {
           "name": "RSI 反轉策略",
-          "winRate": 78,
-          "roi": 33.9
+          "winRate": 74.3,
+          "roi": 50.4
+        }
+      },
+      {
+        "id": "macd",
+        "name": "MACD 趨勢策略",
+        "type": "Trend",
+        "winRate": 55.6,
+        "roi": 28,
+        "tradeCount": 10,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-24",
+            "type": "SELL",
+            "price": 430,
+            "return": 6.1,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-22",
+            "type": "SELL",
+            "price": 322,
+            "return": -3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 476,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "SELL",
+            "price": 712,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-10",
+            "type": "BUY",
+            "price": 546,
+            "return": 7.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "BUY",
+            "price": 377,
+            "return": 3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-27",
+            "type": "SELL",
+            "price": 337,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "BUY",
+            "price": 621,
+            "return": 6.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-15",
+            "type": "SELL",
+            "price": 912,
+            "return": -2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-12",
+            "type": "BUY",
+            "price": 788,
+            "return": 2.4,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 76.1,
+          "roi": 43.6
         }
       },
       {
         "id": "kd",
         "name": "KD 黃金交叉",
         "type": "Momentum",
-        "winRate": 53.3,
-        "roi": -3.6,
-        "tradeCount": 11,
-        "lastSignal": "BUY",
+        "winRate": 42.7,
+        "roi": 25.1,
+        "tradeCount": 17,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-22",
-            "type": "BUY",
-            "price": 392,
-            "return": -3.1,
+            "date": "2025-11-19",
+            "type": "SELL",
+            "price": 579,
+            "return": 2,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-15",
-            "type": "SELL",
-            "price": 551,
-            "return": 5.1,
+            "date": "2025-11-14",
+            "type": "BUY",
+            "price": 643,
+            "return": -2.1,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-12",
+            "date": "2025-11-09",
             "type": "BUY",
-            "price": 270,
+            "price": 665,
             "return": 2.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-05",
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 412,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "SELL",
+            "price": 506,
+            "return": -1.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "SELL",
+            "price": 635,
+            "return": 4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 457,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-11",
+            "type": "SELL",
+            "price": 878,
+            "return": 4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-02",
+            "type": "SELL",
+            "price": 157,
+            "return": 2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-25",
             "type": "BUY",
-            "price": 646,
+            "price": 879,
+            "return": -3.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-22",
+            "type": "SELL",
+            "price": 894,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-18",
+            "type": "BUY",
+            "price": 428,
+            "return": -2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-13",
+            "type": "SELL",
+            "price": 260,
+            "return": 5.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-06",
+            "type": "SELL",
+            "price": 226,
+            "return": 2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-01",
+            "type": "SELL",
+            "price": 162,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-25",
+            "type": "SELL",
+            "price": 799,
+            "return": -3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-21",
+            "type": "SELL",
+            "price": 348,
             "return": -3.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-29",
-            "type": "BUY",
-            "price": 178,
-            "return": -1.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-23",
-            "type": "BUY",
-            "price": 963,
-            "return": 6.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-16",
-            "type": "BUY",
-            "price": 451,
-            "return": 3.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-14",
-            "type": "SELL",
-            "price": 882,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-08",
-            "type": "BUY",
-            "price": 202,
-            "return": 6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-01",
-            "type": "BUY",
-            "price": 520,
-            "return": -4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-23",
-            "type": "SELL",
-            "price": 900,
-            "return": 5.1,
             "status": "CLOSED"
           }
         ],
         "champion": {
           "name": "RSI 反轉策略",
-          "winRate": 70.7,
-          "roi": 46.8
+          "winRate": 69.9,
+          "roi": 54.9
         }
       },
       {
         "id": "bollinger",
         "name": "布林通道突破",
         "type": "Volatility",
-        "winRate": 41.8,
-        "roi": 18.2,
-        "tradeCount": 5,
+        "winRate": 44.6,
+        "roi": -2.6,
+        "tradeCount": 12,
         "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
             "date": "2025-11-20",
             "type": "BUY",
-            "price": 228,
-            "return": -4.7,
+            "price": 846,
+            "return": -4.3,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 348,
-            "return": -3.4,
+            "date": "2025-11-17",
+            "type": "SELL",
+            "price": 906,
+            "return": -1.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-06",
+            "date": "2025-11-13",
+            "type": "SELL",
+            "price": 724,
+            "return": -2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-05",
             "type": "BUY",
-            "price": 575,
-            "return": -3,
+            "price": 536,
+            "return": -4.1,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-29",
             "type": "SELL",
-            "price": 546,
-            "return": 4.3,
+            "price": 623,
+            "return": 5.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-23",
+            "date": "2025-10-27",
+            "type": "BUY",
+            "price": 143,
+            "return": -4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
             "type": "SELL",
-            "price": 777,
-            "return": 5.6,
+            "price": 264,
+            "return": -3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "BUY",
+            "price": 179,
+            "return": 5.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-11",
+            "type": "SELL",
+            "price": 318,
+            "return": 3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-04",
+            "type": "SELL",
+            "price": 769,
+            "return": 2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-26",
+            "type": "SELL",
+            "price": 527,
+            "return": -3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-19",
+            "type": "SELL",
+            "price": 209,
+            "return": 2.4,
             "status": "CLOSED"
           }
         ],
         "champion": {
           "name": "RSI 反轉策略",
-          "winRate": 74.1,
-          "roi": 45.1
+          "winRate": 68.5,
+          "roi": 47.7
         }
       },
       {
@@ -3408,107 +1633,2162 @@
         "name": "均線穿越策略",
         "type": "Trend",
         "winRate": 55.2,
-        "roi": 13,
-        "tradeCount": 13,
+        "roi": -1.3,
+        "tradeCount": 17,
         "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-17",
-            "type": "BUY",
-            "price": 864,
-            "return": 4.4,
+            "date": "2025-11-19",
+            "type": "SELL",
+            "price": 168,
+            "return": 3.8,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-14",
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 691,
+            "return": -5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-09",
             "type": "SELL",
-            "price": 864,
-            "return": 5,
+            "price": 695,
+            "return": 3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 900,
+            "return": -3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
+            "type": "SELL",
+            "price": 525,
+            "return": -1.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-21",
+            "type": "SELL",
+            "price": 555,
+            "return": 5.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 539,
+            "return": -4.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "BUY",
+            "price": 204,
+            "return": 4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-03",
+            "type": "BUY",
+            "price": 141,
+            "return": -4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-29",
+            "type": "SELL",
+            "price": 957,
+            "return": 4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-25",
+            "type": "BUY",
+            "price": 625,
+            "return": 6.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-23",
+            "type": "SELL",
+            "price": 817,
+            "return": -3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-14",
+            "type": "SELL",
+            "price": 519,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-08",
+            "type": "SELL",
+            "price": 446,
+            "return": -1.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-06",
+            "type": "BUY",
+            "price": 345,
+            "return": 6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-30",
+            "type": "BUY",
+            "price": 703,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-21",
+            "type": "SELL",
+            "price": 975,
+            "return": 4.7,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 76.6,
+          "roi": 54.1
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "2317",
+    "name": "鴻海",
+    "buyAndHoldRoi": 5.4,
+    "strategies": [
+      {
+        "id": "rsi",
+        "name": "RSI 反轉策略",
+        "type": "Reversal",
+        "winRate": 51.5,
+        "roi": 9.9,
+        "tradeCount": 12,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-18",
+            "type": "BUY",
+            "price": 523,
+            "return": 5.6,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "SELL",
+            "price": 145,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 386,
+            "return": -2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "SELL",
+            "price": 828,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-21",
+            "type": "SELL",
+            "price": 139,
+            "return": -3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-12",
+            "type": "BUY",
+            "price": 858,
+            "return": -3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-03",
+            "type": "SELL",
+            "price": 259,
+            "return": 7.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-01",
+            "type": "SELL",
+            "price": 769,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-26",
+            "type": "SELL",
+            "price": 917,
+            "return": 7.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "BUY",
+            "price": 177,
+            "return": 2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "BUY",
+            "price": 184,
+            "return": 7.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-10",
+            "type": "BUY",
+            "price": 423,
+            "return": 4.9,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "KD 黃金交叉",
+          "winRate": 76.4,
+          "roi": 36.4
+        }
+      },
+      {
+        "id": "macd",
+        "name": "MACD 趨勢策略",
+        "type": "Trend",
+        "winRate": 53.1,
+        "roi": 22.1,
+        "tradeCount": 14,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 138,
+            "return": 2.2,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-17",
+            "type": "SELL",
+            "price": 606,
+            "return": 5.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-12",
+            "type": "BUY",
+            "price": 758,
+            "return": 6.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-06",
+            "type": "SELL",
+            "price": 621,
+            "return": -4.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-04",
+            "type": "BUY",
+            "price": 349,
+            "return": -1.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "SELL",
+            "price": 273,
+            "return": -1.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "BUY",
+            "price": 643,
+            "return": 2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
+            "type": "BUY",
+            "price": 910,
+            "return": 7.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 567,
+            "return": -3.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-11",
+            "type": "BUY",
+            "price": 688,
+            "return": 4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "BUY",
+            "price": 952,
+            "return": 3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-27",
+            "type": "SELL",
+            "price": 252,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-25",
+            "type": "BUY",
+            "price": 484,
+            "return": 4.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-18",
+            "type": "BUY",
+            "price": 289,
+            "return": 6.1,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "KD 黃金交叉",
+          "winRate": 73.5,
+          "roi": 47.1
+        }
+      },
+      {
+        "id": "kd",
+        "name": "KD 黃金交叉",
+        "type": "Momentum",
+        "winRate": 74,
+        "roi": 32,
+        "tradeCount": 9,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-22",
+            "type": "BUY",
+            "price": 524,
+            "return": -1.7,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-15",
+            "type": "SELL",
+            "price": 518,
+            "return": 6.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-11",
+            "type": "BUY",
+            "price": 877,
+            "return": 2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "BUY",
+            "price": 823,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-04",
+            "type": "BUY",
+            "price": 624,
+            "return": -4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
+            "type": "BUY",
+            "price": 357,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "SELL",
+            "price": 105,
+            "return": 6.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "SELL",
+            "price": 237,
+            "return": 7.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "BUY",
+            "price": 394,
+            "return": 2.9,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "KD 黃金交叉",
+          "winRate": 77.8,
+          "roi": 57.2
+        }
+      },
+      {
+        "id": "bollinger",
+        "name": "布林通道突破",
+        "type": "Volatility",
+        "winRate": 50.7,
+        "roi": 5.7,
+        "tradeCount": 7,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-23",
+            "type": "SELL",
+            "price": 284,
+            "return": -2,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-21",
+            "type": "BUY",
+            "price": 417,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 353,
+            "return": 5.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "BUY",
+            "price": 296,
+            "return": 3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-03",
+            "type": "SELL",
+            "price": 556,
+            "return": -2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "BUY",
+            "price": 400,
+            "return": -2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "SELL",
+            "price": 143,
+            "return": 6.9,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "KD 黃金交叉",
+          "winRate": 72.3,
+          "roi": 42.4
+        }
+      },
+      {
+        "id": "ma",
+        "name": "均線穿越策略",
+        "type": "Trend",
+        "winRate": 40.4,
+        "roi": 10.2,
+        "tradeCount": 5,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-20",
+            "type": "SELL",
+            "price": 888,
+            "return": -1.5,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-16",
+            "type": "BUY",
+            "price": 825,
+            "return": 6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "BUY",
+            "price": 434,
+            "return": 5.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-31",
+            "type": "SELL",
+            "price": 170,
+            "return": 7.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-29",
+            "type": "SELL",
+            "price": 211,
+            "return": 2.3,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "KD 黃金交叉",
+          "winRate": 71.9,
+          "roi": 53.5
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "0050",
+    "name": "元大台灣50",
+    "buyAndHoldRoi": 12.9,
+    "strategies": [
+      {
+        "id": "rsi",
+        "name": "RSI 反轉策略",
+        "type": "Reversal",
+        "winRate": 82.4,
+        "roi": 35.2,
+        "tradeCount": 19,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-23",
+            "type": "BUY",
+            "price": 716,
+            "return": 5.8,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-21",
+            "type": "SELL",
+            "price": 387,
+            "return": 4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-19",
+            "type": "BUY",
+            "price": 713,
+            "return": 7.5,
             "status": "CLOSED"
           },
           {
             "date": "2025-11-12",
             "type": "SELL",
             "price": 135,
-            "return": 4.5,
+            "return": 3.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-08",
+            "date": "2025-11-07",
             "type": "SELL",
-            "price": 815,
-            "return": 5.9,
+            "price": 725,
+            "return": 5.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-05",
-            "type": "SELL",
-            "price": 265,
-            "return": -1.4,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-01",
+            "date": "2025-11-02",
             "type": "BUY",
-            "price": 395,
-            "return": -3,
+            "price": 884,
+            "return": 2.7,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-29",
-            "type": "BUY",
-            "price": 284,
-            "return": 3.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-22",
             "type": "SELL",
-            "price": 120,
-            "return": 5.9,
+            "price": 578,
+            "return": 7.4,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-17",
+            "date": "2025-10-25",
             "type": "SELL",
-            "price": 382,
-            "return": -4.2,
+            "price": 777,
+            "return": 2.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-08",
+            "date": "2025-10-20",
             "type": "BUY",
-            "price": 964,
-            "return": -3.1,
+            "price": 478,
+            "return": 7.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-02",
+            "date": "2025-10-13",
             "type": "BUY",
-            "price": 390,
-            "return": -5,
+            "price": 420,
+            "return": 2.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-26",
+            "date": "2025-10-07",
             "type": "BUY",
-            "price": 995,
-            "return": 5.8,
+            "price": 663,
+            "return": 2.2,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-20",
+            "date": "2025-09-29",
+            "type": "BUY",
+            "price": 360,
+            "return": 7.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-22",
+            "type": "BUY",
+            "price": 924,
+            "return": 7.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
             "type": "SELL",
-            "price": 405,
-            "return": 2.3,
+            "price": 196,
+            "return": 6.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "SELL",
+            "price": 271,
+            "return": 3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-03",
+            "type": "SELL",
+            "price": 924,
+            "return": 7.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-28",
+            "type": "SELL",
+            "price": 559,
+            "return": -1.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-20",
+            "type": "BUY",
+            "price": 750,
+            "return": 2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-18",
+            "type": "BUY",
+            "price": 437,
+            "return": -2.4,
             "status": "CLOSED"
           }
         ],
         "champion": {
           "name": "RSI 反轉策略",
-          "winRate": 69.5,
-          "roi": 46.5
+          "winRate": 73.4,
+          "roi": 36.7
+        }
+      },
+      {
+        "id": "macd",
+        "name": "MACD 趨勢策略",
+        "type": "Trend",
+        "winRate": 54.8,
+        "roi": -7.6,
+        "tradeCount": 8,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-22",
+            "type": "BUY",
+            "price": 351,
+            "return": -3.9,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-19",
+            "type": "SELL",
+            "price": 850,
+            "return": 6.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 817,
+            "return": -1.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "BUY",
+            "price": 788,
+            "return": 5.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 292,
+            "return": -3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-31",
+            "type": "BUY",
+            "price": 651,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "SELL",
+            "price": 555,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
+            "type": "BUY",
+            "price": 832,
+            "return": -1.9,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 75.1,
+          "roi": 54.9
+        }
+      },
+      {
+        "id": "kd",
+        "name": "KD 黃金交叉",
+        "type": "Momentum",
+        "winRate": 52.6,
+        "roi": 7.5,
+        "tradeCount": 18,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-22",
+            "type": "SELL",
+            "price": 812,
+            "return": 3.9,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-16",
+            "type": "BUY",
+            "price": 285,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "SELL",
+            "price": 926,
+            "return": -4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "BUY",
+            "price": 159,
+            "return": 7.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-03",
+            "type": "BUY",
+            "price": 744,
+            "return": -4.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 428,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "BUY",
+            "price": 626,
+            "return": 7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "SELL",
+            "price": 266,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-17",
+            "type": "SELL",
+            "price": 598,
+            "return": -1.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 748,
+            "return": -1.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-05",
+            "type": "BUY",
+            "price": 311,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-30",
+            "type": "BUY",
+            "price": 881,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-23",
+            "type": "BUY",
+            "price": 551,
+            "return": 3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-19",
+            "type": "BUY",
+            "price": 776,
+            "return": -3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "SELL",
+            "price": 732,
+            "return": -3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-05",
+            "type": "BUY",
+            "price": 232,
+            "return": 5.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-31",
+            "type": "BUY",
+            "price": 965,
+            "return": 7.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-26",
+            "type": "SELL",
+            "price": 713,
+            "return": 6.4,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 76.6,
+          "roi": 58.6
+        }
+      },
+      {
+        "id": "bollinger",
+        "name": "布林通道突破",
+        "type": "Volatility",
+        "winRate": 57.1,
+        "roi": 25.3,
+        "tradeCount": 17,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-17",
+            "type": "BUY",
+            "price": 342,
+            "return": -3.1,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "BUY",
+            "price": 851,
+            "return": 7.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-05",
+            "type": "BUY",
+            "price": 955,
+            "return": -3.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-27",
+            "type": "BUY",
+            "price": 425,
+            "return": 2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-20",
+            "type": "SELL",
+            "price": 454,
+            "return": -2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-15",
+            "type": "SELL",
+            "price": 524,
+            "return": -3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 472,
+            "return": 3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "SELL",
+            "price": 355,
+            "return": -3.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-30",
+            "type": "BUY",
+            "price": 835,
+            "return": 4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-26",
+            "type": "SELL",
+            "price": 775,
+            "return": 3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "SELL",
+            "price": 176,
+            "return": 7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "SELL",
+            "price": 664,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "BUY",
+            "price": 402,
+            "return": 6.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
+            "type": "BUY",
+            "price": 505,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "BUY",
+            "price": 360,
+            "return": 6.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-04",
+            "type": "BUY",
+            "price": 249,
+            "return": 2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-31",
+            "type": "SELL",
+            "price": 481,
+            "return": 6.2,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 68.1,
+          "roi": 36
+        }
+      },
+      {
+        "id": "ma",
+        "name": "均線穿越策略",
+        "type": "Trend",
+        "winRate": 47.2,
+        "roi": -5.3,
+        "tradeCount": 17,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-20",
+            "type": "SELL",
+            "price": 652,
+            "return": -2.6,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-16",
+            "type": "BUY",
+            "price": 268,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-08",
+            "type": "BUY",
+            "price": 325,
+            "return": 4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-04",
+            "type": "SELL",
+            "price": 489,
+            "return": -4.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-27",
+            "type": "BUY",
+            "price": 355,
+            "return": -4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "BUY",
+            "price": 403,
+            "return": -1.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-16",
+            "type": "BUY",
+            "price": 546,
+            "return": -4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "BUY",
+            "price": 370,
+            "return": -3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-03",
+            "type": "SELL",
+            "price": 205,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "BUY",
+            "price": 996,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-15",
+            "type": "SELL",
+            "price": 686,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-08",
+            "type": "SELL",
+            "price": 443,
+            "return": 2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-31",
+            "type": "SELL",
+            "price": 429,
+            "return": -5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-24",
+            "type": "SELL",
+            "price": 420,
+            "return": -3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-18",
+            "type": "BUY",
+            "price": 432,
+            "return": 5.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-15",
+            "type": "SELL",
+            "price": 460,
+            "return": 2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-11",
+            "type": "SELL",
+            "price": 772,
+            "return": -4.7,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "RSI 反轉策略",
+          "winRate": 69.4,
+          "roi": 43.2
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "2303",
+    "name": "聯電",
+    "buyAndHoldRoi": 1.4,
+    "strategies": [
+      {
+        "id": "rsi",
+        "name": "RSI 反轉策略",
+        "type": "Reversal",
+        "winRate": 51.8,
+        "roi": 10.7,
+        "tradeCount": 13,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 732,
+            "return": 7.3,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-12",
+            "type": "BUY",
+            "price": 196,
+            "return": -3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "BUY",
+            "price": 603,
+            "return": -2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "BUY",
+            "price": 953,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "SELL",
+            "price": 382,
+            "return": 4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "SELL",
+            "price": 939,
+            "return": -4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-12",
+            "type": "BUY",
+            "price": 147,
+            "return": 6.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "SELL",
+            "price": 418,
+            "return": -3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-27",
+            "type": "SELL",
+            "price": 204,
+            "return": -2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "SELL",
+            "price": 441,
+            "return": -1.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "SELL",
+            "price": 786,
+            "return": -2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-02",
+            "type": "BUY",
+            "price": 486,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-24",
+            "type": "SELL",
+            "price": 636,
+            "return": -4.8,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "均線穿越策略",
+          "winRate": 71.8,
+          "roi": 57.6
+        }
+      },
+      {
+        "id": "macd",
+        "name": "MACD 趨勢策略",
+        "type": "Trend",
+        "winRate": 46.9,
+        "roi": 24,
+        "tradeCount": 9,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-23",
+            "type": "BUY",
+            "price": 561,
+            "return": 4.5,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-21",
+            "type": "SELL",
+            "price": 428,
+            "return": -1.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 991,
+            "return": 3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-05",
+            "type": "BUY",
+            "price": 130,
+            "return": -2.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-29",
+            "type": "SELL",
+            "price": 647,
+            "return": 3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "SELL",
+            "price": 438,
+            "return": -2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "SELL",
+            "price": 571,
+            "return": -4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "SELL",
+            "price": 757,
+            "return": 5.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 212,
+            "return": 2.7,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "均線穿越策略",
+          "winRate": 69.7,
+          "roi": 32.5
+        }
+      },
+      {
+        "id": "kd",
+        "name": "KD 黃金交叉",
+        "type": "Momentum",
+        "winRate": 51.2,
+        "roi": -9.5,
+        "tradeCount": 19,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-19",
+            "type": "BUY",
+            "price": 776,
+            "return": 5.5,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-12",
+            "type": "SELL",
+            "price": 176,
+            "return": 3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-03",
+            "type": "SELL",
+            "price": 649,
+            "return": -4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-27",
+            "type": "BUY",
+            "price": 772,
+            "return": 5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "SELL",
+            "price": 316,
+            "return": 5.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-10",
+            "type": "BUY",
+            "price": 114,
+            "return": 4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "SELL",
+            "price": 469,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-30",
+            "type": "SELL",
+            "price": 846,
+            "return": -4.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-26",
+            "type": "SELL",
+            "price": 981,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "BUY",
+            "price": 104,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "BUY",
+            "price": 917,
+            "return": -4.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-08",
+            "type": "BUY",
+            "price": 432,
+            "return": 5.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-30",
+            "type": "BUY",
+            "price": 597,
+            "return": -4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-21",
+            "type": "BUY",
+            "price": 280,
+            "return": 5.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-12",
+            "type": "BUY",
+            "price": 292,
+            "return": 2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-06",
+            "type": "SELL",
+            "price": 748,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-07-28",
+            "type": "SELL",
+            "price": 402,
+            "return": 3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-07-22",
+            "type": "SELL",
+            "price": 806,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-07-15",
+            "type": "SELL",
+            "price": 574,
+            "return": 6.1,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "均線穿越策略",
+          "winRate": 71.8,
+          "roi": 58.8
+        }
+      },
+      {
+        "id": "bollinger",
+        "name": "布林通道突破",
+        "type": "Volatility",
+        "winRate": 59.6,
+        "roi": 13.6,
+        "tradeCount": 11,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-17",
+            "type": "BUY",
+            "price": 148,
+            "return": -3.8,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-08",
+            "type": "SELL",
+            "price": 676,
+            "return": -3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
+            "type": "SELL",
+            "price": 631,
+            "return": 5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-27",
+            "type": "SELL",
+            "price": 909,
+            "return": 4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-25",
+            "type": "BUY",
+            "price": 753,
+            "return": 5.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-21",
+            "type": "BUY",
+            "price": 314,
+            "return": -3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "BUY",
+            "price": 893,
+            "return": 7.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-16",
+            "type": "BUY",
+            "price": 108,
+            "return": 6.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 845,
+            "return": -3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-05",
+            "type": "BUY",
+            "price": 124,
+            "return": -2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-03",
+            "type": "SELL",
+            "price": 999,
+            "return": -5,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "均線穿越策略",
+          "winRate": 77.4,
+          "roi": 53.9
+        }
+      },
+      {
+        "id": "ma",
+        "name": "均線穿越策略",
+        "type": "Trend",
+        "winRate": 73.4,
+        "roi": 36.5,
+        "tradeCount": 16,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-22",
+            "type": "BUY",
+            "price": 290,
+            "return": -1.2,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-18",
+            "type": "BUY",
+            "price": 862,
+            "return": -2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 531,
+            "return": 2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-06",
+            "type": "BUY",
+            "price": 338,
+            "return": 2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-04",
+            "type": "BUY",
+            "price": 721,
+            "return": -2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "SELL",
+            "price": 272,
+            "return": 2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "BUY",
+            "price": 505,
+            "return": 7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-21",
+            "type": "BUY",
+            "price": 836,
+            "return": 7.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-14",
+            "type": "BUY",
+            "price": 290,
+            "return": 2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-09",
+            "type": "SELL",
+            "price": 386,
+            "return": 3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "BUY",
+            "price": 650,
+            "return": 2.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-02",
+            "type": "SELL",
+            "price": 634,
+            "return": -1.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-24",
+            "type": "BUY",
+            "price": 632,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-22",
+            "type": "BUY",
+            "price": 808,
+            "return": -4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "SELL",
+            "price": 378,
+            "return": 5.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-12",
+            "type": "BUY",
+            "price": 687,
+            "return": -2.6,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "均線穿越策略",
+          "winRate": 70,
+          "roi": 32.1
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "2881",
+    "name": "富邦金",
+    "buyAndHoldRoi": 21.4,
+    "strategies": [
+      {
+        "id": "rsi",
+        "name": "RSI 反轉策略",
+        "type": "Reversal",
+        "winRate": 40.2,
+        "roi": 13.1,
+        "tradeCount": 8,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-18",
+            "type": "BUY",
+            "price": 729,
+            "return": -4.4,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "SELL",
+            "price": 333,
+            "return": -4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 573,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-23",
+            "type": "BUY",
+            "price": 908,
+            "return": -3.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "SELL",
+            "price": 361,
+            "return": 4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-16",
+            "type": "BUY",
+            "price": 437,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 339,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-11",
+            "type": "BUY",
+            "price": 881,
+            "return": 3.9,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "MACD 趨勢策略",
+          "winRate": 74.3,
+          "roi": 35.7
+        }
+      },
+      {
+        "id": "macd",
+        "name": "MACD 趨勢策略",
+        "type": "Trend",
+        "winRate": 79.8,
+        "roi": 31.5,
+        "tradeCount": 9,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-20",
+            "type": "BUY",
+            "price": 921,
+            "return": -2.3,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-11",
+            "type": "SELL",
+            "price": 176,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-08",
+            "type": "SELL",
+            "price": 955,
+            "return": 3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 149,
+            "return": -1.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
+            "type": "SELL",
+            "price": 447,
+            "return": 6.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "BUY",
+            "price": 909,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "BUY",
+            "price": 242,
+            "return": -3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-10",
+            "type": "SELL",
+            "price": 647,
+            "return": 5.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-05",
+            "type": "SELL",
+            "price": 117,
+            "return": 3.1,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "MACD 趨勢策略",
+          "winRate": 76.5,
+          "roi": 37.9
+        }
+      },
+      {
+        "id": "kd",
+        "name": "KD 黃金交叉",
+        "type": "Momentum",
+        "winRate": 53.1,
+        "roi": 14.2,
+        "tradeCount": 6,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-18",
+            "type": "SELL",
+            "price": 763,
+            "return": 2.3,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "BUY",
+            "price": 918,
+            "return": 2.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "BUY",
+            "price": 940,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 103,
+            "return": 4.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-29",
+            "type": "BUY",
+            "price": 433,
+            "return": -2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "SELL",
+            "price": 237,
+            "return": 4.3,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "MACD 趨勢策略",
+          "winRate": 72.7,
+          "roi": 57.5
+        }
+      },
+      {
+        "id": "bollinger",
+        "name": "布林通道突破",
+        "type": "Volatility",
+        "winRate": 53.4,
+        "roi": 19.5,
+        "tradeCount": 7,
+        "lastSignal": "BUY",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-22",
+            "type": "SELL",
+            "price": 259,
+            "return": -2.1,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-16",
+            "type": "BUY",
+            "price": 745,
+            "return": -2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-07",
+            "type": "SELL",
+            "price": 193,
+            "return": -3.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-03",
+            "type": "SELL",
+            "price": 943,
+            "return": -2.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 809,
+            "return": -3.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-24",
+            "type": "SELL",
+            "price": 225,
+            "return": 3.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-15",
+            "type": "BUY",
+            "price": 722,
+            "return": -1.1,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "MACD 趨勢策略",
+          "winRate": 72.1,
+          "roi": 54.4
+        }
+      },
+      {
+        "id": "ma",
+        "name": "均線穿越策略",
+        "type": "Trend",
+        "winRate": 47.1,
+        "roi": 0.4,
+        "tradeCount": 13,
+        "lastSignal": "SELL",
+        "lastSignalDate": "2025-11-26",
+        "trades": [
+          {
+            "date": "2025-11-17",
+            "type": "SELL",
+            "price": 276,
+            "return": -3.6,
+            "status": "OPEN"
+          },
+          {
+            "date": "2025-11-09",
+            "type": "BUY",
+            "price": 158,
+            "return": 3.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-05",
+            "type": "BUY",
+            "price": 199,
+            "return": 2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 965,
+            "return": -2.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "BUY",
+            "price": 766,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-18",
+            "type": "BUY",
+            "price": 715,
+            "return": -3.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-09",
+            "type": "BUY",
+            "price": 282,
+            "return": 4.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-01",
+            "type": "BUY",
+            "price": 540,
+            "return": -1.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-25",
+            "type": "BUY",
+            "price": 621,
+            "return": 3.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-18",
+            "type": "BUY",
+            "price": 915,
+            "return": -4.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-16",
+            "type": "BUY",
+            "price": 854,
+            "return": -3.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-14",
+            "type": "BUY",
+            "price": 854,
+            "return": -4.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-09",
+            "type": "SELL",
+            "price": 192,
+            "return": 2,
+            "status": "CLOSED"
+          }
+        ],
+        "champion": {
+          "name": "MACD 趨勢策略",
+          "winRate": 73.7,
+          "roi": 42.4
         }
       }
     ]
@@ -3516,308 +3796,343 @@
   {
     "symbol": "1301",
     "name": "台塑",
-    "buyAndHoldRoi": 11.4,
+    "buyAndHoldRoi": 2.2,
     "strategies": [
       {
         "id": "rsi",
         "name": "RSI 反轉策略",
         "type": "Reversal",
-        "winRate": 53.5,
-        "roi": 11.1,
-        "tradeCount": 18,
-        "lastSignal": "SELL",
+        "winRate": 73.1,
+        "roi": 40.4,
+        "tradeCount": 12,
+        "lastSignal": "BUY",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-18",
+            "date": "2025-11-22",
             "type": "BUY",
-            "price": 413,
-            "return": 7.7,
+            "price": 410,
+            "return": -3.5,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-09",
+            "date": "2025-11-13",
             "type": "SELL",
-            "price": 788,
-            "return": 7.2,
+            "price": 703,
+            "return": 7.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-02",
-            "type": "BUY",
-            "price": 204,
-            "return": 7,
+            "date": "2025-11-04",
+            "type": "SELL",
+            "price": 688,
+            "return": -4.9,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-30",
+            "date": "2025-11-01",
+            "type": "SELL",
+            "price": 612,
+            "return": 5.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-28",
+            "type": "SELL",
+            "price": 192,
+            "return": -4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-22",
+            "type": "SELL",
+            "price": 976,
+            "return": 6.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
             "type": "BUY",
-            "price": 897,
+            "price": 760,
+            "return": 3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-10",
+            "type": "SELL",
+            "price": 177,
             "return": 4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "BUY",
-            "price": 122,
-            "return": 5.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-21",
-            "type": "SELL",
-            "price": 167,
-            "return": -3.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-14",
-            "type": "SELL",
-            "price": 757,
-            "return": -4.4,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-08",
             "type": "BUY",
-            "price": 593,
-            "return": 5.1,
+            "price": 486,
+            "return": 3.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-06",
-            "type": "BUY",
-            "price": 184,
-            "return": -4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-04",
+            "date": "2025-09-29",
             "type": "SELL",
-            "price": 753,
-            "return": 3.4,
+            "price": 604,
+            "return": 2.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-02",
+            "date": "2025-09-26",
+            "type": "BUY",
+            "price": 998,
+            "return": 2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-23",
             "type": "SELL",
-            "price": 577,
-            "return": 4.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-25",
-            "type": "BUY",
-            "price": 746,
-            "return": -4.9,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-19",
-            "type": "BUY",
-            "price": 426,
-            "return": 2.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-11",
-            "type": "BUY",
-            "price": 402,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-09-07",
-            "type": "BUY",
-            "price": 331,
-            "return": -1.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-29",
-            "type": "SELL",
-            "price": 424,
-            "return": -3.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-27",
-            "type": "BUY",
-            "price": 978,
-            "return": -4.1,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-08-23",
-            "type": "SELL",
-            "price": 650,
-            "return": 6.1,
+            "price": 190,
+            "return": 2.9,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 76.6,
-          "roi": 46.2
+          "name": "RSI 反轉策略",
+          "winRate": 77.1,
+          "roi": 33.6
         }
       },
       {
         "id": "macd",
         "name": "MACD 趨勢策略",
         "type": "Trend",
-        "winRate": 89.2,
-        "roi": 21.6,
-        "tradeCount": 5,
-        "lastSignal": "BUY",
+        "winRate": 41.6,
+        "roi": 21.4,
+        "tradeCount": 15,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-24",
+            "date": "2025-11-19",
             "type": "BUY",
-            "price": 574,
-            "return": 2.2,
+            "price": 650,
+            "return": 6.1,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-17",
+            "date": "2025-11-13",
             "type": "SELL",
-            "price": 959,
-            "return": 3.6,
+            "price": 843,
+            "return": 2.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 413,
+            "date": "2025-11-08",
+            "type": "SELL",
+            "price": 888,
+            "return": -1.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-04",
+            "type": "SELL",
+            "price": 184,
             "return": 2.2,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-05",
+            "date": "2025-10-27",
             "type": "SELL",
-            "price": 203,
-            "return": -3.7,
+            "price": 618,
+            "return": 6.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-03",
+            "date": "2025-10-25",
             "type": "BUY",
-            "price": 947,
+            "price": 896,
+            "return": 7.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-19",
+            "type": "BUY",
+            "price": 474,
+            "return": 5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-15",
+            "type": "BUY",
+            "price": 720,
+            "return": 6.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-06",
+            "type": "BUY",
+            "price": 832,
+            "return": -2.9,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-29",
+            "type": "SELL",
+            "price": 454,
+            "return": -5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-27",
+            "type": "SELL",
+            "price": 559,
+            "return": -5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-20",
+            "type": "BUY",
+            "price": 602,
             "return": 4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-11",
+            "type": "SELL",
+            "price": 167,
+            "return": 4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-03",
+            "type": "BUY",
+            "price": 708,
+            "return": 4.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-08-28",
+            "type": "BUY",
+            "price": 489,
+            "return": -3.3,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 74.2,
-          "roi": 53.2
+          "name": "RSI 反轉策略",
+          "winRate": 68.1,
+          "roi": 47.8
         }
       },
       {
         "id": "kd",
         "name": "KD 黃金交叉",
         "type": "Momentum",
-        "winRate": 40.5,
-        "roi": 9.6,
-        "tradeCount": 13,
-        "lastSignal": "BUY",
+        "winRate": 51.4,
+        "roi": -4.2,
+        "tradeCount": 14,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-21",
-            "type": "SELL",
-            "price": 386,
-            "return": 3.3,
+            "date": "2025-11-22",
+            "type": "BUY",
+            "price": 963,
+            "return": -2.5,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-16",
+            "date": "2025-11-17",
+            "type": "SELL",
+            "price": 622,
+            "return": 7.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-08",
+            "type": "SELL",
+            "price": 663,
+            "return": 7.5,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-30",
             "type": "BUY",
-            "price": 779,
-            "return": -2.3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-14",
-            "type": "SELL",
-            "price": 158,
-            "return": 5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-11",
-            "type": "SELL",
-            "price": 499,
-            "return": -1.2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-06",
-            "type": "SELL",
-            "price": 660,
-            "return": 2,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-02",
-            "type": "SELL",
-            "price": 272,
-            "return": 2.8,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-10-25",
-            "type": "SELL",
-            "price": 642,
+            "price": 415,
             "return": 4.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-18",
+            "date": "2025-10-28",
             "type": "SELL",
-            "price": 818,
-            "return": 4.8,
+            "price": 956,
+            "return": 7.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-12",
-            "type": "SELL",
-            "price": 633,
-            "return": -1.9,
+            "date": "2025-10-23",
+            "type": "BUY",
+            "price": 430,
+            "return": 6.7,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-09",
-            "type": "SELL",
-            "price": 287,
-            "return": -1.7,
+            "date": "2025-10-16",
+            "type": "BUY",
+            "price": 999,
+            "return": 3.8,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "BUY",
+            "price": 337,
+            "return": 4.5,
             "status": "CLOSED"
           },
           {
             "date": "2025-10-05",
             "type": "SELL",
-            "price": 971,
-            "return": 2.8,
+            "price": 313,
+            "return": 7.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-28",
+            "date": "2025-10-03",
             "type": "SELL",
-            "price": 924,
-            "return": 6.4,
+            "price": 811,
+            "return": -2.6,
             "status": "CLOSED"
           },
           {
-            "date": "2025-09-21",
+            "date": "2025-09-25",
             "type": "BUY",
-            "price": 568,
-            "return": 3,
+            "price": 227,
+            "return": 5.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-17",
+            "type": "SELL",
+            "price": 194,
+            "return": -2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-14",
+            "type": "BUY",
+            "price": 127,
+            "return": -3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-08",
+            "type": "SELL",
+            "price": 109,
+            "return": -4.6,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 74.4,
+          "name": "RSI 反轉策略",
+          "winRate": 70.3,
           "roi": 49.6
         }
       },
@@ -3825,125 +4140,188 @@
         "id": "bollinger",
         "name": "布林通道突破",
         "type": "Volatility",
-        "winRate": 47.9,
-        "roi": -4.7,
-        "tradeCount": 8,
-        "lastSignal": "BUY",
+        "winRate": 54,
+        "roi": 14.4,
+        "tradeCount": 9,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-24",
-            "type": "SELL",
-            "price": 669,
-            "return": -1.1,
+            "date": "2025-11-17",
+            "type": "BUY",
+            "price": 448,
+            "return": -1.2,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-22",
+            "date": "2025-11-11",
             "type": "BUY",
-            "price": 900,
-            "return": 2.6,
+            "price": 509,
+            "return": -4.5,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-19",
-            "type": "SELL",
-            "price": 539,
-            "return": -2.5,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-16",
+            "date": "2025-11-09",
             "type": "BUY",
-            "price": 618,
-            "return": -3.4,
+            "price": 627,
+            "return": 7.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-13",
+            "date": "2025-11-04",
             "type": "SELL",
-            "price": 272,
-            "return": -2.1,
+            "price": 115,
+            "return": 7.8,
             "status": "CLOSED"
           },
           {
-            "date": "2025-11-06",
-            "type": "SELL",
-            "price": 132,
-            "return": 3,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
+            "date": "2025-10-30",
             "type": "BUY",
-            "price": 496,
-            "return": -4.7,
+            "price": 464,
+            "return": -4.4,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-31",
+            "date": "2025-10-24",
             "type": "SELL",
-            "price": 620,
-            "return": -1,
+            "price": 702,
+            "return": -2.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-17",
+            "type": "SELL",
+            "price": 213,
+            "return": -2.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-13",
+            "type": "SELL",
+            "price": 217,
+            "return": 3.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-08",
+            "type": "BUY",
+            "price": 897,
+            "return": 4.1,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 69.7,
-          "roi": 41.9
+          "name": "RSI 反轉策略",
+          "winRate": 70.6,
+          "roi": 35.5
         }
       },
       {
         "id": "ma",
         "name": "均線穿越策略",
         "type": "Trend",
-        "winRate": 42.5,
-        "roi": 7.6,
-        "tradeCount": 5,
-        "lastSignal": "BUY",
+        "winRate": 47.2,
+        "roi": 6.5,
+        "tradeCount": 13,
+        "lastSignal": "SELL",
         "lastSignalDate": "2025-11-26",
         "trades": [
           {
-            "date": "2025-11-17",
+            "date": "2025-11-23",
             "type": "SELL",
-            "price": 326,
-            "return": -1.7,
+            "price": 980,
+            "return": -2.9,
             "status": "OPEN"
           },
           {
-            "date": "2025-11-13",
-            "type": "BUY",
-            "price": 325,
-            "return": -2.6,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-08",
-            "type": "BUY",
-            "price": 146,
-            "return": -4.7,
-            "status": "CLOSED"
-          },
-          {
-            "date": "2025-11-03",
+            "date": "2025-11-17",
             "type": "SELL",
-            "price": 626,
+            "price": 125,
+            "return": -1.2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-13",
+            "type": "SELL",
+            "price": 793,
+            "return": -4.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-06",
+            "type": "BUY",
+            "price": 909,
+            "return": -2,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-11-02",
+            "type": "BUY",
+            "price": 140,
             "return": 5.3,
             "status": "CLOSED"
           },
           {
-            "date": "2025-10-27",
+            "date": "2025-10-28",
             "type": "SELL",
-            "price": 408,
-            "return": 5.6,
+            "price": 382,
+            "return": 6.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-26",
+            "type": "BUY",
+            "price": 155,
+            "return": -4.1,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-21",
+            "type": "SELL",
+            "price": 711,
+            "return": -2.6,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-16",
+            "type": "SELL",
+            "price": 146,
+            "return": -4.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-10",
+            "type": "SELL",
+            "price": 962,
+            "return": -1.4,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-07",
+            "type": "SELL",
+            "price": 564,
+            "return": -3.7,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-10-01",
+            "type": "BUY",
+            "price": 122,
+            "return": 3.3,
+            "status": "CLOSED"
+          },
+          {
+            "date": "2025-09-27",
+            "type": "SELL",
+            "price": 883,
+            "return": 2.7,
             "status": "CLOSED"
           }
         ],
         "champion": {
-          "name": "MACD 趨勢策略",
-          "winRate": 73.5,
-          "roi": 37.1
+          "name": "RSI 反轉策略",
+          "winRate": 71,
+          "roi": 37.8
         }
       }
     ]
