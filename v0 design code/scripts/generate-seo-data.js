@@ -102,9 +102,13 @@ const generateData = () => {
             };
         });
 
+        // Generate Buy & Hold ROI for the stock (benchmark)
+        const buyAndHoldRoi = parseFloat(random(-5, 25).toFixed(1));
+
         return {
             symbol: stock.symbol,
             name: stock.name,
+            buyAndHoldRoi, // Add B&H ROI
             strategies: stockStrategies
         };
     });

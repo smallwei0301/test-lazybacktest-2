@@ -284,6 +284,7 @@
         toggleRollingControls(true);
         clearRollingReport();
         ensureProgressPanelVisible(true);
+        setRollingProgressSpinnerActive(true);
         setAlert('系統已開始滾動測試，請保持頁面開啟。', 'info');
         updateProgressUI();
 
@@ -380,6 +381,7 @@
         toggleRollingControls(false);
         state.running = false;
         ensureProgressPanelVisible(state.results.length > 0);
+        setRollingProgressSpinnerActive(false);
         if (state.cancelled) {
             setAlert('滾動測試已中止，可重新調整參數後再試。', 'warning');
         } else if (state.results.length > 0) {
@@ -423,6 +425,14 @@
         if (!panel) return;
         if (visible) panel.classList.remove('hidden');
         else panel.classList.add('hidden');
+        setRollingProgressSpinnerActive(visible && state.running);
+    }
+
+    function setRollingProgressSpinnerActive(active) {
+        const spinner = document.getElementById('rolling-progress-spinner');
+        if (!spinner) return;
+        spinner.classList.toggle('hidden', !active);
+        spinner.classList.toggle('animate-spin', active);
     }
 
     function updateProgressUI(message) {

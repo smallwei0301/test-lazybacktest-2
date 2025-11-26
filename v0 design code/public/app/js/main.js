@@ -4549,6 +4549,17 @@ function cancelLoadingMascotRotation() {
     }
 }
 
+function stopLoadingMascotRequests() {
+    cancelLoadingMascotRotation();
+    const container = getLoadingMascotContainer();
+    if (!container) return;
+    const img = container.querySelector("img.loading-mascot-image");
+    if (img) {
+        img.setAttribute("aria-hidden", "true");
+        img.removeAttribute("src");
+    }
+}
+
 function scheduleLoadingMascotRotation(totalSources) {
     const rotation = getLoadingMascotRotationState();
     if (!rotation) return;
@@ -4868,6 +4879,7 @@ function showLoading(m = "處理中...") {
 function hideLoading() {
     const el = document.getElementById("loading");
     progressAnimator.stop();
+    stopLoadingMascotRequests();
     if (el) el.classList.add("hidden");
 }
 function updateProgress(p) {
