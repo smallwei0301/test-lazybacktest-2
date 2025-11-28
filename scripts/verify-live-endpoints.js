@@ -1,17 +1,12 @@
-const fetch = require('node-fetch');
 const readline = require('readline');
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+// Use native fetch if available (Node 18+), otherwise try require
+const fetch = global.fetch || require('node-fetch');
 
 const defaultUrl = 'http://localhost:8888/.netlify/functions/';
 
-rl.question(`Enter base URL (default: ${defaultUrl}): `, async (inputUrl) => {
-    const baseUrl = inputUrl.trim() || defaultUrl;
-    rl.close();
-
+async function runTests(baseUrl) {
+    if (!baseUrl.endsWith('/')) baseUrl += '/';
     console.log(`\nTesting against: ${baseUrl}`);
 
     const today = new Date();
@@ -20,24 +15,62 @@ rl.question(`Enter base URL (default: ${defaultUrl}): `, async (inputUrl) => {
     const lastYear = currentYear - 1;
 
     const testCases = [
+        // TWSE
         {
-            name: 'Historical Data (TWSE)',
+            name: 'TWSE Historical (2330)',
             url: `${baseUrl}twse-proxy?stockNo=2330&month=${lastYear}01`,
-            expectedTTL: 31536000
+            expectedTTL: 31536000,
+            immutable: true
         },
         {
-            name: 'Current Data (TWSE)',
+            name: 'TWSE Current (2330)',
             url: `${baseUrl}twse-proxy?stockNo=2330&month=${currentYear}${currentMonth}`,
             expectedTTL: 3600
         },
+        // TPEX
         {
-            name: 'Historical Data (TPEX)',
+            name: 'TPEX Historical (8069)',
             url: `${baseUrl}tpex-proxy?stockNo=8069&month=${lastYear}01`,
-            expectedTTL: 31536000
+            expectedTTL: 31536000,
+            immutable: true
         },
         {
-            name: 'Current Data (TPEX)',
+            name: 'TPEX Current (8069)',
             url: `${baseUrl}tpex-proxy?stockNo=8069&month=${currentYear}${currentMonth}`,
+            expectedTTL: 3600
+        },
+        // Index Proxy
+        {
+            name: 'Index Info Mode',
+            url: `${baseUrl}index-proxy?mode=info`,
+            expectedTTL: 86400
+        },
+        {
+            name: 'Index Price Historical',
+            url: `${baseUrl}index-proxy?mode=price&symbol=^TWII&start=${lastYear}-01-01&end=${lastYear}-01-31`,
+            expectedTTL: 31536000,
+            immutable: true
+        },
+        {
+            name: 'Index Price Current',
+            url: `${baseUrl}index-proxy?mode=price&symbol=^TWII&start=${currentYear}-${currentMonth}-01`,
+            expectedTTL: 3600
+        },
+        // US Proxy
+        {
+            name: 'US Info Mode',
+            url: `${baseUrl}us-proxy?mode=info&symbol=AAPL`,
+            expectedTTL: 604800
+        },
+        {
+            name: 'US Price Historical',
+            url: `${baseUrl}us-proxy?mode=price&symbol=AAPL&start=${lastYear}-01-01&end=${lastYear}-01-31`,
+            expectedTTL: 31536000,
+            immutable: true
+        },
+        {
+            name: 'US Price Current',
+            url: `${baseUrl}us-proxy?mode=price&symbol=AAPL&start=${currentYear}-${currentMonth}-01`,
             expectedTTL: 3600
         }
     ];
@@ -53,10 +86,10 @@ rl.question(`Enter base URL (default: ${defaultUrl}): `, async (inputUrl) => {
             console.log(`\nTest: ${test.name}`);
             console.log(`URL: ${test.url}`);
             console.log(`Cache-Control: ${cacheControl}`);
-            console.log(`Netlify-CDN-Cache-Control: ${cdnCacheControl}`);
+            // console.log(`Netlify-CDN-Cache-Control: ${cdnCacheControl}`);
 
             if (cacheControl && cacheControl.includes(`max-age=${test.expectedTTL}`)) {
-                if (test.expectedTTL === 31536000 && !cacheControl.includes('immutable')) {
+                if (test.immutable && !cacheControl.includes('immutable')) {
                     console.error('❌ FAIL (Missing "immutable" for historical data)');
                     allPassed = false;
                 } else {
@@ -68,7 +101,6 @@ rl.question(`Enter base URL (default: ${defaultUrl}): `, async (inputUrl) => {
             }
         } catch (err) {
             console.error(`❌ Error fetching ${test.url}:`, err.message);
-            console.warn('⚠️ Make sure the local server is running (netlify dev) or provide a valid live URL.');
             allPassed = false;
         }
     }
@@ -78,4 +110,20 @@ rl.question(`Enter base URL (default: ${defaultUrl}): `, async (inputUrl) => {
     } else {
         console.log('\n❌ Some Live Checks Failed');
     }
-});
+}
+
+const argUrl = process.argv[2];
+if (argUrl) {
+    runTests(argUrl);
+} else {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    rl.question(`Enter base URL (default: ${defaultUrl}): `, (inputUrl) => {
+        const baseUrl = inputUrl.trim() || defaultUrl;
+        rl.close();
+        runTests(baseUrl);
+    });
+}

@@ -1,0 +1,36 @@
+Reading file from: C:\Users\KN222\Documents\GitHub\test-lazybacktest\v0 design code\lib\data\seo-text-bank-v3.ts
+Bollinger block extracted. Length: 36097
+Bollinger Strategy Sentence Counts:
+----------------------------------------
+
+layer1_theory:
+  poor      : 20 ✅
+  average   : 20 ✅
+  good      : 20 ✅
+  excellent : 20 ✅
+
+layer2_adaptability:
+  poor      : 20 ✅
+  average   : 20 ✅
+  good      : 20 ✅
+  excellent : 20 ✅
+
+layer3_blindspot:
+  poor      : 20 ✅
+  average   : 20 ✅
+  good      : 20 ✅
+  excellent : 20 ✅
+
+layer4_data:
+  poor      : 20 ✅
+  average   : 20 ✅
+  good      : 20 ✅
+  excellent : 20 ✅
+
+layer5_pain:
+  poor      : 20 ✅
+  average   : 20 ✅
+  good      : 20 ✅
+  excellent : 20 ✅
+
+Verification PASSED. All layers/categories have 20+ sentences.

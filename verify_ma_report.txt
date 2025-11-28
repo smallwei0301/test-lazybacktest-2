@@ -1,0 +1,30 @@
+Reading file from: C:\Users\KN222\Documents\GitHub\test-lazybacktest\v0 design code\lib\data\seo-text-bank-v3.ts
+MovingAverage block extracted. Length: 9200
+MA Strategy Sentence Counts:
+----------------------------------------
+
+layer1_theory:
+  poor      : 4 ❌ (4/20)
+  average   : 4 ❌ (4/20)
+  good      : 4 ❌ (4/20)
+  excellent : 4 ❌ (4/20)
+
+layer2_adaptability:
+  poor      : 4 ❌ (4/20)
+  average   : 4 ❌ (4/20)
+  good      : 3 ❌ (3/20)
+  excellent : 4 ❌ (4/20)
+
+layer3_blindspot:
+  MISSING LAYER! ❌ (Regex failed to match layer3_blindspot)
+
+layer4_data:
+  poor      : 4 ❌ (4/20)
+  average   : 4 ❌ (4/20)
+  good      : 4 ❌ (4/20)
+  excellent : 4 ❌ (4/20)
+
+layer5_pain:
+  MISSING LAYER! ❌ (Regex failed to match layer5_pain)
+
+Verification FAILED. Some layers/categories are missing or incomplete.
