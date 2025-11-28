@@ -296,8 +296,15 @@ export default async (req) => {
                 // [Dynamic Caching Strategy]
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-                const endDateObj = endISO ? new Date(endISO) : new Date();
-                const isHistorical = !Number.isNaN(endDateObj.getTime()) && endDateObj < today;
+                // Safety: If endISO is missing or invalid, default to current time (Active Data)
+                let endDateObj = new Date();
+                if (endISO) {
+                    const parsed = new Date(endISO);
+                    if (!Number.isNaN(parsed.getTime())) {
+                        endDateObj = parsed;
+                    }
+                }
+                const isHistorical = endDateObj < today;
                 const cacheTTL = isHistorical ? 31536000 : 3600;
                 const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
 
@@ -322,8 +329,15 @@ export default async (req) => {
         // [Dynamic Caching Strategy]
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const endDateObj = endISO ? new Date(endISO) : new Date();
-        const isHistorical = !Number.isNaN(endDateObj.getTime()) && endDateObj < today;
+        // Safety: If endISO is missing or invalid, default to current time (Active Data)
+        let endDateObj = new Date();
+        if (endISO) {
+            const parsed = new Date(endISO);
+            if (!Number.isNaN(parsed.getTime())) {
+                endDateObj = parsed;
+            }
+        }
+        const isHistorical = endDateObj < today;
         const cacheTTL = isHistorical ? 31536000 : 3600;
         const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
 
