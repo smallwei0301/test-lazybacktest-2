@@ -46,8 +46,8 @@ const CLASSIFICATION_MODES = {
 
 const legacyRuleResultNormaliser =
   typeof self !== 'undefined' &&
-  self.LegacyStrategyPluginShim &&
-  typeof self.LegacyStrategyPluginShim.normaliseResult === 'function'
+    self.LegacyStrategyPluginShim &&
+    typeof self.LegacyStrategyPluginShim.normaliseResult === 'function'
     ? self.LegacyStrategyPluginShim.normaliseResult.bind(self.LegacyStrategyPluginShim)
     : null;
 
@@ -643,8 +643,8 @@ async function handleAITrainLSTMMessage(message) {
     const volatilityThresholds = sanitizeVolatilityThresholds(dataset.volatilityThresholds);
     let volatilityDiagnostics = dataset.volatilityDiagnostics
       && typeof dataset.volatilityDiagnostics === 'object'
-        ? { ...dataset.volatilityDiagnostics }
-        : null;
+      ? { ...dataset.volatilityDiagnostics }
+      : null;
     const classificationMode = normalizeClassificationMode(hyper.classificationMode || dataset.classificationMode);
     const isBinary = classificationMode === CLASSIFICATION_MODES.BINARY;
     const gatingThreshold = getDefaultThresholdForMode(classificationMode);
@@ -1320,19 +1320,19 @@ function annPrepareDataset(
   const classificationMode = normalizeClassificationMode(classificationOverride);
   const parsed = Array.isArray(rows)
     ? rows
-        .filter((row) => row && typeof row.date === 'string')
-        .map((row) => {
-          const close = annResolveClose(row);
-          return {
-            date: row.date,
-            close,
-            open: annResolveOpen(row, close),
-            high: annResolveHigh(row, close),
-            low: annResolveLow(row, close),
-          };
-        })
-        .filter((row) => Number.isFinite(row.close) && row.close > 0 && Number.isFinite(row.high) && Number.isFinite(row.low))
-        .sort((a, b) => a.date.localeCompare(b.date))
+      .filter((row) => row && typeof row.date === 'string')
+      .map((row) => {
+        const close = annResolveClose(row);
+        return {
+          date: row.date,
+          close,
+          open: annResolveOpen(row, close),
+          high: annResolveHigh(row, close),
+          low: annResolveLow(row, close),
+        };
+      })
+      .filter((row) => Number.isFinite(row.close) && row.close > 0 && Number.isFinite(row.high) && Number.isFinite(row.low))
+      .sort((a, b) => a.date.localeCompare(b.date))
     : [];
 
   const close = parsed.map((row) => row.close);
@@ -1771,9 +1771,9 @@ async function handleAITrainANNMessage(message) {
     if (shouldAttachVix) {
       const dateCandidates = Array.isArray(rows)
         ? rows
-            .filter((row) => row && typeof row.date === 'string')
-            .map((row) => row.date)
-            .sort((a, b) => a.localeCompare(b))
+          .filter((row) => row && typeof row.date === 'string')
+          .map((row) => row.date)
+          .sort((a, b) => a.localeCompare(b))
         : [];
       if (dateCandidates.length > 0) {
         const vixStart = dateCandidates[0];
@@ -1817,8 +1817,8 @@ async function handleAITrainANNMessage(message) {
     let volatilityThresholds = sanitizeVolatilityThresholds(prepared.volatilityThresholds);
     let volatilityDiagnostics = prepared.volatilityDiagnostics
       && typeof prepared.volatilityDiagnostics === 'object'
-        ? { ...prepared.volatilityDiagnostics }
-        : null;
+      ? { ...prepared.volatilityDiagnostics }
+      : null;
     const labels = new Array(totalSamples);
     const classReturnSumsTrain = isBinary ? [0, 0] : [0, 0, 0];
     const classReturnCountsTrain = isBinary ? [0, 0] : [0, 0, 0];
@@ -2377,9 +2377,9 @@ function isTWTradingDay(dateISO) {
   } else {
     return false;
   }
-  
+
   if (Number.isNaN(date.getTime())) return false;
-  
+
   // 使用 getUTCDay() 以避免時區混淆
   // 0=Sunday, 1=Monday, ..., 6=Saturday
   const dayOfWeek = date.getUTCDay();
@@ -2400,9 +2400,9 @@ function getPreviousTWTradingDay(dateISO) {
   } else {
     return null;
   }
-  
+
   if (Number.isNaN(date.getTime())) return null;
-  
+
   // 回溯最多 3 天（以防連假）
   for (let i = 1; i <= 3; i++) {
     const prevDate = new Date(date);
@@ -2411,7 +2411,7 @@ function getPreviousTWTradingDay(dateISO) {
       return prevDate.toISOString().split('T')[0];
     }
   }
-  
+
   return null;
 }
 
@@ -2432,18 +2432,18 @@ function shouldPatchCurrentMonthGap(stockNo, lastDataISO, targetEndISO) {
   if (!lastDataISO || lastDataISO >= targetEndISO) {
     return { shouldPatch: false, reason: 'data-up-to-date', cacheTTL: 0 };
   }
-  
+
   const prevTradingDay = getPreviousTWTradingDay(targetEndISO);
-  
+
   // 無法取得前一交易日
   if (!prevTradingDay) {
     return { shouldPatch: false, reason: 'cannot-determine-prev-trading-day', cacheTTL: 0 };
   }
-  
+
   // 情況 1：最後資料為前一交易日
   if (lastDataISO === prevTradingDay) {
     const currentHour = getCurrentTWHour();
-    
+
     if (currentHour >= TW_AFTERNOON_CUTOFF_HOUR) {
       // 已過下午兩點，可以補齊
       return {
@@ -2460,7 +2460,7 @@ function shouldPatchCurrentMonthGap(stockNo, lastDataISO, targetEndISO) {
       };
     }
   }
-  
+
   // 情況 2：最後資料不是前一交易日（更早的資料）
   return {
     shouldPatch: true,
@@ -2478,15 +2478,15 @@ function shouldPatchCurrentMonthGap(stockNo, lastDataISO, targetEndISO) {
 function isPatchCacheSuspended(stockNo, gapDateISO) {
   const cacheKey = `${stockNo}|${gapDateISO}`;
   const cached = patchAttemptCache.get(cacheKey);
-  
+
   if (!cached) return false;
-  
+
   const age = Date.now() - cached.timestamp;
   if (age < cached.ttl) {
     // 快取仍有效
     return true;
   }
-  
+
   // 快取已過期，清除
   patchAttemptCache.delete(cacheKey);
   return false;
@@ -2506,7 +2506,7 @@ function recordPatchAttempt(stockNo, gapDateISO, result, ttl) {
     timestamp: Date.now(),
     ttl
   });
-  
+
   // 定期清理過期快取（每 100 筆操作）
   if (patchAttemptCache.size % 100 === 0) {
     const now = Date.now();
@@ -2527,14 +2527,14 @@ function recordPatchAttempt(stockNo, gapDateISO, result, ttl) {
 function getPatchAttemptFromCache(stockNo, gapDateISO) {
   const cacheKey = `${stockNo}|${gapDateISO}`;
   const cached = patchAttemptCache.get(cacheKey);
-  
+
   if (!cached) return null;
-  
+
   const age = Date.now() - cached.timestamp;
   if (age < cached.ttl) {
     return cached.result;
   }
-  
+
   // 快取已過期
   patchAttemptCache.delete(cacheKey);
   return null;
@@ -3508,7 +3508,7 @@ function hydrateWorkerCacheFromMainThread(options = {}) {
       adjustmentFallbackApplied: Boolean(cachedMeta?.adjustmentFallbackApplied),
       adjustmentFallbackInfo:
         cachedMeta?.adjustmentFallbackInfo &&
-        typeof cachedMeta.adjustmentFallbackInfo === "object"
+          typeof cachedMeta.adjustmentFallbackInfo === "object"
           ? cachedMeta.adjustmentFallbackInfo
           : null,
       debugSteps: Array.isArray(cachedMeta?.debugSteps) ? cachedMeta.debugSteps : [],
@@ -4188,17 +4188,17 @@ async function fetchAdjustedPriceRange(
     const volumeRaw =
       toNumber(
         row.volume ??
-          row.Volume ??
-          row.Trading_Volume ??
-          row.TradingVolume ??
-          row.trade_volume ??
-          row.tradeVolume ??
-          row.total_volume ??
-          row.totalVolume ??
-          row.vol ??
-          row.volume_shares ??
-          row.volumeShares ??
-          0,
+        row.Volume ??
+        row.Trading_Volume ??
+        row.TradingVolume ??
+        row.trade_volume ??
+        row.tradeVolume ??
+        row.total_volume ??
+        row.totalVolume ??
+        row.vol ??
+        row.volume_shares ??
+        row.volumeShares ??
+        0,
       ) || 0;
     const factor = toNumber(row.adjustedFactor ?? row.adjust_factor ?? row.factor);
     const rawOpen = toNumber(
@@ -5117,23 +5117,23 @@ async function tryFetchRangeFromBlob({
   const todayUtcMonth = now.getUTCMonth();
   const todayUtcDate = now.getUTCDate();
   const todayUtcMs = Date.UTC(todayUtcYear, todayUtcMonth, todayUtcDate);
-  
+
   // 🔧 修復：使用結束日期本身來判斷是否為當月請求，而不是依賴 UTC 時間
   // 因為 endDate 已經是用戶指定的日期，我們應該直接檢查它是否表示當月
   const endDateISO = endDate; // 例如 "2025-11-18"
   const endDateParts = endDateISO?.split('-') || [];
   const endYear = parseInt(endDateParts[0], 10);
   const endMonth = parseInt(endDateParts[1], 10);
-  
+
   // 使用 UTC 時間計算當前年月
   const todayISO = new Date(todayUtcMs).toISOString().split('T')[0]; // 例如 "2025-11-18"
   const todayParts = todayISO.split('-');
   const todayYear = parseInt(todayParts[0], 10);
   const todayMonth = parseInt(todayParts[1], 10);
-  
+
   // 判斷結束日期的年月是否與今天年月相同
   const isCurrentMonthRequest = (endYear === todayYear && endMonth === todayMonth);
-  
+
   // 診斷日誌：日期判斷
   console.log(
     `[Worker] ${stockNo} 日期檢查: endDate=${endDate}, today=${todayISO}, endMonth=${endMonth}, todayMonth=${todayMonth}, isCurrentMonth=${isCurrentMonthRequest}`,
@@ -5169,21 +5169,21 @@ async function tryFetchRangeFromBlob({
   ) {
     const patchStartISO = lastDate ? addDaysIso(lastDate, 1) : targetLatestISO;
     const gapDateISO = targetLatestISO;
-    
+
     // 診斷日誌：進入補齊邏輯
     console.log(
       `[Worker] ${stockNo} 進入當月補齊邏輯: lastDate=${lastDate}, targetLatestISO=${targetLatestISO}, gap=${normalizedCurrentMonthGap}天`,
     );
-    
+
     // 使用新邏輯判斷是否應該進行補齊
     const patchDecision = shouldPatchCurrentMonthGap(stockNo, lastDate, gapDateISO);
     const shouldPerformPatch = patchDecision.shouldPatch;
-    
+
     // 診斷日誌：決策結果
     console.log(
       `[Worker] ${stockNo} 補齊決策: shouldPatch=${shouldPerformPatch}, reason=${patchDecision.reason}, cacheTTL=${patchDecision.cacheTTL}`,
     );
-    
+
     // 初始化補齊診斷信息
     rangeFetchInfo.patchDecision = patchDecision;
     rangeFetchInfo.patch = {
@@ -5192,11 +5192,11 @@ async function tryFetchRangeFromBlob({
       start: patchStartISO,
       end: targetLatestISO,
     };
-    
+
     if (shouldPerformPatch) {
       // 檢查快取，避免重複補齊
       const cachedPatchResult = getPatchAttemptFromCache(stockNo, gapDateISO);
-      
+
       if (cachedPatchResult) {
         // ✅ 使用快取的補齊結果
         console.log(
@@ -5226,20 +5226,20 @@ async function tryFetchRangeFromBlob({
           primaryForceSource,
           fallbackForceSource,
         });
-        
+
         console.log(
           `[Worker] ${stockNo} 補齊結果: status=${patchResult.diagnostics?.status}, rows=${patchResult.rows?.length || 0}`,
         );
-        
+
         // 記錄補齊結果到快取
         recordPatchAttempt(stockNo, gapDateISO, patchResult, patchDecision.cacheTTL);
-        
+
         rangeFetchInfo.patch = patchResult.diagnostics || {
           status: "unknown",
           start: patchStartISO,
           end: targetLatestISO,
         };
-        
+
         if (Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
           console.log(
             `[Worker] ${stockNo} 成功補齊 ${patchResult.rows.length} 筆資料，合併到現有資料`,
@@ -5299,7 +5299,7 @@ async function tryFetchRangeFromBlob({
         `[Worker] ${stockNo} 當月補齊被跳過 (原因: ${patchDecision.reason})`,
       );
     }
-    
+
     fetchDiagnostics.patch = rangeFetchInfo.patch;
   }
 
@@ -5315,8 +5315,7 @@ async function tryFetchRangeFromBlob({
     rangeFetchInfo.status = "insufficient";
     rangeFetchInfo.reason = startGapExceeded ? "start-gap" : "end-gap";
     console.warn(
-      `[Worker] ${stockNo} Netlify Blob 範圍資料覆蓋不足 (startGap=${
-        startGap ?? "N/A"
+      `[Worker] ${stockNo} Netlify Blob 範圍資料覆蓋不足 (startGap=${startGap ?? "N/A"
       }, endGap=${endGap ?? "N/A"})，改用 Proxy 逐月補抓。`,
     );
     return null;
@@ -5351,8 +5350,7 @@ async function tryFetchRangeFromBlob({
       } else {
         rangeFetchInfo.status = "current-month-stale";
         console.warn(
-          `[Worker] ${stockNo} 當月補齊被跳過 (${reason})，缺少 ${normalizedCurrentMonthGap} 天資料 (last=${
-            lastDate || "N/A"
+          `[Worker] ${stockNo} 當月補齊被跳過 (${reason})，缺少 ${normalizedCurrentMonthGap} 天資料 (last=${lastDate || "N/A"
           } < expected=${targetLatestISO})`,
         );
       }
@@ -5361,8 +5359,7 @@ async function tryFetchRangeFromBlob({
       rangeFetchInfo.status = "current-month-stale";
       rangeFetchInfo.reason = "current-month-gap";
       console.warn(
-        `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${
-          lastDate || "N/A"
+        `[Worker] ${stockNo} Netlify Blob 範圍資料仍缺少當月最新 ${normalizedCurrentMonthGap} 天 (last=${lastDate || "N/A"
         } < expected=${targetLatestISO})，等待當日補齊。`,
       );
     }
@@ -5610,7 +5607,7 @@ async function fetchStockData(
       adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
       summary:
         cachedEntry?.meta?.summary &&
-        typeof cachedEntry.meta.summary === "object"
+          typeof cachedEntry.meta.summary === "object"
           ? cachedEntry.meta.summary
           : null,
       adjustments: Array.isArray(cachedEntry?.meta?.adjustments)
@@ -5622,7 +5619,7 @@ async function fetchStockData(
         : [],
       dividendDiagnostics:
         cachedEntry?.meta?.dividendDiagnostics &&
-        typeof cachedEntry.meta.dividendDiagnostics === "object"
+          typeof cachedEntry.meta.dividendDiagnostics === "object"
           ? cachedEntry.meta.dividendDiagnostics
           : null,
       dividendEvents: Array.isArray(cachedEntry?.meta?.dividendEvents)
@@ -5630,12 +5627,12 @@ async function fetchStockData(
         : [],
       splitDiagnostics:
         cachedEntry?.meta?.splitDiagnostics &&
-        typeof cachedEntry.meta.splitDiagnostics === "object"
+          typeof cachedEntry.meta.splitDiagnostics === "object"
           ? cachedEntry.meta.splitDiagnostics
           : null,
       finmindStatus:
         cachedEntry?.meta?.finmindStatus &&
-        typeof cachedEntry.meta.finmindStatus === "object"
+          typeof cachedEntry.meta.finmindStatus === "object"
           ? cachedEntry.meta.finmindStatus
           : null,
       adjustmentDebugLog: Array.isArray(cachedEntry?.meta?.adjustmentDebugLog)
@@ -5779,7 +5776,7 @@ async function fetchStockData(
           Boolean(adjustedResult.adjustmentFallbackApplied),
         adjustmentFallbackInfo:
           adjustedResult.adjustmentFallbackInfo &&
-          typeof adjustedResult.adjustmentFallbackInfo === "object"
+            typeof adjustedResult.adjustmentFallbackInfo === "object"
             ? adjustedResult.adjustmentFallbackInfo
             : null,
         debugSteps: Array.isArray(adjustedResult.debugSteps)
@@ -5787,7 +5784,7 @@ async function fetchStockData(
           : [],
         dividendDiagnostics:
           adjustedResult.dividendDiagnostics &&
-          typeof adjustedResult.dividendDiagnostics === "object"
+            typeof adjustedResult.dividendDiagnostics === "object"
             ? adjustedResult.dividendDiagnostics
             : null,
         dividendEvents: Array.isArray(adjustedResult.dividendEvents)
@@ -5795,12 +5792,12 @@ async function fetchStockData(
           : [],
         splitDiagnostics:
           adjustedResult.splitDiagnostics &&
-          typeof adjustedResult.splitDiagnostics === "object"
+            typeof adjustedResult.splitDiagnostics === "object"
             ? adjustedResult.splitDiagnostics
             : null,
         finmindStatus:
           adjustedResult.finmindStatus &&
-          typeof adjustedResult.finmindStatus === "object"
+            typeof adjustedResult.finmindStatus === "object"
             ? adjustedResult.finmindStatus
             : null,
         adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
@@ -5826,12 +5823,12 @@ async function fetchStockData(
       ),
       adjustmentFallbackInfo:
         adjustedResult.adjustmentFallbackInfo &&
-        typeof adjustedResult.adjustmentFallbackInfo === "object"
+          typeof adjustedResult.adjustmentFallbackInfo === "object"
           ? adjustedResult.adjustmentFallbackInfo
           : null,
       dividendDiagnostics:
         adjustedResult.dividendDiagnostics &&
-        typeof adjustedResult.dividendDiagnostics === "object"
+          typeof adjustedResult.dividendDiagnostics === "object"
           ? adjustedResult.dividendDiagnostics
           : null,
       dividendEvents: Array.isArray(adjustedResult.dividendEvents)
@@ -5839,12 +5836,12 @@ async function fetchStockData(
         : [],
       splitDiagnostics:
         adjustedResult.splitDiagnostics &&
-        typeof adjustedResult.splitDiagnostics === "object"
+          typeof adjustedResult.splitDiagnostics === "object"
           ? adjustedResult.splitDiagnostics
           : null,
       finmindStatus:
         adjustedResult.finmindStatus &&
-        typeof adjustedResult.finmindStatus === "object"
+          typeof adjustedResult.finmindStatus === "object"
           ? adjustedResult.finmindStatus
           : null,
       adjustmentDebugLog: Array.isArray(adjustedResult.adjustmentDebugLog)
@@ -5972,7 +5969,7 @@ async function fetchStockData(
       const existingCoverage = Array.isArray(monthEntry.coverage)
         ? monthEntry.coverage.map((range) => ({ ...range }))
         : [];
-      
+
       // 只在非批量優化時執行缺口檢測
       let forcedRepairRanges = [];
       if (!skipCoverageGapRepair) {
@@ -5983,7 +5980,7 @@ async function fetchStockData(
           { toleranceDays: COVERAGE_GAP_TOLERANCE_DAYS },
         );
       }
-      
+
       let coverageForComputation = existingCoverage;
       if (forcedRepairRanges.length > 0) {
         coverageForComputation = subtractRangeBounds(
@@ -6053,7 +6050,7 @@ async function fetchStockData(
           const touchesRangeEnd =
             Number.isFinite(targetEndExclusive) &&
             Math.abs(missingRange.end - targetEndExclusive) <=
-              STALE_RANGE_TOUCH_TOLERANCE_MS;
+            STALE_RANGE_TOUCH_TOLERANCE_MS;
           const lastUpdatedMs = Number.isFinite(monthEntry.lastUpdated)
             ? monthEntry.lastUpdated
             : 0;
@@ -7069,10 +7066,10 @@ function calculateMaxDrawdown(values) {
 // --- 計算所有指標 ---
 function calculateAllIndicators(data, params) {
   /* ... (程式碼與上次 Part 3 相同) ... */ self.postMessage({
-    type: "progress",
-    progress: 55,
-    message: "計算指標...",
-  });
+  type: "progress",
+  progress: 55,
+  message: "計算指標...",
+});
   const closes = data.map((d) => d.close);
   const highs = data.map((d) => d.high);
   const lows = data.map((d) => d.low);
@@ -7425,16 +7422,16 @@ function calculateAllIndicators(data, params) {
       volumeShortEntryPeriod === volumeExitPeriod
         ? indic.volumeAvgExit
         : volumeShortEntryPeriod === volumeEntryPeriod
-        ? indic.volumeAvgEntry
-        : resolveVolumeAverage(volumeShortEntryPeriod);
+          ? indic.volumeAvgEntry
+          : resolveVolumeAverage(volumeShortEntryPeriod);
     indic.volumeAvgShortExit =
       volumeShortExitPeriod === volumeShortEntryPeriod
         ? indic.volumeAvgShortEntry
         : volumeShortExitPeriod === volumeExitPeriod
-        ? indic.volumeAvgExit
-        : volumeShortExitPeriod === volumeEntryPeriod
-        ? indic.volumeAvgEntry
-        : resolveVolumeAverage(volumeShortExitPeriod);
+          ? indic.volumeAvgExit
+          : volumeShortExitPeriod === volumeEntryPeriod
+            ? indic.volumeAvgEntry
+            : resolveVolumeAverage(volumeShortExitPeriod);
     const wrEntryPeriod = ep?.period || 14;
     const wrCoverPeriod = enableShorting
       ? (sxp?.period ?? wrEntryPeriod)
@@ -7574,12 +7571,12 @@ function createIndicatorContext(baseContext, indicators) {
     volumes,
     longTrailingStops:
       Array.isArray(baseContext?.longTrailingStops) &&
-      baseContext.longTrailingStops.length === length
+        baseContext.longTrailingStops.length === length
         ? baseContext.longTrailingStops
         : new Array(length).fill(null),
     shortTrailingStops:
       Array.isArray(baseContext?.shortTrailingStops) &&
-      baseContext.shortTrailingStops.length === length
+        baseContext.shortTrailingStops.length === length
         ? baseContext.shortTrailingStops
         : new Array(length).fill(null),
     getRollingHigh(period) {
@@ -8226,7 +8223,7 @@ function computeTrailingStopLevels(
 
   const shortPctRaw =
     options?.enableShorting &&
-    options?.shortExitStrategy === "cover_trailing_stop"
+      options?.shortExitStrategy === "cover_trailing_stop"
       ? Number(options?.shortExitParams?.percentage ?? 5)
       : null;
   if (Number.isFinite(shortPctRaw)) {
@@ -8295,57 +8292,57 @@ function runStrategy(data, params, options = {}) {
   const lastIdx = n - 1;
   // 初始化隔日交易追蹤
   pendingNextDayTrade = null;
-    const {
-      initialCapital,
-      positionSize,
-      stopLoss: globalSL,
-      takeProfit: globalTP,
-      entryStrategy,
-      exitStrategy,
-      entryParams,
-      entryStages,
-      entryStagingMode,
-      exitParams,
-      exitStages,
-      exitStagingMode,
-      enableShorting,
-      shortEntryStrategy,
-      shortExitStrategy,
-      shortEntryParams,
-      shortExitParams,
-      tradeTiming,
-      buyFee,
-      sellFee,
-      positionBasis,
-    } = params;
+  const {
+    initialCapital,
+    positionSize,
+    stopLoss: globalSL,
+    takeProfit: globalTP,
+    entryStrategy,
+    exitStrategy,
+    entryParams,
+    entryStages,
+    entryStagingMode,
+    exitParams,
+    exitStages,
+    exitStagingMode,
+    enableShorting,
+    shortEntryStrategy,
+    shortExitStrategy,
+    shortEntryParams,
+    shortExitParams,
+    tradeTiming,
+    buyFee,
+    sellFee,
+    positionBasis,
+  } = params;
 
-    const entryStagePercentsRaw = Array.isArray(entryStages)
-      ? entryStages.map((value) => Number(value))
-      : [];
-    const entryStagePercents = entryStagePercentsRaw.filter(
-      (value) => Number.isFinite(value) && value > 0,
-    );
-    if (entryStagePercents.length === 0) {
-      entryStagePercents.push(positionSize);
-    }
-    const entryStageMode =
-      typeof entryStagingMode === "string" ? entryStagingMode : "signal_repeat";
+  const entryStagePercentsRaw = Array.isArray(entryStages)
+    ? entryStages.map((value) => Number(value))
+    : [];
+  const entryStagePercents = entryStagePercentsRaw.filter(
+    (value) => Number.isFinite(value) && value > 0,
+  );
+  if (entryStagePercents.length === 0) {
+    entryStagePercents.push(positionSize);
+  }
+  const entryStageMode =
+    typeof entryStagingMode === "string" ? entryStagingMode : "signal_repeat";
 
-    const exitStagePercentsRaw = Array.isArray(exitStages)
-      ? exitStages.map((value) => Number(value))
-      : [];
-    const exitStagePercents = exitStagePercentsRaw.filter(
-      (value) => Number.isFinite(value) && value > 0,
-    );
-    if (exitStagePercents.length === 0) {
-      exitStagePercents.push(100);
-    }
-    const exitStageMode =
-      typeof exitStagingMode === "string" ? exitStagingMode : "signal_repeat";
-    const multiStageEnabled =
-      typeof params.multiStageEnabled === "boolean"
-        ? params.multiStageEnabled
-        : entryStagePercents.length > 1 || exitStagePercents.length > 1;
+  const exitStagePercentsRaw = Array.isArray(exitStages)
+    ? exitStages.map((value) => Number(value))
+    : [];
+  const exitStagePercents = exitStagePercentsRaw.filter(
+    (value) => Number.isFinite(value) && value > 0,
+  );
+  if (exitStagePercents.length === 0) {
+    exitStagePercents.push(100);
+  }
+  const exitStageMode =
+    typeof exitStagingMode === "string" ? exitStagingMode : "signal_repeat";
+  const multiStageEnabled =
+    typeof params.multiStageEnabled === "boolean"
+      ? params.multiStageEnabled
+      : entryStagePercents.length > 1 || exitStagePercents.length > 1;
 
   if (!data || n === 0) throw new Error("回測數據無效");
   const dates = data.map((d) => d.date);
@@ -8705,8 +8702,8 @@ function runStrategy(data, params, options = {}) {
       shortExitParams?.period,
       shortExitParams?.breakoutPeriod,
       shortExitParams?.signalPeriod,
-    shortExitParams?.percentage,
-  ]);
+      shortExitParams?.percentage,
+    ]);
   }
   const compositePeriodValues = []
     .concat(collectNumericParamsFromDsl('longEntry', entryParams))
@@ -8733,25 +8730,25 @@ function runStrategy(data, params, options = {}) {
   warmupSummary.kdNeedLong = kdNeedLong;
   const kdNeedShort =
     enableShorting &&
-    (shortEntryStrategy === "short_k_d_cross" ||
-      shortExitStrategy === "cover_k_d_cross")
+      (shortEntryStrategy === "short_k_d_cross" ||
+        shortExitStrategy === "cover_k_d_cross")
       ? shortEntryParams?.period || shortExitParams?.period || 9
       : 0;
   warmupSummary.kdNeedShort = kdNeedShort;
   const macdNeedLong =
     entryStrategy === "macd_cross" || exitStrategy === "macd_cross_exit"
       ? (entryParams?.longPeriod || exitParams?.longPeriod || 26) +
-        (entryParams?.signalPeriod || exitParams?.signalPeriod || 9) -
-        1
+      (entryParams?.signalPeriod || exitParams?.signalPeriod || 9) -
+      1
       : 0;
   warmupSummary.macdNeedLong = macdNeedLong;
   const macdNeedShort =
     enableShorting &&
-    (shortEntryStrategy === "short_macd_cross" ||
-      shortExitStrategy === "cover_macd_cross")
+      (shortEntryStrategy === "short_macd_cross" ||
+        shortExitStrategy === "cover_macd_cross")
       ? (shortEntryParams?.longPeriod || shortExitParams?.longPeriod || 26) +
-        (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
-        1
+      (shortEntryParams?.signalPeriod || shortExitParams?.signalPeriod || 9) -
+      1
       : 0;
   warmupSummary.macdNeedShort = macdNeedShort;
   let startIdx = Math.max(
@@ -8792,24 +8789,24 @@ function runStrategy(data, params, options = {}) {
   let longShares = 0;
   let lastBuyP = 0;
   let curPeakP = 0;
-    let longTrades = [];
-    let longCompletedTrades = [];
-    let currentLongEntryBreakdown = [];
-    let longPositionCostWithFee = 0;
-    let longPositionCostWithoutFee = 0;
-    let longAverageEntryPrice = 0;
-    let filledEntryStages = 0;
-    let currentLongPositionId = null;
-    let nextLongPositionId = 1;
-    let filledExitStages = 0;
-    let lastLongStagePrice = null;
-    let lastEntryStageTrigger = null;
-    let lastLongExitStagePrice = null;
-    let lastExitStageTrigger = null;
-    let currentLongExitPlan = null;
-    let resetExitPlanAfterCapture = false;
-    const longEntryStageStates = new Array(n).fill(null);
-    const longExitStageStates = new Array(n).fill(null);
+  let longTrades = [];
+  let longCompletedTrades = [];
+  let currentLongEntryBreakdown = [];
+  let longPositionCostWithFee = 0;
+  let longPositionCostWithoutFee = 0;
+  let longAverageEntryPrice = 0;
+  let filledEntryStages = 0;
+  let currentLongPositionId = null;
+  let nextLongPositionId = 1;
+  let filledExitStages = 0;
+  let lastLongStagePrice = null;
+  let lastEntryStageTrigger = null;
+  let lastLongExitStagePrice = null;
+  let lastExitStageTrigger = null;
+  let currentLongExitPlan = null;
+  let resetExitPlanAfterCapture = false;
+  const longEntryStageStates = new Array(n).fill(null);
+  const longExitStageStates = new Array(n).fill(null);
   const buySigs = [];
   const sellSigs = [];
   const longPl = Array(n).fill(0);
@@ -8844,19 +8841,19 @@ function runStrategy(data, params, options = {}) {
       buyHoldReturns: Array(n).fill(0),
       strategyReturns: Array(n).fill(0),
       dates: dates,
-        chartBuySignals: [],
-        chartSellSignals: [],
-        chartShortSignals: [],
-        chartCoverSignals: [],
-        entryStrategy: params.entryStrategy,
-        exitStrategy: params.exitStrategy,
-        entryParams: params.entryParams,
-        entryStages: entryStagePercents.slice(),
-        entryStagingMode: entryStageMode,
-        exitParams: params.exitParams,
-        exitStages: exitStagePercents.slice(),
-        exitStagingMode: exitStageMode,
-        multiStageEnabled,
+      chartBuySignals: [],
+      chartSellSignals: [],
+      chartShortSignals: [],
+      chartCoverSignals: [],
+      entryStrategy: params.entryStrategy,
+      exitStrategy: params.exitStrategy,
+      entryParams: params.entryParams,
+      entryStages: entryStagePercents.slice(),
+      entryStagingMode: entryStageMode,
+      exitParams: params.exitParams,
+      exitStages: exitStagePercents.slice(),
+      exitStagingMode: exitStageMode,
+      multiStageEnabled,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -8878,316 +8875,316 @@ function runStrategy(data, params, options = {}) {
     };
   }
 
+  console.log(
+    `[Worker] Starting simulation loop from index ${startIdx} to ${n - 1}`,
+  );
+
+  const executeLongStage = ({
+    tradePrice,
+    tradeDate,
+    stageIndex,
+    baseCapitalForSizing,
+    investmentLimitOverride,
+    strategyKey,
+    signalIndex,
+    kdValues,
+    macdValues,
+    indicatorValues,
+    trigger,
+  }) => {
+    if (!Number.isFinite(tradePrice) || tradePrice <= 0) {
+      return { executed: false };
+    }
+
+    const adjustedTradePrice = tradePrice * (1 + buyFee / 100);
+    if (!Number.isFinite(adjustedTradePrice) || adjustedTradePrice <= 0) {
+      return { executed: false };
+    }
+
+    const resolvedStageIndex = Number.isInteger(stageIndex) && stageIndex >= 0
+      ? Math.min(stageIndex, entryStagePercents.length - 1)
+      : Math.min(filledEntryStages, entryStagePercents.length - 1);
+    const stagePercent = entryStagePercents[resolvedStageIndex];
+    if (!Number.isFinite(stagePercent) || stagePercent <= 0) {
+      return { executed: false };
+    }
+
+    let spendingLimit = Number.isFinite(investmentLimitOverride)
+      ? Math.min(longCap, investmentLimitOverride)
+      : null;
+    if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
+      const base = Number.isFinite(baseCapitalForSizing) && baseCapitalForSizing > 0
+        ? baseCapitalForSizing
+        : initialCapital;
+      spendingLimit = Math.min(longCap, base * (stagePercent / 100));
+    }
+    if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
+      return { executed: false };
+    }
+
+    const stageShares = Math.floor(spendingLimit / adjustedTradePrice);
+    if (!Number.isFinite(stageShares) || stageShares <= 0) {
+      return { executed: false };
+    }
+
+    const stageCostWithFee = stageShares * adjustedTradePrice;
+    if (!Number.isFinite(stageCostWithFee) || stageCostWithFee <= 0) {
+      return { executed: false };
+    }
+    if (longCap + 1e-9 < stageCostWithFee) {
+      return { executed: false };
+    }
+
+    const stageCostWithoutFee = stageShares * tradePrice;
+    longCap -= stageCostWithFee;
+    longPositionCostWithFee += stageCostWithFee;
+    longPositionCostWithoutFee += stageCostWithoutFee;
+    longShares += stageShares;
+    longPos = 1;
+    if (!currentLongPositionId) {
+      currentLongPositionId = nextLongPositionId;
+      nextLongPositionId += 1;
+    }
+    filledEntryStages = Math.min(filledEntryStages + 1, entryStagePercents.length);
+    longAverageEntryPrice =
+      longShares > 0 ? longPositionCostWithoutFee / longShares : 0;
+    lastBuyP = longAverageEntryPrice;
+    curPeakP = Math.max(curPeakP || 0, tradePrice);
+
+    const cumulativePercent = currentLongEntryBreakdown.reduce(
+      (sum, info) => sum + (info.allocationPercent || 0),
+      0,
+    ) + stagePercent;
+
+    const stageTrigger =
+      typeof trigger === "string" ? trigger : "signal";
+
+    const stageSnapshot = {
+      type: "buy",
+      date: tradeDate,
+      price: tradePrice,
+      shares: stageShares,
+      cost: stageCostWithFee,
+      costWithoutFee: stageCostWithoutFee,
+      allocationPercent: stagePercent,
+      cumulativeStagePercent: cumulativePercent,
+      capital_after: longCap,
+      triggeringStrategy: strategyKey,
+      simType: "long",
+      positionId: currentLongPositionId,
+      stageTrigger,
+      originalShares: stageShares,
+      originalCost: stageCostWithFee,
+      originalCostWithoutFee: stageCostWithoutFee,
+      remainingShares: stageShares,
+      remainingCost: stageCostWithFee,
+      remainingCostWithoutFee: stageCostWithoutFee,
+      stageIndex: resolvedStageIndex,
+    };
+    if (kdValues) stageSnapshot.kdValues = kdValues;
+    if (macdValues) stageSnapshot.macdValues = macdValues;
+    if (indicatorValues) stageSnapshot.indicatorValues = indicatorValues;
+
+    currentLongEntryBreakdown.push({ ...stageSnapshot });
+    longTrades.push({ ...stageSnapshot });
+    if (Number.isInteger(signalIndex) && signalIndex >= 0) {
+      buySigs.push({ date: tradeDate, index: signalIndex });
+    }
+
     console.log(
-      `[Worker] Starting simulation loop from index ${startIdx} to ${n - 1}`,
+      `[Worker LONG] Stage ${resolvedStageIndex + 1}/${entryStagePercents.length} Buy Executed: ${stageShares}@${tradePrice} on ${tradeDate}, Cap After: ${longCap.toFixed(0)}`,
     );
 
-    const executeLongStage = ({
-      tradePrice,
-      tradeDate,
-      stageIndex,
-      baseCapitalForSizing,
-      investmentLimitOverride,
-      strategyKey,
-      signalIndex,
-      kdValues,
-      macdValues,
-      indicatorValues,
-      trigger,
-    }) => {
-      if (!Number.isFinite(tradePrice) || tradePrice <= 0) {
-        return { executed: false };
-      }
+    lastLongStagePrice = tradePrice;
+    lastEntryStageTrigger = stageTrigger;
+    filledExitStages = 0;
+    currentLongExitPlan = null;
+    lastLongExitStagePrice = null;
+    lastExitStageTrigger = null;
 
-      const adjustedTradePrice = tradePrice * (1 + buyFee / 100);
-      if (!Number.isFinite(adjustedTradePrice) || adjustedTradePrice <= 0) {
-        return { executed: false };
-      }
+    return { executed: true, shares: stageShares, tradeData: stageSnapshot };
+  };
 
-      const resolvedStageIndex = Number.isInteger(stageIndex) && stageIndex >= 0
-        ? Math.min(stageIndex, entryStagePercents.length - 1)
-        : Math.min(filledEntryStages, entryStagePercents.length - 1);
-      const stagePercent = entryStagePercents[resolvedStageIndex];
-      if (!Number.isFinite(stagePercent) || stagePercent <= 0) {
-        return { executed: false };
-      }
-
-      let spendingLimit = Number.isFinite(investmentLimitOverride)
-        ? Math.min(longCap, investmentLimitOverride)
-        : null;
-      if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
-        const base = Number.isFinite(baseCapitalForSizing) && baseCapitalForSizing > 0
-          ? baseCapitalForSizing
-          : initialCapital;
-        spendingLimit = Math.min(longCap, base * (stagePercent / 100));
-      }
-      if (!Number.isFinite(spendingLimit) || spendingLimit <= 0) {
-        return { executed: false };
-      }
-
-      const stageShares = Math.floor(spendingLimit / adjustedTradePrice);
-      if (!Number.isFinite(stageShares) || stageShares <= 0) {
-        return { executed: false };
-      }
-
-      const stageCostWithFee = stageShares * adjustedTradePrice;
-      if (!Number.isFinite(stageCostWithFee) || stageCostWithFee <= 0) {
-        return { executed: false };
-      }
-      if (longCap + 1e-9 < stageCostWithFee) {
-        return { executed: false };
-      }
-
-      const stageCostWithoutFee = stageShares * tradePrice;
-      longCap -= stageCostWithFee;
-      longPositionCostWithFee += stageCostWithFee;
-      longPositionCostWithoutFee += stageCostWithoutFee;
-      longShares += stageShares;
-      longPos = 1;
-      if (!currentLongPositionId) {
-        currentLongPositionId = nextLongPositionId;
-        nextLongPositionId += 1;
-      }
-      filledEntryStages = Math.min(filledEntryStages + 1, entryStagePercents.length);
-      longAverageEntryPrice =
-        longShares > 0 ? longPositionCostWithoutFee / longShares : 0;
-      lastBuyP = longAverageEntryPrice;
-      curPeakP = Math.max(curPeakP || 0, tradePrice);
-
-      const cumulativePercent = currentLongEntryBreakdown.reduce(
-        (sum, info) => sum + (info.allocationPercent || 0),
-        0,
-      ) + stagePercent;
-
-      const stageTrigger =
-        typeof trigger === "string" ? trigger : "signal";
-
-      const stageSnapshot = {
-        type: "buy",
-        date: tradeDate,
-        price: tradePrice,
-        shares: stageShares,
-        cost: stageCostWithFee,
-        costWithoutFee: stageCostWithoutFee,
-        allocationPercent: stagePercent,
-        cumulativeStagePercent: cumulativePercent,
-        capital_after: longCap,
-        triggeringStrategy: strategyKey,
-        simType: "long",
-        positionId: currentLongPositionId,
-        stageTrigger,
-        originalShares: stageShares,
-        originalCost: stageCostWithFee,
-        originalCostWithoutFee: stageCostWithoutFee,
-        remainingShares: stageShares,
-        remainingCost: stageCostWithFee,
-        remainingCostWithoutFee: stageCostWithoutFee,
-        stageIndex: resolvedStageIndex,
-      };
-      if (kdValues) stageSnapshot.kdValues = kdValues;
-      if (macdValues) stageSnapshot.macdValues = macdValues;
-      if (indicatorValues) stageSnapshot.indicatorValues = indicatorValues;
-
-      currentLongEntryBreakdown.push({ ...stageSnapshot });
-      longTrades.push({ ...stageSnapshot });
-      if (Number.isInteger(signalIndex) && signalIndex >= 0) {
-        buySigs.push({ date: tradeDate, index: signalIndex });
-      }
-
-      console.log(
-        `[Worker LONG] Stage ${resolvedStageIndex + 1}/${entryStagePercents.length} Buy Executed: ${stageShares}@${tradePrice} on ${tradeDate}, Cap After: ${longCap.toFixed(0)}`,
-      );
-
-      lastLongStagePrice = tradePrice;
-      lastEntryStageTrigger = stageTrigger;
-      filledExitStages = 0;
-      currentLongExitPlan = null;
-      lastLongExitStagePrice = null;
-      lastExitStageTrigger = null;
-
-      return { executed: true, shares: stageShares, tradeData: stageSnapshot };
+  const buildAggregatedLongEntry = () => {
+    if (currentLongEntryBreakdown.length === 0) return null;
+    const totalShares = currentLongEntryBreakdown.reduce(
+      (sum, info) => sum + (info.originalShares || info.shares || 0),
+      0,
+    );
+    const totalPercent = currentLongEntryBreakdown.reduce(
+      (sum, info) => sum + (info.allocationPercent || 0),
+      0,
+    );
+    const totalCostWithFee = currentLongEntryBreakdown.reduce(
+      (sum, info) =>
+        sum + (info.originalCost ?? info.cost ?? info.remainingCost ?? 0),
+      0,
+    );
+    const totalCostWithoutFee = currentLongEntryBreakdown.reduce(
+      (sum, info) =>
+        sum +
+        (info.originalCostWithoutFee ??
+          info.costWithoutFee ??
+          info.remainingCostWithoutFee ??
+          0),
+      0,
+    );
+    const averageEntryPrice =
+      totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
+    const aggregated = {
+      type: "buy",
+      date: currentLongEntryBreakdown[0]?.date || null,
+      price: averageEntryPrice,
+      shares: totalShares,
+      cost: totalCostWithFee,
+      costWithoutFee: totalCostWithoutFee,
+      averageEntryPrice,
+      stageCount: currentLongEntryBreakdown.length,
+      cumulativeStagePercent: totalPercent,
+      stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
+      positionId: currentLongPositionId,
     };
-
-    const buildAggregatedLongEntry = () => {
-      if (currentLongEntryBreakdown.length === 0) return null;
-      const totalShares = currentLongEntryBreakdown.reduce(
-        (sum, info) => sum + (info.originalShares || info.shares || 0),
-        0,
-      );
-      const totalPercent = currentLongEntryBreakdown.reduce(
-        (sum, info) => sum + (info.allocationPercent || 0),
-        0,
-      );
-      const totalCostWithFee = currentLongEntryBreakdown.reduce(
-        (sum, info) =>
-          sum + (info.originalCost ?? info.cost ?? info.remainingCost ?? 0),
-        0,
-      );
-      const totalCostWithoutFee = currentLongEntryBreakdown.reduce(
-        (sum, info) =>
-          sum +
-          (info.originalCostWithoutFee ??
-            info.costWithoutFee ??
-            info.remainingCostWithoutFee ??
-            0),
-        0,
-      );
-      const averageEntryPrice =
-        totalShares > 0 ? totalCostWithoutFee / totalShares : 0;
-      const aggregated = {
-        type: "buy",
-        date: currentLongEntryBreakdown[0]?.date || null,
-        price: averageEntryPrice,
-        shares: totalShares,
-        cost: totalCostWithFee,
-        costWithoutFee: totalCostWithoutFee,
-        averageEntryPrice,
-        stageCount: currentLongEntryBreakdown.length,
-        cumulativeStagePercent: totalPercent,
-        stages: currentLongEntryBreakdown.map((info) => ({ ...info })),
-        positionId: currentLongPositionId,
-      };
-      const metaSource = currentLongEntryBreakdown.find(
-        (stage) =>
-          stage &&
-          typeof stage === "object" &&
-          (stage.indicatorValues || stage.kdValues || stage.macdValues),
-      );
-      if (metaSource) {
-        if (metaSource.indicatorValues && typeof metaSource.indicatorValues === "object") {
-          try {
-            aggregated.indicatorValues = JSON.parse(
-              JSON.stringify(metaSource.indicatorValues),
-            );
-          } catch (cloneError) {
-            aggregated.indicatorValues = metaSource.indicatorValues;
-          }
-        }
-        if (metaSource.kdValues && typeof metaSource.kdValues === "object") {
-          aggregated.kdValues = { ...metaSource.kdValues };
-        }
-        if (metaSource.macdValues && typeof metaSource.macdValues === "object") {
-          aggregated.macdValues = { ...metaSource.macdValues };
-        }
-        if (metaSource.triggeringStrategy) {
-          aggregated.triggeringStrategy = metaSource.triggeringStrategy;
-        }
-        if (metaSource.stageTrigger) {
-          aggregated.stageTrigger = metaSource.stageTrigger;
+    const metaSource = currentLongEntryBreakdown.find(
+      (stage) =>
+        stage &&
+        typeof stage === "object" &&
+        (stage.indicatorValues || stage.kdValues || stage.macdValues),
+    );
+    if (metaSource) {
+      if (metaSource.indicatorValues && typeof metaSource.indicatorValues === "object") {
+        try {
+          aggregated.indicatorValues = JSON.parse(
+            JSON.stringify(metaSource.indicatorValues),
+          );
+        } catch (cloneError) {
+          aggregated.indicatorValues = metaSource.indicatorValues;
         }
       }
-      return aggregated;
+      if (metaSource.kdValues && typeof metaSource.kdValues === "object") {
+        aggregated.kdValues = { ...metaSource.kdValues };
+      }
+      if (metaSource.macdValues && typeof metaSource.macdValues === "object") {
+        aggregated.macdValues = { ...metaSource.macdValues };
+      }
+      if (metaSource.triggeringStrategy) {
+        aggregated.triggeringStrategy = metaSource.triggeringStrategy;
+      }
+      if (metaSource.stageTrigger) {
+        aggregated.stageTrigger = metaSource.stageTrigger;
+      }
+    }
+    return aggregated;
+  };
+
+  const computeExitStagePlan = (totalShares) => {
+    if (!Number.isFinite(totalShares) || totalShares <= 0) return null;
+    const plan = [];
+    let allocated = 0;
+    for (let idx = 0; idx < exitStagePercents.length; idx += 1) {
+      if (idx === exitStagePercents.length - 1) {
+        plan.push(Math.max(totalShares - allocated, 0));
+        break;
+      }
+      let stageShare = Math.floor((totalShares * exitStagePercents[idx]) / 100);
+      const remainingStages = exitStagePercents.length - idx;
+      const remainingShares = totalShares - allocated;
+      if (stageShare <= 0 && remainingShares > remainingStages) {
+        stageShare = 1;
+      }
+      plan.push(stageShare);
+      allocated += stageShare;
+    }
+    if (plan.length < exitStagePercents.length) {
+      const lastShare = Math.max(totalShares - plan.reduce((sum, val) => sum + val, 0), 0);
+      plan.push(lastShare);
+    }
+    const sumShares = plan.reduce((sum, val) => sum + val, 0);
+    if (sumShares !== totalShares && plan.length > 0) {
+      plan[plan.length - 1] += totalShares - sumShares;
+    }
+    return plan;
+  };
+
+  const consumeEntryForShares = (sharesToConsume) => {
+    if (!Number.isFinite(sharesToConsume) || sharesToConsume <= 0) return null;
+    let remaining = sharesToConsume;
+    let totalCostWithFee = 0;
+    let totalCostWithoutFee = 0;
+    const stages = [];
+    for (const stage of currentLongEntryBreakdown) {
+      const availableShares = stage.remainingShares ?? stage.shares ?? 0;
+      if (!Number.isFinite(availableShares) || availableShares <= 0) continue;
+      const take = Math.min(availableShares, remaining);
+      if (take <= 0) continue;
+      const availableCost = stage.remainingCost ?? stage.cost ?? 0;
+      const availableCostWithoutFee = stage.remainingCostWithoutFee ?? stage.costWithoutFee ?? 0;
+      const costPerShareWithFee = availableShares > 0 ? availableCost / availableShares : 0;
+      const costPerShareWithoutFee = availableShares > 0 ? availableCostWithoutFee / availableShares : 0;
+      const consumedCostWithFee = costPerShareWithFee * take;
+      const consumedCostWithoutFee = costPerShareWithoutFee * take;
+      stage.remainingShares = availableShares - take;
+      stage.remainingCost = availableCost - consumedCostWithFee;
+      stage.remainingCostWithoutFee = availableCostWithoutFee - consumedCostWithoutFee;
+      totalCostWithFee += consumedCostWithFee;
+      totalCostWithoutFee += consumedCostWithoutFee;
+      stages.push({
+        date: stage.date,
+        price: stage.price,
+        shares: take,
+        cost: consumedCostWithFee,
+        costWithoutFee: consumedCostWithoutFee,
+        allocationPercent: stage.allocationPercent,
+        stageTrigger: stage.stageTrigger,
+        stageIndex: stage.stageIndex,
+      });
+      remaining -= take;
+      if (remaining <= 0) break;
+    }
+    const consumedShares = sharesToConsume - remaining;
+    return {
+      shares: consumedShares,
+      cost: totalCostWithFee,
+      costWithoutFee: totalCostWithoutFee,
+      averageEntryPrice:
+        consumedShares > 0 ? totalCostWithoutFee / consumedShares : 0,
+      stages,
     };
+  };
 
-    const computeExitStagePlan = (totalShares) => {
-      if (!Number.isFinite(totalShares) || totalShares <= 0) return null;
-      const plan = [];
-      let allocated = 0;
-      for (let idx = 0; idx < exitStagePercents.length; idx += 1) {
-        if (idx === exitStagePercents.length - 1) {
-          plan.push(Math.max(totalShares - allocated, 0));
-          break;
-        }
-        let stageShare = Math.floor((totalShares * exitStagePercents[idx]) / 100);
-        const remainingStages = exitStagePercents.length - idx;
-        const remainingShares = totalShares - allocated;
-        if (stageShare <= 0 && remainingShares > remainingStages) {
-          stageShare = 1;
-        }
-        plan.push(stageShare);
-        allocated += stageShare;
-      }
-      if (plan.length < exitStagePercents.length) {
-        const lastShare = Math.max(totalShares - plan.reduce((sum, val) => sum + val, 0), 0);
-        plan.push(lastShare);
-      }
-      const sumShares = plan.reduce((sum, val) => sum + val, 0);
-      if (sumShares !== totalShares && plan.length > 0) {
-        plan[plan.length - 1] += totalShares - sumShares;
-      }
-      return plan;
-    };
-
-    const consumeEntryForShares = (sharesToConsume) => {
-      if (!Number.isFinite(sharesToConsume) || sharesToConsume <= 0) return null;
-      let remaining = sharesToConsume;
-      let totalCostWithFee = 0;
-      let totalCostWithoutFee = 0;
-      const stages = [];
-      for (const stage of currentLongEntryBreakdown) {
-        const availableShares = stage.remainingShares ?? stage.shares ?? 0;
-        if (!Number.isFinite(availableShares) || availableShares <= 0) continue;
-        const take = Math.min(availableShares, remaining);
-        if (take <= 0) continue;
-        const availableCost = stage.remainingCost ?? stage.cost ?? 0;
-        const availableCostWithoutFee = stage.remainingCostWithoutFee ?? stage.costWithoutFee ?? 0;
-        const costPerShareWithFee = availableShares > 0 ? availableCost / availableShares : 0;
-        const costPerShareWithoutFee = availableShares > 0 ? availableCostWithoutFee / availableShares : 0;
-        const consumedCostWithFee = costPerShareWithFee * take;
-        const consumedCostWithoutFee = costPerShareWithoutFee * take;
-        stage.remainingShares = availableShares - take;
-        stage.remainingCost = availableCost - consumedCostWithFee;
-        stage.remainingCostWithoutFee = availableCostWithoutFee - consumedCostWithoutFee;
-        totalCostWithFee += consumedCostWithFee;
-        totalCostWithoutFee += consumedCostWithoutFee;
-        stages.push({
-          date: stage.date,
-          price: stage.price,
-          shares: take,
-          cost: consumedCostWithFee,
-          costWithoutFee: consumedCostWithoutFee,
-          allocationPercent: stage.allocationPercent,
-          stageTrigger: stage.stageTrigger,
-          stageIndex: stage.stageIndex,
-        });
-        remaining -= take;
-        if (remaining <= 0) break;
-      }
-      const consumedShares = sharesToConsume - remaining;
-      return {
-        shares: consumedShares,
-        cost: totalCostWithFee,
-        costWithoutFee: totalCostWithoutFee,
-        averageEntryPrice:
-          consumedShares > 0 ? totalCostWithoutFee / consumedShares : 0,
-        stages,
-      };
-    };
-
-    const captureEntryStageState = () => ({
-      totalStages: entryStagePercents.length,
-      filledStages: filledEntryStages,
-      sharesHeld: longShares,
-      averageEntryPrice: longShares > 0 ? longAverageEntryPrice : null,
-      lastStagePrice: Number.isFinite(lastLongStagePrice)
-        ? lastLongStagePrice
-        : null,
-      lastTrigger: lastEntryStageTrigger || null,
-      mode: entryStageMode,
-      nextTriggerPrice:
-        entryStageMode === "price_pullback" &&
+  const captureEntryStageState = () => ({
+    totalStages: entryStagePercents.length,
+    filledStages: filledEntryStages,
+    sharesHeld: longShares,
+    averageEntryPrice: longShares > 0 ? longAverageEntryPrice : null,
+    lastStagePrice: Number.isFinite(lastLongStagePrice)
+      ? lastLongStagePrice
+      : null,
+    lastTrigger: lastEntryStageTrigger || null,
+    mode: entryStageMode,
+    nextTriggerPrice:
+      entryStageMode === "price_pullback" &&
         filledEntryStages < entryStagePercents.length &&
         Number.isFinite(lastLongStagePrice)
-          ? lastLongStagePrice
-          : null,
-    });
-
-    const captureExitStageState = () => ({
-      totalStages: exitStagePercents.length,
-      executedStages: filledExitStages,
-      remainingShares: longShares,
-      lastStagePrice: Number.isFinite(lastLongExitStagePrice)
-        ? lastLongExitStagePrice
+        ? lastLongStagePrice
         : null,
-      lastTrigger: lastExitStageTrigger || null,
-      mode: exitStageMode,
-      nextTriggerPrice:
-        exitStageMode === "price_rally" &&
+  });
+
+  const captureExitStageState = () => ({
+    totalStages: exitStagePercents.length,
+    executedStages: filledExitStages,
+    remainingShares: longShares,
+    lastStagePrice: Number.isFinite(lastLongExitStagePrice)
+      ? lastLongExitStagePrice
+      : null,
+    lastTrigger: lastExitStageTrigger || null,
+    mode: exitStageMode,
+    nextTriggerPrice:
+      exitStageMode === "price_rally" &&
         filledExitStages < exitStagePercents.length &&
         Number.isFinite(lastLongExitStagePrice)
-          ? lastLongExitStagePrice
-          : null,
-    });
+        ? lastLongExitStagePrice
+        : null,
+  });
   for (let i = startIdx; i < n; i++) {
     const curC = closes[i];
     const curH = highs[i];
@@ -9225,27 +9222,27 @@ function runStrategy(data, params, options = {}) {
       if (pendingTrade && pendingTrade.executeOnDate === dates[i]) {
         const actualTradePrice = curO;
 
-          if (pendingTrade.type === "buy") {
-            const stageIndex =
-              Number.isInteger(pendingTrade.stageIndex) && pendingTrade.stageIndex >= 0
-                ? pendingTrade.stageIndex
-                : filledEntryStages;
-            const result = executeLongStage({
-              tradePrice: actualTradePrice,
-              tradeDate: dates[i],
-              stageIndex,
-              investmentLimitOverride: pendingTrade.investmentLimit,
-              strategyKey: pendingTrade.strategy,
-              signalIndex: i,
-              kdValues: pendingTrade.kdValues,
-              macdValues: pendingTrade.macdValues,
-              indicatorValues: pendingTrade.indicatorValues,
-              trigger: pendingTrade.stageTrigger,
-            });
-            if (result.executed) {
-              executedBuy = true;
-            }
-          } else if (pendingTrade.type === "short") {
+        if (pendingTrade.type === "buy") {
+          const stageIndex =
+            Number.isInteger(pendingTrade.stageIndex) && pendingTrade.stageIndex >= 0
+              ? pendingTrade.stageIndex
+              : filledEntryStages;
+          const result = executeLongStage({
+            tradePrice: actualTradePrice,
+            tradeDate: dates[i],
+            stageIndex,
+            investmentLimitOverride: pendingTrade.investmentLimit,
+            strategyKey: pendingTrade.strategy,
+            signalIndex: i,
+            kdValues: pendingTrade.kdValues,
+            macdValues: pendingTrade.macdValues,
+            indicatorValues: pendingTrade.indicatorValues,
+            trigger: pendingTrade.stageTrigger,
+          });
+          if (result.executed) {
+            executedBuy = true;
+          }
+        } else if (pendingTrade.type === "short") {
           // 執行隔日做空
           const actualAdjustedPrice = actualTradePrice * (1 + buyFee / 100);
           const actualShares = Math.floor(
@@ -9746,10 +9743,10 @@ function runStrategy(data, params, options = {}) {
 
               const stagePercent =
                 exitStagePercents[
-                  Math.min(
-                    stageIndexForPlan,
-                    exitStagePercents.length - 1,
-                  )
+                Math.min(
+                  stageIndexForPlan,
+                  exitStagePercents.length - 1,
+                )
                 ] || 0;
               const cumulativePercent = exitStagePercents
                 .slice(0, stageIndexForPlan + 1)
@@ -9782,7 +9779,7 @@ function runStrategy(data, params, options = {}) {
                 cumulativeStagePercent: cumulativePercent,
                 plannedShares:
                   Array.isArray(currentLongExitPlan) &&
-                  stageIndexForPlan < currentLongExitPlan.length
+                    stageIndexForPlan < currentLongExitPlan.length
                     ? currentLongExitPlan[stageIndexForPlan]
                     : executedShares,
                 consumedEntryStages: Array.isArray(consumption?.stages)
@@ -10015,11 +10012,11 @@ function runStrategy(data, params, options = {}) {
                 };
               break;
             }
-        case "cover_k_d_cross":
-          {
-            const pluginResult = callStrategyPlugin(
-              'cover_k_d_cross',
-              'shortExit',
+          case "cover_k_d_cross":
+            {
+              const pluginResult = callStrategyPlugin(
+                'cover_k_d_cross',
+                'shortExit',
                 i,
                 shortExitParams,
               );
@@ -10045,57 +10042,57 @@ function runStrategy(data, params, options = {}) {
                 kC > dC &&
                 kPC <= dPC &&
                 dC < thXC;
-            if (coverSignal)
-              coverKDValues = {
-                kPrev: kPC,
-                dPrev: dPC,
-                kNow: kC,
-                dNow: dC,
-                kNext: indicators.kCover[i + 1] ?? null,
-                dNext: indicators.dCover[i + 1] ?? null,
-              };
-            break;
-          }
-        case "cover_volume_spike":
-          {
-            const pluginResult = callStrategyPlugin(
-              'cover_volume_spike',
-              'shortExit',
-              i,
-              shortExitParams,
-            );
-            if (pluginResult) {
-              coverSignal = pluginResult.cover === true;
-              shortExitRuleResult = pluginResult;
-              const meta = pluginResult.meta || {};
-              if (!coverIndicatorValues && meta.indicatorValues)
-                coverIndicatorValues = meta.indicatorValues;
+              if (coverSignal)
+                coverKDValues = {
+                  kPrev: kPC,
+                  dPrev: dPC,
+                  kNow: kC,
+                  dNow: dC,
+                  kNext: indicators.kCover[i + 1] ?? null,
+                  dNext: indicators.dCover[i + 1] ?? null,
+                };
               break;
             }
-            const avgVolume =
-              Array.isArray(indicators.volumeAvgShortExit)
-                ? indicators.volumeAvgShortExit[i]
-                : undefined;
-            const multiplierRaw = Number(shortExitParams?.multiplier);
-            const multiplier =
-              Number.isFinite(multiplierRaw) && multiplierRaw > 0
-                ? multiplierRaw
-                : 2;
-            coverSignal =
-              check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
-            if (coverSignal)
-              coverIndicatorValues = {
-                成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
-                均量: [
-                  indicators.volumeAvgShortExit?.[i - 1] ?? null,
-                  avgVolume,
-                  indicators.volumeAvgShortExit?.[i + 1] ?? null,
-                ],
-              };
-            break;
-          }
-        case "cover_price_breakout":
-          const bpC = shortExitParams.period || 20;
+          case "cover_volume_spike":
+            {
+              const pluginResult = callStrategyPlugin(
+                'cover_volume_spike',
+                'shortExit',
+                i,
+                shortExitParams,
+              );
+              if (pluginResult) {
+                coverSignal = pluginResult.cover === true;
+                shortExitRuleResult = pluginResult;
+                const meta = pluginResult.meta || {};
+                if (!coverIndicatorValues && meta.indicatorValues)
+                  coverIndicatorValues = meta.indicatorValues;
+                break;
+              }
+              const avgVolume =
+                Array.isArray(indicators.volumeAvgShortExit)
+                  ? indicators.volumeAvgShortExit[i]
+                  : undefined;
+              const multiplierRaw = Number(shortExitParams?.multiplier);
+              const multiplier =
+                Number.isFinite(multiplierRaw) && multiplierRaw > 0
+                  ? multiplierRaw
+                  : 2;
+              coverSignal =
+                check(avgVolume) && check(curV) && curV > avgVolume * multiplier;
+              if (coverSignal)
+                coverIndicatorValues = {
+                  成交量: [volumes[i - 1] ?? null, curV, volumes[i + 1] ?? null],
+                  均量: [
+                    indicators.volumeAvgShortExit?.[i - 1] ?? null,
+                    avgVolume,
+                    indicators.volumeAvgShortExit?.[i + 1] ?? null,
+                  ],
+                };
+              break;
+            }
+          case "cover_price_breakout":
+            const bpC = shortExitParams.period || 20;
             if (i >= bpC) {
               const hsC = highs.slice(i - bpC, i).filter((h) => check(h));
               if (hsC.length > 0) {
@@ -10566,89 +10563,89 @@ function runStrategy(data, params, options = {}) {
       if (!entryMACDValues && entryMeta && entryMeta.macdValues)
         entryMACDValues = entryMeta.macdValues;
       let shouldEnterStage = false;
-        let stageTriggerType = null;
-        if (buySignal) {
+      let stageTriggerType = null;
+      if (buySignal) {
+        shouldEnterStage = true;
+        stageTriggerType = "signal";
+      }
+      if (
+        !shouldEnterStage &&
+        entryStageMode === "price_pullback" &&
+        filledEntryStages > 0 &&
+        filledEntryStages < entryStagePercents.length &&
+        longPos === 1 &&
+        Number.isFinite(lastLongStagePrice) &&
+        check(curC)
+      ) {
+        if (tradeTiming === "close" && curC < lastLongStagePrice) {
           shouldEnterStage = true;
-          stageTriggerType = "signal";
+          stageTriggerType = "price_pullback";
+        } else if (canTradeOpen && curC < lastLongStagePrice) {
+          shouldEnterStage = true;
+          stageTriggerType = "price_pullback";
         }
-        if (
-          !shouldEnterStage &&
-          entryStageMode === "price_pullback" &&
-          filledEntryStages > 0 &&
-          filledEntryStages < entryStagePercents.length &&
-          longPos === 1 &&
-          Number.isFinite(lastLongStagePrice) &&
-          check(curC)
-        ) {
-          if (tradeTiming === "close" && curC < lastLongStagePrice) {
-            shouldEnterStage = true;
-            stageTriggerType = "price_pullback";
-          } else if (canTradeOpen && curC < lastLongStagePrice) {
-            shouldEnterStage = true;
-            stageTriggerType = "price_pullback";
-          }
-        }
-        if (shouldEnterStage) {
-          tradePrice = null;
-          tradeDate = dates[i];
-          const stageIndex = filledEntryStages;
-          const triggerLabel = stageTriggerType || "signal";
-          if (tradeTiming === "close") {
-            tradePrice = curC;
-            if (check(tradePrice) && tradePrice > 0 && longCap > 0) {
-              let baseCapitalForSizing = initialCapital;
-              if (positionBasis === "totalCapital") {
-                baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
-              }
-              const result = executeLongStage({
-                tradePrice,
-                tradeDate,
-                stageIndex,
-                baseCapitalForSizing,
-                strategyKey: entryStrategy,
-                signalIndex: i,
-                kdValues: entryKDValues,
-                macdValues: entryMACDValues,
-                indicatorValues: entryIndicatorValues,
-                trigger: triggerLabel,
-              });
-              if (result.executed) {
-                executedBuy = true;
-              }
-            }
-          } else if (canTradeOpen) {
+      }
+      if (shouldEnterStage) {
+        tradePrice = null;
+        tradeDate = dates[i];
+        const stageIndex = filledEntryStages;
+        const triggerLabel = stageTriggerType || "signal";
+        if (tradeTiming === "close") {
+          tradePrice = curC;
+          if (check(tradePrice) && tradePrice > 0 && longCap > 0) {
             let baseCapitalForSizing = initialCapital;
             if (positionBasis === "totalCapital") {
               baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
             }
-            const maxInvestmentAllowed =
-              baseCapitalForSizing *
-              (entryStagePercents[Math.min(stageIndex, entryStagePercents.length - 1)] / 100);
-            const actualInvestmentLimit = Math.min(
-              longCap,
-              maxInvestmentAllowed,
-            );
-
-            if (actualInvestmentLimit > 0) {
-              pendingNextDayTrade = {
-                type: "buy",
-                executeOnDate: dates[i + 1],
-                investmentLimit: actualInvestmentLimit,
-                strategy: entryStrategy,
-                triggerIndex: i,
-                stageIndex,
-                kdValues: entryKDValues,
-                macdValues: entryMACDValues,
-                indicatorValues: entryIndicatorValues,
-                stageTrigger: triggerLabel,
-              };
-            } else {
-              console.warn(
-                `[Worker LONG] Stage ${stageIndex + 1} pending entry skipped due to zero investment limit on ${dates[i]}.`,
-              );
+            const result = executeLongStage({
+              tradePrice,
+              tradeDate,
+              stageIndex,
+              baseCapitalForSizing,
+              strategyKey: entryStrategy,
+              signalIndex: i,
+              kdValues: entryKDValues,
+              macdValues: entryMACDValues,
+              indicatorValues: entryIndicatorValues,
+              trigger: triggerLabel,
+            });
+            if (result.executed) {
+              executedBuy = true;
             }
           }
+        } else if (canTradeOpen) {
+          let baseCapitalForSizing = initialCapital;
+          if (positionBasis === "totalCapital") {
+            baseCapitalForSizing = portfolioVal[i - 1] ?? initialCapital;
+          }
+          const maxInvestmentAllowed =
+            baseCapitalForSizing *
+            (entryStagePercents[Math.min(stageIndex, entryStagePercents.length - 1)] / 100);
+          const actualInvestmentLimit = Math.min(
+            longCap,
+            maxInvestmentAllowed,
+          );
+
+          if (actualInvestmentLimit > 0) {
+            pendingNextDayTrade = {
+              type: "buy",
+              executeOnDate: dates[i + 1],
+              investmentLimit: actualInvestmentLimit,
+              strategy: entryStrategy,
+              triggerIndex: i,
+              stageIndex,
+              kdValues: entryKDValues,
+              macdValues: entryMACDValues,
+              indicatorValues: entryIndicatorValues,
+              stageTrigger: triggerLabel,
+            };
+          } else {
+            console.warn(
+              `[Worker LONG] Stage ${stageIndex + 1} pending entry skipped due to zero investment limit on ${dates[i]}.`,
+            );
+          }
         }
+      }
     }
     if (enableShorting && shortPos === 0 && longPos === 0) {
       let shortSignal = false;
@@ -10681,7 +10678,7 @@ function runStrategy(data, params, options = {}) {
               check(indicators.maLongShortEntry[i - 1]) &&
               indicators.maShortShortEntry[i] < indicators.maLongShortEntry[i] &&
               indicators.maShortShortEntry[i - 1] >=
-                indicators.maLongShortEntry[i - 1];
+              indicators.maLongShortEntry[i - 1];
             if (shortSignal)
               shortEntryIndicatorValues = {
                 短SMA: [
@@ -11145,71 +11142,71 @@ function runStrategy(data, params, options = {}) {
     const finalP =
       lastIdx >= 0 && check(closes[lastIdx]) ? closes[lastIdx] : null;
     if (forceFinalLiquidation && longPos === 1 && finalP !== null && longShares > 0) {
-        const rev = longShares * finalP * (1 - sellFee / 100);
-        const entryCostWithFee = longPositionCostWithFee;
-        const prof = rev - entryCostWithFee;
-        const profitPercent =
-          entryCostWithFee > 0 ? (prof / entryCostWithFee) * 100 : 0;
-        longCap += rev;
-        const finalTradeData = {
-          type: "sell",
-          date: dates[lastIdx],
-          price: finalP,
-          shares: longShares,
-          revenue: rev,
+      const rev = longShares * finalP * (1 - sellFee / 100);
+      const entryCostWithFee = longPositionCostWithFee;
+      const prof = rev - entryCostWithFee;
+      const profitPercent =
+        entryCostWithFee > 0 ? (prof / entryCostWithFee) * 100 : 0;
+      longCap += rev;
+      const finalTradeData = {
+        type: "sell",
+        date: dates[lastIdx],
+        price: finalP,
+        shares: longShares,
+        revenue: rev,
+        profit: prof,
+        profitPercent,
+        capital_after: longCap,
+        triggeredByStopLoss: false,
+        triggeredByTakeProfit: false,
+        triggeringStrategy: "EndOfPeriod",
+        simType: "long",
+        entryCost: entryCostWithFee,
+        entryAveragePrice: longAverageEntryPrice,
+        stageCount: currentLongEntryBreakdown.length,
+        positionId: currentLongPositionId,
+      };
+      longTrades.push(finalTradeData);
+      if (!sellSigs.some((s) => s.index === lastIdx))
+        sellSigs.push({ date: dates[lastIdx], index: lastIdx });
+      longStateSeries[lastIdx] = "出場";
+      positionStatesFull[lastIdx] = combinePositionLabel(
+        longStateSeries[lastIdx],
+        shortStateSeries[lastIdx],
+      );
+      const aggregatedEntry = buildAggregatedLongEntry();
+      if (aggregatedEntry) {
+        longCompletedTrades.push({
+          entry: aggregatedEntry,
+          exit: finalTradeData,
           profit: prof,
           profitPercent,
-          capital_after: longCap,
-          triggeredByStopLoss: false,
-          triggeredByTakeProfit: false,
-          triggeringStrategy: "EndOfPeriod",
-          simType: "long",
-          entryCost: entryCostWithFee,
-          entryAveragePrice: longAverageEntryPrice,
-          stageCount: currentLongEntryBreakdown.length,
-          positionId: currentLongPositionId,
-        };
-        longTrades.push(finalTradeData);
-        if (!sellSigs.some((s) => s.index === lastIdx))
-          sellSigs.push({ date: dates[lastIdx], index: lastIdx });
-        longStateSeries[lastIdx] = "出場";
-        positionStatesFull[lastIdx] = combinePositionLabel(
-          longStateSeries[lastIdx],
-          shortStateSeries[lastIdx],
-        );
-        const aggregatedEntry = buildAggregatedLongEntry();
-        if (aggregatedEntry) {
-          longCompletedTrades.push({
-            entry: aggregatedEntry,
-            exit: finalTradeData,
-            profit: prof,
-            profitPercent,
-          });
-        }
-        longPl[lastIdx] = longCap - initialCapital;
-        longPos = 0;
-        longShares = 0;
-        lastBuyP = 0;
-        longAverageEntryPrice = 0;
-        longPositionCostWithFee = 0;
-        longPositionCostWithoutFee = 0;
-        currentLongEntryBreakdown = [];
-        filledEntryStages = 0;
-        currentLongExitPlan = null;
-        filledExitStages = exitStagePercents.length;
-        lastLongExitStagePrice = finalP;
-        lastExitStageTrigger = "final_day";
-        lastLongStagePrice = null;
-        lastEntryStageTrigger = null;
-        longEntryStageStates[lastIdx] = captureEntryStageState();
-        longExitStageStates[lastIdx] = captureExitStageState();
-        filledExitStages = 0;
-        lastLongExitStagePrice = null;
-        lastExitStageTrigger = null;
-        currentLongPositionId = null;
-        console.log(
-          `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
-        );
+        });
+      }
+      longPl[lastIdx] = longCap - initialCapital;
+      longPos = 0;
+      longShares = 0;
+      lastBuyP = 0;
+      longAverageEntryPrice = 0;
+      longPositionCostWithFee = 0;
+      longPositionCostWithoutFee = 0;
+      currentLongEntryBreakdown = [];
+      filledEntryStages = 0;
+      currentLongExitPlan = null;
+      filledExitStages = exitStagePercents.length;
+      lastLongExitStagePrice = finalP;
+      lastExitStageTrigger = "final_day";
+      lastLongStagePrice = null;
+      lastEntryStageTrigger = null;
+      longEntryStageStates[lastIdx] = captureEntryStageState();
+      longExitStageStates[lastIdx] = captureExitStageState();
+      filledExitStages = 0;
+      lastLongExitStagePrice = null;
+      lastExitStageTrigger = null;
+      currentLongPositionId = null;
+      console.log(
+        `[Worker LONG] Final Sell Executed: ${finalTradeData.shares}@${finalP} on ${dates[lastIdx]}`,
+      );
     } else if (longPos === 1) {
       longPl[lastIdx] = longPl[lastIdx > 0 ? lastIdx - 1 : 0] ?? 0;
     }
@@ -11361,22 +11358,22 @@ function runStrategy(data, params, options = {}) {
       finalStateFallback = finalEvaluationFallbackMeta;
     }
 
-  let annualR = 0;
-  let buyHoldAnnualizedReturn = 0;
-  let firstValidPriceIdxBH = -1;
-  let lastValidPriceIdxBH = -1;
-  const buyHoldSummary = {
-    firstValidPriceIdx: null,
-    firstValidPriceDate: null,
-    firstValidPriceGapFromEffective: null,
-    firstValidPriceGapFromRequested: null,
-    invalidBarsBeforeFirstValid: { count: 0, samples: [] },
-    gapToleranceDays: CRITICAL_START_GAP_TOLERANCE_DAYS,
-    exceedsGapTolerance: false,
-  };
-  // 使用使用者設定的日期範圍來計算年化報酬
-  const firstDateStr = params.startDate;
-  const lastDateStr = params.endDate;
+    let annualR = 0;
+    let buyHoldAnnualizedReturn = 0;
+    let firstValidPriceIdxBH = -1;
+    let lastValidPriceIdxBH = -1;
+    const buyHoldSummary = {
+      firstValidPriceIdx: null,
+      firstValidPriceDate: null,
+      firstValidPriceGapFromEffective: null,
+      firstValidPriceGapFromRequested: null,
+      invalidBarsBeforeFirstValid: { count: 0, samples: [] },
+      gapToleranceDays: CRITICAL_START_GAP_TOLERANCE_DAYS,
+      exceedsGapTolerance: false,
+    };
+    // 使用使用者設定的日期範圍來計算年化報酬
+    const firstDateStr = params.startDate;
+    const lastDateStr = params.endDate;
     if (firstDateStr && lastDateStr) {
       const firstD = new Date(firstDateStr);
       const lastD = new Date(lastDateStr);
@@ -11752,10 +11749,10 @@ function runStrategy(data, params, options = {}) {
     const adjustSignals = (signals) =>
       Array.isArray(signals)
         ? signals
-            .filter(
-              (s) => typeof s.index === "number" && s.index >= visibleStartIdx,
-            )
-            .map((s) => ({ ...s, index: s.index - visibleStartIdx }))
+          .filter(
+            (s) => typeof s.index === "number" && s.index >= visibleStartIdx,
+          )
+          .map((s) => ({ ...s, index: s.index - visibleStartIdx }))
         : [];
     const trimmedIndicatorDisplay = sliceIndicatorDisplay(
       indicatorDisplayFull,
@@ -11806,14 +11803,14 @@ function runStrategy(data, params, options = {}) {
     }
     const pendingTradeSnapshot = pendingNextDayTrade
       ? {
-          type: pendingNextDayTrade.type || pendingNextDayTrade.kind || null,
-          action: pendingNextDayTrade.action || null,
-          strategy: pendingNextDayTrade.strategy || null,
-          reason: pendingNextDayTrade.reason || null,
-          triggeredAt: pendingNextDayTrade.triggeredAt || null,
-          plannedDate:
-            pendingNextDayTrade.date || pendingNextDayTrade.nextDate || null,
-        }
+        type: pendingNextDayTrade.type || pendingNextDayTrade.kind || null,
+        action: pendingNextDayTrade.action || null,
+        strategy: pendingNextDayTrade.strategy || null,
+        reason: pendingNextDayTrade.reason || null,
+        triggeredAt: pendingNextDayTrade.triggeredAt || null,
+        plannedDate:
+          pendingNextDayTrade.date || pendingNextDayTrade.nextDate || null,
+      }
       : null;
 
     const runtimeDiagnostics = {
@@ -11893,18 +11890,18 @@ function runStrategy(data, params, options = {}) {
       strategyReturns: sliceArray(strategyReturns),
       dates: sliceArray(dates),
       chartBuySignals: adjustSignals(buySigs),
-        chartSellSignals: adjustSignals(sellSigs),
-        chartShortSignals: adjustSignals(shortSigs),
-        chartCoverSignals: adjustSignals(coverSigs),
-        entryStrategy: params.entryStrategy,
-        exitStrategy: params.exitStrategy,
-        entryParams: params.entryParams,
-        entryStages: entryStagePercents.slice(),
-        entryStagingMode: entryStageMode,
-        exitParams: params.exitParams,
-        exitStages: exitStagePercents.slice(),
-        exitStagingMode: exitStageMode,
-        multiStageEnabled,
+      chartSellSignals: adjustSignals(sellSigs),
+      chartShortSignals: adjustSignals(shortSigs),
+      chartCoverSignals: adjustSignals(coverSigs),
+      entryStrategy: params.entryStrategy,
+      exitStrategy: params.exitStrategy,
+      entryParams: params.entryParams,
+      entryStages: entryStagePercents.slice(),
+      entryStagingMode: entryStageMode,
+      exitParams: params.exitParams,
+      exitStages: exitStagePercents.slice(),
+      exitStagingMode: exitStageMode,
+      multiStageEnabled,
       enableShorting: params.enableShorting,
       shortEntryStrategy: params.shortEntryStrategy,
       shortExitStrategy: params.shortExitStrategy,
@@ -12055,7 +12052,7 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   const summaryAverage =
     summaryAccumulator.driftValues.length > 0
       ? summaryAccumulator.driftValues.reduce((sum, val) => sum + val, 0) /
-        summaryAccumulator.driftValues.length
+      summaryAccumulator.driftValues.length
       : null;
   const summaryMax =
     summaryAccumulator.driftValues.length > 0
@@ -12064,22 +12061,22 @@ function computeParameterSensitivity({ data, baseParams, baselineMetrics }) {
   const summaryPositive =
     summaryAccumulator.positive.length > 0
       ? summaryAccumulator.positive.reduce((sum, val) => sum + val, 0) /
-        summaryAccumulator.positive.length
+      summaryAccumulator.positive.length
       : null;
   const summaryNegative =
     summaryAccumulator.negative.length > 0
       ? summaryAccumulator.negative.reduce((sum, val) => sum + val, 0) /
-        summaryAccumulator.negative.length
+      summaryAccumulator.negative.length
       : null;
   const summarySharpeDrop =
     summaryAccumulator.sharpeDrops.length > 0
       ? summaryAccumulator.sharpeDrops.reduce((sum, val) => sum + val, 0) /
-        summaryAccumulator.sharpeDrops.length
+      summaryAccumulator.sharpeDrops.length
       : null;
   const summarySharpeGain =
     summaryAccumulator.sharpeGains.length > 0
       ? summaryAccumulator.sharpeGains.reduce((sum, val) => sum + val, 0) /
-        summaryAccumulator.sharpeGains.length
+      summaryAccumulator.sharpeGains.length
       : null;
 
   const stabilityComponents = evaluateSensitivityStability(
@@ -12206,7 +12203,7 @@ function buildSensitivityGroup({
   const groupSharpeGain =
     validSharpeGain.length > 0
       ? validSharpeGain.reduce((sum, val) => sum + val, 0) /
-        validSharpeGain.length
+      validSharpeGain.length
       : null;
   const groupStabilityComponents = evaluateSensitivityStability(
     groupAverage,
@@ -12291,8 +12288,8 @@ function evaluateSensitivityParameter({
           ? scenarioAnnualized - baselineAnnualizedReturn
           : scenarioAnnualized
         : Number.isFinite(baselineAnnualizedReturn)
-        ? -baselineAnnualizedReturn
-        : null;
+          ? -baselineAnnualizedReturn
+          : null;
       const driftPercent = Number.isFinite(deltaAnnualizedReturn)
         ? Math.abs(deltaAnnualizedReturn)
         : null;
@@ -12378,19 +12375,19 @@ function evaluateSensitivityParameter({
   const avgDrift =
     absoluteDrifts.length > 0
       ? absoluteDrifts.reduce((sum, val) => sum + val, 0) /
-        absoluteDrifts.length
+      absoluteDrifts.length
       : null;
   const maxDrift =
     absoluteDrifts.length > 0 ? Math.max(...absoluteDrifts) : null;
   const positiveBias =
     positiveDeltas.length > 0
       ? positiveDeltas.reduce((sum, val) => sum + val, 0) /
-        positiveDeltas.length
+      positiveDeltas.length
       : null;
   const negativeBias =
     negativeDeltas.length > 0
       ? negativeDeltas.reduce((sum, val) => sum + val, 0) /
-        negativeDeltas.length
+      negativeDeltas.length
       : null;
   const avgSharpeDrop =
     sharpeDrops.length > 0
@@ -12586,13 +12583,13 @@ function cloneParamsForSensitivity(baseParams) {
     },
     shortEntryParams: {
       ...(baseParams.shortEntryParams &&
-      typeof baseParams.shortEntryParams === "object"
+        typeof baseParams.shortEntryParams === "object"
         ? baseParams.shortEntryParams
         : {}),
     },
     shortExitParams: {
       ...(baseParams.shortExitParams &&
-      typeof baseParams.shortExitParams === "object"
+        typeof baseParams.shortExitParams === "object"
         ? baseParams.shortExitParams
         : {}),
     },
@@ -12836,23 +12833,23 @@ function createOptimizationParamTemplate(baseParams = {}) {
         : null;
     template.shortEntryParams =
       baseParams.shortEntryParams &&
-      typeof baseParams.shortEntryParams === "object"
+        typeof baseParams.shortEntryParams === "object"
         ? { ...baseParams.shortEntryParams }
         : null;
     template.shortExitParams =
       baseParams.shortExitParams &&
-      typeof baseParams.shortExitParams === "object"
+        typeof baseParams.shortExitParams === "object"
         ? { ...baseParams.shortExitParams }
         : null;
     template.entryStages = Array.isArray(baseParams.entryStages)
       ? baseParams.entryStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
+        stage && typeof stage === "object" ? { ...stage } : stage,
+      )
       : null;
     template.exitStages = Array.isArray(baseParams.exitStages)
       ? baseParams.exitStages.map((stage) =>
-          stage && typeof stage === "object" ? { ...stage } : stage,
-        )
+        stage && typeof stage === "object" ? { ...stage } : stage,
+      )
       : null;
   }
   template.base.__skipSensitivity = true;
@@ -12993,14 +12990,14 @@ async function runOptimization(
   } else {
     // 批量優化模式：判斷快取暖身期是否足夠參數優化需求
     // 只有在暖身資料不足時才重新抓取
-    
+
     // 計算參數優化所需的暖身起點
     const optDataStart = baseParams.dataStartDate || baseParams.startDate;
     const optEffectiveStart = baseParams.effectiveStartDate || baseParams.startDate;
     const optLookback = Number.isFinite(baseParams.lookbackDays)
       ? baseParams.lookbackDays
       : null;
-    
+
     // 檢查參數掃描時的最大值是否會增加暖身期需求
     // 某些參數（如 MA period、RSI period 等）的最大值會影響指標計算的暖身天數
     let adjustedLookback = optLookback;
@@ -13008,7 +13005,7 @@ async function runOptimization(
       const rangeMax = Number.isFinite(optRange.to) ? optRange.to : optRange.from;
       const rangeMin = Number.isFinite(optRange.from) ? optRange.from : rangeMax;
       const maxRangeValue = Math.max(Math.abs(rangeMax), Math.abs(rangeMin));
-      
+
       // 對於周期參數（period, length, lookback等），最大值直接影響暖身期
       // 例如：MA period=50 需要至少 50 天的歷史數據；MACD(12,26,9) 需要 26+9=35 天
       // 為了安全起見，如果參數最大值大於當前 lookback，增加暖身期
@@ -13019,7 +13016,7 @@ async function runOptimization(
         console.log(`[Worker Opt] 參數掃描最大值 (${maxRangeValue}) > 基礎 lookback (${optLookback})，調整暖身期至 ${adjustedLookback}`);
       }
     }
-    
+
     // 確定所需的最早暖身日期
     let requiredWarmupStart = optDataStart;
     if (adjustedLookback && optEffectiveStart) {
@@ -13031,11 +13028,11 @@ async function runOptimization(
       // 取最早的日期作為暖身起點
       requiredWarmupStart = calculatedWarmup < optDataStart ? calculatedWarmup : optDataStart;
     }
-    
+
     // 檢查快取資料的暖身起點是否足夠
     let cacheWarmupSufficient = false;
     let cacheToUse = null;
-    
+
     if (Array.isArray(cachedData) && cachedData.length > 0) {
       const cacheFirstDate = cachedData[0]?.date;
       if (cacheFirstDate && cacheFirstDate <= requiredWarmupStart) {
@@ -13055,7 +13052,7 @@ async function runOptimization(
         console.log(`[Worker Opt] Worker 快取暖身期不足（快取起點：${cacheFirstDate}，需求起點：${requiredWarmupStart}）`);
       }
     }
-    
+
     if (cacheWarmupSufficient && cacheToUse) {
       // 快取暖身期足夠，直接使用
       stockData = cacheToUse;
@@ -13412,7 +13409,7 @@ self.onmessage = async function (e) {
               ),
               adjustmentFallbackInfo:
                 cachedMeta?.adjustmentFallbackInfo &&
-                typeof cachedMeta.adjustmentFallbackInfo === "object"
+                  typeof cachedMeta.adjustmentFallbackInfo === "object"
                   ? cachedMeta.adjustmentFallbackInfo
                   : null,
               debugSteps: Array.isArray(cachedMeta?.debugSteps)
@@ -13455,7 +13452,7 @@ self.onmessage = async function (e) {
             adjustmentFallbackApplied: Boolean(cachedMeta.adjustmentFallbackApplied),
             adjustmentFallbackInfo:
               cachedMeta?.adjustmentFallbackInfo &&
-              typeof cachedMeta.adjustmentFallbackInfo === "object"
+                typeof cachedMeta.adjustmentFallbackInfo === "object"
                 ? cachedMeta.adjustmentFallbackInfo
                 : null,
             debugSteps: Array.isArray(cachedMeta.debugSteps)
@@ -13533,11 +13530,11 @@ self.onmessage = async function (e) {
       const endISO = params.endDate || null;
       const visibleStrategyData = Array.isArray(strategyData)
         ? strategyData.filter((row) => {
-            if (!row || !row.date) return false;
-            if (startISO && row.date < startISO) return false;
-            if (endISO && row.date > endISO) return false;
-            return true;
-          })
+          if (!row || !row.date) return false;
+          if (startISO && row.date < startISO) return false;
+          if (endISO && row.date > endISO) return false;
+          return true;
+        })
         : [];
 
       if (visibleStrategyData.length === 0) {
@@ -13716,11 +13713,11 @@ self.onmessage = async function (e) {
       // 將結果與資料來源一起回傳
       const metaInfo = outcome ||
         workerLastMeta || {
-          stockName: params.stockNo,
-          dataSource: fetched
-            ? params.marketType || params.market || "未知"
-            : "快取",
-        };
+        stockName: params.stockNo,
+        dataSource: fetched
+          ? params.marketType || params.market || "未知"
+          : "快取",
+      };
       self.postMessage({
         type: "result",
         data: backtestResult,
@@ -13884,7 +13881,7 @@ self.onmessage = async function (e) {
         };
       const diagnosticsMeta =
         suggestionOutcome?.diagnostics &&
-        typeof suggestionOutcome.diagnostics === "object"
+          typeof suggestionOutcome.diagnostics === "object"
           ? suggestionOutcome.diagnostics
           : null;
       let evaluationRecoveredFromFinalState = false;
@@ -14009,8 +14006,7 @@ self.onmessage = async function (e) {
         };
         evaluationRecoveredFromFinalState = true;
         evaluationRecoveryNotes = [
-          `finalEvaluation 由 finalState 快照重建：${
-            fallbackMeta.fallbackFromDate || derivedDate || "未知日期"
+          `finalEvaluation 由 finalState 快照重建：${fallbackMeta.fallbackFromDate || derivedDate || "未知日期"
           } → ${fallbackMeta.requestedLastDate || latestDate || "未知日期"}`,
         ];
         todayResult.finalEvaluation = evaluation;
@@ -14072,8 +14068,7 @@ self.onmessage = async function (e) {
         }
         if (Array.isArray(coverage) && coverage.length > 0) {
           developerNotes.push(
-            `覆蓋區段 ${coverage.length} 段，fingerprint ${
-              coverageFingerprint || "N/A"
+            `覆蓋區段 ${coverage.length} 段，fingerprint ${coverageFingerprint || "N/A"
             }`,
           );
         }
@@ -14217,7 +14212,7 @@ self.onmessage = async function (e) {
           evaluationMeta.requestedLastDate || datasetLastDate;
         const fallbackReasonLabel =
           evaluationMeta.fallbackReason ===
-          "final_evaluation_degraded_missing_price"
+            "final_evaluation_degraded_missing_price"
             ? "最新交易日缺少有效收盤價"
             : evaluationMeta.fallbackReason ===
               "final_evaluation_recovered_from_snapshot"
@@ -14227,8 +14222,7 @@ self.onmessage = async function (e) {
           `${fallbackReasonLabel}，已改以 ${fallbackFromDate || "前一交易日"} 的資料推導今日建議。`,
         );
         developerNotes.push(
-          `finalEvaluation fallback：${fallbackFromDate || "N/A"} ← ${
-            requestedLastDate || "N/A"
+          `finalEvaluation fallback：${fallbackFromDate || "N/A"} ← ${requestedLastDate || "N/A"
           }`,
         );
         if (
@@ -14239,10 +14233,9 @@ self.onmessage = async function (e) {
             `最新有效資料落後資料最後日期 ${evaluationMeta.fallbackLagDays} 日。`,
           );
           developerNotes.push(
-            `fallback 落後 ${evaluationMeta.fallbackLagDays} 日（bars=${
-              Number.isFinite(evaluationMeta.fallbackLagBars)
-                ? evaluationMeta.fallbackLagBars
-                : "N/A"
+            `fallback 落後 ${evaluationMeta.fallbackLagDays} 日（bars=${Number.isFinite(evaluationMeta.fallbackLagBars)
+              ? evaluationMeta.fallbackLagBars
+              : "N/A"
             }）。`,
           );
         }

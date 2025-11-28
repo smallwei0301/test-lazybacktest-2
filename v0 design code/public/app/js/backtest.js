@@ -12380,3 +12380,106 @@ document.addEventListener('DOMContentLoaded', function () {
         console.log('[Market Switch] 市場切換功能已初始化');
     }, 100);
 });
+
+// --- Price Inspector Logic ---
+
+async function handlePriceInspectorDownload(format) {
+    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
+        showError('無資料可下載');
+        return;
+    }
+
+    const context = getPriceInspectorContext();
+    const tableModel = buildPriceInspectorTableModel(context);
+    const filename = `price_data_${context.stockNo || 'unknown'}_${new Date().toISOString().slice(0, 10)}.${format}`;
+
+    if (format === 'json') {
+        const data = tableModel.rows.map(r => r.values);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        downloadBlob(blob, filename);
+    } else if (format === 'csv') {
+        const headers = tableModel.headerConfig.map(c => c.label);
+        const csvContent = [
+            headers.join(','),
+            ...tableModel.rows.map(row => {
+                return tableModel.headerConfig.map(col => {
+                    const val = row.values[col.key];
+                    return `"${(val === undefined || val === null ? '' : String(val)).replace(/"/g, '""')}"`;
+                }).join(',');
+            })
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        downloadBlob(blob, filename);
+    }
+
+    // Track download stats
+    try {
+        await fetch('/.netlify/functions/price-inspector-download', {
+            method: 'POST',
+            body: JSON.stringify({ format, stockNo: context.stockNo, market: context.market }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+    } catch (e) {
+        console.warn('Failed to track download', e);
+    }
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// --- Price Inspector Event Listeners ---
+document.addEventListener('DOMContentLoaded', function () {
+    const openPriceInspectorBtn = document.getElementById('openPriceInspector');
+    if (openPriceInspectorBtn) {
+        openPriceInspectorBtn.addEventListener('click', openPriceInspectorModal);
+    }
+
+    const closePriceInspectorBtn = document.getElementById('closePriceInspector');
+    if (closePriceInspectorBtn) {
+        closePriceInspectorBtn.addEventListener('click', closePriceInspectorModal);
+    }
+
+    // Close modal when clicking outside
+    const priceInspectorModal = document.getElementById('priceInspectorModal');
+    if (priceInspectorModal) {
+        priceInspectorModal.addEventListener('click', function (event) {
+            if (event.target === priceInspectorModal) {
+                closePriceInspectorModal();
+            }
+        });
+    }
+
+    // Download Menu Logic
+    const downloadToggle = document.getElementById('priceInspectorDownloadToggle');
+    const downloadMenu = document.getElementById('priceInspectorDownloadMenu');
+
+    if (downloadToggle && downloadMenu) {
+        downloadToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            downloadMenu.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!downloadToggle.contains(e.target) && !downloadMenu.contains(e.target)) {
+                downloadMenu.classList.add('hidden');
+            }
+        });
+
+        downloadMenu.querySelectorAll('[data-download-format]').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const format = e.currentTarget.dataset.downloadFormat;
+                downloadMenu.classList.add('hidden');
+                await handlePriceInspectorDownload(format);
+            });
+        });
+    }
+});
