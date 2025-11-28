@@ -2139,6 +2139,39 @@ const trendBackgroundPlugin = {
         });
         ctx.restore();
     },
+    afterDatasetsDraw(chart, _args, opts) {
+        if (currentChartMode !== CHART_MODES.PRICE) return;
+        const { ctx, chartArea } = chart;
+        if (!chartArea) return;
+
+        const legendItems = [
+            { label: '上漲段', color: 'rgba(147, 51, 234, 0.1)' },
+            { label: '下跌段', color: 'rgba(59, 130, 246, 0.1)' }
+        ];
+
+        ctx.save();
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        let x = chartArea.left + 12;
+        let y = chartArea.top + 12;
+
+        legendItems.forEach((item) => {
+            ctx.fillStyle = item.color;
+            ctx.fillRect(x, y, 12, 12);
+
+            ctx.fillStyle = 'var(--muted-foreground)';
+            // Note: Canvas doesn't support CSS vars directly, but we can try to approximate or use a fixed color.
+            // Using a fixed color for now to ensure visibility.
+            ctx.fillStyle = '#64748b';
+
+            ctx.fillText(item.label, x + 18, y);
+            x += 70;
+        });
+
+        ctx.restore();
+    },
 };
 
 if (typeof Chart !== 'undefined' && Chart.register) {
@@ -6611,17 +6644,6 @@ function renderIndicatorCell(columnGroup, rowIndex) {
 }
 
 function formatStageModeLabel(mode, type) {
-    if (!mode) return '';
-    if (type === 'entry') {
-        return mode === 'price_pullback' ? '價格回落加碼' : '策略訊號再觸發';
-    }
-    if (type === 'exit') {
-        return mode === 'price_rally' ? '價格走高分批出場' : '策略訊號再觸發';
-    }
-    return '';
-}
-
-function resolveStageModeDisplay(stageCandidate, stageMode, type) {
     if (stageCandidate && stageCandidate.isSingleFull) {
         return '皆可';
     }

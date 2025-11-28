@@ -949,11 +949,18 @@
         const container = document.createElement('div');
         container.className = 'mt-1 space-y-2';
 
+        const values = Array.isArray(aggregate.wfeValuesPercent) ? aggregate.wfeValuesPercent : [];
+        const count = values.length;
+        const above50 = values.filter(v => v >= 50).length;
+        const above30 = values.filter(v => v >= 30).length;
+        const ratio50 = count > 0 ? Math.round((above50 / count) * 100) : 0;
+        const ratio30 = count > 0 ? Math.round((above30 / count) * 100) : 0;
+
         const summary = document.createElement('p');
-        summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)}，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
+        summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)} (視窗比 ≥ 50%: ${ratio50}%; ≥ 30%: ${ratio30}%)，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
         container.appendChild(summary);
 
-        const values = Array.isArray(aggregate.wfeValuesPercent) ? aggregate.wfeValuesPercent : [];
+        // values is already declared above
         const items = values
             .map((value, index) => (Number.isFinite(value) ? `視窗 ${index + 1}：${formatPercent(value)}` : null))
             .filter((item) => item);
@@ -2533,7 +2540,14 @@
         if (!sampleAdequate) {
             statWeight = Math.min(statWeight, 0.3);
         }
-        const windowScore = (Number.isFinite(quality.value) ? quality.value : 0) * statWeight;
+        let windowScore = (Number.isFinite(quality.value) ? quality.value : 0) * statWeight;
+
+        // ✅ P3 Fix: 若視窗未通過門檻，給予分數懲罰 (0.5x)
+        // 避免發生「通過率 0% 但總分 100 分」的矛盾狀況
+        const evaluation = evaluateWindow(metrics, resolvedThresholds);
+        if (!evaluation.pass) {
+            windowScore *= 0.5;
+        }
 
         return {
             oosQuality: quality,
