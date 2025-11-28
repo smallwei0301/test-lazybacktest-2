@@ -1,4 +1,4 @@
-const fetch = require('node-fetch');
+// const fetch = require('node-fetch'); // Native fetch used in Node 18+
 const readline = require('readline');
 
 const rl = readline.createInterface({
