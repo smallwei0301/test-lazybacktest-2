@@ -58,7 +58,7 @@
           longPeriod: {
             type: 'integer',
             minimum: 1,
-            maximum: 1000,
+            maximum: 365,
             default: 20,
           },
         },

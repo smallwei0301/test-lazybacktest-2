@@ -2139,39 +2139,6 @@ const trendBackgroundPlugin = {
         });
         ctx.restore();
     },
-    afterDatasetsDraw(chart, _args, opts) {
-        if (currentChartMode !== CHART_MODES.PRICE) return;
-        const { ctx, chartArea } = chart;
-        if (!chartArea) return;
-
-        const legendItems = [
-            { label: '上漲段', color: 'rgba(147, 51, 234, 0.1)' },
-            { label: '下跌段', color: 'rgba(59, 130, 246, 0.1)' }
-        ];
-
-        ctx.save();
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-
-        let x = chartArea.left + 12;
-        let y = chartArea.top + 12;
-
-        legendItems.forEach((item) => {
-            ctx.fillStyle = item.color;
-            ctx.fillRect(x, y, 12, 12);
-
-            ctx.fillStyle = 'var(--muted-foreground)';
-            // Note: Canvas doesn't support CSS vars directly, but we can try to approximate or use a fixed color.
-            // Using a fixed color for now to ensure visibility.
-            ctx.fillStyle = '#64748b';
-
-            ctx.fillText(item.label, x + 18, y);
-            x += 70;
-        });
-
-        ctx.restore();
-    },
 };
 
 if (typeof Chart !== 'undefined' && Chart.register) {
@@ -6644,6 +6611,17 @@ function renderIndicatorCell(columnGroup, rowIndex) {
 }
 
 function formatStageModeLabel(mode, type) {
+    if (!mode) return '';
+    if (type === 'entry') {
+        return mode === 'price_pullback' ? '價格回落加碼' : '策略訊號再觸發';
+    }
+    if (type === 'exit') {
+        return mode === 'price_rally' ? '價格走高分批出場' : '策略訊號再觸發';
+    }
+    return '';
+}
+
+function resolveStageModeDisplay(stageCandidate, stageMode, type) {
     if (stageCandidate && stageCandidate.isSingleFull) {
         return '皆可';
     }
@@ -12379,111 +12357,4 @@ document.addEventListener('DOMContentLoaded', function () {
         initializeMarketSwitch();
         console.log('[Market Switch] 市場切換功能已初始化');
     }, 100);
-});
-
-// --- Price Inspector Logic ---
-
-async function handlePriceInspectorDownload(format) {
-    if (!Array.isArray(visibleStockData) || visibleStockData.length === 0) {
-        showError('無資料可下載');
-        return;
-    }
-
-    const context = getPriceInspectorContext();
-    const tableModel = buildPriceInspectorTableModel(context);
-    const filename = `price_data_${context.stockNo || 'unknown'}_${new Date().toISOString().slice(0, 10)}.${format}`;
-
-    if (format === 'json') {
-        const data = tableModel.rows.map(r => r.values);
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        downloadBlob(blob, filename);
-    } else if (format === 'csv') {
-        const headers = tableModel.headerConfig.map(c => c.label);
-        const csvContent = [
-            headers.join(','),
-            ...tableModel.rows.map(row => {
-                return tableModel.headerConfig.map(col => {
-                    const val = row.values[col.key];
-                    return `"${(val === undefined || val === null ? '' : String(val)).replace(/"/g, '""')}"`;
-                }).join(',');
-            })
-        ].join('\n');
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        downloadBlob(blob, filename);
-    }
-
-    // Track download stats
-    try {
-        await fetch('/.netlify/functions/price-inspector-download', {
-            method: 'POST',
-            body: JSON.stringify({ format, stockNo: context.stockNo, market: context.market }),
-            headers: { 'Content-Type': 'application/json' }
-        });
-    } catch (e) {
-        console.warn('Failed to track download', e);
-    }
-}
-
-function downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-// --- Price Inspector Event Listeners ---
-// --- Price Inspector Event Listeners (Delegation) ---
-document.addEventListener('click', function (event) {
-    const target = event.target;
-
-    // Open Button
-    if (target && target.closest('#openPriceInspector')) {
-        openPriceInspectorModal();
-        return;
-    }
-
-    // Close Button
-    if (target && target.closest('#closePriceInspector')) {
-        closePriceInspectorModal();
-        return;
-    }
-
-    // Modal Background (Click outside)
-    if (target && target.id === 'priceInspectorModal') {
-        closePriceInspectorModal();
-        return;
-    }
-
-    // Download Toggle
-    const downloadToggle = target.closest('#priceInspectorDownloadToggle');
-    if (downloadToggle) {
-        event.stopPropagation();
-        const menu = document.getElementById('priceInspectorDownloadMenu');
-        if (menu) menu.classList.toggle('hidden');
-        return;
-    }
-
-    // Download Items
-    const downloadItem = target.closest('[data-download-format]');
-    if (downloadItem) {
-        const format = downloadItem.dataset.downloadFormat;
-        const menu = document.getElementById('priceInspectorDownloadMenu');
-        if (menu) menu.classList.add('hidden');
-        handlePriceInspectorDownload(format);
-        return;
-    }
-
-    // Close Download Menu if clicking elsewhere
-    const menu = document.getElementById('priceInspectorDownloadMenu');
-    const toggle = document.getElementById('priceInspectorDownloadToggle');
-    if (menu && !menu.classList.contains('hidden')) {
-        if ((!toggle || !toggle.contains(target)) && (!menu || !menu.contains(target))) {
-            menu.classList.add('hidden');
-        }
-    }
 });

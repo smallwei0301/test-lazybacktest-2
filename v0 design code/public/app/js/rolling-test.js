@@ -949,18 +949,11 @@
         const container = document.createElement('div');
         container.className = 'mt-1 space-y-2';
 
-        const values = Array.isArray(aggregate.wfeValuesPercent) ? aggregate.wfeValuesPercent : [];
-        const count = values.length;
-        const above50 = values.filter(v => v >= 50).length;
-        const above30 = values.filter(v => v >= 30).length;
-        const ratio50 = count > 0 ? Math.round((above50 / count) * 100) : 0;
-        const ratio30 = count > 0 ? Math.round((above30 / count) * 100) : 0;
-
         const summary = document.createElement('p');
-        summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)} (視窗比 ≥ 50%: ${ratio50}%; ≥ 30%: ${ratio30}%)，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
+        summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)}，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
         container.appendChild(summary);
 
-        // values is already declared above
+        const values = Array.isArray(aggregate.wfeValuesPercent) ? aggregate.wfeValuesPercent : [];
         const items = values
             .map((value, index) => (Number.isFinite(value) ? `視窗 ${index + 1}：${formatPercent(value)}` : null))
             .filter((item) => item);
