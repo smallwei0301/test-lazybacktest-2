@@ -55,11 +55,11 @@ class ProxyClient {
     if (!params.stockNo) {
       throw new Error('Missing required parameter: stockNo');
     }
-    
+
     if (!params.startDate) {
       throw new Error('Missing required parameter: startDate');
     }
-    
+
     if (!params.endDate) {
       throw new Error('Missing required parameter: endDate');
     }
@@ -69,7 +69,7 @@ class ProxyClient {
     if (!dateRegex.test(params.startDate)) {
       throw new Error('Invalid date format: startDate must be YYYY-MM-DD');
     }
-    
+
     if (!dateRegex.test(params.endDate)) {
       throw new Error('Invalid date format: endDate must be YYYY-MM-DD');
     }
@@ -77,7 +77,7 @@ class ProxyClient {
     // 驗證日期範圍
     const startDate = new Date(params.startDate);
     const endDate = new Date(params.endDate);
-    
+
     if (startDate > endDate) {
       throw new Error('Start date must be before or equal to end date');
     }
@@ -117,7 +117,7 @@ class ProxyClient {
   buildApiUrl(params) {
     const market = this.normalizeMarket(params.market);
     const isIndex = this.isIndexSymbol(params.stockNo);
-    
+
     // 決定端點
     let endpoint = '/api/twse/';
     if (isIndex || market === 'INDEX') {
@@ -139,7 +139,7 @@ class ProxyClient {
     if (params.adjusted) {
       queryParams.set('adjusted', '1');
     }
-    
+
     if (params.forceSource) {
       queryParams.set('forceSource', params.forceSource);
     }
@@ -197,8 +197,8 @@ class ProxyClient {
       // 簡單的 polyfill
       return {
         signal: { aborted: false },
-        abort: () => {},
-        cleanup: () => {}
+        abort: () => { },
+        cleanup: () => { }
       };
     }
 
@@ -206,10 +206,10 @@ class ProxyClient {
     const timeoutId = setTimeout(() => {
       controller.abort();
     }, timeout);
-    
+
     // 清理函數
     controller.cleanup = () => clearTimeout(timeoutId);
-    
+
     return controller;
   }
 
@@ -230,11 +230,11 @@ class ProxyClient {
    */
   async makeRequest(url, options = {}) {
     let lastError;
-    
+
     for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
       const controller = this.createTimeoutController(this.config.timeout);
       let response;
-      
+
       try {
         response = await fetch(url, {
           headers: this.config.headers,
@@ -257,7 +257,7 @@ class ProxyClient {
           await this.delay(this.config.retryDelay * (attempt + 1));
           continue;
         }
-        
+
         break;
       }
 
@@ -266,7 +266,7 @@ class ProxyClient {
         // 讀取回應內容
         const text = await response.text();
         let payload = {};
-        
+
         try {
           payload = text ? JSON.parse(text) : {};
         } catch (parseError) {
@@ -280,7 +280,7 @@ class ProxyClient {
         }
 
         return payload;
-        
+
       } catch (error) {
         lastError = error;
 
@@ -289,7 +289,7 @@ class ProxyClient {
           await this.delay(this.config.retryDelay * (attempt + 1));
           continue;
         }
-        
+
         break;
       }
     }
@@ -370,11 +370,11 @@ class ProxyClient {
    */
   async testDataSource(params) {
     const startTime = Date.now();
-    
+
     try {
       const result = await this.getStockData(params);
       const endTime = Date.now();
-      
+
       return {
         success: true,
         responseTime: endTime - startTime,
@@ -383,7 +383,7 @@ class ProxyClient {
       };
     } catch (error) {
       const endTime = Date.now();
-      
+
       return {
         success: false,
         responseTime: endTime - startTime,

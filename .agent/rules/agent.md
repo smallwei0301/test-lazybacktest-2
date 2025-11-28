@@ -4,9 +4,9 @@ trigger: always_on
 
 # Lazybacktest 綜合診斷、暖身與價格治理手冊（版本 LB-GUIDE-20250610B）
 
-## Codex Agent 使用守則
+## 使用守則
 
-- 此文件為 Codex 每次啟動時必須遵守的最高原則，請在任何情況下優先依照執行。
+- 此文件為每次啟動時必須遵守的最高原則，請在任何情況下優先依照執行。
 
 - 每次回覆都必須使用繁體中文並維持高資訊密度，這是不可違反的規則。
 
@@ -199,4 +199,3 @@ Lazybacktest 部署於 Netlify，主要服務台灣上市櫃與 ETF 回測，每
   2. 於訓練視窗列印 `plan.config.iterationLimit`、`cachedDataOverride` 長度、`baseParams.startDate/endDate`，確認資料與設定同步。
   3. 若資料無誤仍出現差異，抓取 Worker 端 `optimizeCombinationIterative` 的指標收斂紀錄，與批量面板的 `diagnostics` 比對，以判斷是否需統一 trials 或風控流程。
 - **追蹤建議**：每次修改滾動測試或批量優化流程後，更新對應版本碼並在 `log.md` 記錄觀察到的視窗資料範圍、迭代紀錄與比對結果，避免重複排查。
-

@@ -2,7 +2,7 @@
 trigger: always_on
 ---
 
-# VS Code AI Agent 工作指南
+# AI Agent 工作指南
 
 **本檔案是 LazyBacktest 專案的 AI Agent 工作規則。所有 AI 工具在開始工作前必須讀取此文件。**
 

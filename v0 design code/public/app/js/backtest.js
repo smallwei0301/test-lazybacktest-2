@@ -12437,49 +12437,53 @@ function downloadBlob(blob, filename) {
 }
 
 // --- Price Inspector Event Listeners ---
-document.addEventListener('DOMContentLoaded', function () {
-    const openPriceInspectorBtn = document.getElementById('openPriceInspector');
-    if (openPriceInspectorBtn) {
-        openPriceInspectorBtn.addEventListener('click', openPriceInspectorModal);
+// --- Price Inspector Event Listeners (Delegation) ---
+document.addEventListener('click', function (event) {
+    const target = event.target;
+
+    // Open Button
+    if (target && target.closest('#openPriceInspector')) {
+        openPriceInspectorModal();
+        return;
     }
 
-    const closePriceInspectorBtn = document.getElementById('closePriceInspector');
-    if (closePriceInspectorBtn) {
-        closePriceInspectorBtn.addEventListener('click', closePriceInspectorModal);
+    // Close Button
+    if (target && target.closest('#closePriceInspector')) {
+        closePriceInspectorModal();
+        return;
     }
 
-    // Close modal when clicking outside
-    const priceInspectorModal = document.getElementById('priceInspectorModal');
-    if (priceInspectorModal) {
-        priceInspectorModal.addEventListener('click', function (event) {
-            if (event.target === priceInspectorModal) {
-                closePriceInspectorModal();
-            }
-        });
+    // Modal Background (Click outside)
+    if (target && target.id === 'priceInspectorModal') {
+        closePriceInspectorModal();
+        return;
     }
 
-    // Download Menu Logic
-    const downloadToggle = document.getElementById('priceInspectorDownloadToggle');
-    const downloadMenu = document.getElementById('priceInspectorDownloadMenu');
+    // Download Toggle
+    const downloadToggle = target.closest('#priceInspectorDownloadToggle');
+    if (downloadToggle) {
+        event.stopPropagation();
+        const menu = document.getElementById('priceInspectorDownloadMenu');
+        if (menu) menu.classList.toggle('hidden');
+        return;
+    }
 
-    if (downloadToggle && downloadMenu) {
-        downloadToggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            downloadMenu.classList.toggle('hidden');
-        });
+    // Download Items
+    const downloadItem = target.closest('[data-download-format]');
+    if (downloadItem) {
+        const format = downloadItem.dataset.downloadFormat;
+        const menu = document.getElementById('priceInspectorDownloadMenu');
+        if (menu) menu.classList.add('hidden');
+        handlePriceInspectorDownload(format);
+        return;
+    }
 
-        document.addEventListener('click', (e) => {
-            if (!downloadToggle.contains(e.target) && !downloadMenu.contains(e.target)) {
-                downloadMenu.classList.add('hidden');
-            }
-        });
-
-        downloadMenu.querySelectorAll('[data-download-format]').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const format = e.currentTarget.dataset.downloadFormat;
-                downloadMenu.classList.add('hidden');
-                await handlePriceInspectorDownload(format);
-            });
-        });
+    // Close Download Menu if clicking elsewhere
+    const menu = document.getElementById('priceInspectorDownloadMenu');
+    const toggle = document.getElementById('priceInspectorDownloadToggle');
+    if (menu && !menu.classList.contains('hidden')) {
+        if ((!toggle || !toggle.contains(target)) && (!menu || !menu.contains(target))) {
+            menu.classList.add('hidden');
+        }
     }
 });
