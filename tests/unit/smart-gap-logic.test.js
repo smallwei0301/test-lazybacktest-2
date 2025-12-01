@@ -6,11 +6,17 @@ const getPriceModeKey = () => 'raw';
 const computeMissingRanges = (coverage, start, end) => {
     // Simplified mock: if coverage is empty, return full range
     if (!coverage || coverage.length === 0) return [{ start, end }];
-    // If coverage covers everything, return empty
-    // This is a simple mock, real one is more complex
-    return [];
+
+    const reqStart = start;
+    const reqEnd = end;
+
+    // Check if any range covers reqStart to reqEnd
+    const covered = coverage.some(r => r.start <= reqStart && r.end >= reqEnd);
+    if (covered) return [];
+
+    return [{ start, end }];
 };
-const dedupeAndSortData = (data) => data;
+const dedupeAndSortData = (data) => data.sort((a, b) => a.date.localeCompare(b.date));
 const fetchWithAdaptiveRetry = jest.fn();
 const normalizeProxyRow = (row) => ({ ...row, date: row.date }); // Simple pass-through
 const self = { postMessage: jest.fn() };
@@ -35,7 +41,24 @@ function setYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split, ent
         marketCache.set(stockKey, new Map());
     }
     const stockCache = marketCache.get(stockKey);
-    stockCache.set(year, entry);
+
+    // Check if entry already exists
+    const existing = stockCache.get(year);
+    if (existing) {
+        // Merge data
+        const mergedData = dedupeAndSortData([...existing.data, ...entry.data]);
+
+        // Merge coverage
+        const mergedCoverage = [...(existing.coverage || []), ...(entry.coverage || [])];
+
+        stockCache.set(year, {
+            data: mergedData,
+            coverage: mergedCoverage,
+            lastUpdated: Date.now()
+        });
+    } else {
+        stockCache.set(year, entry);
+    }
 }
 
 function filterDatasetForWindow(data, start, end) {
@@ -121,52 +144,61 @@ async function tryFetchSmartGapMergedRange({
 
     const priceModeKey = getPriceModeKey(false);
 
+    // 1. Check Cache (Memory Only for Worker)
     for (const chunk of chunks) {
-        const entry = getYearSupersetEntry(marketKey, stockNo, priceModeKey, chunk.year, split);
-        if (entry && Array.isArray(entry.data)) {
-            const missing = computeMissingRanges(entry.coverage, chunk.start, chunk.end);
-            if (missing.length === 0) {
-                chunk.cached = true;
-                chunk.data = filterDatasetForWindow(entry.data, chunk.start, chunk.end);
+        // Only check cache for historical chunks
+        if (chunk.isHistorical) {
+            const entry = getYearSupersetEntry(marketKey, stockNo, split ? 'split' : 'raw', chunk.year, split);
+            if (entry) {
+                // Check if entry covers the chunk range
+                const missing = computeMissingRanges(entry.coverage, chunk.start, chunk.end);
+                if (missing.length === 0) {
+                    chunk.cached = true;
+                    chunk.data = filterDatasetForWindow(entry.data, chunk.start, chunk.end);
+                }
             }
         }
     }
 
+    // 2. Group missing chunks into requests
     const fetchRequests = [];
     let currentRequest = null;
-
     const MAX_MERGE_YEARS = 3;
+
     for (const chunk of chunks) {
-        if (!chunk.cached) {
-            if (!currentRequest) {
+        if (chunk.cached) continue;
+
+        // If we have a current request, try to merge
+        if (currentRequest) {
+            // Check if contiguous
+            const isContiguous = true; // Simplified for year iteration
+            const isSameType = currentRequest.isHistorical === chunk.isHistorical;
+            const withinLimit = (chunk.year - currentRequest.startYear) < MAX_MERGE_YEARS;
+
+            if (isContiguous && isSameType && withinLimit) {
+                currentRequest.end = chunk.end;
+                currentRequest.years.push(chunk.year);
+                currentRequest.chunks.push(chunk);
+            } else {
+                fetchRequests.push(currentRequest);
                 currentRequest = {
                     start: chunk.start,
                     end: chunk.end,
                     years: [chunk.year],
-                    isHistorical: chunk.isHistorical
+                    chunks: [chunk],
+                    isHistorical: chunk.isHistorical,
+                    startYear: chunk.year
                 };
-            } else {
-                // Check if adding this year exceeds the max merge limit
-                // AND if the historical status matches
-                if (currentRequest.years.length < MAX_MERGE_YEARS && currentRequest.isHistorical === chunk.isHistorical) {
-                    currentRequest.end = chunk.end;
-                    currentRequest.years.push(chunk.year);
-                } else {
-                    // Push current request and start a new one
-                    fetchRequests.push(currentRequest);
-                    currentRequest = {
-                        start: chunk.start,
-                        end: chunk.end,
-                        years: [chunk.year],
-                        isHistorical: chunk.isHistorical
-                    };
-                }
             }
         } else {
-            if (currentRequest) {
-                fetchRequests.push(currentRequest);
-                currentRequest = null;
-            }
+            currentRequest = {
+                start: chunk.start,
+                end: chunk.end,
+                years: [chunk.year],
+                chunks: [chunk],
+                isHistorical: chunk.isHistorical,
+                startYear: chunk.year
+            };
         }
     }
     if (currentRequest) {
@@ -238,19 +270,32 @@ async function tryFetchSmartGapMergedRange({
                 if (responsePayload.stockName) fetchedStockName = responsePayload.stockName;
                 if (responsePayload.dataSource) sourceFlags.add(responsePayload.dataSource);
 
-                for (const year of req.years) {
-                    const yearStart = `${year}-01-01`;
-                    const yearEnd = `${year}-12-31`;
-                    const yearData = normalized.filter(d => d.date >= yearStart && d.date <= yearEnd);
+                // Save to cache (if historical)
+                if (req.isHistorical) {
+                    for (const year of req.years) {
+                        const yearStartFull = `${year}-01-01`;
+                        const yearEndFull = `${year}-12-31`;
 
-                    if (yearData.length > 0) {
-                        const entry = {
-                            data: yearData,
-                            coverage: [{ start: yearStart, end: yearEnd }],
-                            lastUpdated: Date.now()
-                        };
-                        setYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split, entry);
+                        // Calculate actual coverage for this year based on request range
+                        const coverageStart = req.start > yearStartFull ? req.start : yearStartFull;
+                        const coverageEnd = req.end < yearEndFull ? req.end : yearEndFull;
+
+                        const yearData = normalized.filter(d => d.date >= yearStartFull && d.date <= yearEndFull);
+
+                        if (yearData.length > 0) {
+                            const entry = {
+                                data: yearData,
+                                coverage: [{ start: coverageStart, end: coverageEnd }],
+                                lastUpdated: Date.now()
+                            };
+                            setYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split, entry);
+                        }
                     }
+                }
+
+                // Distribute data to chunks
+                for (const chunk of req.chunks) {
+                    chunk.data = filterDatasetForWindow(normalized, chunk.start, chunk.end);
                 }
                 combinedData.push(...normalized);
             } else {
@@ -418,10 +463,6 @@ describe('Smart Gap Merging Logic', () => {
         // 2. 2025-01-01 to 2025-11-30 (Historical part of current year)
         // 3. 2025-12-01 to 2025-12-01 (Current part)
 
-        // Merging logic:
-        // 2024 and 2025-Jan-Nov are both historical, so they MIGHT be merged if contiguous.
-        // 2025-Dec is current, so it must be separate.
-
         expect(fetchWithAdaptiveRetry).toHaveBeenCalledTimes(2);
 
         // First request: 2024 + 2025(Jan-Nov)
@@ -439,5 +480,37 @@ describe('Smart Gap Merging Logic', () => {
         );
 
         jest.useRealTimers();
+    });
+
+    test('should incrementally fetch and merge missing data', async () => {
+        // Pre-populate cache with Jan-Nov 2025
+        setYearSupersetEntry('TWSE', '2330', 'raw', 2025, false, {
+            data: [{ date: '2025-01-01', close: 100 }],
+            coverage: [{ start: '2025-01-01', end: '2025-11-30' }]
+        });
+
+        fetchWithAdaptiveRetry.mockResolvedValue({
+            data: [{ date: '2025-12-01', close: 110 }]
+        });
+
+        const result = await tryFetchSmartGapMergedRange({
+            stockNo: '2330',
+            startDate: '2025-01-01',
+            endDate: '2025-12-01',
+            marketKey: 'TWSE',
+            fetchDiagnostics: {}
+        });
+
+        // Should only fetch Dec 2025
+        expect(fetchWithAdaptiveRetry).toHaveBeenCalledTimes(1);
+        expect(fetchWithAdaptiveRetry).toHaveBeenCalledWith(
+            expect.stringContaining('start=2025-12-01&end=2025-12-01'),
+            expect.any(Object)
+        );
+
+        // Result should contain merged data (Jan + Dec)
+        expect(result.data).toHaveLength(2);
+        expect(result.data[0].date).toBe('2025-01-01');
+        expect(result.data[1].date).toBe('2025-12-01');
     });
 });

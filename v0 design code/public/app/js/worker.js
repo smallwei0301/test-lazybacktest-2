@@ -5541,7 +5541,27 @@ function setYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split, ent
     marketCache.set(stockKey, new Map());
   }
   const stockCache = marketCache.get(stockKey);
-  stockCache.set(year, entry);
+
+  // Check if entry already exists
+  const existing = stockCache.get(year);
+  if (existing) {
+    // Merge data
+    const mergedData = dedupeAndSortData([...existing.data, ...entry.data]);
+
+    // Merge coverage
+    // We can simply concatenate coverage ranges and let computeMissingRanges handle the logic,
+    // or we can try to merge them. For simplicity and correctness with computeMissingRanges,
+    // we just append. computeMissingRanges uses mergeRangeBounds internally.
+    const mergedCoverage = [...(existing.coverage || []), ...(entry.coverage || [])];
+
+    stockCache.set(year, {
+      data: mergedData,
+      coverage: mergedCoverage,
+      lastUpdated: Date.now()
+    });
+  } else {
+    stockCache.set(year, entry);
+  }
 }
 
 function filterDatasetForWindow(data, start, end) {
@@ -5748,14 +5768,19 @@ async function tryFetchSmartGapMergedRange({
         if (responsePayload.dataSource) sourceFlags.add(responsePayload.dataSource);
 
         for (const year of req.years) {
-          const yearStart = `${year}-01-01`;
-          const yearEnd = `${year}-12-31`;
-          const yearData = normalized.filter(d => d.date >= yearStart && d.date <= yearEnd);
+          const yearStartFull = `${year}-01-01`;
+          const yearEndFull = `${year}-12-31`;
+
+          // Calculate actual coverage for this year based on request range
+          const coverageStart = req.start > yearStartFull ? req.start : yearStartFull;
+          const coverageEnd = req.end < yearEndFull ? req.end : yearEndFull;
+
+          const yearData = normalized.filter(d => d.date >= yearStartFull && d.date <= yearEndFull);
 
           if (yearData.length > 0) {
             const entry = {
               data: yearData,
-              coverage: [{ start: yearStart, end: yearEnd }],
+              coverage: [{ start: coverageStart, end: coverageEnd }],
               lastUpdated: Date.now()
             };
             setYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split, entry);
