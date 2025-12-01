@@ -1,12 +1,11 @@
 /**
  * API 代理客戶端
  * 
- * 統一 API 呼叫邏輯，從 main.js 提取資料獲取相關代碼：
+ * 統一 API 呼叫邏輯，包含：
  * - 股票數據獲取 (TWSE, TPEX, US, INDEX)
- * - 還原股價數據處理
+ * - 智慧空缺合併 (Smart Gap Merging) 與客戶端快取
  * - 錯誤處理和重試機制
  * - 請求參數驗證
- * - 緩存鍵生成
  */
 
 class ProxyClient {
@@ -16,6 +15,7 @@ class ProxyClient {
       timeout: 30000,
       retryAttempts: 2,
       retryDelay: 1000,
+      cacheName: 'lazybacktest-stock-v1',
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
@@ -26,7 +26,6 @@ class ProxyClient {
 
   /**
    * 獲取當前配置
-   * @returns {Object} 配置對象
    */
   getConfig() {
     return { ...this.config };
@@ -34,7 +33,6 @@ class ProxyClient {
 
   /**
    * 更新配置
-   * @param {Object} updates 要更新的配置
    */
   updateConfig(updates) {
     this.config = {
@@ -49,7 +47,6 @@ class ProxyClient {
 
   /**
    * 驗證請求參數
-   * @param {Object} params 請求參數
    */
   validateParams(params) {
     if (!params.stockNo) {
@@ -64,7 +61,6 @@ class ProxyClient {
       throw new Error('Missing required parameter: endDate');
     }
 
-    // 驗證日期格式 (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(params.startDate)) {
       throw new Error('Invalid date format: startDate must be YYYY-MM-DD');
@@ -74,7 +70,6 @@ class ProxyClient {
       throw new Error('Invalid date format: endDate must be YYYY-MM-DD');
     }
 
-    // 驗證日期範圍
     const startDate = new Date(params.startDate);
     const endDate = new Date(params.endDate);
 
@@ -85,8 +80,6 @@ class ProxyClient {
 
   /**
    * 正規化市場值
-   * @param {string} market 市場代碼
-   * @returns {string} 正規化的市場代碼
    */
   normalizeMarket(market) {
     const normalized = (market || 'TWSE').toUpperCase();
@@ -98,8 +91,6 @@ class ProxyClient {
 
   /**
    * 檢查是否為指數代碼
-   * @param {string} stockNo 股票代碼
-   * @returns {boolean} 是否為指數
    */
   isIndexSymbol(stockNo) {
     if (!stockNo || typeof stockNo !== 'string') {
@@ -111,14 +102,11 @@ class ProxyClient {
 
   /**
    * 構建 API URL
-   * @param {Object} params 請求參數
-   * @returns {string} API URL
    */
   buildApiUrl(params) {
     const market = this.normalizeMarket(params.market);
     const isIndex = this.isIndexSymbol(params.stockNo);
 
-    // 決定端點
     let endpoint = '/api/twse/';
     if (isIndex || market === 'INDEX') {
       endpoint = '/api/index/';
@@ -128,14 +116,12 @@ class ProxyClient {
       endpoint = '/api/us/';
     }
 
-    // 構建查詢參數
     const queryParams = new URLSearchParams({
       stockNo: params.stockNo,
       start: params.startDate,
       end: params.endDate
     });
 
-    // 添加可選參數
     if (params.adjusted) {
       queryParams.set('adjusted', '1');
     }
@@ -149,8 +135,6 @@ class ProxyClient {
 
   /**
    * 構建還原股價 API URL
-   * @param {Object} params 請求參數
-   * @returns {string} API URL
    */
   buildAdjustedPriceUrl(params) {
     const queryParams = new URLSearchParams({
@@ -169,32 +153,20 @@ class ProxyClient {
 
   /**
    * 構建緩存鍵
-   * @param {Object} params 請求參數
-   * @returns {string} 緩存鍵
    */
-  buildCacheKey(params) {
+  getCacheKey(params, year) {
     const market = this.normalizeMarket(params.market || 'TWSE');
     const stockNo = (params.stockNo || '').toString().toUpperCase();
-    const priceModeKey = params.adjusted ? 'ADJ' : 'RAW';
-    const splitFlag = params.split ? 'SPLIT' : 'NOSPLIT';
-    const dataStart = params.dataStartDate || params.startDate || 'NA';
-    const effectiveStart = params.effectiveStartDate || params.startDate || 'NA';
-    const lookbackKey = Number.isFinite(params.lookbackDays)
-      ? `LB${Math.round(params.lookbackDays)}`
-      : 'LB-';
-
-    return `${market}|${stockNo}|${priceModeKey}|${splitFlag}|${dataStart}|${effectiveStart}|${lookbackKey}`;
+    const type = params.adjusted ? 'adj' : 'raw';
+    // 注意：這裡的 cache key 設計為按年份儲存
+    return `v1::${market}::${stockNo}::${year}::${type}`;
   }
 
   /**
    * 創建帶超時的 AbortController
-   * @param {number} timeout 超時時間（毫秒）
-   * @returns {AbortController} AbortController 實例
    */
   createTimeoutController(timeout) {
-    // 檢查 AbortController 是否可用（Node.js 環境處理）
     if (typeof AbortController === 'undefined') {
-      // 簡單的 polyfill
       return {
         signal: { aborted: false },
         abort: () => { },
@@ -207,26 +179,17 @@ class ProxyClient {
       controller.abort();
     }, timeout);
 
-    // 清理函數
     controller.cleanup = () => clearTimeout(timeoutId);
 
     return controller;
   }
 
-  /**
-   * 延遲函數
-   * @param {number} ms 延遲毫秒數
-   * @returns {Promise} Promise
-   */
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
    * 執行 HTTP 請求（帶重試）
-   * @param {string} url 請求 URL
-   * @param {Object} options 請求選項
-   * @returns {Promise} 回應 Promise
    */
   async makeRequest(url, options = {}) {
     let lastError;
@@ -247,23 +210,18 @@ class ProxyClient {
         controller.cleanup();
         lastError = error;
 
-        // 如果是 AbortError，轉換為超時錯誤
         if (error.name === 'AbortError') {
           lastError = new Error('Request timeout');
         }
 
-        // 如果不是最後一次嘗試，等待後重試
         if (attempt < this.config.retryAttempts) {
           await this.delay(this.config.retryDelay * (attempt + 1));
           continue;
         }
-
         break;
       }
 
-      // 如果到這裡，說明 fetch 成功了，處理回應
       try {
-        // 讀取回應內容
         const text = await response.text();
         let payload = {};
 
@@ -273,7 +231,6 @@ class ProxyClient {
           payload = {};
         }
 
-        // 檢查 HTTP 狀態和 API 錯誤
         if (!response.ok || payload?.error) {
           const message = payload?.error || `HTTP ${response.status}: ${response.statusText}`;
           throw new Error(message);
@@ -283,13 +240,10 @@ class ProxyClient {
 
       } catch (error) {
         lastError = error;
-
-        // 如果不是最後一次嘗試，等待後重試
         if (attempt < this.config.retryAttempts) {
           await this.delay(this.config.retryDelay * (attempt + 1));
           continue;
         }
-
         break;
       }
     }
@@ -298,342 +252,236 @@ class ProxyClient {
   }
 
   /**
-   * 獲取緩存名稱
+   * 計算需要的區塊 (Smart Gap Merging 核心)
    */
-  get CACHE_NAME() {
-    return 'lazybacktest-data-v1';
-  }
-
-  /**
-   * 獲取股票數據 (智能緩存版)
-   * @param {Object} params 請求參數
-   * @returns {Promise<Object>} 股票數據
-   */
-  async getStockData(params) {
-    // 1. 嘗試使用智能緩存
-    try {
-      if (this.isCacheSupported() && !params.forceSource) {
-        return await this.fetchStockDataWithSmartCaching(params);
-      }
-    } catch (error) {
-      console.warn('Smart caching failed, falling back to direct fetch:', error);
-    }
-
-    // 2. 降級為直接請求
-    return this.fetchStockDataDirect(params);
-  }
-
-  /**
-   * 直接獲取股票數據 (無緩存邏輯)
-   * @param {Object} params 請求參數
-   * @returns {Promise<Object>} 股票數據
-   */
-  async fetchStockDataDirect(params) {
-    // 驗證參數
-    this.validateParams(params);
-
-    // 構建 URL
-    const url = this.buildApiUrl(params);
-
-    // 執行請求
-    const response = await this.makeRequest(url);
-
-    return response;
-  }
-
-  /**
-   * 檢查是否支援 Cache API
-   */
-  isCacheSupported() {
-    const globalScope = typeof window !== 'undefined' ? window : self;
-    const supported = 'caches' in globalScope;
-    console.log(`[ProxyClient] isCacheSupported: ${supported} (Scope: ${typeof window !== 'undefined' ? 'window' : 'worker'})`);
-    return supported;
-  }
-
-  /**
-   * 智能緩存獲取股票數據
-   */
-  async fetchStockDataWithSmartCaching(params) {
-    console.log('[ProxyClient] fetchStockDataWithSmartCaching called', params);
-    // 1. 計算需要的年份區塊
-    const chunks = this.calculateChunks(params.startDate, params.endDate);
-    console.log('[ProxyClient] Chunks:', chunks);
-
-    // 2. 檢查緩存
-    const { hits, misses } = await this.checkCache(params, chunks);
-    console.log('[ProxyClient] Cache Check - Hits:', hits.length, 'Misses:', misses);
-
-    // 如果全部命中，直接合併返回
-    if (misses.length === 0) {
-      console.log('[ProxyClient] All chunks hit cache');
-      return this.combineAllData(hits, [], params);
-    }
-
-    // 3. 合併缺口 (Smart Gap Merging)
-    const fetchRanges = this.mergeGaps(misses);
-    console.log('[ProxyClient] Fetch Ranges:', fetchRanges);
-
-    // 4. 獲取並緩存缺口數據
-    const fetchedDataList = [];
-    for (const range of fetchRanges) {
-      console.log('[ProxyClient] Fetching range:', range);
-      const data = await this.fetchAndCache(params, range);
-      fetchedDataList.push(data);
-    }
-
-    // 5. 合併所有數據 (緩存 + 新獲取) 並返回
-    return this.combineAllData(hits, fetchedDataList, params);
-  }
-
-  /**
-   * 計算需要的年份區塊
-   */
-  calculateChunks(startDate, endDate) {
-    const startYear = new Date(startDate).getFullYear();
-    const endYear = new Date(endDate).getFullYear();
+  calculateChunks(params) {
+    const start = new Date(params.startDate);
+    const end = new Date(params.endDate);
     const chunks = [];
-    for (let year = startYear; year <= endYear; year++) {
-      chunks.push(year);
+    const currentYear = new Date().getFullYear();
+
+    let year = start.getFullYear();
+    const endYear = end.getFullYear();
+
+    while (year <= endYear) {
+      const isHistorical = year < currentYear;
+
+      // 歷史年份：請求整年 (01-01 ~ 12-31) 以利快取
+      // 當前年份：請求整年 (01-01 ~ 12-31)，API 會處理未來日期，確保我們拿到最新資料
+      // 注意：當前年份不進行長期快取，但為了合併邏輯一致，我們還是定義為整年區塊
+
+      chunks.push({
+        year: year,
+        startDate: `${year}-01-01`,
+        endDate: `${year}-12-31`,
+        isHistorical: isHistorical,
+        cached: false,
+        data: null
+      });
+      year++;
     }
     return chunks;
   }
 
   /**
-   * 檢查緩存狀態
+   * 檢查快取
    */
-  async checkCache(params, chunks) {
-    const hits = [];
-    const misses = [];
-    const cache = await caches.open(this.CACHE_NAME);
-    const currentYear = new Date().getFullYear();
+  async checkCache(chunks, params) {
+    if (typeof caches === 'undefined') return chunks;
 
-    for (const year of chunks) {
-      // 當前年份不讀取緩存 (確保數據新鮮度)
-      if (year === currentYear) {
-        misses.push(year);
-        continue;
-      }
-
-      const key = this.buildYearCacheKey(params, year);
-      const response = await cache.match(key);
-      if (response) {
-        try {
-          const data = await response.json();
-          hits.push({ year, data });
-        } catch (e) {
-          console.warn(`[ProxyClient] Cache parse error for ${year}:`, e);
-          misses.push(year);
-        }
-      } else {
-        misses.push(year);
-      }
-    }
-    return { hits, misses };
-  }
-
-  /**
-   * 合併連續的缺失年份
-   */
-  mergeGaps(missingChunks) {
-    if (missingChunks.length === 0) return [];
-
-    // 排序
-    missingChunks.sort((a, b) => a - b);
-
-    const ranges = [];
-    let startYear = missingChunks[0];
-    let prevYear = missingChunks[0];
-
-    for (let i = 1; i < missingChunks.length; i++) {
-      const year = missingChunks[i];
-      if (year !== prevYear + 1) {
-        // 發現斷點，推入前一段
-        ranges.push({ startYear, endYear: prevYear });
-        startYear = year;
-      }
-      prevYear = year;
-    }
-    // 推入最後一段
-    ranges.push({ startYear, endYear: prevYear });
-
-    // 轉換為日期範圍
-    return ranges.map(range => ({
-      startDate: `${range.startYear}-01-01`,
-      endDate: `${range.endYear}-12-31`
-    }));
-  }
-
-  /**
-   * 獲取數據並切分緩存
-   */
-  async fetchAndCache(params, range) {
-    // 構建請求參數
-    const fetchParams = {
-      ...params,
-      startDate: range.startDate,
-      endDate: range.endDate
-    };
-
-    // 強制直接獲取，避免遞歸
-    const result = await this.fetchStockDataDirect(fetchParams);
-
-    if (!result || !result.data || !Array.isArray(result.data)) {
-      console.warn('[ProxyClient] No data returned for range:', range);
-      return result || { data: [] };
-    }
-
-    // 嚴格數據切分 (Strict Data Slicing)
-    const dataByYear = {};
-    const currentYear = new Date().getFullYear();
-
-    result.data.forEach(row => {
-      const dateStr = row[0]; // 假設格式為 "YYYYMMDD" 或 "YYYY-MM-DD"
-      let year;
-
-      // 簡單的日期解析
-      if (dateStr.includes('-')) {
-        year = parseInt(dateStr.split('-')[0]);
-      } else if (dateStr.includes('/')) {
-        year = parseInt(dateStr.split('/')[0]);
-        // 處理民國年 (假設 3 位數是民國年)
-        if (year < 1911) year += 1911;
-      } else if (dateStr.length === 8) {
-        year = parseInt(dateStr.substring(0, 4));
-      } else {
-        year = new Date(dateStr).getFullYear();
-      }
-
-      if (!isNaN(year)) {
-        if (!dataByYear[year]) dataByYear[year] = [];
-        dataByYear[year].push(row);
-      }
-    });
-
-    // 寫入緩存
     try {
-      const cache = await caches.open(this.CACHE_NAME);
-      console.log(`[ProxyClient] Writing to cache: ${this.CACHE_NAME}`);
+      const cache = await caches.open(this.config.cacheName);
 
-      for (const yearStr in dataByYear) {
-        const year = parseInt(yearStr);
-        const yearData = dataByYear[year];
+      for (const chunk of chunks) {
+        // 只檢查歷史年份的快取，當前年份總是重新抓取
+        if (!chunk.isHistorical) continue;
 
-        // 只緩存歷史年份
-        if (year < currentYear) {
-          const key = this.buildYearCacheKey(params, year);
-          // 保持原始結構，但替換 data
-          const yearResult = { ...result, data: yearData };
-          await cache.put(key, new Response(JSON.stringify(yearResult)));
-          console.log(`[ProxyClient] Cached year ${year} with key ${key}`);
-        } else {
-          console.log(`[ProxyClient] Skipping cache for current year ${year}`);
+        const key = this.getCacheKey(params, chunk.year);
+        const response = await cache.match(key);
+
+        if (response) {
+          try {
+            const json = await response.json();
+            if (json && Array.isArray(json.data)) {
+              chunk.cached = true;
+              chunk.data = json.data;
+            }
+          } catch (e) {
+            console.warn('[ProxyClient] Cache parse error', e);
+          }
         }
       }
     } catch (e) {
-      console.error('[ProxyClient] Cache write failed:', e);
+      console.warn('[ProxyClient] Cache access error', e);
     }
-
-    return result;
+    return chunks;
   }
 
   /**
-   * 合併所有數據並過濾
+   * 合併缺口
    */
-  combineAllData(hits, fetchedDataList, params) {
-    let allRows = [];
+  mergeGaps(chunks) {
+    const requests = [];
+    let currentRange = null;
 
-    // 加入緩存數據
-    hits.forEach(hit => {
-      if (hit.data && hit.data.data) {
-        allRows = allRows.concat(hit.data.data);
+    for (const chunk of chunks) {
+      if (chunk.cached) {
+        if (currentRange) {
+          requests.push(currentRange);
+          currentRange = null;
+        }
+        continue;
       }
-    });
 
-    // 加入新獲取數據
-    fetchedDataList.forEach(fetched => {
-      if (fetched && fetched.data) {
-        allRows = allRows.concat(fetched.data);
+      if (!currentRange) {
+        currentRange = {
+          startDate: chunk.startDate,
+          endDate: chunk.endDate,
+          years: [chunk.year]
+        };
+      } else {
+        // 延長當前範圍
+        currentRange.endDate = chunk.endDate;
+        currentRange.years.push(chunk.year);
       }
+    }
+
+    if (currentRange) {
+      requests.push(currentRange);
+    }
+
+    return requests;
+  }
+
+  /**
+   * 執行請求並處理快取
+   */
+  async fetchAndProcess(requests, chunks, params) {
+    const allData = [];
+
+    // 1. 加入快取資料
+    for (const chunk of chunks) {
+      if (chunk.cached && chunk.data) {
+        allData.push(...chunk.data);
+      }
+    }
+
+    // 2. 抓取缺失範圍
+    if (requests.length > 0) {
+      const cache = typeof caches !== 'undefined' ? await caches.open(this.config.cacheName) : null;
+
+      for (const req of requests) {
+        const fetchParams = {
+          ...params,
+          startDate: req.startDate,
+          endDate: req.endDate
+        };
+
+        // 使用內部方法抓取，避免遞迴
+        const result = await this.getStockDataInternal(fetchParams);
+
+        if (result && Array.isArray(result.data)) {
+          allData.push(...result.data);
+
+          // 切分並寫入快取
+          if (cache) {
+            for (const year of req.years) {
+              const chunk = chunks.find(c => c.year === year);
+              // 只快取歷史年份
+              if (chunk && chunk.isHistorical) {
+                const yearData = result.data.filter(d => {
+                  // 假設 d.date 格式為 YYYY-MM-DD
+                  return d.date && d.date.startsWith(year.toString());
+                });
+
+                if (yearData.length > 0) {
+                  const key = this.getCacheKey(params, year);
+                  const responseToCache = new Response(JSON.stringify({ data: yearData }), {
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  cache.put(key, responseToCache).catch(e => console.warn('Cache put failed', e));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. 過濾與排序
+    // 過濾出使用者請求的精確範圍
+    const finalData = allData.filter(item => {
+      return item.date >= params.startDate && item.date <= params.endDate;
     });
 
     // 排序
-    allRows.sort((a, b) => {
-      const da = a[0].replace(/[-\/]/g, '');
-      const db = b[0].replace(/[-\/]/g, '');
-      return da.localeCompare(db);
-    });
+    finalData.sort((a, b) => a.date.localeCompare(b.date));
 
-    // 去重
-    const uniqueRows = [];
+    // 去重 (以防萬一)
+    const uniqueData = [];
     const seenDates = new Set();
-    for (const row of allRows) {
-      const date = row[0];
-      if (!seenDates.has(date)) {
-        seenDates.add(date);
-        uniqueRows.push(row);
+    for (const item of finalData) {
+      if (!seenDates.has(item.date)) {
+        seenDates.add(item.date);
+        uniqueData.push(item);
       }
     }
 
-    // 過濾請求範圍
-    const start = params.startDate.replace(/[-\/]/g, '');
-    const end = params.endDate.replace(/[-\/]/g, '');
-
-    const filteredRows = uniqueRows.filter(row => {
-      const d = row[0].replace(/[-\/]/g, '');
-      return d >= start && d <= end;
-    });
-
-    // 使用第一個有效結果作為模板
-    const template = (hits[0] && hits[0].data) || (fetchedDataList[0]) || {};
-
-    return {
-      ...template,
-      data: filteredRows,
-      count: filteredRows.length
-    };
+    return uniqueData;
   }
 
   /**
-   * 構建年度緩存鍵
+   * 內部使用的基礎抓取方法
    */
-  buildYearCacheKey(params, year) {
-    const market = this.normalizeMarket(params.market || 'TWSE');
-    const stockNo = (params.stockNo || '').toString().toUpperCase();
-    const priceModeKey = params.adjusted ? 'ADJ' : 'RAW';
-    const splitFlag = params.split ? 'SPLIT' : 'NOSPLIT';
-    // 緩存鍵不包含 startDate/endDate，只包含年份
-    return `https://lazybacktest.local/data/${market}/${stockNo}/${year}/${priceModeKey}/${splitFlag}`;
+  async getStockDataInternal(params) {
+    this.validateParams(params);
+    const url = this.buildApiUrl(params);
+    return await this.makeRequest(url);
   }
 
   /**
-   * 獲取還原股價數據
-   * @param {Object} params 請求參數
-   * @param {string} params.stockNo 股票代碼
-   * @param {string} params.market 市場代碼
-   * @param {string} params.startDate 開始日期 (YYYY-MM-DD)
-   * @param {string} params.endDate 結束日期 (YYYY-MM-DD)
-   * @param {boolean} [params.split] 是否包含股票拆分調整
-   * @returns {Promise<Object>} 還原股價數據
+   * 獲取股票數據 (整合 Smart Gap Merging)
+   */
+  async getStockData(params) {
+    // 如果強制指定來源或不使用快取，則直接抓取
+    if (params.forceSource) {
+      return this.getStockDataInternal(params);
+    }
+
+    try {
+      // 1. 計算區塊
+      const chunks = this.calculateChunks(params);
+
+      // 2. 檢查快取
+      const checkedChunks = await this.checkCache(chunks, params);
+
+      // 3. 合併缺口
+      const fetchRequests = this.mergeGaps(checkedChunks);
+
+      // 4. 抓取與處理
+      const data = await this.fetchAndProcess(fetchRequests, checkedChunks, params);
+
+      return {
+        stockNo: params.stockNo,
+        data: data
+      };
+    } catch (error) {
+      console.warn('[ProxyClient] Smart caching failed, falling back to direct fetch', error);
+      return this.getStockDataInternal(params);
+    }
+  }
+
+  /**
+   * 獲取還原股價數據 (維持原樣)
    */
   async getAdjustedPrice(params) {
-    // 驗證參數
     this.validateParams(params);
-
-    // 構建 URL
     const url = this.buildAdjustedPriceUrl(params);
-
-    // 執行請求
-    const response = await this.makeRequest(url);
-
-    return response;
+    return await this.makeRequest(url);
   }
 
   /**
    * 批次獲取多支股票數據
-   * @param {Array<Object>} stockList 股票列表
-   * @param {Object} commonParams 共同參數
-   * @returns {Promise<Array<Object>>} 批次結果
    */
   async getBatchStockData(stockList, commonParams = {}) {
     const promises = stockList.map(stockParams => {
@@ -650,8 +498,6 @@ class ProxyClient {
 
   /**
    * 測試數據源可用性
-   * @param {Object} params 測試參數
-   * @returns {Promise<Object>} 測試結果
    */
   async testDataSource(params) {
     const startTime = Date.now();
@@ -679,11 +525,4 @@ class ProxyClient {
   }
 }
 
-// Export logic for both CommonJS and Browser/Worker
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ProxyClient };
-} else if (typeof self !== 'undefined') {
-  self.ProxyClient = ProxyClient;
-} else if (typeof window !== 'undefined') {
-  window.ProxyClient = ProxyClient;
-}
+module.exports = { ProxyClient };
