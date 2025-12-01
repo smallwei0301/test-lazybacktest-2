@@ -9,8 +9,6 @@
  * - 緩存鍵生成
  */
 
-console.log('[ProxyClient] Script loading...');
-
 class ProxyClient {
   constructor(config = {}) {
     this.config = {
@@ -335,19 +333,51 @@ class ProxyClient {
     this.validateParams(params);
 
     // 構建 URL
+    const url = this.buildApiUrl(params);
+
+    // 執行請求
+    const response = await this.makeRequest(url);
+
+    return response;
+  }
+
+  /**
+   * 檢查是否支援 Cache API
+   */
+  isCacheSupported() {
+    const globalScope = typeof window !== 'undefined' ? window : self;
+    const supported = 'caches' in globalScope;
+    console.log(`[ProxyClient] isCacheSupported: ${supported} (Scope: ${typeof window !== 'undefined' ? 'window' : 'worker'})`);
+    return supported;
+  }
+
+  /**
+   * 智能緩存獲取股票數據
+   */
+  async fetchStockDataWithSmartCaching(params) {
+    console.log('[ProxyClient] fetchStockDataWithSmartCaching called', params);
+    // 1. 計算需要的年份區塊
+    const chunks = this.calculateChunks(params.startDate, params.endDate);
+    console.log('[ProxyClient] Chunks:', chunks);
+
+    // 2. 檢查緩存
     const { hits, misses } = await this.checkCache(params, chunks);
+    console.log('[ProxyClient] Cache Check - Hits:', hits.length, 'Misses:', misses);
 
     // 如果全部命中，直接合併返回
     if (misses.length === 0) {
+      console.log('[ProxyClient] All chunks hit cache');
       return this.combineAllData(hits, [], params);
     }
 
     // 3. 合併缺口 (Smart Gap Merging)
     const fetchRanges = this.mergeGaps(misses);
+    console.log('[ProxyClient] Fetch Ranges:', fetchRanges);
 
     // 4. 獲取並緩存缺口數據
     const fetchedDataList = [];
     for (const range of fetchRanges) {
+      console.log('[ProxyClient] Fetching range:', range);
       const data = await this.fetchAndCache(params, range);
       fetchedDataList.push(data);
     }
@@ -392,6 +422,7 @@ class ProxyClient {
           const data = await response.json();
           hits.push({ year, data });
         } catch (e) {
+          console.warn(`[ProxyClient] Cache parse error for ${year}:`, e);
           misses.push(year);
         }
       } else {
@@ -448,6 +479,7 @@ class ProxyClient {
     const result = await this.fetchStockDataDirect(fetchParams);
 
     if (!result || !result.data || !Array.isArray(result.data)) {
+      console.warn('[ProxyClient] No data returned for range:', range);
       return result || { data: [] };
     }
 
@@ -479,214 +511,27 @@ class ProxyClient {
     });
 
     // 寫入緩存
-    const cache = await caches.open(this.CACHE_NAME);
-
-    for (const yearStr in dataByYear) {
-      const year = parseInt(yearStr);
-      const yearData = dataByYear[year];
-
-      // 只緩存歷史年份
-      if (year < currentYear) {
-        const key = this.buildYearCacheKey(params, year);
-        // 保持原始結構，但替換 data
-        const yearResult = { ...result, data: yearData };
-        await cache.put(key, new Response(JSON.stringify(yearResult)));
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * 合併所有數據並過濾
-   */
-  combineAllData(hits, fetchedDataList, params) {
-    let allRows = [];
-
-    // 加入緩存數據
-    hits.forEach(hit => {
-      if (hit.data && hit.data.data) {
-        allRows = allRows.concat(hit.data.data);
-      }
-    });
-
-    // 加入新獲取數據
-    fetchedDataList.forEach(fetched => {
-      if (fetched && fetched.data) {
-        allRows = allRows.concat(fetched.data);
-      }
-    });
-
-    // 排序
-    allRows.sort((a, b) => {
-      const da = a[0].replace(/[-\/]/g, '');
-      const db = b[0].replace(/[-\/]/g, '');
-      return da.localeCompare(db);
-    });
-
-    // 去重
-    const uniqueRows = [];
-    const seenDates = new Set();
-    for (const row of allRows) {
-      const date = row[0];
-      if (!seenDates.has(date)) {
-        seenDates.add(date);
-        uniqueRows.push(row);
-      }
-    }
-
-    // 過濾請求範圍
-    const start = params.startDate.replace(/[-\/]/g, '');
-    const end = params.endDate.replace(/[-\/]/g, '');
-
-    const filteredRows = uniqueRows.filter(row => {
-      const d = row[0].replace(/[-\/]/g, '');
-      return d >= start && d <= end;
-    });
-
-    // 使用第一個有效結果作為模板
-    const template = (hits[0] && hits[0].data) || (fetchedDataList[0]) || {};
-
-    return {
-      ...template,
-      data: filteredRows,
-      count: filteredRows.length
-    };
-  }
-
-  /**
-   * 構建年度緩存鍵
-   */
-  buildYearCacheKey(params, year) {
-    const market = this.normalizeMarket(params.market || 'TWSE');
-    const stockNo = (params.stockNo || '').toString().toUpperCase();
-    const priceModeKey = params.adjusted ? 'ADJ' : 'RAW';
-    const splitFlag = params.split ? 'SPLIT' : 'NOSPLIT';
-    // 緩存鍵不包含 startDate/endDate，只包含年份
-    return `https://lazybacktest.local/data/${market}/${stockNo}/${year}/${priceModeKey}/${splitFlag}`;
-  }
-
-  /**
-   * 獲取還原股價數據
-   * @param {Object} params 請求參數
-   * @param {string} params.stockNo 股票代碼
-   * @param {string} params.market 市場代碼
-   * @param {string} params.startDate 開始日期 (YYYY-MM-DD)
-   * @param {string} params.endDate 結束日期 (YYYY-MM-DD)
-   * @param {boolean} [params.split] 是否包含股票拆分調整
-   * @returns {Promise<Object>} 還原股價數據
-   */
-  async getAdjustedPrice(params) {
-    // 驗證參數
-    this.validateParams(params);
-
-    // 構建 URL
-    const url = this.buildAdjustedPriceUrl(params);
-
-    // 執行請求
-    const response = await this.makeRequest(url);
-
-    return response;
-  }
-
-  /**
-   * 批次獲取多支股票數據
-   * @param {Array<Object>} stockList 股票列表
-   * @param {Object} commonParams 共同參數
-   * @returns {Promise<Array<Object>>} 批次結果
-   */
-  async getBatchStockData(stockList, commonParams = {}) {
-    const promises = stockList.map(stockParams => {
-      const fullParams = { ...commonParams, ...stockParams };
-      return this.getStockData(fullParams).catch(error => ({
-        error: error.message,
-        stockNo: stockParams.stockNo,
-        market: stockParams.market
-      }));
-    });
-
-    return Promise.all(promises);
-  }
-
-  /**
-   * 測試數據源可用性
-   * @param {Object} params 測試參數
-   * @returns {Promise<Object>} 測試結果
-   */
-  async testDataSource(params) {
-    const startTime = Date.now();
-
     try {
-      const result = await this.getStockData(params);
-      const endTime = Date.now();
+      const cache = await caches.open(this.CACHE_NAME);
+      console.log(`[ProxyClient] Writing to cache: ${this.CACHE_NAME}`);
 
-      return {
-        success: true,
-        responseTime: endTime - startTime,
-        dataPoints: Array.isArray(result.data) ? result.data.length : 0,
-        result
-      };
-    } catch (error) {
-      const endTime = Date.now();
+      for (const yearStr in dataByYear) {
+        const year = parseInt(yearStr);
+        const yearData = dataByYear[year];
 
-      return {
-        success: false,
-        responseTime: endTime - startTime,
-        error: error.message,
-        dataPoints: 0
-      };
-      startDate: range.startDate,
-        endDate: range.endDate
-    };
-
-    // 強制直接獲取，避免遞歸
-    const result = await this.fetchStockDataDirect(fetchParams);
-
-    if (!result || !result.data || !Array.isArray(result.data)) {
-      return result || { data: [] };
-    }
-
-    // 嚴格數據切分 (Strict Data Slicing)
-    const dataByYear = {};
-    const currentYear = new Date().getFullYear();
-
-    result.data.forEach(row => {
-      const dateStr = row[0]; // 假設格式為 "YYYYMMDD" 或 "YYYY-MM-DD"
-      let year;
-
-      // 簡單的日期解析
-      if (dateStr.includes('-')) {
-        year = parseInt(dateStr.split('-')[0]);
-      } else if (dateStr.includes('/')) {
-        year = parseInt(dateStr.split('/')[0]);
-        // 處理民國年 (假設 3 位數是民國年)
-        if (year < 1911) year += 1911;
-      } else if (dateStr.length === 8) {
-        year = parseInt(dateStr.substring(0, 4));
-      } else {
-        year = new Date(dateStr).getFullYear();
+        // 只緩存歷史年份
+        if (year < currentYear) {
+          const key = this.buildYearCacheKey(params, year);
+          // 保持原始結構，但替換 data
+          const yearResult = { ...result, data: yearData };
+          await cache.put(key, new Response(JSON.stringify(yearResult)));
+          console.log(`[ProxyClient] Cached year ${year} with key ${key}`);
+        } else {
+          console.log(`[ProxyClient] Skipping cache for current year ${year}`);
+        }
       }
-
-      if (!isNaN(year)) {
-        if (!dataByYear[year]) dataByYear[year] = [];
-        dataByYear[year].push(row);
-      }
-    });
-
-    // 寫入緩存
-    const cache = await caches.open(this.CACHE_NAME);
-
-    for (const yearStr in dataByYear) {
-      const year = parseInt(yearStr);
-      const yearData = dataByYear[year];
-
-      // 只緩存歷史年份
-      if (year < currentYear) {
-        const key = this.buildYearCacheKey(params, year);
-        // 保持原始結構，但替換 data
-        const yearResult = { ...result, data: yearData };
-        await cache.put(key, new Response(JSON.stringify(yearResult)));
-      }
+    } catch (e) {
+      console.error('[ProxyClient] Cache write failed:', e);
     }
 
     return result;
@@ -834,18 +679,11 @@ class ProxyClient {
   }
 }
 
-// Export logic for both CommonJS and Browser/Worker
 // Export logic for both CommonJS and Browser/Worker
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { ProxyClient };
-}
-
-// Ensure it's available globally in Worker/Browser regardless of module system
-if (typeof self !== 'undefined') {
+} else if (typeof self !== 'undefined') {
   self.ProxyClient = ProxyClient;
-  console.log('[ProxyClient] Class exported to self (Worker/Global)');
-}
-
-if (typeof window !== 'undefined') {
+} else if (typeof window !== 'undefined') {
   window.ProxyClient = ProxyClient;
 }
