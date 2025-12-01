@@ -333,29 +333,6 @@ class ProxyClient {
     this.validateParams(params);
 
     // 構建 URL
-    const url = this.buildApiUrl(params);
-
-    // 執行請求
-    const response = await this.makeRequest(url);
-
-    return response;
-  }
-
-  /**
-   * 檢查是否支援 Cache API
-   */
-  isCacheSupported() {
-    return typeof window !== 'undefined' && 'caches' in window;
-  }
-
-  /**
-   * 智能緩存獲取股票數據
-   */
-  async fetchStockDataWithSmartCaching(params) {
-    // 1. 計算需要的年份區塊
-    const chunks = this.calculateChunks(params.startDate, params.endDate);
-
-    // 2. 檢查緩存
     const { hits, misses } = await this.checkCache(params, chunks);
 
     // 如果全部命中，直接合併返回
@@ -660,4 +637,11 @@ class ProxyClient {
   }
 }
 
-module.exports = { ProxyClient };
+// Export logic for both CommonJS and Browser/Worker
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ProxyClient };
+} else if (typeof self !== 'undefined') {
+  self.ProxyClient = ProxyClient;
+} else if (typeof window !== 'undefined') {
+  window.ProxyClient = ProxyClient;
+}

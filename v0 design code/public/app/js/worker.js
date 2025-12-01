@@ -18,6 +18,7 @@
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
 importScripts('shared-lookback.js');
+importScripts('layers/api/proxy-client.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
 importScripts('strategy-plugin-manifest.js');
@@ -5714,6 +5715,69 @@ async function fetchStockData(
       message: fallbackMessage,
     });
   }
+
+  // --- ProxyClient Integration (Smart Caching) ---
+  try {
+    if (typeof ProxyClient !== 'undefined') {
+      const proxy = new ProxyClient();
+      const proxyParams = {
+        stockNo,
+        market: marketType,
+        startDate,
+        endDate,
+        adjusted: adjusted,
+        split: split,
+        forceSource: options.forceSource,
+        lookbackDays: optionLookbackDays,
+        effectiveStartDate: optionEffectiveStart
+      };
+
+      self.postMessage({
+        type: "progress",
+        progress: 10,
+        message: "嘗試使用 ProxyClient (Smart Caching)...",
+      });
+
+      const proxyResult = await proxy.getStockData(proxyParams);
+
+      if (proxyResult && Array.isArray(proxyResult.data) && proxyResult.data.length > 0) {
+        self.postMessage({
+          type: "progress",
+          progress: 50,
+          message: "ProxyClient 獲取成功",
+        });
+
+        // Construct result compatible with worker expectations
+        const convertedResult = {
+          data: proxyResult.data,
+          dataSource: proxyResult.dataSource || 'ProxyClient',
+          stockName: proxyResult.stockName || stockNo,
+          summary: proxyResult.summary || null,
+          adjustments: proxyResult.adjustments || [],
+          dividendEvents: proxyResult.dividendEvents || [],
+          // Preserve other metadata if available
+          meta: {
+            stockNo,
+            startDate,
+            endDate,
+            dataStartDate: startDate,
+            effectiveStartDate: optionEffectiveStart,
+            lookbackDays: optionLookbackDays,
+            fetchRange: { start: startDate, end: endDate },
+            ...proxyResult.meta
+          }
+        };
+
+        // Cache in worker memory
+        setWorkerCacheEntry(marketKey, cacheKey, convertedResult);
+
+        return convertedResult;
+      }
+    }
+  } catch (e) {
+    console.warn('ProxyClient fetch failed, falling back to legacy worker logic:', e);
+  }
+  // --- End ProxyClient Integration ---
 
   if (adjusted) {
     self.postMessage({
