@@ -5597,6 +5597,7 @@ async function tryFetchSmartGapMergedRange({
   const fetchRequests = [];
   let currentRequest = null;
 
+  const MAX_MERGE_YEARS = 3;
   for (const chunk of chunks) {
     if (!chunk.cached) {
       if (!currentRequest) {
@@ -5606,8 +5607,19 @@ async function tryFetchSmartGapMergedRange({
           years: [chunk.year]
         };
       } else {
-        currentRequest.end = chunk.end;
-        currentRequest.years.push(chunk.year);
+        // Check if adding this year exceeds the max merge limit
+        if (currentRequest.years.length < MAX_MERGE_YEARS) {
+          currentRequest.end = chunk.end;
+          currentRequest.years.push(chunk.year);
+        } else {
+          // Push current request and start a new one
+          fetchRequests.push(currentRequest);
+          currentRequest = {
+            start: chunk.start,
+            end: chunk.end,
+            years: [chunk.year]
+          };
+        }
       }
     } else {
       if (currentRequest) {

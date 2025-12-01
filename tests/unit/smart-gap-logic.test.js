@@ -91,6 +91,7 @@ async function tryFetchSmartGapMergedRange({
     const fetchRequests = [];
     let currentRequest = null;
 
+    const MAX_MERGE_YEARS = 3;
     for (const chunk of chunks) {
         if (!chunk.cached) {
             if (!currentRequest) {
@@ -100,8 +101,19 @@ async function tryFetchSmartGapMergedRange({
                     years: [chunk.year]
                 };
             } else {
-                currentRequest.end = chunk.end;
-                currentRequest.years.push(chunk.year);
+                // Check if adding this year exceeds the max merge limit
+                if (currentRequest.years.length < MAX_MERGE_YEARS) {
+                    currentRequest.end = chunk.end;
+                    currentRequest.years.push(chunk.year);
+                } else {
+                    // Push current request and start a new one
+                    fetchRequests.push(currentRequest);
+                    currentRequest = {
+                        start: chunk.start,
+                        end: chunk.end,
+                        years: [chunk.year]
+                    };
+                }
             }
         } else {
             if (currentRequest) {
@@ -303,5 +315,37 @@ describe('Smart Gap Merging Logic', () => {
         );
 
         expect(result.data).toHaveLength(2); // 1 from cache, 1 from fetch
+    });
+
+    test('should limit merged chunk size to 3 years', async () => {
+        fetchWithAdaptiveRetry.mockResolvedValue({
+            data: []
+        });
+
+        await tryFetchSmartGapMergedRange({
+            stockNo: '2330',
+            startDate: '2020-01-01',
+            endDate: '2024-12-31', // 5 years: 2020, 2021, 2022, 2023, 2024
+            marketKey: 'TWSE',
+            fetchDiagnostics: {}
+        });
+
+        // Should be split into 2 requests: 3 years + 2 years
+        console.log('Calls:', JSON.stringify(fetchWithAdaptiveRetry.mock.calls, null, 2));
+        expect(fetchWithAdaptiveRetry).toHaveBeenCalledTimes(2);
+
+        // First request: 2020-2022 (3 years)
+        expect(fetchWithAdaptiveRetry).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining('start=2020-01-01&end=2022-12-31'),
+            expect.any(Object)
+        );
+
+        // Second request: 2023-2024 (2 years)
+        expect(fetchWithAdaptiveRetry).toHaveBeenNthCalledWith(
+            2,
+            expect.stringContaining('start=2023-01-01&end=2024-12-31'),
+            expect.any(Object)
+        );
     });
 });
