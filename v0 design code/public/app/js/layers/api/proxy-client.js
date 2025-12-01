@@ -298,17 +298,37 @@ class ProxyClient {
   }
 
   /**
-   * 獲取股票數據
+   * 獲取緩存名稱
+   */
+  get CACHE_NAME() {
+    return 'lazybacktest-data-v1';
+  }
+
+  /**
+   * 獲取股票數據 (智能緩存版)
    * @param {Object} params 請求參數
-   * @param {string} params.stockNo 股票代碼
-   * @param {string} params.market 市場代碼 (TWSE, TPEX, US, INDEX)
-   * @param {string} params.startDate 開始日期 (YYYY-MM-DD)
-   * @param {string} params.endDate 結束日期 (YYYY-MM-DD)
-   * @param {boolean} [params.adjusted] 是否為還原股價
-   * @param {string} [params.forceSource] 強制使用的數據源
    * @returns {Promise<Object>} 股票數據
    */
   async getStockData(params) {
+    // 1. 嘗試使用智能緩存
+    try {
+      if (this.isCacheSupported() && !params.forceSource) {
+        return await this.fetchStockDataWithSmartCaching(params);
+      }
+    } catch (error) {
+      console.warn('Smart caching failed, falling back to direct fetch:', error);
+    }
+
+    // 2. 降級為直接請求
+    return this.fetchStockDataDirect(params);
+  }
+
+  /**
+   * 直接獲取股票數據 (無緩存邏輯)
+   * @param {Object} params 請求參數
+   * @returns {Promise<Object>} 股票數據
+   */
+  async fetchStockDataDirect(params) {
     // 驗證參數
     this.validateParams(params);
 
@@ -319,6 +339,252 @@ class ProxyClient {
     const response = await this.makeRequest(url);
 
     return response;
+  }
+
+  /**
+   * 檢查是否支援 Cache API
+   */
+  isCacheSupported() {
+    return typeof window !== 'undefined' && 'caches' in window;
+  }
+
+  /**
+   * 智能緩存獲取股票數據
+   */
+  async fetchStockDataWithSmartCaching(params) {
+    // 1. 計算需要的年份區塊
+    const chunks = this.calculateChunks(params.startDate, params.endDate);
+
+    // 2. 檢查緩存
+    const { hits, misses } = await this.checkCache(params, chunks);
+
+    // 如果全部命中，直接合併返回
+    if (misses.length === 0) {
+      return this.combineAllData(hits, [], params);
+    }
+
+    // 3. 合併缺口 (Smart Gap Merging)
+    const fetchRanges = this.mergeGaps(misses);
+
+    // 4. 獲取並緩存缺口數據
+    const fetchedDataList = [];
+    for (const range of fetchRanges) {
+      const data = await this.fetchAndCache(params, range);
+      fetchedDataList.push(data);
+    }
+
+    // 5. 合併所有數據 (緩存 + 新獲取) 並返回
+    return this.combineAllData(hits, fetchedDataList, params);
+  }
+
+  /**
+   * 計算需要的年份區塊
+   */
+  calculateChunks(startDate, endDate) {
+    const startYear = new Date(startDate).getFullYear();
+    const endYear = new Date(endDate).getFullYear();
+    const chunks = [];
+    for (let year = startYear; year <= endYear; year++) {
+      chunks.push(year);
+    }
+    return chunks;
+  }
+
+  /**
+   * 檢查緩存狀態
+   */
+  async checkCache(params, chunks) {
+    const hits = [];
+    const misses = [];
+    const cache = await caches.open(this.CACHE_NAME);
+    const currentYear = new Date().getFullYear();
+
+    for (const year of chunks) {
+      // 當前年份不讀取緩存 (確保數據新鮮度)
+      if (year === currentYear) {
+        misses.push(year);
+        continue;
+      }
+
+      const key = this.buildYearCacheKey(params, year);
+      const response = await cache.match(key);
+      if (response) {
+        try {
+          const data = await response.json();
+          hits.push({ year, data });
+        } catch (e) {
+          misses.push(year);
+        }
+      } else {
+        misses.push(year);
+      }
+    }
+    return { hits, misses };
+  }
+
+  /**
+   * 合併連續的缺失年份
+   */
+  mergeGaps(missingChunks) {
+    if (missingChunks.length === 0) return [];
+
+    // 排序
+    missingChunks.sort((a, b) => a - b);
+
+    const ranges = [];
+    let startYear = missingChunks[0];
+    let prevYear = missingChunks[0];
+
+    for (let i = 1; i < missingChunks.length; i++) {
+      const year = missingChunks[i];
+      if (year !== prevYear + 1) {
+        // 發現斷點，推入前一段
+        ranges.push({ startYear, endYear: prevYear });
+        startYear = year;
+      }
+      prevYear = year;
+    }
+    // 推入最後一段
+    ranges.push({ startYear, endYear: prevYear });
+
+    // 轉換為日期範圍
+    return ranges.map(range => ({
+      startDate: `${range.startYear}-01-01`,
+      endDate: `${range.endYear}-12-31`
+    }));
+  }
+
+  /**
+   * 獲取數據並切分緩存
+   */
+  async fetchAndCache(params, range) {
+    // 構建請求參數
+    const fetchParams = {
+      ...params,
+      startDate: range.startDate,
+      endDate: range.endDate
+    };
+
+    // 強制直接獲取，避免遞歸
+    const result = await this.fetchStockDataDirect(fetchParams);
+
+    if (!result || !result.data || !Array.isArray(result.data)) {
+      return result || { data: [] };
+    }
+
+    // 嚴格數據切分 (Strict Data Slicing)
+    const dataByYear = {};
+    const currentYear = new Date().getFullYear();
+
+    result.data.forEach(row => {
+      const dateStr = row[0]; // 假設格式為 "YYYYMMDD" 或 "YYYY-MM-DD"
+      let year;
+
+      // 簡單的日期解析
+      if (dateStr.includes('-')) {
+        year = parseInt(dateStr.split('-')[0]);
+      } else if (dateStr.includes('/')) {
+        year = parseInt(dateStr.split('/')[0]);
+        // 處理民國年 (假設 3 位數是民國年)
+        if (year < 1911) year += 1911;
+      } else if (dateStr.length === 8) {
+        year = parseInt(dateStr.substring(0, 4));
+      } else {
+        year = new Date(dateStr).getFullYear();
+      }
+
+      if (!isNaN(year)) {
+        if (!dataByYear[year]) dataByYear[year] = [];
+        dataByYear[year].push(row);
+      }
+    });
+
+    // 寫入緩存
+    const cache = await caches.open(this.CACHE_NAME);
+
+    for (const yearStr in dataByYear) {
+      const year = parseInt(yearStr);
+      const yearData = dataByYear[year];
+
+      // 只緩存歷史年份
+      if (year < currentYear) {
+        const key = this.buildYearCacheKey(params, year);
+        // 保持原始結構，但替換 data
+        const yearResult = { ...result, data: yearData };
+        await cache.put(key, new Response(JSON.stringify(yearResult)));
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 合併所有數據並過濾
+   */
+  combineAllData(hits, fetchedDataList, params) {
+    let allRows = [];
+
+    // 加入緩存數據
+    hits.forEach(hit => {
+      if (hit.data && hit.data.data) {
+        allRows = allRows.concat(hit.data.data);
+      }
+    });
+
+    // 加入新獲取數據
+    fetchedDataList.forEach(fetched => {
+      if (fetched && fetched.data) {
+        allRows = allRows.concat(fetched.data);
+      }
+    });
+
+    // 排序
+    allRows.sort((a, b) => {
+      const da = a[0].replace(/[-\/]/g, '');
+      const db = b[0].replace(/[-\/]/g, '');
+      return da.localeCompare(db);
+    });
+
+    // 去重
+    const uniqueRows = [];
+    const seenDates = new Set();
+    for (const row of allRows) {
+      const date = row[0];
+      if (!seenDates.has(date)) {
+        seenDates.add(date);
+        uniqueRows.push(row);
+      }
+    }
+
+    // 過濾請求範圍
+    const start = params.startDate.replace(/[-\/]/g, '');
+    const end = params.endDate.replace(/[-\/]/g, '');
+
+    const filteredRows = uniqueRows.filter(row => {
+      const d = row[0].replace(/[-\/]/g, '');
+      return d >= start && d <= end;
+    });
+
+    // 使用第一個有效結果作為模板
+    const template = (hits[0] && hits[0].data) || (fetchedDataList[0]) || {};
+
+    return {
+      ...template,
+      data: filteredRows,
+      count: filteredRows.length
+    };
+  }
+
+  /**
+   * 構建年度緩存鍵
+   */
+  buildYearCacheKey(params, year) {
+    const market = this.normalizeMarket(params.market || 'TWSE');
+    const stockNo = (params.stockNo || '').toString().toUpperCase();
+    const priceModeKey = params.adjusted ? 'ADJ' : 'RAW';
+    const splitFlag = params.split ? 'SPLIT' : 'NOSPLIT';
+    // 緩存鍵不包含 startDate/endDate，只包含年份
+    return `https://lazybacktest.local/data/${market}/${stockNo}/${year}/${priceModeKey}/${splitFlag}`;
   }
 
   /**
