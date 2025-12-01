@@ -5719,6 +5719,12 @@ async function fetchStockData(
   // --- ProxyClient Integration (Smart Caching) ---
   try {
     if (typeof ProxyClient !== 'undefined') {
+      self.postMessage({
+        type: "progress",
+        progress: 10,
+        message: "ProxyClient 已載入，準備執行...",
+      });
+
       const proxy = new ProxyClient();
       const proxyParams = {
         stockNo,
@@ -5734,8 +5740,8 @@ async function fetchStockData(
 
       self.postMessage({
         type: "progress",
-        progress: 10,
-        message: "嘗試使用 ProxyClient (Smart Caching)...",
+        progress: 12,
+        message: `ProxyClient 參數: ${JSON.stringify(proxyParams)}`,
       });
 
       const proxyResult = await proxy.getStockData(proxyParams);
@@ -5744,7 +5750,7 @@ async function fetchStockData(
         self.postMessage({
           type: "progress",
           progress: 50,
-          message: "ProxyClient 獲取成功",
+          message: `ProxyClient 獲取成功: ${proxyResult.data.length} 筆資料`,
         });
 
         // Construct result compatible with worker expectations
@@ -5772,10 +5778,27 @@ async function fetchStockData(
         setWorkerCacheEntry(marketKey, cacheKey, convertedResult);
 
         return convertedResult;
+      } else {
+        self.postMessage({
+          type: "progress",
+          progress: 15,
+          message: "ProxyClient 回傳空資料或格式錯誤",
+        });
       }
+    } else {
+      self.postMessage({
+        type: "progress",
+        progress: 10,
+        message: "ProxyClient 未定義 (undefined)",
+      });
     }
   } catch (e) {
     console.warn('ProxyClient fetch failed, falling back to legacy worker logic:', e);
+    self.postMessage({
+      type: "progress",
+      progress: 10,
+      message: `ProxyClient 錯誤: ${e.message}`,
+    });
   }
   // --- End ProxyClient Integration ---
 

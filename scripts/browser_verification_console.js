@@ -109,9 +109,10 @@
             log("ℹ️ 2022 not found (check logic).", 'info');
         }
 
-        log("🎉 Verification Complete!", 'success');
+        return "🎉 Verification Complete! Check the 'verification-results' overlay or logs above.";
 
     } catch (e) {
         log(`❌ Error: ${e.message}`, 'error');
+        return `❌ Error: ${e.message}`;
     }
 })();
