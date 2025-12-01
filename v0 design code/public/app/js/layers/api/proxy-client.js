@@ -9,6 +9,8 @@
  * - 緩存鍵生成
  */
 
+console.log('[ProxyClient] Script loading...');
+
 class ProxyClient {
   constructor(config = {}) {
     this.config = {
