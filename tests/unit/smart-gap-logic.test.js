@@ -63,16 +63,60 @@ async function tryFetchSmartGapMergedRange({
     if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
 
     const chunks = [];
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-based
+
     for (let year = startYear; year <= endYear; year++) {
         const chunkStart = year === startYear ? startDate : `${year}-01-01`;
         const chunkEnd = year === endYear ? endDate : `${year}-12-31`;
-        chunks.push({
-            year,
-            start: chunkStart,
-            end: chunkEnd,
-            cached: false,
-            data: []
-        });
+
+        if (year === currentYear) {
+            // Split current year into:
+            // 1. Historical part: Jan 1 to End of Previous Month
+            // 2. Current part: Start of Current Month to End Date
+
+            const currentMonthStartStr = `${year}-${String(currentMonth).padStart(2, '0')}-01`;
+
+            // Calculate end of previous month
+            const prevMonthDate = new Date(year, currentMonth - 1, 0); // Day 0 of current month is last day of prev month
+            const prevMonthEndStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}-${String(prevMonthDate.getDate()).padStart(2, '0')}`;
+
+            // Chunk 1: Historical Part (if applicable)
+            if (chunkStart < currentMonthStartStr) {
+                const histEnd = chunkEnd < prevMonthEndStr ? chunkEnd : prevMonthEndStr;
+                chunks.push({
+                    year,
+                    start: chunkStart,
+                    end: histEnd,
+                    cached: false,
+                    data: [],
+                    isHistorical: true
+                });
+            }
+
+            // Chunk 2: Current Part (if applicable)
+            if (chunkEnd >= currentMonthStartStr) {
+                const currStart = chunkStart > currentMonthStartStr ? chunkStart : currentMonthStartStr;
+                chunks.push({
+                    year,
+                    start: currStart,
+                    end: chunkEnd,
+                    cached: false,
+                    data: [],
+                    isHistorical: false
+                });
+            }
+        } else {
+            chunks.push({
+                year,
+                start: chunkStart,
+                end: chunkEnd,
+                cached: false,
+                data: [],
+                isHistorical: true
+            });
+        }
     }
 
     const priceModeKey = getPriceModeKey(false);
@@ -98,11 +142,13 @@ async function tryFetchSmartGapMergedRange({
                 currentRequest = {
                     start: chunk.start,
                     end: chunk.end,
-                    years: [chunk.year]
+                    years: [chunk.year],
+                    isHistorical: chunk.isHistorical
                 };
             } else {
                 // Check if adding this year exceeds the max merge limit
-                if (currentRequest.years.length < MAX_MERGE_YEARS) {
+                // AND if the historical status matches
+                if (currentRequest.years.length < MAX_MERGE_YEARS && currentRequest.isHistorical === chunk.isHistorical) {
                     currentRequest.end = chunk.end;
                     currentRequest.years.push(chunk.year);
                 } else {
@@ -111,7 +157,8 @@ async function tryFetchSmartGapMergedRange({
                     currentRequest = {
                         start: chunk.start,
                         end: chunk.end,
-                        years: [chunk.year]
+                        years: [chunk.year],
+                        isHistorical: chunk.isHistorical
                     };
                 }
             }
@@ -331,7 +378,6 @@ describe('Smart Gap Merging Logic', () => {
         });
 
         // Should be split into 2 requests: 3 years + 2 years
-        console.log('Calls:', JSON.stringify(fetchWithAdaptiveRetry.mock.calls, null, 2));
         expect(fetchWithAdaptiveRetry).toHaveBeenCalledTimes(2);
 
         // First request: 2020-2022 (3 years)
@@ -347,5 +393,51 @@ describe('Smart Gap Merging Logic', () => {
             expect.stringContaining('start=2023-01-01&end=2024-12-31'),
             expect.any(Object)
         );
+    });
+
+    test('should split current year into historical and current chunks', async () => {
+        // Mock date to 2025-12-01
+        const mockDate = new Date('2025-12-01T00:00:00Z');
+        jest.useFakeTimers();
+        jest.setSystemTime(mockDate);
+
+        fetchWithAdaptiveRetry.mockResolvedValue({
+            data: []
+        });
+
+        await tryFetchSmartGapMergedRange({
+            stockNo: '2330',
+            startDate: '2024-01-01',
+            endDate: '2025-12-01',
+            marketKey: 'TWSE',
+            fetchDiagnostics: {}
+        });
+
+        // Should be split into:
+        // 1. 2024 (Historical)
+        // 2. 2025-01-01 to 2025-11-30 (Historical part of current year)
+        // 3. 2025-12-01 to 2025-12-01 (Current part)
+
+        // Merging logic:
+        // 2024 and 2025-Jan-Nov are both historical, so they MIGHT be merged if contiguous.
+        // 2025-Dec is current, so it must be separate.
+
+        expect(fetchWithAdaptiveRetry).toHaveBeenCalledTimes(2);
+
+        // First request: 2024 + 2025(Jan-Nov)
+        expect(fetchWithAdaptiveRetry).toHaveBeenNthCalledWith(
+            1,
+            expect.stringContaining('start=2024-01-01&end=2025-11-30'),
+            expect.any(Object)
+        );
+
+        // Second request: 2025(Dec)
+        expect(fetchWithAdaptiveRetry).toHaveBeenNthCalledWith(
+            2,
+            expect.stringContaining('start=2025-12-01&end=2025-12-01'),
+            expect.any(Object)
+        );
+
+        jest.useRealTimers();
     });
 });

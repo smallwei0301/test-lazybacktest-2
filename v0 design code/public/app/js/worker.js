@@ -5569,16 +5569,63 @@ async function tryFetchSmartGapMergedRange({
   if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
 
   const chunks = [];
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1; // 1-based
+
   for (let year = startYear; year <= endYear; year++) {
     const chunkStart = year === startYear ? startDate : `${year}-01-01`;
     const chunkEnd = year === endYear ? endDate : `${year}-12-31`;
-    chunks.push({
-      year,
-      start: chunkStart,
-      end: chunkEnd,
-      cached: false,
-      data: []
-    });
+
+    if (year === currentYear) {
+      // Split current year into:
+      // 1. Historical part: Jan 1 to End of Previous Month
+      // 2. Current part: Start of Current Month to End Date
+
+      const currentMonthStartStr = `${year}-${String(currentMonth).padStart(2, '0')}-01`;
+
+      // Calculate end of previous month
+      const prevMonthDate = new Date(year, currentMonth - 1, 0); // Day 0 of current month is last day of prev month
+      const prevMonthEndStr = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}-${String(prevMonthDate.getDate()).padStart(2, '0')}`;
+
+      // Chunk 1: Historical Part (if applicable)
+      // Only if chunkStart is before current month start
+      if (chunkStart < currentMonthStartStr) {
+        const histEnd = chunkEnd < prevMonthEndStr ? chunkEnd : prevMonthEndStr;
+        chunks.push({
+          year,
+          start: chunkStart,
+          end: histEnd,
+          cached: false,
+          data: [],
+          isHistorical: true // Mark as historical for merging
+        });
+      }
+
+      // Chunk 2: Current Part (if applicable)
+      // Only if chunkEnd is on or after current month start
+      if (chunkEnd >= currentMonthStartStr) {
+        const currStart = chunkStart > currentMonthStartStr ? chunkStart : currentMonthStartStr;
+        chunks.push({
+          year,
+          start: currStart,
+          end: chunkEnd,
+          cached: false,
+          data: [],
+          isHistorical: false // Mark as current, do not merge with historical
+        });
+      }
+    } else {
+      // Past years are fully historical
+      chunks.push({
+        year,
+        start: chunkStart,
+        end: chunkEnd,
+        cached: false,
+        data: [],
+        isHistorical: true
+      });
+    }
   }
 
   const priceModeKey = getPriceModeKey(false);
@@ -5604,11 +5651,13 @@ async function tryFetchSmartGapMergedRange({
         currentRequest = {
           start: chunk.start,
           end: chunk.end,
-          years: [chunk.year]
+          years: [chunk.year],
+          isHistorical: chunk.isHistorical
         };
       } else {
         // Check if adding this year exceeds the max merge limit
-        if (currentRequest.years.length < MAX_MERGE_YEARS) {
+        // AND if the historical status matches
+        if (currentRequest.years.length < MAX_MERGE_YEARS && currentRequest.isHistorical === chunk.isHistorical) {
           currentRequest.end = chunk.end;
           currentRequest.years.push(chunk.year);
         } else {
@@ -5617,7 +5666,8 @@ async function tryFetchSmartGapMergedRange({
           currentRequest = {
             start: chunk.start,
             end: chunk.end,
-            years: [chunk.year]
+            years: [chunk.year],
+            isHistorical: chunk.isHistorical
           };
         }
       }
