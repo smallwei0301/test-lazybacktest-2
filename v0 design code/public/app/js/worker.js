@@ -788,7 +788,14 @@ async function idbSetPermanentInvalid(stockNo, date) {
 
     const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
     const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
-    store.put(entry, entry.id);
+    const request = store.put(entry); // 使用 put(value) 因為 keyPath 是 id
+
+    request.onsuccess = () => {
+      console.log(`[Worker IDB] 成功寫入永久無效日期: ${stockNo} ${date}`);
+    };
+    request.onerror = () => {
+      console.warn(`[Worker IDB] 寫入永久無效日期失敗: ${stockNo} ${date}`, request.error);
+    };
   } catch (e) {
     console.warn('[Worker IDB] idbSetPermanentInvalid 錯誤:', e);
   }
