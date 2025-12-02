@@ -6418,6 +6418,29 @@ async function fetchStockData(
         progress: 6,
         message: "命中年度 Superset 快取...",
       });
+
+      // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對 Superset 快取的無效資料進行補救
+      let data = supersetResult.data;
+      const invalidRows = detectInvalidRows(data);
+      if (invalidRows.length > 0) {
+        console.warn(`[Worker] 檢測到 Superset 快取有 ${invalidRows.length} 筆無效資料，嘗試補齊...`);
+        const fallbackData = await fetchFallbackForInvalidDates({
+          stockNo,
+          marketKey,
+          invalidRows,
+          adjusted: false,
+        });
+
+        if (fallbackData.length > 0) {
+          console.log(`[Worker] 成功補齊 Superset 快取 ${fallbackData.length} 筆資料`);
+          const merged = [...data, ...fallbackData];
+          data = dedupeAndSortData(merged);
+        }
+      }
+      // 最終過濾無效收盤價
+      data = filterInvalidClosePriceRows(data);
+      supersetResult.data = data;
+
       return supersetResult;
     }
   }
@@ -6446,6 +6469,28 @@ async function fetchStockData(
       split,
     });
     if (blobRangeResult) {
+      // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對 Blob 快取的無效資料進行補救
+      let data = blobRangeResult.data;
+      const invalidRows = detectInvalidRows(data);
+      if (invalidRows.length > 0) {
+        console.warn(`[Worker] 檢測到 Blob 快取有 ${invalidRows.length} 筆無效資料，嘗試補齊...`);
+        const fallbackData = await fetchFallbackForInvalidDates({
+          stockNo,
+          marketKey,
+          invalidRows,
+          adjusted: false,
+        });
+
+        if (fallbackData.length > 0) {
+          console.log(`[Worker] 成功補齊 Blob 快取 ${fallbackData.length} 筆資料`);
+          const merged = [...data, ...fallbackData];
+          data = dedupeAndSortData(merged);
+        }
+      }
+      // 最終過濾無效收盤價
+      data = filterInvalidClosePriceRows(data);
+      blobRangeResult.data = data;
+
       return blobRangeResult;
     }
     const fallbackStatus = fetchDiagnostics?.rangeFetch?.status;
