@@ -5116,10 +5116,7 @@ function runBacktestInternal() {
         }
         console.log("[Main] WorkerUrl:", workerUrl);
         console.log("[Main] Creating worker...");
-        // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 破壞 Worker 快取
-        const workerUrlWithCache = `${workerUrl}?v=${Date.now()}`;
-        console.log("[Main] Worker URL with cache bust:", workerUrlWithCache);
-        backtestWorker = new Worker(workerUrlWithCache);
+        backtestWorker = new Worker(workerUrl);
 
         // Unified Worker Message Handler
         backtestWorker.onmessage = e => {

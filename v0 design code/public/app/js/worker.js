@@ -17,8 +17,6 @@
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
-// Patch Tag: LB-INVALID-DATA-FALLBACK-20251202E — 無效資料備援機制
-console.log('[Worker] 載入 worker.js - LB-INVALID-DATA-FALLBACK-20251202E 版本');
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
@@ -4950,14 +4948,25 @@ function dedupeAndSortData(rows) {
 
 // Patch: LB-INVALID-DATA-FALLBACK-20251202E — Fallback 來源設定
 function getFallbackForceSource(marketKey, adjusted) {
-  if (marketKey === 'TWSE' || marketKey === 'TPEX') {
-    // 台股備援：TPEX Proxy 已支援 forceSource=yahoo
-    return adjusted ? null : 'yahoo';
+  // 還原價格：統一使用 Yahoo (adjclose)
+  if (adjusted) {
+    if (marketKey === 'TWSE' || marketKey === 'TPEX' || marketKey === 'US') {
+      return 'yahoo';
+    }
+    return null;
+  }
+
+  // 原始價格：根據市場決定備援來源
+  if (marketKey === 'TWSE') {
+    return 'finmind';  // TWSE 原始價使用 FinMind 備援
+  }
+  if (marketKey === 'TPEX') {
+    return 'yahoo';  // TPEX 原始價使用 Yahoo 備援
   }
   if (marketKey === 'US') {
-    // 美股備援：Yahoo Finance
-    return adjusted ? null : 'yahoo';
+    return 'yahoo';  // 美股原始價使用 Yahoo
   }
+
   return null;
 }
 
@@ -4980,6 +4989,11 @@ function detectInvalidRows(rows) {
       });
     }
   });
+
+  // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 增加調試輸出
+  if (invalid.length > 0) {
+    console.log(`[Worker detectInvalidRows] 偵測到 ${invalid.length} 筆無效資料，日期:`, invalid.map(i => i.date).slice(0, 5).join(', '));
+  }
 
   return invalid;
 }
@@ -5034,6 +5048,8 @@ async function fetchFallbackForInvalidDates({
 
   // 3. 決定備援來源
   const targetSource = getFallbackForceSource(marketKey, adjusted);
+  console.log(`[Worker Fallback] 市場: ${marketKey}, 還原: ${adjusted}, 備援來源: ${targetSource}`);
+
   if (!targetSource) {
     console.warn('[Worker] 無法決定備援來源，跳過補齊');
     return [];
@@ -7095,7 +7111,6 @@ async function fetchStockData(
         isTpex,
         startDateObj,
         endDateObj,
-        { adjusted } // Patch: LB-INVALID-DATA-FALLBACK-20251202E
       );
       if (normalized) normalizedRows.push(normalized);
     });
@@ -7107,15 +7122,8 @@ async function fetchStockData(
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   let deduped = dedupeAndSortData(normalizedRows);
 
-
   // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對原始股價的無效資料進行補救
-  console.log(`[Worker DEBUG] 準備偵測無效資料，deduped.length = ${deduped.length}`);
-  console.log(`[Worker DEBUG] 前3筆樣本:`, deduped.slice(0, 3).map(r => ({ date: r.date, close: r.close, open: r.open })));
   const invalidRows = detectInvalidRows(deduped);
-  console.log(`[Worker DEBUG] detectInvalidRows 回傳 ${invalidRows.length} 筆無效資料`);
-  if (invalidRows.length > 0) {
-    console.log(`[Worker DEBUG] 無效資料詳情:`, invalidRows);
-  }
   if (invalidRows.length > 0) {
     console.warn(`[Worker] 檢測到 ${invalidRows.length} 筆無效原始資料，嘗試補齊...`);
 
