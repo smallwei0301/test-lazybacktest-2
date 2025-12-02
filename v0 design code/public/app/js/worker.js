@@ -7105,8 +7105,15 @@ async function fetchStockData(
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   let deduped = dedupeAndSortData(normalizedRows);
 
+
   // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對原始股價的無效資料進行補救
+  console.log(`[Worker DEBUG] 準備偵測無效資料，deduped.length = ${deduped.length}`);
+  console.log(`[Worker DEBUG] 前3筆樣本:`, deduped.slice(0, 3).map(r => ({ date: r.date, close: r.close, open: r.open })));
   const invalidRows = detectInvalidRows(deduped);
+  console.log(`[Worker DEBUG] detectInvalidRows 回傳 ${invalidRows.length} 筆無效資料`);
+  if (invalidRows.length > 0) {
+    console.log(`[Worker DEBUG] 無效資料詳情:`, invalidRows);
+  }
   if (invalidRows.length > 0) {
     console.warn(`[Worker] 檢測到 ${invalidRows.length} 筆無效原始資料，嘗試補齊...`);
 
