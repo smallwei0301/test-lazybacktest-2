@@ -5117,7 +5117,14 @@ async function fetchFallbackForInvalidDates({
 
     try {
       const response = await fetchWithAdaptiveRetry(url, { headers: { Accept: "application/json" } });
-      if (!response || response.error) continue;
+      if (!response || response.error) {
+        console.warn(`[Worker] 備援請求回傳錯誤 (${startDate}~${endDate}):`, response?.error || 'No response');
+        // 請求失敗（如 404 或 500），視為無法補齊，標記為永久無效
+        for (const date of group) {
+          await idbSetPermanentInvalid(stockNo, date);
+        }
+        continue;
+      }
 
       const rows = Array.isArray(response.aaData) ? response.aaData : (response.data || []);
 
