@@ -4978,13 +4978,53 @@ function detectInvalidRows(rows) {
   rows.forEach((row, index) => {
     if (!row) return;
 
+    // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 加強無效資料偵測 (開/高/低/收/量)
+    const isValidOpen = Number.isFinite(row.open) && row.open > 0;
+    const isValidHigh = Number.isFinite(row.high) && row.high > 0;
+    const isValidLow = Number.isFinite(row.low) && row.low > 0;
     const isValidClose = Number.isFinite(row.close) && row.close > 0;
+    // 成交量允許為 0 (例如無交易日)，但不能是 null/undefined/NaN
+    // 使用者要求: 缺少成交量也要備援。這裡假設 "缺少" 意指 undefined/null/NaN，或者資料來源回傳了異常值。
+    // 若要嚴格排除 0 成交量，需確認是否會誤殺暫停交易日。
+    // 根據使用者指示 "缺少...成交量...這五個數值的任何一個失效時"，通常指數據缺失。
+    // 這裡先寬鬆允許 volume >= 0，若使用者指 "成交量為 0 也要備援"，則改為 > 0。
+    // 考慮到台股無量跌停/漲停仍有價格，但無量通常有價格。
+    // 若完全無交易(暫停交易)，通常價格會沿用昨日，volume=0。
+    // 但若資料來源異常導致 volume 遺失，通常是 undefined。
+    // 為了安全，這裡檢查是否為有限數值。若使用者特別強調 "失效"，可能包含 0。
+    // 暫定: 價格必須 > 0，成交量必須 >= 0 且為有限數值。
+    // Update: 使用者明確要求 "缺少...成交量...失效時"，且是為了 "備援"。
+    // 若來源給出 volume=0 但有價格，通常是正確的（無交易）。
+    // 若來源給出 volume=null/NaN，則是錯誤。
+    // 但若使用者是指 "資料缺漏"，則 open/high/low/close/vol 只要有一個是 0 或無效就當作失效?
+    // 許多資料源在無交易日時會給 0 或 null。
+    // 為了最嚴格的備援，我們先檢查數值有效性。
+    // 針對價格: 必須 > 0。
+    // 針對成交量: 必須 >= 0 (因為真的可能為 0)。
+    // 但若使用者希望 "成交量為 0" 也視為資料有問題去備援，這可能會導致大量不必要的請求。
+    // 讓我們假設 "失效" 指的是數據異常 (NaN, null, undefined) 或價格為 0。
+    // 對於成交量，我們檢查是否為有效數字。
 
-    if (!isValidClose) {
+    // 修正：使用者說 "缺少...這五個數值的任何一個失效時"。
+    // 讓我們定義 "失效" 為: !Number.isFinite(val) || val <= 0 (對於價格)
+    // 對於成交量，若為 undefined/null/NaN 則失效。若為 0，視為有效（除非使用者另有堅持）。
+    // 但為了回應 "缺少...成交量"，我們確保它存在。
+    // 注意: 有些來源用 'vol' 有些用 'volume'。
+    const vol = row.volume !== undefined ? row.volume : row.vol;
+    const isValidVol = Number.isFinite(vol) && vol >= 0;
+
+    if (!isValidOpen || !isValidHigh || !isValidLow || !isValidClose || !isValidVol) {
+      const reasons = [];
+      if (!isValidOpen) reasons.push('open');
+      if (!isValidHigh) reasons.push('high');
+      if (!isValidLow) reasons.push('low');
+      if (!isValidClose) reasons.push('close');
+      if (!isValidVol) reasons.push('vol');
+
       invalid.push({
         index,
         date: row.date,
-        reason: row.close === 0 ? 'zero_close' : 'invalid_close',
+        reason: `invalid_${reasons.join('_')}`,
         row
       });
     }
@@ -5085,7 +5125,7 @@ async function fetchFallbackForInvalidDates({
       const endDateObj = new Date(endDate);
       const isTpex = marketKey === 'TPEX';
 
-      let validCount = 0;
+      const validDatesSet = new Set();
       rows.forEach(row => {
         const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, { adjusted });
         if (normalized && normalized.date && normalized.close > 0) {
@@ -5093,14 +5133,16 @@ async function fetchFallbackForInvalidDates({
           normalized.date = normalizeISODate(normalized.date);
           if (normalized.date) {
             resultRows.push(normalized);
+            validDatesSet.add(normalized.date);
             validCount++;
           }
         }
       });
 
-      // 若無有效資料，標記為永久無效
-      if (validCount === 0) {
-        for (const date of group) {
+      // 針對群組中每一個日期，若未在有效回傳資料中，則標記為永久無效
+      // 這能處理「部分補齊」的情況，將剩餘無法補齊的日期記錄下來
+      for (const date of group) {
+        if (!validDatesSet.has(date)) {
           await idbSetPermanentInvalid(stockNo, date);
         }
       }
