@@ -775,7 +775,10 @@ async function idbGetPermanentInvalid(stockNo) {
 async function idbSetPermanentInvalid(stockNo, date) {
   try {
     const db = await initIDB();
-    if (!db) return;
+    if (!db) {
+      console.warn('[Worker IDB] 無法寫入永久無效日期，DB 未初始化');
+      return;
+    }
 
     const expiresAt = Date.now() + PERMANENT_INVALID_TTL_MS;
     const entry = {
@@ -786,16 +789,26 @@ async function idbSetPermanentInvalid(stockNo, date) {
       recordedAt: Date.now()
     };
 
-    const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
-    const request = store.put(entry); // 使用 put(value) 因為 keyPath 是 id
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+        const request = store.put(entry, entry.id);
 
-    request.onsuccess = () => {
-      console.log(`[Worker IDB] 成功寫入永久無效日期: ${stockNo} ${date}`);
-    };
-    request.onerror = () => {
-      console.warn(`[Worker IDB] 寫入永久無效日期失敗: ${stockNo} ${date}`, request.error);
-    };
+        request.onsuccess = () => {
+          console.log(`[Worker IDB] 已記錄永久無效日期: ${stockNo} - ${date}`);
+          resolve();
+        };
+
+        request.onerror = () => {
+          console.warn(`[Worker IDB] 寫入永久無效日期失敗: ${stockNo} - ${date}`, request.error);
+          resolve();
+        };
+      } catch (txError) {
+        console.warn('[Worker IDB] idbSetPermanentInvalid 交易錯誤:', txError);
+        resolve();
+      }
+    });
   } catch (e) {
     console.warn('[Worker IDB] idbSetPermanentInvalid 錯誤:', e);
   }
@@ -5148,7 +5161,6 @@ async function fetchFallbackForInvalidDates({
           if (normalized.date) {
             resultRows.push(normalized);
             validDatesSet.add(normalized.date);
-            validCount++;
           }
         }
       });
