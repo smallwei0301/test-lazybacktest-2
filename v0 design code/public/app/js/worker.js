@@ -5146,7 +5146,9 @@ async function fetchFallbackForInvalidDates({
         continue;
       }
 
+      console.log(`[Worker Fallback Debug] 請求成功 (${startDate}~${endDate})，response:`, { hasError: !!response.error, hasAaData: !!response.aaData, hasData: !!response.data });
       const rows = Array.isArray(response.aaData) ? response.aaData : (response.data || []);
+      console.log(`[Worker Fallback Debug] 取得 ${rows.length} 筆原始資料`);
 
       const startDateObj = new Date(startDate);
       const endDateObj = new Date(endDate);
@@ -5165,11 +5167,18 @@ async function fetchFallbackForInvalidDates({
         }
       });
 
+      console.log(`[Worker Fallback Debug] 群組 ${startDate}~${endDate}: 原始資料 ${rows.length} 筆，有效資料 ${validDatesSet.size} 筆，群組日期 ${group.length} 個`);
+      console.log(`[Worker Fallback Debug] 有效日期:`, Array.from(validDatesSet));
+      console.log(`[Worker Fallback Debug] 請求日期:`, group);
+
       // 針對群組中每一個日期，若未在有效回傳資料中，則標記為永久無效
       // 這能處理「部分補齊」的情況，將剩餘無法補齊的日期記錄下來
       for (const date of group) {
         if (!validDatesSet.has(date)) {
+          console.log(`[Worker Fallback Debug] 準備寫入永久無效: ${date}`);
           await idbSetPermanentInvalid(stockNo, date);
+        } else {
+          console.log(`[Worker Fallback Debug] 日期 ${date} 已成功補齊，跳過寫入`);
         }
       }
 
