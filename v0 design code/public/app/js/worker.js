@@ -17,6 +17,8 @@
 // Patch Tag: LB-AI-TF-LAZYLOAD-20250704A — TensorFlow.js 延後載入，僅在 AI 任務啟動時初始化。
 // Patch Tag: LB-PLUGIN-CONTRACT-20250705A — 引入策略插件契約與 RuleResult 型別驗證。
 // Patch Tag: LB-MONTH-REVALIDATE-20250712A — 月度快取逾期時強制刷新月末缺口避免沿用舊資料。
+// Patch Tag: LB-INVALID-DATA-FALLBACK-20251202E — 無效資料備援機制
+console.log('[Worker] 載入 worker.js - LB-INVALID-DATA-FALLBACK-20251202E 版本');
 importScripts('shared-lookback.js');
 importScripts('strategy-plugin-contract.js');
 importScripts('strategy-plugin-registry.js');
