@@ -568,7 +568,25 @@ async function idbGet(cacheKey) {
         const store = transaction.objectStore(IDB_CONFIG.storeName);
         const request = store.get(cacheKey);
 
-        request.onsuccess = () => resolve(request.result || null);
+        request.onsuccess = () => {
+          const result = request.result;
+
+          // 【防呆機制】檢查讀取的資料是否為空 (LB-IDB-SAFEGUARD-20251202A)
+          if (!result) {
+            resolve(null);
+            return;
+          }
+
+          // 檢查 data 欄位是否為空陣列或不存在
+          if (!result.data || (Array.isArray(result.data) && result.data.length === 0)) {
+            console.warn('[Worker IDB] ⚠️ 讀取到空資料，視為無效快取 (Cache Miss):', cacheKey.substring(0, 50) + '...');
+            resolve(null);
+            return;
+          }
+
+          resolve(result);
+        };
+
         request.onerror = () => {
           console.warn('[Worker IDB] 讀取失敗:', request.error);
           resolve(null);
@@ -594,6 +612,12 @@ async function idbSet(cacheKey, entry) {
   try {
     const db = await initIDB();
     if (!db) return;
+
+    // 【防呆機制】檢查要寫入的資料是否為空 (LB-IDB-SAFEGUARD-20251202A)
+    if (!entry || !entry.data || (Array.isArray(entry.data) && entry.data.length === 0)) {
+      console.warn('[Worker IDB] ⚠️ 禁止寫入空資料，避免污染快取:', cacheKey.substring(0, 50) + '...');
+      return; // 直接返回，不寫入 IDB
+    }
 
     const entryWithTimestamp = {
       ...entry,
