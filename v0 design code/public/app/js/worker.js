@@ -5429,161 +5429,6 @@ function addDaysIso(isoDate, days) {
   return copy.toISOString().split("T")[0];
 }
 
-function getFallbackForceSource(marketKey, adjusted) {
-  if (marketKey === "TWSE" || marketKey === "TPEX") {
-    return adjusted ? "yahoo" : "finmind";
-  }
-  return null;
-}
-
-function detectInvalidRows(rows) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-  const invalidDates = [];
-  rows.forEach((row) => {
-    if (!row || !row.date) return;
-    // 檢查是否為無效資料 (例如: 開高低收皆為 0 或 null，但成交量可能不為 0)
-    // 注意: 某些股票暫停交易時價格可能為 0，需謹慎判斷
-    // 這裡主要針對 "有交易但價格異常" 或 "完全無價格" 的情況
-    const isPriceInvalid =
-      (!Number.isFinite(row.close) || row.close <= 0) &&
-      (!Number.isFinite(row.open) || row.open <= 0) &&
-      (!Number.isFinite(row.high) || row.high <= 0) &&
-      (!Number.isFinite(row.low) || row.low <= 0);
-
-    if (isPriceInvalid) {
-      invalidDates.push(row.date);
-    }
-  });
-  return invalidDates;
-}
-
-function groupConsecutiveDates(dates) {
-  if (!Array.isArray(dates) || dates.length === 0) return [];
-  const sorted = dates.slice().sort();
-  const groups = [];
-  let currentGroup = [sorted[0]];
-
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = new Date(sorted[i - 1]);
-    const curr = new Date(sorted[i]);
-    const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
-
-    if (diffDays <= 1.5) { // 允許 1 天的間隔 (連續日)
-      currentGroup.push(sorted[i]);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [sorted[i]];
-    }
-  }
-  groups.push(currentGroup);
-  return groups;
-}
-
-async function fetchFallbackForInvalidDates(
-  stockNo,
-  invalidDates,
-  marketKey,
-  adjusted,
-  originalRows
-) {
-
-
-  if (!invalidDates || invalidDates.length === 0) return originalRows;
-
-  const fallbackSource = getFallbackForceSource(marketKey, adjusted);
-  if (!fallbackSource) return originalRows;
-
-  console.log(`[Worker] 偵測到 ${invalidDates.length} 筆無效資料，嘗試使用 ${fallbackSource} 補救...`);
-
-  // 1. 檢查永久無效名單
-  const permanentInvalid = await idbGetPermanentInvalid(stockNo);
-  const actionableDates = invalidDates.filter(d => !permanentInvalid.includes(d));
-
-  if (actionableDates.length === 0) {
-    console.log('[Worker] 所有無效日期皆在永久忽略名單中，跳過補救。');
-    return originalRows;
-  }
-
-  // 2. 分組連續日期以減少請求次數
-  const dateGroups = groupConsecutiveDates(actionableDates);
-  const patchedRowsMap = new Map();
-  const stillInvalidDates = [];
-
-  for (const group of dateGroups) {
-    const startDate = group[0];
-    const endDate = group[group.length - 1];
-
-    try {
-      // 擴大範圍前後各 1 天以確保覆蓋
-      // 注意: 這裡簡化處理，直接用日期範圍請求
-      const result = await fetchAdjustedPriceRange(
-        stockNo,
-        startDate,
-        endDate,
-        marketKey,
-        { adjusted, splitAdjustment: false } // 強制不拆分，因為我們只想要補價格
-      );
-
-      // 這裡需要一種方式強制指定 source，但 fetchAdjustedPriceRange 目前不支援直接傳 forceSource
-      // 我們可能需要修改 fetchAdjustedPriceRange 或直接呼叫底層 API
-      // 暫時解法: 假設 fetchAdjustedPriceRange 會自動處理，或者我們直接用 fetchStockData 的邏輯
-      // 更佳解法: 直接呼叫 proxy API
-
-      // 重新實作一段簡單的 fetch 邏輯針對 fallback
-      const params = new URLSearchParams({
-        stockNo,
-        startDate,
-        endDate,
-        market: marketKey,
-        forceSource: fallbackSource
-      });
-      if (adjusted) params.set("adjusted", "1");
-
-      const response = await fetch(`/api/adjusted-price/?${params.toString()}`);
-      if (!response.ok) throw new Error("Fallback fetch failed");
-
-      const data = await response.json();
-      const fallbackRows = data.data || [];
-
-      fallbackRows.forEach(row => {
-        if (row && row.date && Number.isFinite(row.close) && row.close > 0) {
-          patchedRowsMap.set(row.date, row);
-        }
-      });
-
-    } catch (err) {
-      console.warn(`[Worker] Fallback 補救失敗 (${startDate}~${endDate}):`, err);
-    }
-  }
-
-  // 3. 合併結果
-  const finalRows = originalRows.map(row => {
-    if (patchedRowsMap.has(row.date)) {
-      const patched = patchedRowsMap.get(row.date);
-      // 保留原始的一些 meta 資訊如果需要
-      return { ...patched, _patched: true, priceSource: fallbackSource };
-    }
-    return row;
-  });
-
-  // 4. 更新永久無效名單
-  // 再次檢查原始無效日期，如果仍未被修復，則加入永久無效名單
-  const newPermanentInvalid = [];
-  actionableDates.forEach(date => {
-    if (!patchedRowsMap.has(date)) {
-      newPermanentInvalid.push(date);
-    }
-  });
-
-  if (newPermanentInvalid.length > 0) {
-    const updatedList = [...new Set([...permanentInvalid, ...newPermanentInvalid])];
-    await idbSetPermanentInvalid(stockNo, updatedList);
-    console.log(`[Worker] 更新永久無效名單，新增 ${newPermanentInvalid.length} 筆`);
-  }
-
-  return finalRows;
-}
-
 async function fetchCurrentMonthGapPatch({
   stockNo,
   marketKey,
@@ -6620,21 +6465,27 @@ async function fetchStockData(
       ? adjustedResult.data
       : [];
 
-    // Patch: LB-FALLBACK-20251202A — 針對還原股價的無效資料進行補救
-    const invalidDates = detectInvalidRows(adjustedRows);
-    if (invalidDates.length > 0) {
-      adjustedRows = await fetchFallbackForInvalidDates(
+    // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對還原股價的無效資料進行補救
+    const invalidAdjustedRows = detectInvalidRows(adjustedRows);
+    if (invalidAdjustedRows.length > 0) {
+      console.warn(`[Worker] 檢測到 ${invalidAdjustedRows.length} 筆無效還原價資料，嘗試補齊...`);
+
+      const fallbackData = await fetchFallbackForInvalidDates({
         stockNo,
-        invalidDates,
         marketKey,
-        true, // adjusted
-        adjustedRows
-      );
-      // 同步更新 adjustedResult.data 以保持一致性
-      if (adjustedResult) {
-        adjustedResult.data = adjustedRows;
+        invalidRows: invalidAdjustedRows,
+        adjusted: true,
+      });
+
+      if (fallbackData.length > 0) {
+        console.log(`[Worker] 成功補齊 ${fallbackData.length} 筆還原價資料`);
+        const merged = [...adjustedRows, ...fallbackData];
+        adjustedRows = dedupeAndSortData(merged);
       }
     }
+
+    // 最終過濾無效收盤價
+    adjustedRows = filterInvalidClosePriceRows(adjustedRows);
     const adjustedOverview = summariseDatasetRows(adjustedRows, {
       requestedStart: optionEffectiveStart || startDate,
       effectiveStartDate: optionEffectiveStart || startDate,
@@ -7253,17 +7104,27 @@ async function fetchStockData(
   self.postMessage({ type: "progress", progress: 55, message: "整理數據..." });
   let deduped = dedupeAndSortData(normalizedRows);
 
-  // Patch: LB-FALLBACK-20251202A — 針對一般股價的無效資料進行補救
-  const invalidDates = detectInvalidRows(deduped);
-  if (invalidDates.length > 0) {
-    deduped = await fetchFallbackForInvalidDates(
+  // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對原始股價的無效資料進行補救
+  const invalidRows = detectInvalidRows(deduped);
+  if (invalidRows.length > 0) {
+    console.warn(`[Worker] 檢測到 ${invalidRows.length} 筆無效原始資料，嘗試補齊...`);
+
+    const fallbackData = await fetchFallbackForInvalidDates({
       stockNo,
-      invalidDates,
       marketKey,
+      invalidRows,
       adjusted,
-      deduped
-    );
+    });
+
+    if (fallbackData.length > 0) {
+      console.log(`[Worker] 成功補齊 ${fallbackData.length} 筆原始資料`);
+      const merged = [...deduped, ...fallbackData];
+      deduped = dedupeAndSortData(merged);
+    }
   }
+
+  // 最終過濾無效收盤價
+  deduped = filterInvalidClosePriceRows(deduped);
   const defaultRemoteLabel = isTpex
     ? adjusted
       ? "Yahoo Finance (還原)"
