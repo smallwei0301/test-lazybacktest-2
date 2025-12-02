@@ -773,8 +773,10 @@ async function idbGetPermanentInvalid(stockNo) {
  * @returns {Promise<void>}
  */
 async function idbSetPermanentInvalid(stockNo, date) {
+  console.log(`[Worker IDB Debug] idbSetPermanentInvalid called for ${stockNo} ${date}`);
   try {
     const db = await initIDB();
+    console.log(`[Worker IDB Debug] DB initialized: ${!!db}`);
     if (!db) {
       console.warn('[Worker IDB] 無法寫入永久無效日期，DB 未初始化');
       return;
@@ -790,28 +792,22 @@ async function idbSetPermanentInvalid(stockNo, date) {
     };
 
     return new Promise((resolve, reject) => {
+      console.log(`[Worker IDB Debug] Creating transaction for ${PERMANENT_INVALID_STORE_NAME}`);
       try {
         const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
         const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+        const request = store.put(entry, entry.id);
+        console.log(`[Worker IDB Debug] Put request created`);
 
-        // 監聽 transaction 完成而非 request 完成
-        transaction.oncomplete = () => {
+        request.onsuccess = () => {
           console.log(`[Worker IDB] 已記錄永久無效日期: ${stockNo} - ${date}`);
           resolve();
         };
 
-        transaction.onerror = () => {
-          console.warn(`[Worker IDB] Transaction 失敗: ${stockNo} - ${date}`, transaction.error);
-          resolve(); // 即使失敗也 resolve，避免阻塞
-        };
-
-        // 執行 put 操作
-        const request = store.put(entry, entry.id);
-
         request.onerror = () => {
           console.warn(`[Worker IDB] 寫入永久無效日期失敗: ${stockNo} - ${date}`, request.error);
+          resolve();
         };
-
       } catch (txError) {
         console.warn('[Worker IDB] idbSetPermanentInvalid 交易錯誤:', txError);
         resolve();
