@@ -506,6 +506,246 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
   overflowPenaltySlope: 4,
 });
 
+// Patch: LB-IDB-CACHE-PROPOSAL-v1 — IndexedDB Native Helper for Persistent Cache
+const IDB_CONFIG = {
+  name: 'LazyBacktestDB',
+  version: 1,
+  storeName: 'stock_cache'
+};
+
+const IDB_ADJ_TTL_MS = 24 * 60 * 60 * 1000; // 還原股價 24 小時 TTL
+let idbInstance = null;
+
+/**
+ * 初始化 IndexedDB 連線
+ * @returns {Promise<IDBDatabase|null>}
+ */
+function initIDB() {
+  if (idbInstance) return Promise.resolve(idbInstance);
+
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_CONFIG.name, IDB_CONFIG.version);
+
+      request.onerror = () => {
+        console.warn('[Worker IDB] 無法開啟 IndexedDB:', request.error);
+        resolve(null);
+      };
+
+      request.onsuccess = () => {
+        idbInstance = request.result;
+        console.log('[Worker IDB] IndexedDB 初始化成功');
+        resolve(idbInstance);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(IDB_CONFIG.storeName)) {
+          db.createObjectStore(IDB_CONFIG.storeName);
+          console.log('[Worker IDB] 建立 ObjectStore:', IDB_CONFIG.storeName);
+        }
+      };
+    } catch (error) {
+      console.warn('[Worker IDB] IndexedDB 初始化失敗 (可能為隱私模式):', error);
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * 從 IndexedDB 讀取快取
+ * @param {string} cacheKey 
+ * @returns {Promise<object|null>}
+ */
+async function idbGet(cacheKey) {
+  try {
+    const db = await initIDB();
+    if (!db) return null;
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = db.transaction([IDB_CONFIG.storeName], 'readonly');
+        const store = transaction.objectStore(IDB_CONFIG.storeName);
+        const request = store.get(cacheKey);
+
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => {
+          console.warn('[Worker IDB] 讀取失敗:', request.error);
+          resolve(null);
+        };
+      } catch (error) {
+        console.warn('[Worker IDB] idbGet 交易錯誤:', error);
+        resolve(null);
+      }
+    });
+  } catch (error) {
+    console.warn('[Worker IDB] idbGet 錯誤:', error);
+    return null;
+  }
+}
+
+/**
+ * 寫入 IndexedDB 快取（含 QuotaExceededError 處理）
+ * @param {string} cacheKey 
+ * @param {object} entry 
+ * @returns {Promise<void>}
+ */
+async function idbSet(cacheKey, entry) {
+  try {
+    const db = await initIDB();
+    if (!db) return;
+
+    const entryWithTimestamp = {
+      ...entry,
+      idbTimestamp: Date.now()
+    };
+
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = db.transaction([IDB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(IDB_CONFIG.storeName);
+        const request = store.put(entryWithTimestamp, cacheKey);
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => {
+          const error = request.error;
+          if (error && error.name === 'QuotaExceededError') {
+            console.error('[Worker IDB] ⚠️ IndexedDB 儲存空間已滿 (QuotaExceededError)');
+            console.warn('[Worker IDB] 建議：請清除瀏覽器快取或執行 idbClear() 釋放空間');
+            reject(error);
+          } else {
+            console.warn('[Worker IDB] 寫入失敗:', error);
+            resolve();
+          }
+        };
+      } catch (error) {
+        if (error && error.name === 'QuotaExceededError') {
+          console.error('[Worker IDB] ⚠️ IndexedDB 儲存空間已滿 (交易錯誤)');
+          console.warn('[Worker IDB] 建議：清除瀏覽器快取或聯絡開發者');
+          reject(error);
+        } else {
+          console.warn('[Worker IDB] idbSet 交易錯誤:', error);
+          resolve();
+        }
+      }
+    });
+  } catch (error) {
+    if (error && error.name === 'QuotaExceededError') {
+      console.error('[Worker IDB] ⚠️ IndexedDB 儲存空間已滿 (外層錯誤)');
+      throw error;
+    }
+    console.warn('[Worker IDB] idbSet 錯誤:', error);
+  }
+}
+
+/**
+ * 清空 IndexedDB 快取
+ * @returns {Promise<void>}
+ */
+async function idbClear() {
+  try {
+    const db = await initIDB();
+    if (!db) return;
+
+    return new Promise((resolve) => {
+      try {
+        const transaction = db.transaction([IDB_CONFIG.storeName], 'readwrite');
+        const store = transaction.objectStore(IDB_CONFIG.storeName);
+        const request = store.clear();
+
+        request.onsuccess = () => {
+          console.log('[Worker IDB] 快取已清空');
+          resolve();
+        };
+        request.onerror = () => {
+          console.warn('[Worker IDB] 清空失敗:', request.error);
+          resolve();
+        };
+      } catch (error) {
+        console.warn('[Worker IDB] idbClear 交易錯誤:', error);
+        resolve();
+      }
+    });
+  } catch (error) {
+    console.warn('[Worker IDB] idbClear 錯誤:', error);
+  }
+}
+
+/**
+ * 檢查還原股價是否過期（24 小時 TTL）
+ * @param {string} cacheKey 
+ * @param {number} idbTimestamp 
+ * @returns {boolean}
+ */
+function isAdjustedPriceStale(cacheKey, idbTimestamp) {
+  if (!cacheKey || !cacheKey.includes('ADJ')) return false;
+  if (!Number.isFinite(idbTimestamp)) return true;
+
+  const age = Date.now() - idbTimestamp;
+  const isStale = age > IDB_ADJ_TTL_MS;
+
+  if (isStale) {
+    const ageHours = (age / (60 * 60 * 1000)).toFixed(1);
+    console.log(`[Worker IDB] 還原股價已過期 (${ageHours}h > 24h)`);
+  }
+
+  return isStale;
+}
+
+// Patch: LB-IDB-YEARCACHE-v1 — 年度資料桶 IndexedDB 工具函式
+/**
+ * 寫入年度資料桶到 IndexedDB
+ * @param {string} marketKey 
+ * @param {string} stockNo 
+ * @param {string} priceModeKey 
+ * @param {number} year 
+ * @param {object} entry 
+ * @param {boolean} split 
+ * @returns {Promise<void>}
+ */
+async function idbSetYearSuperset(marketKey, stockNo, priceModeKey, year, entry, split = false) {
+  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+  const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
+
+  const entryWithMeta = {
+    ...entry,
+    idbTimestamp: Date.now(),
+    marketKey,
+    stockNo: stockNo.toUpperCase(),
+    year,
+    priceModeKey,
+    split
+  };
+
+  return idbSet(idbKey, entryWithMeta);
+}
+
+/**
+ * 從 IndexedDB 讀取年度資料桶
+ * @param {string} marketKey 
+ * @param {string} stockNo 
+ * @param {string} priceModeKey 
+ * @param {number} year 
+ * @param {boolean} split 
+ * @returns {Promise<object|null>}
+ */
+async function idbGetYearSuperset(marketKey, stockNo, priceModeKey, year, split = false) {
+  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+  const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
+
+  try {
+    const data = await idbGet(idbKey);
+    if (!data) return null;
+
+    // 移除 metadata，只返回 entry 格式
+    const { idbTimestamp, marketKey: mk, stockNo: sn, year: y, priceModeKey: pm, split: sp, ...entry } = data;
+    return entry;
+  } catch (error) {
+    console.warn('[Worker IDB] 讀取年度資料桶失敗:', error);
+    return null;
+  }
+}
+
 function aiPostProgress(id, message) {
   if (!id) return;
   self.postMessage({ type: 'ai-train-lstm-progress', id, message });
@@ -2680,6 +2920,15 @@ function setYearSupersetEntry(
     split,
   );
   stockCache.set(year, entry);
+
+  // Patch: LB-IDB-YEARCACHE-v1 — 非阻塞寫入年度資料桶到 IDB
+  idbSetYearSuperset(marketKey, stockNo, priceModeKey, year, entry, split).catch(error => {
+    if (error && error.name === 'QuotaExceededError') {
+      console.warn(`[Worker] ⚠️ 年度資料桶寫入失敗：空間不足 (${year})`);
+    } else {
+      console.warn(`[Worker IDB] 年度資料桶寫入失敗 (${year}):`, error);
+    }
+  });
 }
 
 function mergeYearSupersetRows(existingEntry, rows) {
@@ -3391,7 +3640,9 @@ function getWorkerCacheEntry(marketKey, cacheKey) {
   return null;
 }
 
-function setWorkerCacheEntry(marketKey, cacheKey, entry) {
+// Patch: LB-IDB-CACHE-PROPOSAL-v1 — 修改寫入邏輯支援 IDB
+function setWorkerCacheEntry(marketKey, cacheKey, entry, options = {}) {
+  // 原有記憶體寫入邏輯
   const marketCache = ensureMarketCache(marketKey);
   marketCache.set(cacheKey, entry);
   workerLastDataset = entry.data;
@@ -3401,6 +3652,22 @@ function setWorkerCacheEntry(marketKey, cacheKey, entry) {
     dataSource: entry.dataSource,
     stockName: entry.stockName,
   };
+
+  // 新增：非阻塞式寫入 IndexedDB（含 QuotaExceededError 自動清理）
+  if (!options.skipIDB) {
+    idbSet(cacheKey, entry).catch(error => {
+      if (error && error.name === 'QuotaExceededError') {
+        console.error('[Worker] ⚠️ IndexedDB 空間不足，自動清除所有快取...');
+        idbClear().then(() => {
+          console.log('[Worker] ✅ IndexedDB 快取已清除，下次寫入將有足夠空間');
+        }).catch(clearError => {
+          console.error('[Worker] ❌ 清除 IndexedDB 失敗:', clearError);
+        });
+      } else {
+        console.warn('[Worker IDB] 背景寫入失敗:', error);
+      }
+    });
+  }
 }
 
 function cloneCoverageRanges(ranges) {
@@ -5567,6 +5834,32 @@ async function fetchStockData(
     marketKey,
   );
   const cachedEntry = getWorkerCacheEntry(marketKey, cacheKey);
+
+  // Patch: LB-IDB-CACHE-PROPOSAL-v1 — 新增 IDB 讀取邏輯
+  let finalCachedEntry = cachedEntry;
+
+  if (!finalCachedEntry) {
+    try {
+      const idbData = await idbGet(cacheKey);
+
+      if (idbData) {
+        // 檢查還原股價 TTL (24 小時)
+        if (isAdjustedPriceStale(cacheKey, idbData.idbTimestamp)) {
+          console.log('[Worker IDB] 還原股價已過期 (>24h)，捨棄快取:', cacheKey.substring(0, 50) + '...');
+        } else {
+          console.log('[Worker IDB] 命中 IndexedDB 快取:', cacheKey.substring(0, 50) + '...');
+
+          // 恢復到記憶體快取 (避免重複寫入 IDB)
+          setWorkerCacheEntry(marketKey, cacheKey, idbData, { skipIDB: true });
+
+          finalCachedEntry = idbData;
+        }
+      }
+    } catch (error) {
+      console.warn('[Worker IDB] 讀取錯誤:', error);
+    }
+  }
+
   const fetchDiagnostics = {
     stockNo,
     marketKey,
@@ -5578,15 +5871,18 @@ async function fetchStockData(
     lookbackDays: optionLookbackDays,
     dataStartDate: startDate,
     months: [],
-    usedCache: Boolean(cachedEntry),
+    usedCache: Boolean(finalCachedEntry),
+    idbHit: finalCachedEntry && !cachedEntry ? true : false,
+    idbTimestamp: finalCachedEntry && !cachedEntry ? finalCachedEntry.idbTimestamp : undefined,
   };
-  if (cachedEntry) {
+  // Patch: LB-IDB-CACHE-PROPOSAL-v1 — 使用 finalCachedEntry (可能來自 IDB)
+  if (finalCachedEntry) {
     const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
-      cachedEntry?.meta?.diagnostics || null,
+      finalCachedEntry?.meta?.diagnostics || null,
       {
-        source: "worker-cache",
+        source: cachedEntry ? "worker-cache" : "indexeddb-cache",
         requestedRange: { start: startDate, end: endDate },
-        coverage: cachedEntry?.meta?.coverage || cachedEntry.coverage,
+        coverage: finalCachedEntry?.meta?.coverage || finalCachedEntry.coverage,
       },
     );
     if (workerLastMeta && typeof workerLastMeta === "object") {
@@ -5595,66 +5891,105 @@ async function fetchStockData(
     self.postMessage({
       type: "progress",
       progress: 15,
-      message: "命中背景快取...",
+      message: cachedEntry ? "命中背景快取..." : "命中 IndexedDB 快取...",
     });
     return {
-      data: cachedEntry.data,
-      dataSource: `${cachedEntry.dataSource || marketKey} (Worker快取)`,
-      stockName: cachedEntry.stockName || stockNo,
+      data: finalCachedEntry.data,
+      dataSource: `${finalCachedEntry.dataSource || marketKey} (${cachedEntry ? 'Worker快取' : 'IndexedDB快取'})`,
+      stockName: finalCachedEntry.stockName || stockNo,
       adjustmentFallbackApplied: Boolean(
-        cachedEntry?.meta?.adjustmentFallbackApplied,
+        finalCachedEntry?.meta?.adjustmentFallbackApplied,
       ),
-      adjustmentFallbackInfo: cachedEntry?.meta?.adjustmentFallbackInfo || null,
+      adjustmentFallbackInfo: finalCachedEntry?.meta?.adjustmentFallbackInfo || null,
       summary:
-        cachedEntry?.meta?.summary &&
-          typeof cachedEntry.meta.summary === "object"
-          ? cachedEntry.meta.summary
+        finalCachedEntry?.meta?.summary &&
+          typeof finalCachedEntry.meta.summary === "object"
+          ? finalCachedEntry.meta.summary
           : null,
-      adjustments: Array.isArray(cachedEntry?.meta?.adjustments)
-        ? cachedEntry.meta.adjustments
+      adjustments: Array.isArray(finalCachedEntry?.meta?.adjustments)
+        ? finalCachedEntry.meta.adjustments
         : [],
-      priceSource: cachedEntry?.meta?.priceSource || null,
-      debugSteps: Array.isArray(cachedEntry?.meta?.debugSteps)
-        ? cachedEntry.meta.debugSteps
+      priceSource: finalCachedEntry?.meta?.priceSource || null,
+      debugSteps: Array.isArray(finalCachedEntry?.meta?.debugSteps)
+        ? finalCachedEntry.meta.debugSteps
         : [],
       dividendDiagnostics:
-        cachedEntry?.meta?.dividendDiagnostics &&
-          typeof cachedEntry.meta.dividendDiagnostics === "object"
-          ? cachedEntry.meta.dividendDiagnostics
+        finalCachedEntry?.meta?.dividendDiagnostics &&
+          typeof finalCachedEntry.meta.dividendDiagnostics === "object"
+          ? finalCachedEntry.meta.dividendDiagnostics
           : null,
-      dividendEvents: Array.isArray(cachedEntry?.meta?.dividendEvents)
-        ? cachedEntry.meta.dividendEvents
+      dividendEvents: Array.isArray(finalCachedEntry?.meta?.dividendEvents)
+        ? finalCachedEntry.meta.dividendEvents
         : [],
       splitDiagnostics:
-        cachedEntry?.meta?.splitDiagnostics &&
-          typeof cachedEntry.meta.splitDiagnostics === "object"
-          ? cachedEntry.meta.splitDiagnostics
+        finalCachedEntry?.meta?.splitDiagnostics &&
+          typeof finalCachedEntry.meta.splitDiagnostics === "object"
+          ? finalCachedEntry.meta.splitDiagnostics
           : null,
       finmindStatus:
-        cachedEntry?.meta?.finmindStatus &&
-          typeof cachedEntry.meta.finmindStatus === "object"
-          ? cachedEntry.meta.finmindStatus
+        finalCachedEntry?.meta?.finmindStatus &&
+          typeof finalCachedEntry.meta.finmindStatus === "object"
+          ? finalCachedEntry.meta.finmindStatus
           : null,
-      adjustmentDebugLog: Array.isArray(cachedEntry?.meta?.adjustmentDebugLog)
-        ? cachedEntry.meta.adjustmentDebugLog
+      adjustmentDebugLog: Array.isArray(finalCachedEntry?.meta?.adjustmentDebugLog)
+        ? finalCachedEntry.meta.adjustmentDebugLog
         : [],
-      adjustmentChecks: Array.isArray(cachedEntry?.meta?.adjustmentChecks)
-        ? cachedEntry.meta.adjustmentChecks
+      adjustmentChecks: Array.isArray(finalCachedEntry?.meta?.adjustmentChecks)
+        ? finalCachedEntry.meta.adjustmentChecks
         : [],
       fetchRange:
-        cachedEntry?.meta?.fetchRange ||
+        finalCachedEntry?.meta?.fetchRange ||
         { start: startDate, end: endDate },
       dataStartDate:
-        cachedEntry?.meta?.dataStartDate ||
-        cachedEntry?.meta?.startDate ||
+        finalCachedEntry?.meta?.dataStartDate ||
+        finalCachedEntry?.meta?.startDate ||
         startDate,
-      effectiveStartDate: cachedEntry?.meta?.effectiveStartDate || null,
-      lookbackDays: cachedEntry?.meta?.lookbackDays || null,
+      effectiveStartDate: finalCachedEntry?.meta?.effectiveStartDate || null,
+      lookbackDays: finalCachedEntry?.meta?.lookbackDays || null,
       diagnostics: cacheDiagnostics,
     };
   }
 
+  // Patch: LB-IDB-YEARCACHE-v1 — 預載年度資料桶從 IDB
   if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+    const startYear = parseInt(startDate.slice(0, 4), 10);
+    const endYear = parseInt(endDate.slice(0, 4), 10);
+    const priceModeKey = getPriceModeKey(adjusted);
+
+    if (Number.isFinite(startYear) && Number.isFinite(endYear)) {
+      // 檢查記憶體中是否已有年度資料，沒有才從 IDB 載入
+      for (let year = startYear; year <= endYear; year++) {
+        const existingEntry = getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split);
+
+        if (!existingEntry) {
+          try {
+            const idbEntry = await idbGetYearSuperset(marketKey, stockNo, priceModeKey, year, split);
+
+            if (idbEntry && Array.isArray(idbEntry.data) && idbEntry.data.length > 0) {
+              console.log(`[Worker IDB] 載入年度資料桶: ${stockNo} ${year} (${idbEntry.data.length} rows)`);
+
+              // 寫入記憶體（不再寫回 IDB）
+              const stockCache = ensureYearSupersetStockCache(marketKey, stockNo, priceModeKey, split);
+              stockCache.set(year, idbEntry);
+
+              // 標記為來自 IDB
+              if (!fetchDiagnostics.yearCacheIdbHits) {
+                fetchDiagnostics.yearCacheIdbHits = [];
+              }
+              fetchDiagnostics.yearCacheIdbHits.push({
+                year,
+                rows: idbEntry.data.length,
+                stockNo: stockNo.toUpperCase()
+              });
+            }
+          } catch (error) {
+            console.warn(`[Worker IDB] 載入年度資料桶失敗 (${year}):`, error);
+          }
+        }
+      }
+    }
+
+    // 原有的 tryResolveRangeFromYearSuperset 邏輯
     const supersetResult = tryResolveRangeFromYearSuperset({
       stockNo,
       startDate,
