@@ -7093,6 +7093,7 @@ async function fetchStockData(
         isTpex,
         startDateObj,
         endDateObj,
+        { adjusted } // Patch: LB-INVALID-DATA-FALLBACK-20251202E
       );
       if (normalized) normalizedRows.push(normalized);
     });
