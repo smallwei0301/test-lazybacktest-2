@@ -507,12 +507,15 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
 });
 
 // Patch: LB-IDB-CACHE-PROPOSAL-v1 — IndexedDB Native Helper for Persistent Cache
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — IndexedDB 配置升級
 const IDB_CONFIG = {
   name: 'LazyBacktestDB',
-  version: 1,
+  version: 2, // Patch: LB-INVALID-DATA-FALLBACK-20251202E
   storeName: 'stock_cache'
 };
 
+const PERMANENT_INVALID_STORE_NAME = 'permanentInvalidDates';
+const PERMANENT_INVALID_TTL_MS = 24 * 60 * 60 * 1000; // 永久無效資料 24 小時 TTL
 const IDB_ADJ_TTL_MS = 24 * 60 * 60 * 1000; // 還原股價 24 小時 TTL
 let idbInstance = null;
 
@@ -540,9 +543,19 @@ function initIDB() {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+
+        // 主快取 store
         if (!db.objectStoreNames.contains(IDB_CONFIG.storeName)) {
           db.createObjectStore(IDB_CONFIG.storeName);
           console.log('[Worker IDB] 建立 ObjectStore:', IDB_CONFIG.storeName);
+        }
+
+        // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 永久無效資料 store
+        if (!db.objectStoreNames.contains(PERMANENT_INVALID_STORE_NAME)) {
+          const permanentStore = db.createObjectStore(PERMANENT_INVALID_STORE_NAME);
+          permanentStore.createIndex('stockNo', 'stockNo', { unique: false });
+          permanentStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+          console.log('[Worker IDB] 建立 ObjectStore:', PERMANENT_INVALID_STORE_NAME);
         }
       };
     } catch (error) {
@@ -715,6 +728,72 @@ function isAdjustedPriceStale(cacheKey, idbTimestamp) {
 
   return isStale;
 }
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — 永久無效資料 IDB 存取
+/**
+ * 從 IndexedDB 讀取股票的永久無效日期清單
+ * @param {string} stockNo 股票代碼
+ * @returns {Promise<string[]>} 永久無效日期陣列 (YYYY-MM-DD)
+ */
+async function idbGetPermanentInvalid(stockNo) {
+  try {
+    const db = await initIDB();
+    if (!db) return [];
+
+    return new Promise((resolve) => {
+      const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+      const index = store.index('stockNo');
+      const request = index.getAll(stockNo);
+
+      request.onsuccess = () => {
+        const results = request.result || [];
+        const now = Date.now();
+
+        // 過濾已過期的資料
+        const valid = results.filter(item => item.expiresAt > now);
+        resolve(valid.map(item => item.date));
+      };
+
+      request.onerror = () => {
+        console.warn('[Worker IDB] 讀取永久無效資料失敗:', request.error);
+        resolve([]);
+      };
+    });
+  } catch (e) {
+    console.warn('[Worker IDB] idbGetPermanentInvalid 錯誤:', e);
+    return [];
+  }
+}
+
+/**
+ * 將無效日期寫入 IndexedDB
+ * @param {string} stockNo 股票代碼
+ * @param {string} date 無效日期 (YYYY-MM-DD)
+ * @returns {Promise<void>}
+ */
+async function idbSetPermanentInvalid(stockNo, date) {
+  try {
+    const db = await initIDB();
+    if (!db) return;
+
+    const expiresAt = Date.now() + PERMANENT_INVALID_TTL_MS;
+    const entry = {
+      id: `${stockNo}|${date}`,
+      stockNo,
+      date,
+      expiresAt,
+      recordedAt: Date.now()
+    };
+
+    const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+    store.put(entry, entry.id);
+  } catch (e) {
+    console.warn('[Worker IDB] idbSetPermanentInvalid 錯誤:', e);
+  }
+}
+
 
 // Patch: LB-IDB-YEARCACHE-v1 — 年度資料桶 IndexedDB 工具函式
 /**
@@ -4607,8 +4686,9 @@ async function fetchAdjustedPriceRange(
   };
 }
 
-function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
+function normalizeProxyRow(item, isTpex, startDateObj, endDateObj, options = {}) {
   try {
+    const adjusted = options.adjusted || false; // Patch: LB-INVALID-DATA-FALLBACK-20251202E
     let dateStr = null;
     let open = null,
       high = null,
@@ -4680,6 +4760,13 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         const num = Number(normalized);
         return Number.isFinite(num) ? num : null;
       };
+
+      // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 優先處理 adjclose
+      let adjClose = null;
+      if (adjusted) {
+        adjClose = parseNumber(item.adjclose ?? item.adjClose ?? item.adjustedClose ?? null);
+      }
+
       const resolveObjectVolume = () => {
         const candidates = [
           item.volume,
@@ -4693,6 +4780,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
           item.vol,
           item.volume_shares,
           item.volumeShares,
+          item.regularMarketVolume, // Patch: LB-INVALID-DATA-FALLBACK-20251202E - Yahoo Finance
         ];
         for (let i = 0; i < candidates.length; i += 1) {
           const parsed = parseNumber(candidates[i]);
@@ -4703,10 +4791,19 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
         return 0;
       };
       dateStr = item.date || item.Date || item.tradeDate || null;
-      open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
-      high = parseNumber(item.high ?? item.High ?? item.max ?? null);
-      low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
-      close = parseNumber(item.close ?? item.Close ?? null);
+
+      // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 還原模式優先使用 adjclose
+      if (adjusted && adjClose !== null) {
+        close = adjClose;
+        open = parseNumber(item.open ?? item.Open ?? item.Opening ?? adjClose);
+        high = parseNumber(item.high ?? item.High ?? item.max ?? Math.max(open ?? adjClose, adjClose));
+        low = parseNumber(item.low ?? item.Low ?? item.min ?? Math.min(open ?? adjClose, adjClose));
+      } else {
+        open = parseNumber(item.open ?? item.Open ?? item.Opening ?? null);
+        high = parseNumber(item.high ?? item.High ?? item.max ?? null);
+        low = parseNumber(item.low ?? item.Low ?? item.min ?? null);
+        close = parseNumber(item.close ?? item.Close ?? null);
+      }
       volume = resolveObjectVolume();
     } else {
       return null;
@@ -4746,14 +4843,243 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj) {
   }
 }
 
+/**
+ * 正規化日期為 ISO 格式 (YYYY-MM-DD)
+ * Patch: LB-INVALID-DATA-FALLBACK-20251202E
+ * @param {string|Date} dateInput 
+ * @returns {string|null} ISO 日期字串或 null
+ */
+function normalizeISODate(dateInput) {
+  if (!dateInput) return null;
+
+  // 已經是 YYYY-MM-DD 格式
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    return dateInput;
+  }
+
+  // 包含時間戳記 (如 2024-01-01T00:00:00.000Z)
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(dateInput)) {
+    return dateInput.split('T')[0];
+  }
+
+  // Date 物件
+  if (dateInput instanceof Date && !Number.isNaN(dateInput.getTime())) {
+    const year = dateInput.getFullYear();
+    const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+    const day = String(dateInput.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // 嘗試解析
+  try {
+    const parsed = new Date(dateInput);
+    if (!Number.isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  } catch (e) {
+    return null;
+  }
+
+  return null;
+}
+
 function dedupeAndSortData(rows) {
   const map = new Map();
   rows.forEach((row) => {
-    if (row && row.date) map.set(row.date, row);
+    if (row && row.date) {
+      const normalizedDate = normalizeISODate(row.date); // Patch: LB-INVALID-DATA-FALLBACK-20251202E
+      if (normalizedDate) {
+        // 若已存在,保留較新的資料 (有更多欄位的優先)
+        const existing = map.get(normalizedDate);
+        if (!existing || (row.close !== null && existing.close === null)) {
+          map.set(normalizedDate, { ...row, date: normalizedDate });
+        }
+      }
+    }
   });
   return Array.from(map.values()).sort(
     (a, b) => new Date(a.date) - new Date(b.date),
   );
+}
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — Fallback 來源設定
+function getFallbackForceSource(marketKey, adjusted) {
+  if (marketKey === 'TWSE' || marketKey === 'TPEX') {
+    // 台股備援：TPEX Proxy 已支援 forceSource=yahoo
+    return adjusted ? null : 'yahoo';
+  }
+  if (marketKey === 'US') {
+    // 美股備援：Yahoo Finance
+    return adjusted ? null : 'yahoo';
+  }
+  return null;
+}
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — 無效資料偵測
+function detectInvalidRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  const invalid = [];
+
+  rows.forEach((row, index) => {
+    if (!row) return;
+
+    const isValidClose = Number.isFinite(row.close) && row.close > 0;
+
+    if (!isValidClose) {
+      invalid.push({
+        index,
+        date: row.date,
+        reason: row.close === 0 ? 'zero_close' : 'invalid_close',
+        row
+      });
+    }
+  });
+
+  return invalid;
+}
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — 群組連續日期
+function groupConsecutiveDates(dates) {
+  if (!Array.isArray(dates) || dates.length === 0) return [];
+  const sorted = dates.slice().sort();
+  const groups = [];
+  let currentGroup = [sorted[0]];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(currentGroup[currentGroup.length - 1]);
+    const curr = new Date(sorted[i]);
+    const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
+
+    if (diffDays <= 1.5) { // 允許 1 天差距
+      currentGroup.push(sorted[i]);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [sorted[i]];
+    }
+  }
+  groups.push(currentGroup);
+  return groups;
+}
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — 針對無效日期嘗試補齊
+async function fetchFallbackForInvalidDates({
+  stockNo,
+  marketKey,
+  invalidRows,
+  adjusted = false,
+}) {
+  if (!invalidRows || invalidRows.length === 0) return [];
+
+  // 1. 檢查永久無效清單
+  const permanentInvalidDates = await idbGetPermanentInvalid(stockNo);
+  const permanentSet = new Set(permanentInvalidDates);
+
+  const candidates = invalidRows.filter(r => !permanentSet.has(r.date));
+  if (candidates.length === 0) {
+    console.log(`[Worker] 所有無效日期皆為永久無效 (${stockNo})`);
+    return [];
+  }
+
+  console.log(`[Worker] 嘗試補齊 ${candidates.length} 筆無效資料 (${stockNo})`);
+
+  // 2. 分群連續日期
+  const dateGroups = groupConsecutiveDates(candidates.map(c => c.date));
+  const resultRows = [];
+
+  // 3. 決定備援來源
+  const targetSource = getFallbackForceSource(marketKey, adjusted);
+  if (!targetSource) {
+    console.warn('[Worker] 無法決定備援來源，跳過補齊');
+    return [];
+  }
+
+  let proxyPath = "/api/twse/";
+  if (marketKey === "TPEX") proxyPath = "/api/tpex/";
+  else if (marketKey === "US") proxyPath = "/api/us/";
+
+  // 4. 逐群組請求
+  for (const group of dateGroups) {
+    const startDate = group[0];
+    const endDate = group[group.length - 1];
+
+    const params = new URLSearchParams({
+      stockNo,
+      start: startDate,
+      end: endDate,
+      forceSource: targetSource
+    });
+    if (adjusted) params.set("adjusted", "1");
+    params.set("cacheBust", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
+    const url = `${proxyPath}?${params.toString()}`;
+
+    try {
+      const response = await fetchWithAdaptiveRetry(url, { headers: { Accept: "application/json" } });
+      if (!response || response.error) continue;
+
+      const rows = Array.isArray(response.aaData) ? response.aaData : (response.data || []);
+
+      const startDateObj = new Date(startDate);
+      const endDateObj = new Date(endDate);
+      const isTpex = marketKey === 'TPEX';
+
+      let validCount = 0;
+      rows.forEach(row => {
+        const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, { adjusted });
+        if (normalized && normalized.date && normalized.close > 0) {
+          // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 正規化日期
+          normalized.date = normalizeISODate(normalized.date);
+          if (normalized.date) {
+            resultRows.push(normalized);
+            validCount++;
+          }
+        }
+      });
+
+      // 若無有效資料，標記為永久無效
+      if (validCount === 0) {
+        for (const date of group) {
+          await idbSetPermanentInvalid(stockNo, date);
+        }
+      }
+
+    } catch (e) {
+      console.warn(`[Worker] 補齊失敗 (${startDate}~${endDate}):`, e);
+      // 請求失敗也標記為永久無效
+      for (const date of group) {
+        await idbSetPermanentInvalid(stockNo, date);
+      }
+    }
+  }
+
+  return resultRows;
+}
+
+// Patch: LB-INVALID-DATA-FALLBACK-20251202E — 過濾收盤價無效的資料列
+function filterInvalidClosePriceRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  const validRows = [];
+  const invalidLog = [];
+
+  rows.forEach(row => {
+    if (row && Number.isFinite(row.close) && row.close > 0) {
+      validRows.push(row);
+    } else {
+      if (row && row.date) {
+        invalidLog.push(row.date);
+      }
+    }
+  });
+
+  if (invalidLog.length > 0) {
+    console.warn(`[Worker] 過濾掉 ${invalidLog.length} 筆無效收盤價資料:`,
+      invalidLog.slice(0, 5).join(', ') + (invalidLog.length > 5 ? '...' : ''));
+  }
+
+  return validRows;
 }
 
 function parseSourceLabelDescriptor(label) {
