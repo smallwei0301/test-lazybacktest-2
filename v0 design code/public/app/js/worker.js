@@ -44,6 +44,10 @@ const CLASSIFICATION_MODES = {
   MULTICLASS: 'multiclass',
 };
 
+// Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
+const DEBUG_SUPERSET = false; // Set to true for detailed Superset cache logs
+
+
 const legacyRuleResultNormaliser =
   typeof self !== 'undefined' &&
     self.LegacyStrategyPluginShim &&
@@ -3158,6 +3162,8 @@ async function recordYearSupersetSlices({
     console.warn('[Worker IDB] Clean-on-Write 檢查失敗，將寫入原始資料:', e);
   }
 
+  // Patch: LB-SUPERSET-V2-20251203B — 允許當月資料寫入 Year Superset
+  // 無過濾器：所有有效資料(包含當月)都會寫入 Superset
   const grouped = new Map();
   validRows.forEach((row) => {
     if (!row || typeof row.date !== "string") return;
@@ -3180,6 +3186,7 @@ async function recordYearSupersetSlices({
         lastUpdated: 0,
       };
 
+    // mergeYearSupersetRows 會自動更新 entry.lastUpdated
     mergeYearSupersetRows(entry, yearRows);
 
     // 更新記憶體快取並觸發 IDB 寫入
@@ -3191,6 +3198,11 @@ async function recordYearSupersetSlices({
       entry,
       split,
     );
+
+    // Patch: LB-SUPERSET-V2-20251203B — Debug log (僅在 DEBUG_SUPERSET 啟用時)
+    if (DEBUG_SUPERSET) {
+      console.log(`[Worker Superset Debug] 寫入年度桶: ${year} (${entry.data.length} 筆, lastUpdated: ${new Date(entry.lastUpdated).toISOString()})`);
+    }
   }
 }
 
@@ -5403,6 +5415,69 @@ async function runWithConcurrency(items, limit, workerFn) {
   return results;
 }
 
+// Patch Tag: LB-SUPERSET-V2-20251203B — 取得市場最後收盤時間戳記 (修正時區版)
+/**
+ * 取得市場最後收盤時間戳記
+ * @param {string} marketKey - 市場代碼 (TWSE/TPEX/US)
+ * @returns {number} 最後收盤時間的 timestamp (毫秒)
+ * 
+ * 🔥 時區處理說明:
+ * - 台股檢查點: 台灣時間 14:00 (收盤後 1.5 小時)
+ * - 美股檢查點: 台灣時間 06:00 (美股收盤後約 1 小時)
+ * - 使用「虛擬 UTC+8」技巧進行台灣時間運算
+ * - 最終轉回真實 UTC timestamp
+ */
+function getLastMarketCloseTime(marketKey) {
+  const now = new Date();
+
+  // 1. 定義截止小時 (以台灣時間為準)
+  // 台股: 14:00 檢查 / 美股: 06:00 檢查 (對應美股收盤+1hr)
+  const cutoffHour = marketKey === "US" ? 6 : 14;
+
+  // 2. 轉換為台灣時間物件 (UTC+8) 用於判斷
+  // 建立一個「虛擬」Date 物件，其 UTC 方法回傳的是台灣時間數值
+  // 例如: 台灣 2024-12-03 15:00 → twNow.getUTCHours() = 15
+  const twOffset = 8 * 60 * 60 * 1000; // 8 小時 = 28800000 毫秒
+  const twNow = new Date(now.getTime() + twOffset);
+  const currentTwHour = twNow.getUTCHours();
+
+  // 3. 判斷基準日
+  // 使用 twNow (台灣時間) 進行日期運算
+  let targetDateTw = new Date(twNow);
+
+  // 若當前台灣時間 < 截止小時，目標推回昨天
+  if (currentTwHour < cutoffHour) {
+    targetDateTw.setUTCDate(targetDateTw.getUTCDate() - 1);
+  }
+
+  // 4. 排除週末 (週六/週日 → 推回週五)
+  // getUTCDay() 回傳 0(日)~6(六)
+  while (targetDateTw.getUTCDay() === 0 || targetDateTw.getUTCDay() === 6) {
+    targetDateTw.setUTCDate(targetDateTw.getUTCDate() - 1);
+  }
+
+  // 5. 設定截止時間
+  // 注意: 這裡設定的是「台灣時間」的 cutoffHour
+  targetDateTw.setUTCHours(cutoffHour, 0, 0, 0);
+
+  // 6. 轉回真實 UTC Timestamp
+  // 因為 targetDateTw 是加了 8 小時的虛擬時間，要減回來才是真正的 UTC Timestamp
+  const finalTimestamp = targetDateTw.getTime() - twOffset;
+
+  // Debug log (僅在 DEBUG_SUPERSET 啟用時)
+  if (DEBUG_SUPERSET) {
+    console.log(`[Worker Superset Freshness] 市場收盤檢查點:`, {
+      market: marketKey,
+      taiwanTime: new Date(twNow.getTime() - twOffset).toISOString(),
+      checkpointUTC: new Date(finalTimestamp).toISOString(),
+      currentTwHour,
+      cutoffHour,
+    });
+  }
+
+  return finalTimestamp;
+}
+
 function tryResolveRangeFromYearSuperset({
   stockNo,
   startDate,
@@ -5427,8 +5502,14 @@ function tryResolveRangeFromYearSuperset({
   const startYear = parseInt(startDate.slice(0, 4), 10);
   const endYear = parseInt(endDate.slice(0, 4), 10);
   if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+
+  // Patch: LB-SUPERSET-V2-20251203B — 部分命中與新鮮度檢查
+  const currentYear = new Date().getUTCFullYear();
   const combinedRows = [];
+  const missingYears = [];
   const years = [];
+
+  // 迴圈檢查每個年份
   for (let year = startYear; year <= endYear; year += 1) {
     const entry = getYearSupersetEntry(
       marketKey,
@@ -5437,21 +5518,65 @@ function tryResolveRangeFromYearSuperset({
       year,
       split,
     );
+
+    // 年份完全缺失 → 加入 missingYears
     if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) {
-      return null;
+      if (DEBUG_SUPERSET) {
+        console.log(`[Worker Superset Debug] 年份 ${year} 無快取，標記為缺失`);
+      }
+      missingYears.push(year);
+      continue;
     }
-    const segmentStartISO =
-      year === startYear ? startDate : `${year}-01-01`;
-    const segmentEndISO =
-      year === endYear ? endDate : `${year}-12-31`;
+
+    // 🔥 新鮮度檢查 (僅針對今年)
+    if (year === currentYear) {
+      const lastCloseTime = getLastMarketCloseTime(marketKey);
+
+      if (entry.lastUpdated && entry.lastUpdated < lastCloseTime) {
+        console.warn(`[Worker Superset] 年份 ${year} 資料過期 (lastUpdated: ${new Date(entry.lastUpdated).toISOString()}, 檢查點: ${new Date(lastCloseTime).toISOString()})`);
+
+        // 剔除當月資料 (本月 1 號以後)
+        const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+        const filteredData = entry.data.filter(r => !r.date.startsWith(currentMonth));
+
+        // 若剔除後仍有資料，使用過濾後的資料
+        if (filteredData.length > 0) {
+          console.log(`[Worker Superset] 保留今年歷史資料 ${filteredData.length} 筆，當月標記缺失`);
+
+          const segmentStartISO = year === startYear ? startDate : `${year}-01-01`;
+          const segmentEndISO = year === endYear ? endDate : `${year}-12-31`;
+
+          filteredData
+            .filter(row => row && row.date >= segmentStartISO && row.date <= segmentEndISO)
+            .forEach(row => combinedRows.push(row));
+
+          years.push(year);
+        }
+
+        // 將今年標記為部分缺失 (需補抓當月)
+        missingYears.push(year);
+        continue;
+      }
+    }
+
+    // Coverage 缺口檢查 (保留原有邏輯)
+    const segmentStartISO = year === startYear ? startDate : `${year}-01-01`;
+    const segmentEndISO = year === endYear ? endDate : `${year}-12-31`;
     const missing = computeMissingRanges(
       entry.coverage,
       segmentStartISO,
       segmentEndISO,
     );
+
     if (missing.length > 0) {
-      return null;
+      if (DEBUG_SUPERSET) {
+        console.log(`[Worker Superset Debug] 年份 ${year} 有缺口 ${missing.length} 個，標記為缺失`);
+      }
+      missingYears.push(year);
+      continue;
     }
+
+    // ✅ 該年份完整，納入結果
     entry.data
       .filter(
         (row) =>
@@ -5462,6 +5587,41 @@ function tryResolveRangeFromYearSuperset({
       .forEach((row) => combinedRows.push(row));
     years.push(year);
   }
+
+  // 🔥 部分命中邏輯
+  if (missingYears.length > 0) {
+    if (combinedRows.length > 0) {
+      // 有部分資料，回傳 partial hit
+      console.log(`[Worker Superset] 部分命中: 已有 ${years.length} 年資料，缺失 ${missingYears.length} 年 (${missingYears.join(', ')})`);
+
+      const deduped = dedupeAndSortData(combinedRows);
+
+      return {
+        partial: true,
+        data: deduped,
+        missingYears,
+        years,
+        stockNo,
+        startDate,
+        endDate,
+        marketKey,
+        split,
+        priceModeKey,
+        fetchDiagnostics,
+        cacheKey,
+        optionEffectiveStart,
+        optionLookbackDays,
+      };
+    } else {
+      // 完全沒有資料，回傳 null (fallback 至原有邏輯)
+      if (DEBUG_SUPERSET) {
+        console.log(`[Worker Superset Debug] 完全未命中，缺失所有年份`);
+      }
+      return null;
+    }
+  }
+
+  // ✅ 完全命中 (原有邏輯)
   if (combinedRows.length === 0) return null;
   const deduped = dedupeAndSortData(combinedRows);
   if (deduped.length === 0) return null;
@@ -6481,8 +6641,11 @@ async function fetchStockData(
     };
   }
 
+  // Patch: LB-SUPERSET-V2-20251203B — useYearSuperset 參數控制
+  const useYearSuperset = options.useYearSuperset !== false; // 預設為 true
+
   // Patch: LB-IDB-YEARCACHE-v1 — 預載年度資料桶從 IDB
-  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX")) {
+  if (!adjusted && !split && (marketKey === "TWSE" || marketKey === "TPEX") && useYearSuperset) {
     const startYear = parseInt(startDate.slice(0, 4), 10);
     const endYear = parseInt(endDate.slice(0, 4), 10);
     const priceModeKey = getPriceModeKey(adjusted);
@@ -6533,6 +6696,84 @@ async function fetchStockData(
       optionLookbackDays,
     });
     if (supersetResult) {
+      // Patch: LB-SUPERSET-V2-20251203B — 處理部分命中
+      if (supersetResult.partial && Array.isArray(supersetResult.missingYears) && supersetResult.missingYears.length > 0) {
+        console.log(`[Worker Superset] 處理部分命中，補抓缺失年份: ${supersetResult.missingYears.join(', ')}`);
+
+        self.postMessage({
+          type: "progress",
+          progress: 7,
+          message: `補抓缺失資料 (${supersetResult.missingYears.length} 年)...`,
+        });
+
+        const patchedData = [];
+
+        // 迴圈補抓每個缺失年份
+        for (const year of supersetResult.missingYears) {
+          const yearStartISO = year === parseInt(startDate.slice(0, 4), 10)
+            ? startDate
+            : `${year}-01-01`;
+          const yearEndISO = year === parseInt(endDate.slice(0, 4), 10)
+            ? endDate
+            : `${year}-12-31`;
+
+          console.log(`[Worker Superset] 補抓年份 ${year}: ${yearStartISO} ~ ${yearEndISO}`);
+
+          try {
+            // 🔥 遞迴呼叫 fetchStockData
+            // 🔒 安全性保障:
+            //   1. skipCoverageGapRepair: true - 防止無限遞迴
+            //   2. useYearSuperset: false - 避免再次讀取 Superset (優化 IDB 查詢)
+            const patchResult = await fetchStockData({
+              stockNo,
+              startDate: yearStartISO,
+              endDate: yearEndISO,
+              effectiveStartDate: optionEffectiveStart,
+              lookbackDays: optionLookbackDays,
+              adjusted: false,
+              split,
+              primaryForceSource,
+              fallbackForceSource,
+              forceSourceType,
+              skipCoverageGapRepair: true,  // 🔥 防止無限遞迴
+              useYearSuperset: false,        // 🔥 跳過 Superset (優化查詢)
+            });
+
+            if (patchResult && Array.isArray(patchResult.data) && patchResult.data.length > 0) {
+              console.log(`[Worker Superset] 成功補抓年份 ${year}: ${patchResult.data.length} 筆`);
+              patchedData.push(...patchResult.data);
+            } else {
+              console.warn(`[Worker Superset] 年份 ${year} 補抓失敗或無資料`);
+            }
+          } catch (error) {
+            console.error(`[Worker Superset] 年份 ${year} 補抓發生錯誤:`, error);
+          }
+        }
+
+        // 合併資料: 原有快取 + 補抓資料
+        const mergedData = [...supersetResult.data, ...patchedData];
+        const finalData = dedupeAndSortData(mergedData);
+
+        console.log(`[Worker Superset] 合併完成: 快取 ${supersetResult.data.length} 筆 + 補抓 ${patchedData.length} 筆 = 最終 ${finalData.length} 筆`);
+
+        // 更新 supersetResult
+        supersetResult.data = finalData;
+        supersetResult.partial = false;  // 已完成補抓
+        delete supersetResult.missingYears;
+
+        // 寫入年度 Superset (觸發 IDB 持久化)
+        if (patchedData.length > 0) {
+          await recordYearSupersetSlices({
+            marketKey,
+            stockNo,
+            priceModeKey: getPriceModeKey(false),
+            split,
+            rows: patchedData,  // 只寫入新補抓的資料
+          });
+        }
+      }
+
+      // ✅ 完全命中或部分命中已補齊
       self.postMessage({
         type: "progress",
         progress: 6,
