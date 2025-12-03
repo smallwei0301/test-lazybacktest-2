@@ -510,7 +510,7 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
 // Patch: LB-INVALID-DATA-FALLBACK-20251202E — IndexedDB 配置升級
 const IDB_CONFIG = {
   name: 'LazyBacktestDB',
-  version: 3, // Patch: LB-INVALID-DATA-FALLBACK-20251202F - 強制觸發 permanentInvalidDates 建立
+  version: 4, // Patch: LB-INVALID-DATA-FALLBACK-20251202G - 修正 permanentInvalidDates keyPath
   storeName: 'stock_cache'
 };
 
@@ -550,9 +550,9 @@ function initIDB() {
           console.log('[Worker IDB] 建立 ObjectStore:', IDB_CONFIG.storeName);
         }
 
-        // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 永久無效資料 store
+        // Patch: LB-INVALID-DATA-FALLBACK-20251202G — 永久無效資料 store (含 keyPath 修正)
         if (!db.objectStoreNames.contains(PERMANENT_INVALID_STORE_NAME)) {
-          const permanentStore = db.createObjectStore(PERMANENT_INVALID_STORE_NAME);
+          const permanentStore = db.createObjectStore(PERMANENT_INVALID_STORE_NAME, { keyPath: 'id' });
           permanentStore.createIndex('stockNo', 'stockNo', { unique: false });
           permanentStore.createIndex('expiresAt', 'expiresAt', { unique: false });
           console.log('[Worker IDB] 建立 ObjectStore:', PERMANENT_INVALID_STORE_NAME);
