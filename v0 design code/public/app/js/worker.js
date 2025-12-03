@@ -510,7 +510,7 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
 // Patch: LB-INVALID-DATA-FALLBACK-20251202E — IndexedDB 配置升級
 const IDB_CONFIG = {
   name: 'LazyBacktestDB',
-  version: 2, // Patch: LB-INVALID-DATA-FALLBACK-20251202E
+  version: 3, // Patch: LB-INVALID-DATA-FALLBACK-20251202F - 強制觸發 permanentInvalidDates 建立
   storeName: 'stock_cache'
 };
 
