@@ -796,7 +796,7 @@ async function idbSetPermanentInvalid(stockNo, date) {
       try {
         const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
         const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
-        const request = store.put(entry, entry.id);
+        const request = store.put(entry);
         console.log(`[Worker IDB Debug] Put request created`);
 
         request.onsuccess = () => {
