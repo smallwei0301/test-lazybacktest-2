@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料存活時間 (TTL) 與儲存流向分析報告</title>
+    <style>
+        body {
+            font-family: "Microsoft JhengHei", sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #2c3e50;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .mermaid {
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .highlight-box {
+            background-color: #e8f4f8;
+            border-left: 5px solid #3498db;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .dynamic-cache-box {
+            background-color: #fff8e1;
+            border-left: 5px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>資料存活時間 (TTL) 與儲存流向分析報告</h1>
+
+    <blockquote>
+        <p><strong>日期</strong>: 2025-12-03<br>
+            <strong>分析對象</strong>: LazyBacktest 前端資料快取機制 (Worker, IndexedDB, LocalStorage) 與雲端快取 (Netlify Blob/Proxy)
+        </p>
+    </blockquote>
+
+    <h2>1. 資料儲存層級與 TTL 總覽</h2>
+
+    <p>系統採用三級快取架構：<strong>記憶體 (Memory/Blob)</strong>、<strong>IndexedDB (IDB)</strong>、<strong>LocalStorage
+            (LS)</strong>，並搭配雲端 <strong>Netlify Blob</strong> 與 <strong>Proxy 動態快取</strong> 進行資料分流。</p>
+
+    <h3>📊 儲存層級對照表</h3>
+
+    <table>
+        <thead>
+            <tr>
+                <th>儲存位置</th>
+                <th>資料類型</th>
+                <th>變數/Key 名稱</th>
+                <th>TTL (存活時間)</th>
+                <th>備註</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>LocalStorage</strong></td>
+                <td>台股名稱快取</td>
+                <td><code>LB_TW_NAME_CACHE_...</code></td>
+                <td><strong>7 天</strong></td>
+                <td><code>LOCAL_STOCK_NAME_CACHE_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>LocalStorage</strong></td>
+                <td>美股名稱快取</td>
+                <td><code>LB_US_NAME_CACHE_...</code></td>
+                <td><strong>3 天</strong></td>
+                <td><code>LOCAL_US_NAME_CACHE_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>LocalStorage</strong></td>
+                <td>台股官方清單</td>
+                <td><code>LB_TW_DIRECTORY_CACHE_...</code></td>
+                <td><strong>24 小時</strong></td>
+                <td><code>TAIWAN_DIRECTORY_CACHE_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>IndexedDB</strong></td>
+                <td>永久無效日期</td>
+                <td><code>permanentInvalidDates</code></td>
+                <td><strong>24 小時</strong></td>
+                <td><code>PERMANENT_INVALID_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>IndexedDB</strong></td>
+                <td>還原股價快取</td>
+                <td><code>stock_cache</code> (ADJ)</td>
+                <td><strong>24 小時</strong></td>
+                <td><code>IDB_ADJ_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>IndexedDB</strong></td>
+                <td>年度資料桶</td>
+                <td><code>SUP|...</code> (Year Superset)</td>
+                <td><strong>7 天</strong></td>
+                <td><code>NON_CURRENT_MONTH_STALE_REVALIDATE_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>Memory (Worker)</strong></td>
+                <td>補齊嘗試記錄</td>
+                <td><code>patchAttemptCache</code></td>
+                <td><strong>5 分鐘 / 1 小時</strong></td>
+                <td>同日 5 分 / 缺交易 1 小時</td>
+            </tr>
+            <tr>
+                <td><strong>Memory (Worker)</strong></td>
+                <td>股票名稱查找</td>
+                <td><code>stockNameLookupCache</code></td>
+                <td><strong>12 小時</strong></td>
+                <td><code>STOCK_NAME_CACHE_TTL_MS</code></td>
+            </tr>
+            <tr>
+                <td><strong>Memory (Worker)</strong></td>
+                <td>當月資料驗證</td>
+                <td><code>workerMonthlyCache</code></td>
+                <td><strong>18 小時 (TW) / 12 小時 (US)</strong></td>
+                <td><code>MONTH_STALE_REVALIDATE_...</code></td>
+            </tr>
+            <tr>
+                <td><strong>Cloud (Blob)</strong></td>
+                <td>當月資料快取</td>
+                <td><code>twse_cache_store</code></td>
+                <td><strong>24 小時</strong></td>
+                <td><code>TWSE_MONTH_TTL_MS</code> (stock-range.js)</td>
+            </tr>
+            <tr>
+                <td><strong>Cloud (Blob)</strong></td>
+                <td>年度資料快取</td>
+                <td><code>stock_year_cache_store</code></td>
+                <td><strong>2~3 天</strong></td>
+                <td>TWSE: 3天 / TPEX: 2天</td>
+            </tr>
+            <tr>
+                <td><strong>Cloud (Proxy)</strong></td>
+                <td>動態分級快取</td>
+                <td><code>Cache-Control</code> Header</td>
+                <td><strong>1 小時 / 1 年</strong></td>
+                <td>依據資料是否為歷史資料動態調整</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>2. 雲端動態分級快取 (Dynamic Caching Strategy)</h2>
+
+    <div class="dynamic-cache-box">
+        <h3>🚀 發現：Proxy 實作了「動態分級快取」策略</h3>
+        <p>在 <code>twse-proxy.js</code>, <code>tpex-proxy.js</code>, <code>us-proxy.js</code>
+            中，系統會根據請求的資料範圍是否為「歷史資料」來動態設定 HTTP <code>Cache-Control</code> Header。</p>
+    </div>
+
+    <ul>
+        <li><strong>判斷邏輯</strong>: 檢查請求的 <code>endDate</code> 是否小於 <code>today</code> (當日零時)。</li>
+        <li><strong>歷史資料 (Historical Data)</strong>:
+            <ul>
+                <li><strong>條件</strong>: <code>endDate < today</code></li>
+                <li><strong>TTL</strong>: <strong>1 年 (31536000s)</strong></li>
+                <li><strong>Header</strong>: <code>public, max-age=31536000, s-maxage=31536000, immutable</code></li>
+                <li><strong>目的</strong>: 歷史資料不會變動，設定極長 TTL 並標記 <code>immutable</code> 以最大化 CDN 快取效益。</li>
+            </ul>
+        </li>
+        <li><strong>當前/近期資料 (Current Data)</strong>:
+            <ul>
+                <li><strong>條件</strong>: <code>endDate >= today</code></li>
+                <li><strong>TTL</strong>: <strong>1 小時 (3600s)</strong></li>
+                <li><strong>Header</strong>: <code>public, max-age=3600, s-maxage=3600</code></li>
+                <li><strong>目的</strong>: 近期資料可能隨盤中或盤後更新，設定較短 TTL (1小時) 以確保資料新鮮度。</li>
+            </ul>
+        </li>
+    </ul>
+
+    <hr>
+
+    <h2>3. IDB 資料分流確認 (Historical vs Current)</h2>
+
+    <div class="highlight-box">
+        <h3>✅ 確認結果：IndexedDB 確實採用分流儲存策略</h3>
+        <p>經程式碼分析，系統將資料分為「歷史資料」與「當月/近期資料」，並分別儲存於不同的 IDB 結構中，擁有獨立的 TTL 設定。</p>
+    </div>
+
+    <h3>📅 歷史資料 (Historical Data)</h3>
+    <ul>
+        <li><strong>儲存結構</strong>: <code>Year Superset</code> (年度資料桶)</li>
+        <li><strong>Key 格式</strong>: <code>SUP|{Market}|{Stock}|{Year}|...</code></li>
+        <li><strong>TTL</strong>: <strong>7 天</strong> (<code>NON_CURRENT_MONTH_STALE_REVALIDATE_MS</code>)</li>
+        <li><strong>機制</strong>: 透過 <code>idbSetYearSuperset</code> 寫入，<code>idbGetYearSuperset</code> 讀取。</li>
+    </ul>
+
+    <h3>📆 當月/近期資料 (Current Month Data)</h3>
+    <ul>
+        <li><strong>儲存結構</strong>: <code>stock_cache</code> (一般快取)</li>
+        <li><strong>Key 格式</strong>: <code>{Market}|{Stock}|{DateRange}...</code></li>
+        <li><strong>TTL</strong>: <strong>18 小時 (TW) / 12 小時 (US)</strong> (<code>MONTH_STALE_REVALIDATE_...</code>)
+        </li>
+        <li><strong>機制</strong>: 透過 <code>setWorkerCacheEntry</code> (呼叫 <code>idbSet</code>) 寫入。</li>
+    </ul>
+
+    <hr>
+
+    <h2>4. 資料流向圖 (Data Flow Diagram)</h2>
+
+    <p>以下流程圖展示了資料從使用者請求到最終呈現的完整路徑及各節點的 TTL，包含雲端 Proxy 的動態快取機制。</p>
+
+    <div class="mermaid">
+        %%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '24px', 'actorFontSize': '24px', 'noteFontSize':
+        '24px', 'messageFontSize': '24px', 'fontFamily': 'Microsoft JhengHei'}}}%%
+        sequenceDiagram
+        autonumber
+        participant User as 使用者
+        participant UI as 前端 UI<br />(backtest.js)
+        participant LS as LocalStorage
+        participant Worker as Web Worker
+        participant Mem as Memory<br />Cache
+        participant IDB as IndexedDB
+        participant Cloud as Netlify<br />Proxy/Blob
+
+        User->>UI: 發起回測請求<br />(StockNo, DateRange)
+
+        rect rgb(200, 255, 200)
+        Note over UI, LS: 1. 檢查基礎資料 (同步)
+        UI->>LS: 查詢股票名稱/清單
+        LS-->>UI: 回傳 (TTL: 7天/24h)
+        opt Miss or Expired
+        UI->>Cloud: 請求最新清單
+        Cloud-->>UI: 回傳並更新 LS
+        end
+        end
+
+        UI->>Worker: postMessage: runBacktest
+
+        rect rgb(255, 240, 240)
+        Note over Worker, Mem: 2. 檢查記憶體快取 (最快)
+        Worker->>Mem: 查詢 workerMonthlyCache<br />stockNameLookup
+        Mem-->>Worker: 回傳 (TTL: 18h/12h)
+        end
+
+        alt Memory Hit
+        Worker-->>UI: 立即回傳結果
+        else Memory Miss
+        rect rgb(240, 240, 255)
+        Note over Worker, IDB: 3. 檢查 IndexedDB<br />(持久化快取)
+        Worker->>IDB: 查詢 Year Superset<br />(歷史資料)
+        IDB-->>Worker: 回傳 (TTL: 7天)
+
+        Worker->>IDB: 查詢 stock_cache<br />(當月資料)
+        IDB-->>Worker: 回傳 (TTL: 18h/12h)
+
+        Worker->>IDB: 查詢 permanentInvalidDates
+        IDB-->>Worker: 回傳無效日期 (TTL: 24h)
+        end
+
+        alt IDB Hit (All Data)
+        Worker->>Mem: 更新 Memory Cache
+        Worker-->>UI: 回傳結果
+        else IDB Miss (Partial/Full)
+        rect rgb(255, 250, 230)
+        Note over Worker, Cloud: 4. 雲端資料請求 (最慢)
+        Worker->>Cloud: 請求缺漏資料<br />(Range Fetch)
+        Note right of Cloud: Dynamic Caching<br />Historical: 1 Year<br />Current: 1 Hour
+        Cloud-->>Worker: 回傳最新股價資料
+        end
+
+        par 更新快取
+        Worker->>Mem: 寫入 Memory Cache
+        Worker->>IDB: 非同步寫入<br />Year Superset (7天)<br />stock_cache (18h)
+        end
+
+        Worker-->>UI: 回傳最終結果
+        end
+        end
+    </div>
+
+    <hr>
+
+    <h2>5. 關鍵發現與建議</h2>
+
+    <ol>
+        <li><strong>動態分級快取 (Dynamic Caching)</strong>:
+            <ul>
+                <li>Proxy 層實作了非常激進的快取策略：對於<strong>歷史資料</strong> (<code>endDate < today</code>)，TTL 長達 <strong>1
+                        年</strong>，且標記為 <code>immutable</code>。這極大地減少了對上游資料源 (FinMind/Yahoo) 的重複請求。</li>
+                <li>對於<strong>當前資料</strong>，TTL 縮短為 <strong>1 小時</strong>，確保使用者能相對即時地看到最新股價。</li>
+            </ul>
+        </li>
+        <li><strong>多層次 TTL 互補</strong>:
+            <ul>
+                <li><strong>Client (IDB)</strong>: 7天 (歷史) / 18小時 (當前)</li>
+                <li><strong>Cloud (Blob)</strong>: 2-3天 (歷史) / 24小時 (當前)</li>
+                <li><strong>CDN (Proxy)</strong>: 1年 (歷史) / 1小時 (當前)</li>
+                <li>這種階梯式的設計既保護了後端資源，又在前端提供了合理的更新頻率。</li>
+            </ul>
+        </li>
+    </ol>
+
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+
+</body>
+
+</html>

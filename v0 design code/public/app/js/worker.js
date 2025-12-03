@@ -515,7 +515,7 @@ const IDB_CONFIG = {
 };
 
 const PERMANENT_INVALID_STORE_NAME = 'permanentInvalidDates';
-const PERMANENT_INVALID_TTL_MS = 24 * 60 * 60 * 1000; // 永久無效資料 24 小時 TTL
+const PERMANENT_INVALID_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 永久無效資料 30 天 TTL
 const IDB_ADJ_TTL_MS = 24 * 60 * 60 * 1000; // 還原股價 24 小時 TTL
 let idbInstance = null;
 
@@ -3130,7 +3130,7 @@ function mergeYearSupersetRows(existingEntry, rows) {
   existingEntry.lastUpdated = Date.now();
 }
 
-function recordYearSupersetSlices({
+async function recordYearSupersetSlices({
   marketKey,
   stockNo,
   priceModeKey,
@@ -3140,15 +3140,38 @@ function recordYearSupersetSlices({
   if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) {
     return;
   }
+
+  // Patch: LB-INVALID-DATA-CLEAN-ON-WRITE-20251203A
+  // 在寫入年度資料前，先過濾掉已知的永久無效日期 (Clean on Write)
+  let validRows = rows;
+  try {
+    const invalidDates = await idbGetPermanentInvalid(stockNo);
+    if (invalidDates.length > 0) {
+      const invalidSet = new Set(invalidDates);
+      const originalCount = rows.length;
+      validRows = rows.filter(r => !invalidSet.has(r.date));
+      if (validRows.length < originalCount) {
+        console.log(`[Worker IDB] Clean-on-Write: 過濾掉 ${originalCount - validRows.length} 筆無效資料 (${stockNo})`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Worker IDB] Clean-on-Write 檢查失敗，將寫入原始資料:', e);
+  }
+
   const grouped = new Map();
-  rows.forEach((row) => {
+  validRows.forEach((row) => {
     if (!row || typeof row.date !== "string") return;
     const year = parseInt(row.date.slice(0, 4), 10);
     if (!Number.isFinite(year)) return;
     if (!grouped.has(year)) grouped.set(year, []);
     grouped.get(year).push(row);
   });
-  grouped.forEach((yearRows, year) => {
+
+  // 使用 for...of 迴圈以支援 await (雖然 idbSetYearSuperset 本身是 async 但這裡可以並行或依序)
+  // 為了效能，我們維持並行寫入，但因為 grouped 是 Map，我們轉為陣列處理
+  // 修正: 恢復使用 setYearSupersetEntry 以確保記憶體快取也被更新
+  // setYearSupersetEntry 內部會觸發非阻塞的 IDB 寫入
+  for (const [year, yearRows] of grouped) {
     const entry =
       getYearSupersetEntry(marketKey, stockNo, priceModeKey, year, split) ||
       {
@@ -3156,7 +3179,10 @@ function recordYearSupersetSlices({
         coverage: [],
         lastUpdated: 0,
       };
+
     mergeYearSupersetRows(entry, yearRows);
+
+    // 更新記憶體快取並觸發 IDB 寫入
     setYearSupersetEntry(
       marketKey,
       stockNo,
@@ -3165,7 +3191,7 @@ function recordYearSupersetSlices({
       entry,
       split,
     );
-  });
+  }
 }
 
 function rebuildCoverageFromData(entry) {
