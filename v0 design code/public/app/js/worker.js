@@ -874,26 +874,56 @@ async function idbGetYearSuperset(marketKey, stockNo, priceModeKey, year, split 
 }
 
 /**
- * 讀取永久無效日期快取
- * @param {string} stockNo 
- * @returns {Promise<string[]>}
+ * 查詢股票的永久無效日期（24小時 TTL）
+ * @param {string} stockNo 股票代碼
+ * @returns {Promise<string[]>} 有效的無效日期陣列
  */
 async function idbGetPermanentInvalid(stockNo) {
-  const idbKey = `INVALID|${stockNo.toUpperCase()}`;
   try {
-    const data = await idbGet(idbKey);
-    if (!data || !Array.isArray(data.dates)) return [];
-
-    // 檢查 TTL (24小時)
-    if (Date.now() - data.idbTimestamp > 24 * 60 * 60 * 1000) {
+    const db = await initIDB();
+    if (!db) {
+      console.warn('[Worker IDB] 無法查詢永久無效日期，DB 未初始化');
       return [];
     }
 
-    return data.dates;
-  } catch (error) {
+    return new Promise((resolve) => {
+      try {
+        const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readonly');
+        const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+        const index = store.index('stockNo');
+        const request = index.getAll(stockNo);
+
+        request.onsuccess = () => {
+          const records = request.result || [];
+          const now = Date.now();
+
+          // 過濾過期記錄，只返回有效的日期
+          const validDates = records
+            .filter(record => record.expiresAt > now)
+            .map(record => record.date);
+
+          console.log(`[Worker IDB] 查詢 ${stockNo} 永久無效日期: ${validDates.length} 筆`);
+          if (validDates.length > 0) {
+            console.log(`[Worker IDB] 無效日期列表: ${validDates.join(', ')}`);
+          }
+          resolve(validDates);
+        };
+
+        request.onerror = () => {
+          console.warn(`[Worker IDB] 查詢永久無效日期失敗: ${stockNo}`, request.error);
+          resolve([]);
+        };
+      } catch (txError) {
+        console.warn('[Worker IDB] idbGetPermanentInvalid 交易錯誤:', txError);
+        resolve([]);
+      }
+    });
+  } catch (e) {
+    console.warn('[Worker IDB] idbGetPermanentInvalid 錯誤:', e);
     return [];
   }
 }
+
 
 
 
@@ -15208,23 +15238,54 @@ self.onmessage = async function (e) {
         { stockNo: '2412', date: '2025-09-01' }
       ];
 
-      const results = [];
+      const writeResults = [];
+
+      // 階段 1: 寫入測試
+      console.log('[Worker Test] === 階段 1: 寫入測試 ===');
       for (const { stockNo, date } of testCases) {
         try {
           console.log(`[Worker Test] 測試寫入: ${stockNo} ${date}`);
           await idbSetPermanentInvalid(stockNo, date);
-          results.push({ stockNo, date, success: true });
+          writeResults.push({ stockNo, date, success: true });
         } catch (error) {
           console.error(`[Worker Test] 寫入失敗: ${stockNo} ${date}`, error);
-          results.push({ stockNo, date, success: false, error: error.message });
+          writeResults.push({ stockNo, date, success: false, error: error.message });
+        }
+      }
+
+      // 階段 2: 查詢測試
+      console.log('[Worker Test] === 階段 2: 查詢測試 ===');
+      const queryResults = {};
+      const uniqueStocks = [...new Set(testCases.map(t => t.stockNo))];
+
+      for (const stockNo of uniqueStocks) {
+        try {
+          console.log(`[Worker Test] 測試查詢: ${stockNo}`);
+          const invalidDates = await idbGetPermanentInvalid(stockNo);
+          queryResults[stockNo] = {
+            success: true,
+            dates: invalidDates,
+            count: invalidDates.length
+          };
+        } catch (error) {
+          console.error(`[Worker Test] 查詢失敗: ${stockNo}`, error);
+          queryResults[stockNo] = {
+            success: false,
+            error: error.message
+          };
         }
       }
 
       self.postMessage({
         type: "testIDBResult",
-        data: { results, message: '測試完成，請檢查 Console 日誌' }
+        data: {
+          writeResults,
+          queryResults,
+          message: '測試完成，請檢查 Console 日誌'
+        }
       });
     }
+
 
 
   } catch (error) {

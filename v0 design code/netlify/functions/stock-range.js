@@ -474,7 +474,21 @@ export default async (req) => {
             }
         };
 
-        return new Response(JSON.stringify(responsePayload), { headers: { 'Content-Type': 'application/json' } });
+        // [Dynamic Caching Strategy]
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const isHistorical = endDate < today;
+        const cacheTTL = isHistorical ? 31536000 : 3600;
+        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
+        return new Response(JSON.stringify(responsePayload), {
+            headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': cacheControlHeader,
+                'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
+            }
+        });
     } catch (error) {
         console.error('[Year Range] Unexpected error:', error);
         return new Response(JSON.stringify({ error: error.message || 'Internal error' }), { status: 500 });
