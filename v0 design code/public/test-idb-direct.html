@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>直接測試 IDB 函數</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        .log {
+            margin: 5px 0;
+            padding: 8px;
+            background: #252526;
+            border-left: 3px solid #007acc;
+            font-size: 12px;
+        }
+
+        .success {
+            border-left-color: #4ec9b0;
+        }
+
+        .error {
+            border-left-color: #f48771;
+        }
+
+        .warn {
+            border-left-color: #dcdcaa;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #007acc;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #005a9e;
+        }
+
+        pre {
+            background: #2d2d2d;
+            padding: 10px;
+            overflow-x: auto;
+            max-height: 400px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>直接測試 IDB 寫入函數</h1>
+    <p><strong>✅ 本測試直接複製 worker.js 中的 IDB 函數並執行</strong></p>
+
+    <button onclick="clearDB()">1. 清除資料庫</button>
+    <button onclick="testDirectWrite()">2. 測試直接寫入</button>
+    <button onclick="checkIDB()">3. 檢查 IndexedDB</button>
+
+    <div id="output"></div>
+
+    <script>
+        // ==================== 直接從 worker.js 複製的代碼 ====================
+
+        const IDB_CONFIG = {
+            name: 'LazyBacktestDB',
+            version: 4,
+            storeName: 'stock_cache'
+        };
+
+        const PERMANENT_INVALID_STORE_NAME = 'permanentInvalidDates';
+        const PERMANENT_INVALID_TTL_MS = 24 * 60 * 60 * 1000;
+        let idbInstance = null;
+
+        function initIDB() {
+            if (idbInstance) return Promise.resolve(idbInstance);
+
+            return new Promise((resolve) => {
+                try {
+                    const request = indexedDB.open(IDB_CONFIG.name, IDB_CONFIG.version);
+
+                    request.onerror = () => {
+                        console.warn('[Worker IDB] 無法開啟 IndexedDB:', request.error);
+                        resolve(null);
+                    };
+
+                    request.onsuccess = () => {
+                        idbInstance = request.result;
+                        console.log('[Worker IDB] IndexedDB 初始化成功');
+                        resolve(idbInstance);
+                    };
+
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+
+                        if (!db.objectStoreNames.contains(IDB_CONFIG.storeName)) {
+                            db.createObjectStore(IDB_CONFIG.storeName);
+                            console.log('[Worker IDB] 建立 ObjectStore:', IDB_CONFIG.storeName);
+                        }
+
+                        if (!db.objectStoreNames.contains(PERMANENT_INVALID_STORE_NAME)) {
+                            const permanentStore = db.createObjectStore(PERMANENT_INVALID_STORE_NAME, { keyPath: 'id' });
+                            permanentStore.createIndex('stockNo', 'stockNo', { unique: false });
+                            permanentStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+                            console.log('[Worker IDB] 建立 ObjectStore:', PERMANENT_INVALID_STORE_NAME);
+                        }
+                    };
+                } catch (error) {
+                    console.warn('[Worker IDB] IndexedDB 初始化失敗 (可能為隱私模式):', error);
+                    resolve(null);
+                }
+            });
+        }
+
+        // ⭐ 這是我們要測試的核心函數（從 worker.js 第 775 行複製）
+        async function idbSetPermanentInvalid(stockNo, date) {
+            console.log(`[Worker IDB Debug] idbSetPermanentInvalid called for ${stockNo} ${date}`);
+            try {
+                const db = await initIDB();
+                console.log(`[Worker IDB Debug] DB initialized: ${!!db}`);
+                if (!db) {
+                    console.warn('[Worker IDB] 無法寫入永久無效日期，DB 未初始化');
+                    return;
+                }
+
+                const expiresAt = Date.now() + PERMANENT_INVALID_TTL_MS;
+                const entry = {
+                    id: `${stockNo}|${date}`,
+                    stockNo,
+                    date,
+                    expiresAt,
+                    recordedAt: Date.now()
+                };
+
+                return new Promise((resolve, reject) => {
+                    console.log(`[Worker IDB Debug] Creating transaction for ${PERMANENT_INVALID_STORE_NAME}`);
+                    try {
+                        const transaction = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readwrite');
+                        const store = transaction.objectStore(PERMANENT_INVALID_STORE_NAME);
+                        const request = store.put(entry); // ✅ 修正後：只傳一個參數
+                        console.log(`[Worker IDB Debug] Put request created`);
+
+                        request.onsuccess = () => {
+                            console.log(`[Worker IDB] 已記錄永久無效日期: ${stockNo} - ${date}`);
+                            resolve();
+                        };
+
+                        request.onerror = () => {
+                            console.warn(`[Worker IDB] 寫入永久無效日期失敗: ${stockNo} - ${date}`, request.error);
+                            resolve();
+                        };
+                    } catch (txError) {
+                        console.warn('[Worker IDB] idbSetPermanentInvalid 交易錯誤:', txError);
+                        resolve();
+                    }
+                });
+            } catch (e) {
+                console.warn('[Worker IDB] idbSetPermanentInvalid 錯誤:', e);
+            }
+        }
+
+        // ==================== 測試輔助函數 ====================
+
+        function log(message, type = 'log') {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            const timestamp = new Date().toISOString().substr(11, 12);
+            div.textContent = `[${timestamp}] ${message}`;
+            output.appendChild(div);
+            console.log(message);
+        }
+
+        async function clearDB() {
+            log('━━━ 清除資料庫 ━━━', 'log');
+            idbInstance = null;
+            const deleteRequest = indexedDB.deleteDatabase(IDB_CONFIG.name);
+            deleteRequest.onsuccess = () => {
+                log('✅ 資料庫已清除', 'success');
+            };
+            deleteRequest.onerror = () => {
+                log('❌ 清除資料庫失敗', 'error');
+            };
+        }
+
+        async function testDirectWrite() {
+            log('━━━ 開始直接寫入測試 ━━━', 'log');
+            log('⚠️ 請在 Console 中查看所有調試日誌！', 'warn');
+
+            const testCases = [
+                { stockNo: '2317', date: '2025-07-30' },
+                { stockNo: '2330', date: '2025-08-15' },
+                { stockNo: '2412', date: '2025-09-01' }
+            ];
+
+            for (const { stockNo, date } of testCases) {
+                try {
+                    log(`📝 寫入: ${stockNo} ${date}`, 'log');
+                    await idbSetPermanentInvalid(stockNo, date);
+                    log(`✅ 完成: ${stockNo} ${date}`, 'success');
+                } catch (error) {
+                    log(`❌ 失敗: ${stockNo} ${date} - ${error}`, 'error');
+                }
+            }
+
+            log('━━━ 寫入測試完成 ━━━', 'log');
+            log('💡 請點擊「3. 檢查 IndexedDB」查看結果', 'warn');
+        }
+
+        async function checkIDB() {
+            log('━━━ 檢查 IndexedDB 內容 ━━━', 'log');
+
+            try {
+                const request = indexedDB.open(IDB_CONFIG.name, IDB_CONFIG.version);
+
+                request.onerror = () => {
+                    log('❌ 無法開啟資料庫', 'error');
+                };
+
+                request.onsuccess = () => {
+                    const db = request.result;
+                    log(`✅ 資料庫版本: ${db.version}`, 'success');
+                    log(`📂 Object Stores: ${Array.from(db.objectStoreNames).join(', ')}`, 'log');
+
+                    if (!db.objectStoreNames.contains(PERMANENT_INVALID_STORE_NAME)) {
+                        log(`⚠️ ${PERMANENT_INVALID_STORE_NAME} store 不存在`, 'warn');
+                        db.close();
+                        return;
+                    }
+
+                    const tx = db.transaction([PERMANENT_INVALID_STORE_NAME], 'readonly');
+                    const store = tx.objectStore(PERMANENT_INVALID_STORE_NAME);
+                    const getAllRequest = store.getAll();
+
+                    getAllRequest.onsuccess = () => {
+                        const records = getAllRequest.result;
+                        log(`✅ ${PERMANENT_INVALID_STORE_NAME} 中共有 ${records.length} 筆記錄`, 'success');
+
+                        if (records.length > 0) {
+                            const pre = document.createElement('pre');
+                            pre.textContent = JSON.stringify(records, null, 2);
+                            document.getElementById('output').appendChild(pre);
+
+                            // 檢查目標記錄
+                            const targets = [
+                                '2317|2025-07-30',
+                                '2330|2025-08-15',
+                                '2412|2025-09-01'
+                            ];
+
+                            targets.forEach(targetId => {
+                                const record = records.find(r => r.id === targetId);
+                                if (record) {
+                                    log(`🎯 ✅ 找到: ${targetId}`, 'success');
+                                } else {
+                                    log(`⚠️ 未找到: ${targetId}`, 'warn');
+                                }
+                            });
+                        } else {
+                            log('⚠️ 沒有任何記錄', 'warn');
+                        }
+                    };
+
+                    getAllRequest.onerror = () => {
+                        log('❌ 讀取記錄失敗', 'error');
+                    };
+
+                    tx.oncomplete = () => db.close();
+                };
+            } catch (error) {
+                log(`❌ 檢查失敗: ${error.message}`, 'error');
+            }
+        }
+
+        // 初始化
+        log('🚀 直接 IDB 測試工具已就緒', 'log');
+        log('💡 本測試直接使用 worker.js 的實際函數代碼', 'log');
+        log('📌 請按順序點擊按鈕：清除 → 測試 → 檢查', 'warn');
+        log('⚠️ 重要：請在 Console 查看完整的調試日誌', 'warn');
+    </script>
+</body>
+
+</html>

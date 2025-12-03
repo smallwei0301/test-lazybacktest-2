@@ -895,24 +895,7 @@ async function idbGetPermanentInvalid(stockNo) {
   }
 }
 
-/**
- * 寫入永久無效日期快取
- * @param {string} stockNo 
- * @param {string[]} dates 
- * @returns {Promise<void>}
- */
-async function idbSetPermanentInvalid(stockNo, dates) {
-  if (!Array.isArray(dates) || dates.length === 0) return;
 
-  const idbKey = `INVALID|${stockNo.toUpperCase()}`;
-  const entry = {
-    dates,
-    idbTimestamp: Date.now(),
-    data: dates // 為了通過 idbSet 的防呆檢查
-  };
-
-  return idbSet(idbKey, entry);
-}
 
 function aiPostProgress(id, message) {
   if (!id) return;
@@ -15216,6 +15199,34 @@ self.onmessage = async function (e) {
         data: suggestionPayload,
       });
     }
+    // Patch: LB-IDB-TEST-20251203A - 測試 IDB 寫入功能（真實 worker 環境）
+    else if (type === "testIDB") {
+      console.log('[Worker Test] 收到 testIDB 請求');
+      const testCases = e.data.testCases || [
+        { stockNo: '2317', date: '2025-07-30' },
+        { stockNo: '2330', date: '2025-08-15' },
+        { stockNo: '2412', date: '2025-09-01' }
+      ];
+
+      const results = [];
+      for (const { stockNo, date } of testCases) {
+        try {
+          console.log(`[Worker Test] 測試寫入: ${stockNo} ${date}`);
+          await idbSetPermanentInvalid(stockNo, date);
+          results.push({ stockNo, date, success: true });
+        } catch (error) {
+          console.error(`[Worker Test] 寫入失敗: ${stockNo} ${date}`, error);
+          results.push({ stockNo, date, success: false, error: error.message });
+        }
+      }
+
+      self.postMessage({
+        type: "testIDBResult",
+        data: { results, message: '測試完成，請檢查 Console 日誌' }
+      });
+    }
+
+
   } catch (error) {
     console.error(`Worker 執行 ${type} 期間錯誤:`, error);
     if (type === "getSuggestion") {
