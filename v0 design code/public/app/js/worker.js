@@ -514,7 +514,7 @@ const ANNUALIZED_SENSITIVITY_SCORING = Object.freeze({
 // Patch: LB-INVALID-DATA-FALLBACK-20251202E — IndexedDB 配置升級
 const IDB_CONFIG = {
   name: 'LazyBacktestDB',
-  version: 4, // Patch: LB-INVALID-DATA-FALLBACK-20251202G - 修正 permanentInvalidDates keyPath
+  version: 5, // Patch: LB-SUPERSET-V2-20251204A - 添加 yearSuperset store
   storeName: 'stock_cache'
 };
 
@@ -560,6 +560,15 @@ function initIDB() {
           permanentStore.createIndex('stockNo', 'stockNo', { unique: false });
           permanentStore.createIndex('expiresAt', 'expiresAt', { unique: false });
           console.log('[Worker IDB] 建立 ObjectStore:', PERMANENT_INVALID_STORE_NAME);
+        }
+
+        // Patch: LB-SUPERSET-V2-20251204A — Year Superset store
+        if (!db.objectStoreNames.contains('yearSuperset')) {
+          const yearSupersetStore = db.createObjectStore('yearSuperset', { keyPath: 'key' });
+          yearSupersetStore.createIndex('stockNo', 'stockNo', { unique: false });
+          yearSupersetStore.createIndex('year', 'year', { unique: false });
+          yearSupersetStore.createIndex('market', 'market', { unique: false });
+          console.log('[Worker IDB] 建立 ObjectStore: yearSuperset');
         }
       };
     } catch (error) {
