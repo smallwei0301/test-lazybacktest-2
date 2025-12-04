@@ -45,7 +45,7 @@ const CLASSIFICATION_MODES = {
 };
 
 // Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
-const DEBUG_SUPERSET = false; // Set to true for detailed Superset cache logs
+const DEBUG_SUPERSET = true; // Set to true for detailed Superset cache logs
 
 
 const legacyRuleResultNormaliser =
@@ -5593,21 +5593,41 @@ function tryResolveRangeFromYearSuperset({
   fetchDiagnostics,
   cacheKey,
   optionEffectiveStart,
+  optionEffectiveStart,
   optionLookbackDays,
+  adjusted = false, // Patch: LB-FIX-SUPERSET-MODE-20251204A
 }) {
-  if (split) return null;
-  if (marketKey !== "TWSE" && marketKey !== "TPEX") return null;
-  const priceModeKey = getPriceModeKey(false);
+  // Patch: LB-SUPERSET-DEBUG-20251204A — 添加診斷日誌
+  console.log(`[Worker Superset] 開始檢查: ${stockNo} ${startDate}~${endDate}, adjusted=${adjusted}`);
+
+  if (split) {
+    console.log(`[Worker Superset] 跳過: split=true`);
+    return null;
+  }
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") {
+    console.log(`[Worker Superset] 跳過: marketKey=${marketKey}`);
+    return null;
+  }
+  const priceModeKey = getPriceModeKey(adjusted); // Patch: LB-FIX-SUPERSET-MODE-20251204A
   const stockCache = ensureYearSupersetStockCache(
     marketKey,
     stockNo,
     priceModeKey,
     split,
   );
-  if (!stockCache || stockCache.size === 0) return null;
+
+  console.log(`[Worker Superset] stockCache.size = ${stockCache ? stockCache.size : 'null'}, priceModeKey = ${priceModeKey}`);
+
+  if (!stockCache || stockCache.size === 0) {
+    console.log(`[Worker Superset] 跳過: stockCache 為空`);
+    return null;
+  }
   const startYear = parseInt(startDate.slice(0, 4), 10);
   const endYear = parseInt(endDate.slice(0, 4), 10);
-  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) {
+    console.log(`[Worker Superset] 跳過: 年份解析失敗`);
+    return null;
+  }
 
   // Patch: LB-SUPERSET-V2-20251203B — 部分命中與新鮮度檢查
   const currentYear = new Date().getUTCFullYear();
@@ -6539,7 +6559,7 @@ async function tryFetchRangeFromBlob({
   recordYearSupersetSlices({
     marketKey,
     stockNo,
-    priceModeKey: getPriceModeKey(false),
+    priceModeKey: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
     split,
     rows: deduped,
   });
@@ -6554,14 +6574,14 @@ async function tryFetchRangeFromBlob({
       dataStartDate,
       effectiveStartDate: optionEffectiveStart,
       endDate,
-      priceMode: getPriceModeKey(false),
+      priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
       diagnostics: cacheDiagnostics,
       rangeCache: blobMeta || null,
     },
-    priceMode: getPriceModeKey(false),
+    priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
   };
   setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
 
@@ -6800,6 +6820,8 @@ async function fetchStockData(
       cacheKey,
       optionEffectiveStart,
       optionLookbackDays,
+      adjusted, // Patch: LB-FIX-SUPERSET-MODE-20251204A
+      adjusted,
     });
     if (supersetResult) {
       // Patch: LB-SUPERSET-V2-20251203B — 處理部分命中
@@ -6872,7 +6894,7 @@ async function fetchStockData(
           await recordYearSupersetSlices({
             marketKey,
             stockNo,
-            priceModeKey: getPriceModeKey(false),
+            priceModeKey: getPriceModeKey(false), // 這裡保持 false，因為補抓時強制 adjusted=false
             split,
             rows: patchedData,  // 只寫入新補抓的資料
           });
