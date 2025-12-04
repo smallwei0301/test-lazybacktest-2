@@ -45,7 +45,7 @@ const CLASSIFICATION_MODES = {
 };
 
 // Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
-const DEBUG_SUPERSET = false; // Set to true for detailed Superset cache logs
+const DEBUG_SUPERSET = true; // Set to true for detailed Superset cache logs
 
 
 const legacyRuleResultNormaliser =
@@ -5595,8 +5595,17 @@ function tryResolveRangeFromYearSuperset({
   optionEffectiveStart,
   optionLookbackDays,
 }) {
-  if (split) return null;
-  if (marketKey !== "TWSE" && marketKey !== "TPEX") return null;
+  // Patch: LB-SUPERSET-DEBUG-20251204A — 添加診斷日誌
+  console.log(`[Worker Superset] 開始檢查: ${stockNo} ${startDate}~${endDate}`);
+
+  if (split) {
+    console.log(`[Worker Superset] 跳過: split=true`);
+    return null;
+  }
+  if (marketKey !== "TWSE" && marketKey !== "TPEX") {
+    console.log(`[Worker Superset] 跳過: marketKey=${marketKey}`);
+    return null;
+  }
   const priceModeKey = getPriceModeKey(false);
   const stockCache = ensureYearSupersetStockCache(
     marketKey,
@@ -5604,10 +5613,19 @@ function tryResolveRangeFromYearSuperset({
     priceModeKey,
     split,
   );
-  if (!stockCache || stockCache.size === 0) return null;
+
+  console.log(`[Worker Superset] stockCache.size = ${stockCache ? stockCache.size : 'null'}, priceModeKey = ${priceModeKey}`);
+
+  if (!stockCache || stockCache.size === 0) {
+    console.log(`[Worker Superset] 跳過: stockCache 為空`);
+    return null;
+  }
   const startYear = parseInt(startDate.slice(0, 4), 10);
   const endYear = parseInt(endDate.slice(0, 4), 10);
-  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) {
+    console.log(`[Worker Superset] 跳過: 年份解析失敗`);
+    return null;
+  }
 
   // Patch: LB-SUPERSET-V2-20251203B — 部分命中與新鮮度檢查
   const currentYear = new Date().getUTCFullYear();
