@@ -5593,8 +5593,9 @@ function tryResolveRangeFromYearSuperset({
   fetchDiagnostics,
   cacheKey,
   optionEffectiveStart,
+  optionEffectiveStart,
   optionLookbackDays,
-  adjusted = false,
+  adjusted = false, // Patch: LB-FIX-SUPERSET-MODE-20251204A
 }) {
   // Patch: LB-SUPERSET-DEBUG-20251204A — 添加診斷日誌
   console.log(`[Worker Superset] 開始檢查: ${stockNo} ${startDate}~${endDate}, adjusted=${adjusted}`);
@@ -5607,7 +5608,7 @@ function tryResolveRangeFromYearSuperset({
     console.log(`[Worker Superset] 跳過: marketKey=${marketKey}`);
     return null;
   }
-  const priceModeKey = getPriceModeKey(adjusted);
+  const priceModeKey = getPriceModeKey(adjusted); // Patch: LB-FIX-SUPERSET-MODE-20251204A
   const stockCache = ensureYearSupersetStockCache(
     marketKey,
     stockNo,
@@ -6558,7 +6559,7 @@ async function tryFetchRangeFromBlob({
   recordYearSupersetSlices({
     marketKey,
     stockNo,
-    priceModeKey: getPriceModeKey(adjusted),
+    priceModeKey: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
     split,
     rows: deduped,
   });
@@ -6573,14 +6574,14 @@ async function tryFetchRangeFromBlob({
       dataStartDate,
       effectiveStartDate: optionEffectiveStart,
       endDate,
-      priceMode: getPriceModeKey(adjusted),
+      priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
       diagnostics: cacheDiagnostics,
       rangeCache: blobMeta || null,
     },
-    priceMode: getPriceModeKey(adjusted),
+    priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
   };
   setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
 
@@ -6819,6 +6820,7 @@ async function fetchStockData(
       cacheKey,
       optionEffectiveStart,
       optionLookbackDays,
+      adjusted, // Patch: LB-FIX-SUPERSET-MODE-20251204A
       adjusted,
     });
     if (supersetResult) {
