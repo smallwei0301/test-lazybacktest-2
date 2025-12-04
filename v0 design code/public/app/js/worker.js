@@ -833,6 +833,7 @@ async function idbSetPermanentInvalid(stockNo, date) {
 
 
 // Patch: LB-IDB-YEARCACHE-v1 — 年度資料桶 IndexedDB 工具函式
+// Patch: LB-SUPERSET-V2-20251204A — 修正寫入邏輯,直接操作 yearSuperset store
 /**
  * 寫入年度資料桶到 IndexedDB
  * @param {string} marketKey 
@@ -844,22 +845,80 @@ async function idbSetPermanentInvalid(stockNo, date) {
  * @returns {Promise<void>}
  */
 async function idbSetYearSuperset(marketKey, stockNo, priceModeKey, year, entry, split = false) {
-  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
-  const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
+  try {
+    const db = await initIDB();
+    if (!db) return;
 
-  const entryWithMeta = {
-    ...entry,
-    idbTimestamp: Date.now(),
-    marketKey,
-    stockNo: stockNo.toUpperCase(),
-    year,
-    priceModeKey,
-    split
-  };
+    // 檢查 yearSuperset store 是否存在
+    if (!db.objectStoreNames.contains('yearSuperset')) {
+      console.warn('[Worker IDB] yearSuperset store 不存在,跳過寫入');
+      return;
+    }
 
-  return idbSet(idbKey, entryWithMeta);
+    // 【防呆機制】檢查要寫入的資料是否為空
+    if (!entry || !entry.data || (Array.isArray(entry.data) && entry.data.length === 0)) {
+      console.warn('[Worker IDB] ⚠️ 禁止寫入空的年度資料:', `${stockNo} ${year}`);
+      return;
+    }
+
+    const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+    const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
+
+    const entryWithMeta = {
+      ...entry,
+      key: idbKey,  // yearSuperset store 的 keyPath
+      idbTimestamp: Date.now(),
+      market: marketKey,
+      stockNo: stockNo.toUpperCase(),
+      year,
+      priceModeKey,
+      split
+    };
+
+    return new Promise((resolve, reject) => {
+      try {
+        // 直接寫入 yearSuperset store
+        const transaction = db.transaction(['yearSuperset'], 'readwrite');
+        const store = transaction.objectStore('yearSuperset');
+        const request = store.put(entryWithMeta);
+
+        request.onsuccess = () => {
+          if (DEBUG_SUPERSET) {
+            console.log(`[Worker IDB] 成功寫入年度桶: ${stockNo} ${year} (${entry.data.length} 筆)`);
+          }
+          resolve();
+        };
+
+        request.onerror = () => {
+          const error = request.error;
+          if (error && error.name === 'QuotaExceededError') {
+            console.error('[Worker IDB] ⚠️ yearSuperset 儲存空間已滿 (QuotaExceededError)');
+            reject(error);
+          } else {
+            console.warn('[Worker IDB] yearSuperset 寫入失敗:', error);
+            resolve(); // 不阻塞主流程
+          }
+        };
+      } catch (error) {
+        if (error && error.name === 'QuotaExceededError') {
+          console.error('[Worker IDB] ⚠️ yearSuperset 交易錯誤 (空間不足)');
+          reject(error);
+        } else {
+          console.warn('[Worker IDB] yearSuperset 交易錯誤:', error);
+          resolve(); // 不阻塞主流程
+        }
+      }
+    });
+  } catch (error) {
+    if (error && error.name === 'QuotaExceededError') {
+      console.error('[Worker IDB] ⚠️ yearSuperset 外層錯誤 (空間不足)');
+      throw error;
+    }
+    console.warn('[Worker IDB] idbSetYearSuperset 錯誤:', error);
+  }
 }
 
+// Patch: LB-SUPERSET-V2-20251204A — 修正讀取邏輯,直接從 yearSuperset store 讀取
 /**
  * 從 IndexedDB 讀取年度資料桶
  * @param {string} marketKey 
@@ -870,18 +929,56 @@ async function idbSetYearSuperset(marketKey, stockNo, priceModeKey, year, entry,
  * @returns {Promise<object|null>}
  */
 async function idbGetYearSuperset(marketKey, stockNo, priceModeKey, year, split = false) {
-  const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
-  const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
-
   try {
-    const data = await idbGet(idbKey);
-    if (!data) return null;
+    const db = await initIDB();
+    if (!db) return null;
 
-    // 移除 metadata，只返回 entry 格式
-    const { idbTimestamp, marketKey: mk, stockNo: sn, year: y, priceModeKey: pm, split: sp, ...entry } = data;
-    return entry;
+    // 檢查 yearSuperset store 是否存在
+    if (!db.objectStoreNames.contains('yearSuperset')) {
+      if (DEBUG_SUPERSET) {
+        console.log('[Worker IDB] yearSuperset store 不存在,跳過讀取');
+      }
+      return null;
+    }
+
+    const stockKey = getYearSupersetStockKey(stockNo, priceModeKey, split);
+    const idbKey = `SUP|${marketKey}|${stockNo.toUpperCase()}|${year}|${stockKey}`;
+
+    return new Promise((resolve) => {
+      try {
+        // 直接從 yearSuperset store 讀取
+        const transaction = db.transaction(['yearSuperset'], 'readonly');
+        const store = transaction.objectStore('yearSuperset');
+        const request = store.get(idbKey);
+
+        request.onsuccess = () => {
+          const data = request.result;
+          if (!data) {
+            resolve(null);
+            return;
+          }
+
+          // 移除 metadata,只返回 entry 格式
+          const { key, idbTimestamp, market, stockNo: sn, year: y, priceModeKey: pm, split: sp, ...entry } = data;
+
+          if (DEBUG_SUPERSET) {
+            console.log(`[Worker IDB] 成功讀取年度桶: ${stockNo} ${year} (${entry.data?.length || 0} 筆)`);
+          }
+
+          resolve(entry);
+        };
+
+        request.onerror = () => {
+          console.warn('[Worker IDB] yearSuperset 讀取失敗:', request.error);
+          resolve(null);
+        };
+      } catch (error) {
+        console.warn('[Worker IDB] yearSuperset 交易錯誤:', error);
+        resolve(null);
+      }
+    });
   } catch (error) {
-    console.warn('[Worker IDB] 讀取年度資料桶失敗:', error);
+    console.warn('[Worker IDB] idbGetYearSuperset 錯誤:', error);
     return null;
   }
 }
