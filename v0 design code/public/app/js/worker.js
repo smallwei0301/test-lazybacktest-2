@@ -45,6 +45,7 @@ const CLASSIFICATION_MODES = {
 };
 
 // Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
+// Patch Tag: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A — 智能缺口過濾與精確覆蓋檢查，修復部分命中失效
 const DEBUG_SUPERSET = true; // Set to true for detailed Superset cache logs
 
 
@@ -5683,30 +5684,86 @@ function tryResolveRangeFromYearSuperset({
       }
     }
 
-    // Coverage 缺口檢查 (保留原有邏輯)
-    const segmentStartISO = year === startYear ? startDate : `${year}-01-01`;
-    const segmentEndISO = year === endYear ? endDate : `${year}-12-31`;
-    const missing = computeMissingRanges(
-      entry.coverage,
-      segmentStartISO,
-      segmentEndISO,
-    );
+    // Patch: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A - Coverage 缺口檢查與智能過濾
+    // 步驟 1: 計算該年份在請求範圍內的實際查詢範圍
+    const requestStartISO = year === startYear ? startDate : `${year}-01-01`;
+    const requestEndISO = year === endYear ? endDate : `${year}-12-31`;
+    // 步驟 2: 檢查快取資料範圍
+    const cacheDataStart = entry.data.length > 0 ? entry.data[0].date : null;
+    const cacheDataEnd = entry.data.length > 0 ? entry.data[entry.data.length - 1].date : null;
 
-    if (missing.length > 0) {
+    if (!cacheDataStart || !cacheDataEnd) {
       if (DEBUG_SUPERSET) {
-        console.log(`[Worker Superset Debug] 年份 ${year} 有缺口 ${missing.length} 個，標記為缺失`);
+        console.log(`[Worker Superset Debug] 年份 ${year} 無快取資料`);
       }
       missingYears.push(year);
       continue;
     }
 
-    // ✅ 該年份完整，納入結果
+    // 步驟 3: 計算 Coverage 缺口
+    const missing = computeMissingRanges(
+      entry.coverage,
+      requestStartISO,
+      requestEndISO,
+    );
+
+    // 步驟 4: 智能缺口過濾 - 只保留請求範圍內的缺口
+    const missingInRange = missing.filter(gap => {
+      // 使用 Date 物件計算缺口範圍（因為 computeMissingRanges 回傳的是 timestamp）
+      const gapStartTime = gap.start;
+      const gapEndTime = gap.end;
+      const requestStartTime = new Date(startDate).getTime();
+      const requestEndTime = new Date(endDate).getTime() + DAY_MS;
+
+      // 缺口必須與總請求範圍重疊
+      return !(gapEndTime <= requestStartTime || gapStartTime >= requestEndTime);
+    });
+
+    if (missingInRange.length > 0) {
+      // 計算缺口總大小
+      const missingDays = missingInRange.reduce((sum, gap) => {
+        return sum + Math.ceil((gap.end - gap.start) / DAY_MS);
+      }, 0);
+
+      if (DEBUG_SUPERSET) {
+        // 格式化缺口資訊供診斷
+        const gapDetails = missingInRange.slice(0, 3).map(gap => {
+          const gapStartDate = new Date(gap.start).toISOString().slice(0, 10);
+          const gapEndDate = new Date(gap.end - DAY_MS).toISOString().slice(0, 10);
+          return `${gapStartDate}~${gapEndDate}`;
+        });
+
+        console.log(`[Worker Superset Debug] 年份 ${year} 請求範圍內有缺口:`, {
+          gaps: missingInRange.length,
+          missingDays,
+          requestRange: `${requestStartISO}~${requestEndISO}`,
+          cacheRange: `${cacheDataStart}~${cacheDataEnd}`,
+          samples: gapDetails.join(', ') + (missingInRange.length > 3 ? '...' : '')
+        });
+      }
+
+      // 🔥 關鍵修改: 保留已有資料（不再 continue 跳過）
+      const validRows = entry.data.filter(
+        row => row && row.date >= requestStartISO && row.date <= requestEndISO
+      );
+      validRows.forEach(row => combinedRows.push(row));
+
+      years.push(year);  // ✅ 加入已命中年份
+      missingYears.push(year);  // ✅ 標記需補抓
+      continue;
+    }
+
+    // ✅ 該年份完全命中，納入結果
+    if (DEBUG_SUPERSET) {
+      console.log(`[Worker Superset Debug] 年份 ${year} 完全命中 (${entry.data.length} 筆)`);
+    }
+
     entry.data
       .filter(
         (row) =>
           row &&
-          row.date >= segmentStartISO &&
-          row.date <= segmentEndISO,
+          row.date >= requestStartISO &&
+          row.date <= requestEndISO,
       )
       .forEach((row) => combinedRows.push(row));
     years.push(year);
@@ -5715,8 +5772,8 @@ function tryResolveRangeFromYearSuperset({
   // 🔥 部分命中邏輯
   if (missingYears.length > 0) {
     if (combinedRows.length > 0) {
-      // 有部分資料，回傳 partial hit
-      console.log(`[Worker Superset] 部分命中: 已有 ${years.length} 年資料，缺失 ${missingYears.length} 年 (${missingYears.join(', ')})`);
+      // Patch: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A - 有部分資料，回傳 partial hit
+      console.log(`[Worker Superset] 部分命中: 已有 ${years.length} 年資料 (${combinedRows.length} 筆)，需補抓 ${missingYears.length} 年 (${missingYears.join(', ')})`);
 
       const deduped = dedupeAndSortData(combinedRows);
 
@@ -6848,20 +6905,20 @@ async function fetchStockData(
             // 🔒 安全性保障:
             //   1. skipCoverageGapRepair: true - 防止無限遞迴
             //   2. useYearSuperset: false - 避免再次讀取 Superset (優化 IDB 查詢)
-            const patchResult = await fetchStockData({
+            const patchResult = await fetchStockData(
               stockNo,
-              startDate: yearStartISO,
-              endDate: yearEndISO,
-              effectiveStartDate: optionEffectiveStart,
-              lookbackDays: optionLookbackDays,
-              adjusted: false,
-              split,
-              primaryForceSource,
-              fallbackForceSource,
-              forceSourceType,
-              skipCoverageGapRepair: true,  // 🔥 防止無限遞迴
-              useYearSuperset: false,        // 🔥 跳過 Superset (優化查詢)
-            });
+              yearStartISO,
+              yearEndISO,
+              marketKey,
+              {
+                effectiveStartDate: optionEffectiveStart,
+                lookbackDays: optionLookbackDays,
+                adjusted: false,
+                splitAdjustment: split,
+                skipCoverageGapRepair: true,  // 🔥 防止無限遞迴
+                useYearSuperset: false,        // 🔥 跳過 Superset (優化查詢)
+              }
+            );
 
             if (patchResult && Array.isArray(patchResult.data) && patchResult.data.length > 0) {
               console.log(`[Worker Superset] 成功補抓年份 ${year}: ${patchResult.data.length} 筆`);
