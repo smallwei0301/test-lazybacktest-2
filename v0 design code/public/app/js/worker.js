@@ -5593,10 +5593,12 @@ function tryResolveRangeFromYearSuperset({
   fetchDiagnostics,
   cacheKey,
   optionEffectiveStart,
+  optionEffectiveStart,
   optionLookbackDays,
+  adjusted = false, // Patch: LB-FIX-SUPERSET-MODE-20251204A
 }) {
   // Patch: LB-SUPERSET-DEBUG-20251204A — 添加診斷日誌
-  console.log(`[Worker Superset] 開始檢查: ${stockNo} ${startDate}~${endDate}`);
+  console.log(`[Worker Superset] 開始檢查: ${stockNo} ${startDate}~${endDate}, adjusted=${adjusted}`);
 
   if (split) {
     console.log(`[Worker Superset] 跳過: split=true`);
@@ -5606,7 +5608,7 @@ function tryResolveRangeFromYearSuperset({
     console.log(`[Worker Superset] 跳過: marketKey=${marketKey}`);
     return null;
   }
-  const priceModeKey = getPriceModeKey(false);
+  const priceModeKey = getPriceModeKey(adjusted); // Patch: LB-FIX-SUPERSET-MODE-20251204A
   const stockCache = ensureYearSupersetStockCache(
     marketKey,
     stockNo,
@@ -6557,7 +6559,7 @@ async function tryFetchRangeFromBlob({
   recordYearSupersetSlices({
     marketKey,
     stockNo,
-    priceModeKey: getPriceModeKey(false),
+    priceModeKey: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
     split,
     rows: deduped,
   });
@@ -6572,14 +6574,14 @@ async function tryFetchRangeFromBlob({
       dataStartDate,
       effectiveStartDate: optionEffectiveStart,
       endDate,
-      priceMode: getPriceModeKey(false),
+      priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
       splitAdjustment: split,
       lookbackDays: optionLookbackDays,
       fetchRange: { start: startDate, end: endDate },
       diagnostics: cacheDiagnostics,
       rangeCache: blobMeta || null,
     },
-    priceMode: getPriceModeKey(false),
+    priceMode: getPriceModeKey(adjusted), // Patch: LB-FIX-SUPERSET-MODE-20251204A
   };
   setWorkerCacheEntry(marketKey, cacheKey, cacheEntry);
 
@@ -6818,6 +6820,7 @@ async function fetchStockData(
       cacheKey,
       optionEffectiveStart,
       optionLookbackDays,
+      adjusted, // Patch: LB-FIX-SUPERSET-MODE-20251204A
     });
     if (supersetResult) {
       // Patch: LB-SUPERSET-V2-20251203B — 處理部分命中
@@ -6890,7 +6893,7 @@ async function fetchStockData(
           await recordYearSupersetSlices({
             marketKey,
             stockNo,
-            priceModeKey: getPriceModeKey(false),
+            priceModeKey: getPriceModeKey(false), // 這裡保持 false，因為補抓時強制 adjusted=false
             split,
             rows: patchedData,  // 只寫入新補抓的資料
           });

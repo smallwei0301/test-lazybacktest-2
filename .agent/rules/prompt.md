@@ -2,9 +2,9 @@
 trigger: always_on
 ---
 
-# 🤖 VS Code AI Agent 系統提示
+# 🤖 AI Agent 系統提示
 
-> **用途**: 指導 VS Code 內的 AI Agent 按照 LazyBacktest 架構完整修改代碼  
+> **用途**: 指導 AI Agent 按照 LazyBacktest 架構完整修改代碼  
 > **版本**: 1.0  
 > **日期**: 2025-10-31
 
