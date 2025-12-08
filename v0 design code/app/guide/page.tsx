@@ -18,8 +18,8 @@ const steps = [
     id: 1,
     title: "啟動一鍵回測，熟悉操作節奏",
     description:
-      "在回測頁面頂部可以看到「一鍵回測」按鈕與可編輯的股票欄位。先讓系統替您跑一遍預設範例（台積電），確認畫面會自動切換到結果區塊。之後只要點擊股票名稱即可改成自己的目標標的。",
-    image: "/guide/step-1.svg",
+      "位於頁面最上方的「一鍵回測」是開始的第一步。系統預設已填入台積電 (2330) 作為範例，點擊按鈕後，程式會自動抓取歷史股價並執行預設策略。您可以直接修改文字，輸入想要回測的股票名稱（例如：聯發科）進行測試。初次使用時，建議先跑完這個範例以確保資料源連線正常。若發現按鈕無反應，通常是瀏覽器正在背景下載歷史數據，請稍候片刻再試。",
+    image: "/guide/step-1.png",
     tip: "如果不知道該從哪支股票開始，點選欄位旁的提示文字即可呼叫內建的台股代碼搜尋器。",
     links: [
       { href: "/backtest", label: "前往股票回測頁", emphasis: true },
@@ -30,8 +30,8 @@ const steps = [
     id: 2,
     title: "調整基本設定：股票代號、期間與資金",
     description:
-      "進入「基本設定」分頁後，依序輸入股票代碼、回測起訖日期以及初始資金。懶人回測Lazybacktest 預設顯示最近三年的台股交易日，您也可以直接從下拉選單套用常用期間。",
-    image: "/guide/step-2.svg",
+      "在左側的「基本設定」卡片中，您可以自訂回測的起訖日期與初始本金。請自行輸入想要回測的「最近幾年」（例如 3 或 5），並按下「套用」才會生效。請注意，若您輸入的日期早於該股票上市日，系統會自動從最早可取得的資料日開始計算；更改任何設定後，都必須再次點擊「執行回測」才會更新結果。",
+    image: "/guide/step-2.png",
     tip: "設定完成後按下「套用最近 N 年」能快速切換測試範圍，記得每次修改都要再次執行回測以更新結果。",
     links: [
       { href: "/faq", label: "常見日期與交易日計算方式" },
@@ -41,8 +41,8 @@ const steps = [
     id: 3,
     title: "完整設定交易成本與風險控管",
     description:
-      "在基本設定卡片下方可以找到「交易成本」與「風險管理」區塊，分別對應手續費、交易稅、停損停利與最大持股金額。所有欄位都支援即時調整，數值會同步帶入後續策略計算。",
-    image: "/guide/step-3.svg",
+      "為了讓回測更貼近真實交易，請務必在下方的「交易設定」與「風險管理」區塊填入您券商的實際手續費折扣（如 2.8 折）與交易稅率。此外，您可以在此設定「固定百分比停損」或「移動停利」機制，這能幫助您驗證策略在遇到劇烈波動時的保護能力。若發現回測績效過於完美，通常是因為交易成本設定過低所致。",
+    image: "/guide/step-3.png",
     tip: "若策略包含分批買進或資金控管，建議先在這裡設定好停損停利條件，避免回測結果與實際操作落差太大。",
     links: [
       { href: "/privacy", label: "了解我們如何保護設定資料" },
@@ -50,10 +50,10 @@ const steps = [
   },
   {
     id: 4,
-    title: "切換到績效分析與交易明細",
+    title: "查看回測摘要",
     description:
-      "回測完成後，使用上方的標籤切換至「績效分析」與「交易記錄」。前者會顯示年化報酬、勝率、最大回檔等指標，後者則逐筆列出買賣明細，方便輸出 CSV 或人工對帳。",
-    image: "/guide/step-4.svg",
+      "當回測進度條跑完後，右側的主畫面會自動切換至「摘要」分頁。這裡呈現了總報酬率、年化報酬率與最大回撤等關鍵指標。建議您特別關注最大回撤數值，它代表策略在最壞情況下的本金減損比例。若想了解每一筆進出的具體時間點與損益，請點擊上方的「交易明細」標籤，這裡詳列了所有買賣紀錄，方便您與 K 線圖對照複盤。",
+    image: "/guide/step-4.png",
     tip: "建議先確認績效指標是否符合策略邏輯，再下載交易紀錄留存，避免只看最終報酬而忽略中間波動。",
     links: [
       { href: "/stock-records", label: "把交易結果同步到股票紀錄" },
@@ -61,21 +61,39 @@ const steps = [
   },
   {
     id: 5,
+    title: "查看績效分析",
+    description:
+      "切換至「績效分析」頁籤，表格將顯示策略的年化報酬率、夏普比率、最大回撤、勝率等關鍵指標。可依據不同年份或市場週期檢視策略的穩定性。",
+    image: "/guide/step-5.png",
+    tip: "夏普比率越高代表承受單位風險所獲得的報酬越好，是評估策略CP值的重要指標。",
+    links: [],
+  },
+  {
+    id: 6,
+    title: "檢視交易紀錄",
+    description:
+      "切換至「交易紀錄」頁籤，列表顯示每一筆交易的進場日期、價格、出場日期、價格及單筆損益。透過檢視個別交易，了解策略在特定行情下的運作邏輯。",
+    image: "/guide/step-6.png",
+    tip: "點擊表頭可依日期或損益排序，快速找出獲利或虧損最大的幾筆交易進行檢討。",
+    links: [],
+  },
+  {
+    id: 7,
     title: "儲存策略組合並進行紀錄比較",
     description:
-      "在右側「策略面板」可以將當前參數儲存為自訂方案，或載入過去的最佳組合。利用紀錄 A、紀錄 B 可以快速對照不同設定的績效差異，並將結果匯出供團隊討論。",
-    image: "/guide/step-5.svg",
+      "螢幕最右側（手機版為下方）是「策略管理面板」。當您調校出一組滿意的參數時，請務必點擊「儲存策略」並命名。為了保障您的策略安全，請注意：策略資料僅儲存在您目前的裝置（手機或電腦）中，更換設備將無法讀取。儲存策略後可以到「策略比較」分頁，讓您可以快速切換並比較兩組不同策略的績效差異（例如：比較停損 10% 與 15% 的差別），是優化策略時不可或缺的工具。",
+    image: "/guide/step-7.png",
     tip: "儲存前記得為策略命名並加入備註，日後在股票紀錄頁面就能更快回顧每次調整的目的。",
     links: [
       { href: "/community", label: "把策略分享至社群討論" },
     ],
   },
   {
-    id: 6,
+    id: 8,
     title: "啟用 AI 預測與批量優化功能",
     description:
-      "想同時測試多組條件時，開啟「AI 預測」或「批量優化」區塊。系統會針對進出場規則、持股天數與風險參數進行自動調校，並以報酬率排序方便挑選。",
-    image: "/guide/step-6.svg",
+      "若您想一次測試多種策略組合（例如：同時測試 MACD、RSI 與均線策略的效果），請切換至「批量優化」分頁。勾選您想測試的策略類型與參數範圍後，系統會自動排列組合並進行運算。請注意，這項功能會消耗較多瀏覽器資源與時間，執行期間請勿關閉分頁。運算結束後，列表會自動依報酬率由高至低排序，助您快速找出該股票的最佳策略組合。",
+    image: "/guide/step-8.png",
     tip: "批量優化需要較長運算時間，建議先鎖定兩到三個核心條件再啟動，並隨時留意上方進度條。",
     links: [
       { href: "/faq", label: "批量優化常見疑問" },
@@ -242,7 +260,7 @@ export default function GuidePage() {
                   <CardTitle className="text-2xl text-foreground">{step.title}</CardTitle>
                   <p className="text-sm leading-relaxed text-muted-foreground">{step.description}</p>
                 </CardHeader>
-                <CardContent className="grid gap-6 pt-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-center">
+                <CardContent className="grid gap-6 pt-6 lg:grid-cols-2 lg:items-center">
                   <div className="order-2 space-y-4 lg:order-1">
                     <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
                       <strong className="block text-foreground">提醒：</strong>
@@ -264,7 +282,7 @@ export default function GuidePage() {
                       ))}
                     </div>
                   </div>
-                  <div className="order-1 overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm lg:order-2">
+                  <div className="order-1 overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm lg:order-2 lg:w-1/2 lg:mx-auto">
                     <Image
                       src={step.image}
                       alt={`${step.title} 示意圖`}

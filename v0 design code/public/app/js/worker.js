@@ -46,7 +46,7 @@ const CLASSIFICATION_MODES = {
 
 // Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
 // Patch Tag: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A — 智能缺口過濾與精確覆蓋檢查，修復部分命中失效
-const DEBUG_SUPERSET = true; // Set to true for detailed Superset cache logs
+const DEBUG_SUPERSET = false; // Set to true for detailed Superset cache logs
 
 
 const legacyRuleResultNormaliser =
@@ -741,6 +741,18 @@ function isAdjustedPriceStale(cacheKey, idbTimestamp) {
   }
 
   return isStale;
+}
+
+// Patch: LB-IDB-PATCH-AFTER-HIT-20251208A — 取得快取資料陣列的最後一筆日期
+/**
+ * 取得快取資料陣列的最後一筆日期
+ * @param {Array} rows 資料陣列
+ * @returns {string|null} 最後一筆日期 (YYYY-MM-DD) 或 null
+ */
+function getLastDateFromCachedRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const lastRow = rows[rows.length - 1];
+  return lastRow?.date || lastRow?.Date || null;
 }
 
 // Patch: LB-INVALID-DATA-FALLBACK-20251202E — 永久無效資料 IDB 存取
@@ -6749,12 +6761,86 @@ async function fetchStockData(
   };
   // Patch: LB-IDB-CACHE-PROPOSAL-v1 — 使用 finalCachedEntry (可能來自 IDB)
   if (finalCachedEntry) {
+    // Patch: LB-IDB-PATCH-AFTER-HIT-20251208A — IDB 快取命中後仍執行當月補抓邏輯
+    let cachedData = finalCachedEntry.data;
+    const lastCachedDate = getLastDateFromCachedRows(cachedData);
+
+    // 判斷是否需要當月補抓
+    let needsPatch = false;
+    let patchDecision = null;
+    let patchDiagnostics = null;
+
+    // 條件：快取資料最後日期 < 請求結束日期
+    if (lastCachedDate && lastCachedDate < endDate) {
+      // 使用現有的當月補抓判斷邏輯
+      patchDecision = shouldPatchCurrentMonthGap(stockNo, lastCachedDate, endDate);
+      needsPatch = patchDecision.shouldPatch;
+
+      console.log(`[Worker IDB] 快取命中後檢查補抓: lastDate=${lastCachedDate}, endDate=${endDate}, shouldPatch=${needsPatch}, reason=${patchDecision?.reason}`);
+    }
+
+    // 執行補抓並合併
+    if (needsPatch) {
+      // 計算補抓起始日期 (最後日期 + 1)
+      const lastDateObj = new Date(lastCachedDate);
+      lastDateObj.setDate(lastDateObj.getDate() + 1);
+      const patchStartISO = lastDateObj.toISOString().split('T')[0];
+
+      console.log(`[Worker IDB] 開始補抓: ${patchStartISO} ~ ${endDate}`);
+
+      try {
+        const patchResult = await fetchCurrentMonthGapPatch({
+          stockNo,
+          marketKey,
+          gapStartISO: patchStartISO,
+          gapEndISO: endDate,
+          startDateObj: new Date(startDate),
+          endDateObj: new Date(endDate),
+          primaryForceSource,
+          fallbackForceSource,
+        });
+
+        patchDiagnostics = patchResult?.diagnostics || null;
+
+        if (patchResult && Array.isArray(patchResult.rows) && patchResult.rows.length > 0) {
+          console.log(`[Worker IDB] 補抓成功: ${patchResult.rows.length} 筆`);
+
+          // 合併資料
+          const mergedData = dedupeAndSortData([...cachedData, ...patchResult.rows]);
+          cachedData = mergedData;
+          finalCachedEntry.data = mergedData;
+
+          // 更新 IDB 快取（非同步，不阻塞）
+          const updatedEntry = {
+            ...finalCachedEntry,
+            data: mergedData,
+            idbTimestamp: Date.now(),
+          };
+          idbSet(cacheKey, updatedEntry).catch((err) => {
+            console.warn('[Worker IDB] 更新快取失敗:', err);
+          });
+
+          // 更新記憶體快取
+          setWorkerCacheEntry(marketKey, cacheKey, updatedEntry, { skipIDB: true });
+        } else {
+          console.log(`[Worker IDB] 補抓無新資料 (reason: ${patchResult?.diagnostics?.status || 'unknown'})`);
+        }
+      } catch (patchError) {
+        console.warn('[Worker IDB] 補抓失敗:', patchError);
+        // 補抓失敗不影響繼續使用快取
+      }
+    }
+
+    // 準備診斷資訊
     const cacheDiagnostics = prepareDiagnosticsForCacheReplay(
       finalCachedEntry?.meta?.diagnostics || null,
       {
         source: cachedEntry ? "worker-cache" : "indexeddb-cache",
         requestedRange: { start: startDate, end: endDate },
         coverage: finalCachedEntry?.meta?.coverage || finalCachedEntry.coverage,
+        patchAttempted: needsPatch,
+        patchDecision: patchDecision,
+        patchDiagnostics: patchDiagnostics,
       },
     );
     if (workerLastMeta && typeof workerLastMeta === "object") {
@@ -6763,11 +6849,11 @@ async function fetchStockData(
     self.postMessage({
       type: "progress",
       progress: 15,
-      message: cachedEntry ? "命中背景快取..." : "命中 IndexedDB 快取...",
+      message: cachedEntry ? "命中背景快取..." : (needsPatch ? "命中 IndexedDB 快取 (已補抓)..." : "命中 IndexedDB 快取..."),
     });
     return {
       data: finalCachedEntry.data,
-      dataSource: `${finalCachedEntry.dataSource || marketKey} (${cachedEntry ? 'Worker快取' : 'IndexedDB快取'})`,
+      dataSource: `${finalCachedEntry.dataSource || marketKey} (${cachedEntry ? 'Worker快取' : 'IndexedDB快取'}${needsPatch ? '+補抓' : ''})`,
       stockName: finalCachedEntry.stockName || stockNo,
       adjustmentFallbackApplied: Boolean(
         finalCachedEntry?.meta?.adjustmentFallbackApplied,

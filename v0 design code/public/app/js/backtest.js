@@ -8583,7 +8583,7 @@ function renderChart(result) {
     }
 
     // 確保插件已註冊
-    console.log('Creating chart with plugins:', Chart.registry.plugins.items);
+    // console.log('Creating chart with plugins:', Chart.registry.plugins.items);
     const yAxisConfig = isPriceMode
         ? {
             type: 'linear',
