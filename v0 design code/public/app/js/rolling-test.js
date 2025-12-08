@@ -3804,16 +3804,24 @@
         if (changedKeys.length === 0) {
             return `${result.label}優化：維持原始參數`;
         }
-        const formatted = changedKeys.map((key) => {
-            const label = result.labelMap?.[key] || key;
-            const value = formatOptimizationParamValue(result.params?.[key]);
-            return `${label}=${value}`;
-        });
+        // 顯示所有優化參數的最終值（使用 labelMap 的鍵作為完整參數列表）
+        // LB-ROLLING-TEST-OPTIMIZE-DISPLAY-20251208A
+        const allParamKeys = result.labelMap
+            ? Object.keys(result.labelMap)
+            : changedKeys;
+        const formatted = allParamKeys
+            .filter((key) => result.params?.[key] !== undefined && result.params?.[key] !== null)
+            .map((key) => {
+                const label = result.labelMap?.[key] || key;
+                const value = formatOptimizationParamValue(result.params?.[key]);
+                return `${label}=${value}`;
+            });
         const metricText = Number.isFinite(result.metricValue)
             ? `（${result.metricLabel || '目標值'}=${formatNumber(result.metricValue)}）`
             : '';
         return `${result.label}優化：${formatted.join('、')}${metricText}`;
     }
+
 
     function formatOptimizationParamValue(value) {
         if (value === null || value === undefined) return '—';
