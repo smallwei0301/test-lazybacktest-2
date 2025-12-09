@@ -6642,6 +6642,21 @@ function buildStageStateLines(state, context) {
     const modeLabel = formatStageModeLabel(state.mode, type);
     if (modeLabel) parts.push(modeLabel);
 
+    // 觸發原因標籤轉換
+    const formatTriggerLabel = (trigger, stageType) => {
+        if (!trigger) return null;
+        if (trigger === 'stop_loss') return '🛑停損全數出場';
+        if (trigger === 'take_profit') return '✅停利全數出場';
+        if (stageType === 'entry') {
+            if (trigger === 'price_pullback') return '📉價格回落觸發';
+            if (trigger === 'signal') return '📊策略訊號觸發';
+        } else {
+            if (trigger === 'price_rally') return '📈價格走高觸發';
+            if (trigger === 'signal') return '📊策略訊號觸發';
+        }
+        return null;
+    };
+
     if (type === 'entry') {
         if (Number.isFinite(state.filledStages) && Number.isFinite(state.totalStages)) {
             parts.push(`已進 ${state.filledStages}/${state.totalStages} 段`);
@@ -6655,6 +6670,10 @@ function buildStageStateLines(state, context) {
         if (Number.isFinite(state.lastStagePrice)) {
             parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
+        // 顯示最後一次觸發原因
+        const triggerLabel = formatTriggerLabel(state.lastTrigger, 'entry');
+        if (triggerLabel) parts.push(triggerLabel);
+
         if (state.totalStages > state.filledStages) {
             if (state.mode === 'price_pullback' && Number.isFinite(state.nextTriggerPrice)) {
                 parts.push(`待觸發：收盤 < ${state.nextTriggerPrice.toFixed(2)}`);
@@ -6674,6 +6693,10 @@ function buildStageStateLines(state, context) {
         if (Number.isFinite(state.lastStagePrice)) {
             parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
+        // 顯示最後一次觸發原因（包含停損停利標註）
+        const triggerLabel = formatTriggerLabel(state.lastTrigger, 'exit');
+        if (triggerLabel) parts.push(triggerLabel);
+
         if (state.totalStages > state.executedStages) {
             if (state.mode === 'price_rally' && Number.isFinite(state.nextTriggerPrice)) {
                 parts.push(`待觸發：收盤 > ${state.nextTriggerPrice.toFixed(2)}`);
