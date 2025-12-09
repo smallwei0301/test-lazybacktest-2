@@ -12,6 +12,21 @@ const inMemoryBlobStores = new Map(); // Map<storeName, MemoryStore>
 const DAY_SECONDS = 24 * 60 * 60;
 const FINMIND_LEVEL_PATTERN = /your level is register/i;
 
+// Patch: LB-PROXY-CURRENT-DAY-20251209A — 台灣時間 14:00 判斷
+// 證交所通常在台灣時間 14:00 後公布當日資料
+const TW_AFTERNOON_CUTOFF_HOUR = 14;
+
+/**
+ * 判斷目前台灣時間是否已過 14:00
+ * @returns {boolean}
+ */
+function isAfterTWAfternoonCutoff() {
+    const now = new Date();
+    // 台灣時區 UTC+8
+    const twHour = (now.getUTCHours() + 8) % 24;
+    return twHour >= TW_AFTERNOON_CUTOFF_HOUR;
+}
+
 function isQuotaError(error) {
     return error?.status === 402 || error?.status === 429;
 }
@@ -766,7 +781,38 @@ export default async (req) => {
                     }
                 }
             } else {
+                // Patch: LB-PROXY-CURRENT-DAY-20251209A — 當月今日智能快取策略
+                // 1. 先讀取快取
+                // 2. 檢查快取中是否已包含今日資料
+                // 3. 若已包含 → 使用快取；若不包含 → 繞過快取呼叫 TWSE
+                const todayISO = new Date().toISOString().split('T')[0];
+                const todayMonth = todayISO.slice(0, 7).replace('-', '');
+                const requestEndISO = formatISODateFromDate(endDate);
+                const isCurrentMonthTodayRequest = (month === todayMonth && requestEndISO === todayISO);
+
+                // 先嘗試讀取快取
                 payload = await readCache(store, cacheKey);
+
+                // 對於當月今日請求，檢查快取是否包含今日資料
+                if (isCurrentMonthTodayRequest && !adjusted && payload) {
+                    const cachedRows = Array.isArray(payload.aaData) ? payload.aaData : [];
+                    // 檢查最後一筆資料的日期（民國格式 -> ISO 格式）
+                    const lastRow = cachedRows[cachedRows.length - 1];
+                    const lastRowDate = lastRow ? rocToISO(lastRow[0]) : null;
+
+                    if (lastRowDate !== todayISO) {
+                        // 只有在台灣時間 14:00 後才嘗試繞過快取抓取今日資料
+                        if (isAfterTWAfternoonCutoff()) {
+                            console.log(`[TWSE Proxy v10.6] 當月今日請求 (14:00後)，快取最後日期=${lastRowDate}，繞過快取呼叫 TWSE`);
+                            payload = null; // 清空 payload，觸發重新呼叫 TWSE
+                        } else {
+                            console.log(`[TWSE Proxy v10.6] 當月今日請求 (14:00前)，快取最後日期=${lastRowDate}，尚未公布今日資料，使用快取`);
+                        }
+                    } else {
+                        console.log(`[TWSE Proxy v10.6] 當月今日請求，快取已包含今日資料，使用快取`);
+                    }
+                }
+
                 if (!payload) {
                     if (adjusted) {
                         if (!yahooHydrated) {
