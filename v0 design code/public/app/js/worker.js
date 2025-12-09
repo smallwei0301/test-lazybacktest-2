@@ -6069,6 +6069,14 @@ async function fetchCurrentMonthGapPatch({
       : Array.isArray(payload?.data)
         ? payload.data
         : [];
+
+    // Patch: LB-IDB-PATCH-AFTER-HIT-20251209A — 新增診斷日誌
+    const rowDates = rows.map((row) => {
+      const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj);
+      return normalized?.date || null;
+    }).filter(Boolean);
+    console.log(`[Worker Patch Debug] Proxy 回傳 ${rows.length} 筆, 日期範圍: ${rowDates[0] || 'N/A'} ~ ${rowDates[rowDates.length - 1] || 'N/A'}, 篩選範圍: ${gapStartISO} ~ ${gapEndISO}`);
+
     rows.forEach((row) => {
       const normalized = normalizeProxyRow(
         row,

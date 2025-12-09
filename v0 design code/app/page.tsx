@@ -220,7 +220,7 @@ export default function HomePage() {
                       <div className="flex flex-col md:flex-row items-start gap-6">
                         <div className="w-full md:w-32 h-32 md:h-auto md:self-stretch rounded-2xl overflow-hidden flex-shrink-0 shadow-lg">
                           <img
-                            src="/confused-investor-looking-at-complex-stock-market-.jpg"
+                            src="/pain_point_confused.jpg"
                             alt="思考策略"
                             className="w-full h-full object-cover"
                           />
