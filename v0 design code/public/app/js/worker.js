@@ -11091,10 +11091,14 @@ function runStrategy(data, params, options = {}) {
         if (!sellSignal && !slTrig && globalTP > 0 && lastBuyP > 0) {
           if (curC >= lastBuyP * (1 + globalTP / 100)) tpTrig = true;
         }
+        // LB-STAGED-EXIT-FIX-20251209A: 價格走高判斷始終使用當日收盤價
+        // candidateExitPrice 僅用於實際成交時根據 tradeTiming 決定
         const candidateExitPrice =
           tradeTiming === "open" && canTradeOpen && check(nextO)
             ? nextO
             : curC;
+        // priceRallyCheckPrice 用於判斷是否觸發價格走高，始終使用當日收盤價
+        const priceRallyCheckPrice = curC;
         let priceRallyTrigger = false;
         if (
           exitStageMode === "price_rally" &&
@@ -11102,11 +11106,12 @@ function runStrategy(data, params, options = {}) {
           filledExitStages < exitStagePercents.length &&
           longPos === 1 &&
           Number.isFinite(lastLongExitStagePrice) &&
-          check(candidateExitPrice) &&
-          candidateExitPrice > lastLongExitStagePrice
+          check(priceRallyCheckPrice) &&
+          priceRallyCheckPrice > lastLongExitStagePrice
         ) {
           priceRallyTrigger = true;
         }
+
 
         if (sellSignal || slTrig || tpTrig || priceRallyTrigger) {
           tradePrice = null;

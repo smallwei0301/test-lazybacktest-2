@@ -1191,7 +1191,7 @@
                                                         </select>
                                                         <p class="text-[11px] leading-snug"
                                                             style="color: var(--muted-foreground);">
-                                                            「價格回落加碼」會在首次進場後、收盤價跌破前一段的成交價時自動投入下一段；「策略訊號再觸發」則需策略條件再次成立才會加碼。
+                                                            「價格回落加碼」會在首次進場後、收盤價跌破前一段的成交價時自動投入下一段；「策略訊號再觸發」則需策略條件再次成立才會加碼。使用「價格回落」模式時，後續階段也可由策略訊號觸發加碼，兩者不互斥。
                                                         </p>
                                                     </div>
                                                     <div class="space-y-3" id="stagedExitContainer">
@@ -1227,7 +1227,7 @@
                                                             </select>
                                                             <p class="text-[11px] leading-snug"
                                                                 style="color: var(--muted-foreground);">
-                                                                「價格走高分批出場」會在首次賣出後、收盤價突破前一段的成交價時自動出清下一段；「策略訊號再觸發」則需策略條件次成立才會續賣。
+                                                                「價格走高分批出場」會在首次賣出後、收盤價突破前一段的成交價時自動出清下一段；「策略訊號再觸發」則需策略條件再次成立才會續賣。使用「價格走高」模式時，後續階段也可由策略訊號觸發出場，兩者不互斥。
                                                             </p>
                                                         </div>
                                                     </div>
@@ -2909,7 +2909,8 @@
                                                                     style="color: var(--muted-foreground);">啟用後會直接呼叫批量優化
                                                                     Batch Optimization Worker，逐一掃描各策略的
                                                                     <code>optimizeTargets</code>
-                                                                    範圍並套用最佳參數，再重跑訓練與測試期，確保結果與批量優化模組一致。</p>
+                                                                    範圍並套用最佳參數，再重跑訓練與測試期，確保結果與批量優化模組一致。
+                                                                </p>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3065,7 +3066,8 @@
                                                         0.35／0.25／0.20／0.10／0.10 的權重求得 <strong>OOS 品質</strong>。</li>
                                                     <li>統計可信度：計算 Probabilistic Sharpe Ratio 與 Deflated Sharpe
                                                         Ratio，平均後轉為 0.5～1 的
-                                                        <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。</li>
+                                                        <strong>StatWeight</strong>，並估算最短樣本需求（MinTRL）。
+                                                    </li>
                                                     <li>單窗分數：<strong>WindowScore = OOS 品質 ×
                                                             StatWeight</strong>，跨窗取中位數，再以 WFE 中位數（取 0.8～1.2 區間）進行調整取得
                                                         Walk-Forward 總分。</li>
