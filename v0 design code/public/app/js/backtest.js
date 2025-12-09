@@ -6642,21 +6642,6 @@ function buildStageStateLines(state, context) {
     const modeLabel = formatStageModeLabel(state.mode, type);
     if (modeLabel) parts.push(modeLabel);
 
-    // 觸發原因標籤轉換
-    const formatTriggerLabel = (trigger, stageType) => {
-        if (!trigger) return null;
-        if (trigger === 'stop_loss') return '🛑停損全數出場';
-        if (trigger === 'take_profit') return '✅停利全數出場';
-        if (stageType === 'entry') {
-            if (trigger === 'price_pullback') return '📉價格回落觸發';
-            if (trigger === 'signal') return '📊策略訊號觸發';
-        } else {
-            if (trigger === 'price_rally') return '📈價格走高觸發';
-            if (trigger === 'signal') return '📊策略訊號觸發';
-        }
-        return null;
-    };
-
     if (type === 'entry') {
         if (Number.isFinite(state.filledStages) && Number.isFinite(state.totalStages)) {
             parts.push(`已進 ${state.filledStages}/${state.totalStages} 段`);
@@ -6670,9 +6655,6 @@ function buildStageStateLines(state, context) {
         if (Number.isFinite(state.lastStagePrice)) {
             parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
-        // 顯示最後一次觸發原因
-        const triggerLabel = formatTriggerLabel(state.lastTrigger, 'entry');
-        if (triggerLabel) parts.push(triggerLabel);
 
         if (state.totalStages > state.filledStages) {
             if (state.mode === 'price_pullback' && Number.isFinite(state.nextTriggerPrice)) {
@@ -6693,9 +6675,6 @@ function buildStageStateLines(state, context) {
         if (Number.isFinite(state.lastStagePrice)) {
             parts.push(`最新段 ${state.lastStagePrice.toFixed(2)}`);
         }
-        // 顯示最後一次觸發原因（包含停損停利標註）
-        const triggerLabel = formatTriggerLabel(state.lastTrigger, 'exit');
-        if (triggerLabel) parts.push(triggerLabel);
 
         if (state.totalStages > state.executedStages) {
             if (state.mode === 'price_rally' && Number.isFinite(state.nextTriggerPrice)) {
@@ -6776,6 +6755,7 @@ function buildPriceInspectorHeaderConfig(indicatorColumns) {
         { key: 'formula', label: '計算公式', align: 'left' },
         { key: 'volume', label: '(千股)量', align: 'right' },
         { key: 'source', label: '價格來源', align: 'left' },
+        { key: 'cacheSource', label: '資料來源', align: 'left' },
     );
     return baseHeaderConfig;
 }
@@ -6832,10 +6812,55 @@ function buildPriceInspectorTableModel(context = {}) {
                 formulaText = `${closeText}（未調整）`;
             }
         }
-        const rowSource =
+        // 解析價格來源：分離 Proxy 來源與快取來源
+        const parseSourceLabel = (rawSource) => {
+            if (!rawSource || typeof rawSource !== 'string') return { proxy: '—', cache: '—' };
+
+            // Proxy 來源關鍵字
+            const proxyPatterns = [
+                { pattern: /TWSE/i, label: 'TWSE' },
+                { pattern: /TPEx|OTC/i, label: 'TPEx' },
+                { pattern: /FinMind/i, label: 'FinMind' },
+                { pattern: /Yahoo/i, label: 'Yahoo' },
+            ];
+
+            // 快取來源關鍵字
+            const cachePatterns = [
+                { pattern: /IndexedDB/i, label: 'IndexedDB' },
+                { pattern: /Blob/i, label: 'Blob' },
+                { pattern: /Memory|記憶體/i, label: 'Memory' },
+                { pattern: /Superset/i, label: 'Superset' },
+            ];
+
+            let proxySource = null;
+            for (const { pattern, label } of proxyPatterns) {
+                if (pattern.test(rawSource)) {
+                    proxySource = label;
+                    break;
+                }
+            }
+
+            const cacheMatches = [];
+            for (const { pattern, label } of cachePatterns) {
+                if (pattern.test(rawSource) && !cacheMatches.includes(label)) {
+                    cacheMatches.push(label);
+                }
+            }
+
+            return {
+                proxy: proxySource || '—',
+                cache: cacheMatches.length > 0 ? cacheMatches[cacheMatches.length - 1] : '—',
+            };
+        };
+
+        const rawSourceText =
             typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
                 ? row.priceSource.trim()
-                : sourceLabel || '—';
+                : sourceLabel || '';
+        const parsedSource = parseSourceLabel(rawSourceText);
+        const rowSource = parsedSource.proxy;
+        const cacheSource = parsedSource.cache;
+
         const entryStageState = entryStageStates[rowIndex] || null;
         const exitStageState = exitStageStates[rowIndex] || null;
         const indicatorCellsHtml = indicatorColumns
@@ -6843,8 +6868,33 @@ function buildPriceInspectorTableModel(context = {}) {
             .join('');
         const entryStageText = formatStageStateText(entryStageState, { type: 'entry' });
         const exitStageText = formatStageStateText(exitStageState, { type: 'exit' });
-        const positionLabel = lastPositionStates[rowIndex] || '空手';
+        const basePositionLabel = lastPositionStates[rowIndex] || '空手';
+
+        // 根據倉位狀態附加觸發原因（僅進場/出場時顯示，空手/持有不顯示）
+        const formatPositionTriggerSuffix = (positionState, entryState, exitState) => {
+            if (!positionState) return '';
+            const isEntry = positionState.includes('進場') || positionState.includes('買入');
+            const isExit = positionState.includes('出場') || positionState.includes('賣出');
+
+            if (isEntry && entryState?.lastTrigger) {
+                const trigger = entryState.lastTrigger;
+                if (trigger === 'price_pullback') return '（價格回落觸發）';
+                if (trigger === 'signal') return '（策略訊號觸發）';
+            }
+            if (isExit && exitState?.lastTrigger) {
+                const trigger = exitState.lastTrigger;
+                if (trigger === 'stop_loss') return '（停損全數出場）';
+                if (trigger === 'take_profit') return '（停利全數出場）';
+                if (trigger === 'price_rally') return '（價格走高觸發）';
+                if (trigger === 'signal') return '（策略訊號觸發）';
+            }
+            return '';
+        };
+
+        const triggerSuffix = formatPositionTriggerSuffix(basePositionLabel, entryStageState, exitStageState);
+        const positionLabel = basePositionLabel + triggerSuffix;
         const rowHtml = `
+
             <tr>
                 <td class="px-3 py-2 whitespace-nowrap" style="color: var(--foreground);">${row?.date || ''}</td>
                 <td class="px-3 py-2 text-right" style="color: var(--foreground);">${formatNumber(row?.open)}</td>
@@ -6860,6 +6910,7 @@ function buildPriceInspectorTableModel(context = {}) {
                 <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(formulaText)}</td>
                 <td class="px-3 py-2 text-right" style="color: var(--muted-foreground);">${volumeLabel}</td>
                 <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(rowSource)}</td>
+                <td class="px-3 py-2 text-left" style="color: var(--muted-foreground);">${escapeHtml(cacheSource)}</td>
             </tr>`;
         const values = {
             date: row?.date || '',
@@ -6875,6 +6926,7 @@ function buildPriceInspectorTableModel(context = {}) {
             formula: formulaText,
             volume: volumeLabel,
             source: rowSource,
+            cacheSource: cacheSource,
         };
         indicatorColumns.forEach((col) => {
             values[col.key] = formatIndicatorCellText(col.series, rowIndex);
