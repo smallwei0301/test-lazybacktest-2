@@ -6813,15 +6813,15 @@ function buildPriceInspectorTableModel(context = {}) {
             }
         }
         // 解析價格來源：分離 Proxy 來源與快取來源
-        const parseSourceLabel = (rawSource) => {
-            if (!rawSource || typeof rawSource !== 'string') return { proxy: '—', cache: '—' };
-
+        // LB-PRICE-SOURCE-DISPLAY-20251209A：根據市場推斷預設 API 來源
+        const parseSourceLabel = (rawSource, market) => {
             // Proxy 來源關鍵字
             const proxyPatterns = [
                 { pattern: /TWSE/i, label: 'TWSE' },
-                { pattern: /TPEx|OTC/i, label: 'TPEx' },
+                { pattern: /TPEx|OTC|TPEX/i, label: 'TPEx' },
                 { pattern: /FinMind/i, label: 'FinMind' },
                 { pattern: /Yahoo/i, label: 'Yahoo' },
+                { pattern: /Netlify/i, label: 'Netlify' },
             ];
 
             // 快取來源關鍵字
@@ -6830,20 +6830,34 @@ function buildPriceInspectorTableModel(context = {}) {
                 { pattern: /Blob/i, label: 'Blob' },
                 { pattern: /Memory|記憶體/i, label: 'Memory' },
                 { pattern: /Superset/i, label: 'Superset' },
+                { pattern: /快取|cache/i, label: '快取' },
             ];
 
             let proxySource = null;
-            for (const { pattern, label } of proxyPatterns) {
-                if (pattern.test(rawSource)) {
-                    proxySource = label;
-                    break;
+            if (rawSource && typeof rawSource === 'string') {
+                for (const { pattern, label } of proxyPatterns) {
+                    if (pattern.test(rawSource)) {
+                        proxySource = label;
+                        break;
+                    }
                 }
             }
 
+            // 若無法從字串識別 API 來源，根據市場推斷預設來源
+            if (!proxySource && market) {
+                const upperMarket = market.toUpperCase();
+                if (upperMarket === 'TWSE') proxySource = 'TWSE';
+                else if (upperMarket === 'TPEX' || upperMarket === 'OTC') proxySource = 'FinMind';
+                else if (upperMarket === 'US') proxySource = 'FinMind';
+                else if (upperMarket === 'INDEX') proxySource = 'Yahoo';
+            }
+
             const cacheMatches = [];
-            for (const { pattern, label } of cachePatterns) {
-                if (pattern.test(rawSource) && !cacheMatches.includes(label)) {
-                    cacheMatches.push(label);
+            if (rawSource && typeof rawSource === 'string') {
+                for (const { pattern, label } of cachePatterns) {
+                    if (pattern.test(rawSource) && !cacheMatches.includes(label)) {
+                        cacheMatches.push(label);
+                    }
                 }
             }
 
@@ -6857,7 +6871,12 @@ function buildPriceInspectorTableModel(context = {}) {
             typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
                 ? row.priceSource.trim()
                 : sourceLabel || '';
-        const parsedSource = parseSourceLabel(rawSourceText);
+        // LB-PRICE-SOURCE-DISPLAY-20251209B：只有在無任何 API 來源資訊時才使用市場推斷
+        // 優先從 rawSourceText + sourceLabel 識別真實 API 來源
+        const combinedSourceText = rawSourceText || sourceLabel || '';
+        const parsedSource = parseSourceLabel(combinedSourceText, context?.market);
+
+
         const rowSource = parsedSource.proxy;
         const cacheSource = parsedSource.cache;
 
