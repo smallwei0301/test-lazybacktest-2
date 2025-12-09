@@ -10746,6 +10746,140 @@ function runStrategy(data, params, options = {}) {
             );
             executedShort = true;
           }
+        } else if (pendingTrade.type === "sell") {
+          // LB-STAGED-EXIT-FIX-20251209A: 執行隔日分批出場
+          const tradePrice = actualTradePrice;
+          const executedShares = pendingTrade.sharesToSell;
+          const exitStrategy = pendingTrade.strategy;
+          const slTrig = pendingTrade.slTrig;
+          const tpTrig = pendingTrade.tpTrig;
+          const exitTriggerLabel = pendingTrade.stageTrigger;
+          const stageIndexForPlan = pendingTrade.stageIndex;
+          const riskExit = pendingTrade.riskExit;
+
+          // 計算營收與損益
+          const revenue = executedShares * tradePrice * (1 - sellFee / 100);
+          const consumption = consumeEntryForShares(executedShares);
+          const entryCostWithFee = consumption.costWithFee;
+          const entryCostWithoutFee = consumption.costWithoutFee;
+          const stageAverageEntryPrice =
+            executedShares > 0 ? entryCostWithoutFee / executedShares : 0;
+          const profit = revenue - entryCostWithFee;
+          const profitPercent =
+            entryCostWithFee > 0 ? (profit / entryCostWithFee) * 100 : 0;
+
+          // 更新資金與持倉
+          longCap += revenue;
+          longPositionCostWithFee = Math.max(
+            0,
+            longPositionCostWithFee - entryCostWithFee,
+          );
+          longPositionCostWithoutFee = Math.max(
+            0,
+            longPositionCostWithoutFee - entryCostWithoutFee,
+          );
+          longShares -= executedShares;
+          if (longShares < 0) longShares = 0;
+
+          if (longShares > 0 && longPositionCostWithoutFee > 0) {
+            longAverageEntryPrice = longPositionCostWithoutFee / longShares;
+            longPos = 1;
+            lastBuyP = longAverageEntryPrice;
+          } else {
+            longAverageEntryPrice = 0;
+          }
+
+          // 準備交易紀錄資料
+          const stagePercent =
+            exitStagePercents[
+            Math.min(stageIndexForPlan, exitStagePercents.length - 1)
+            ] || 0;
+          const cumulativePercent = exitStagePercents
+            .slice(0, stageIndexForPlan + 1)
+            .reduce(
+              (sum, value) => sum + (Number.isFinite(value) ? value : 0),
+              0,
+            );
+
+          const tradeData = {
+            type: "sell",
+            date: dates[i],
+            price: tradePrice,
+            shares: executedShares,
+            revenue,
+            profit,
+            profitPercent,
+            capital_after: longCap,
+            triggeredByStopLoss: slTrig,
+            triggeredByTakeProfit: tpTrig,
+            triggeringStrategy: exitStrategy,
+            simType: "long",
+            entryCost: entryCostWithFee,
+            entryAveragePrice: stageAverageEntryPrice,
+            stageCount: currentLongEntryBreakdown.length,
+            positionId: currentLongPositionId,
+            stageTrigger: exitTriggerLabel,
+            stageIndex: stageIndexForPlan,
+            allocationPercent: stagePercent,
+            cumulativeStagePercent: cumulativePercent,
+            plannedShares: pendingTrade.plannedShares,
+            consumedEntryStages: consumption.stages || [],
+          };
+          if (pendingTrade.kdValues) tradeData.kdValues = pendingTrade.kdValues;
+          if (pendingTrade.macdValues)
+            tradeData.macdValues = pendingTrade.macdValues;
+          if (pendingTrade.indicatorValues)
+            tradeData.indicatorValues = pendingTrade.indicatorValues;
+
+          longTrades.push(tradeData);
+          sellSigs.push({ date: dates[i], index: i });
+          executedSell = true;
+          lastLongExitStagePrice = tradePrice;
+          lastExitStageTrigger = exitTriggerLabel;
+
+          // 更新 filledExitStages
+          if (!riskExit) {
+            filledExitStages = Math.min(
+              filledExitStages + 1,
+              exitStagePercents.length,
+            );
+          } else {
+            filledExitStages = exitStagePercents.length;
+            currentLongExitPlan = null;
+          }
+
+          // 處理完全出場
+          let aggregatedEntry = null;
+          if (longShares === 0) {
+            aggregatedEntry = buildAggregatedLongEntry();
+          }
+          if (aggregatedEntry && longShares === 0) {
+            longCompletedTrades.push({
+              entry: aggregatedEntry,
+              exit: tradeData,
+              profit,
+              profitPercent,
+            });
+          }
+
+          if (longShares === 0) {
+            longPos = 0;
+            lastBuyP = 0;
+            curPeakP = 0;
+            longPositionCostWithFee = 0;
+            longPositionCostWithoutFee = 0;
+            currentLongEntryBreakdown = [];
+            currentLongPositionId = null;
+            currentLongExitPlan = null;
+            filledEntryStages = 0;
+            lastLongStagePrice = null;
+            lastEntryStageTrigger = null;
+            resetExitPlanAfterCapture = true;
+            filledExitStages = exitStagePercents.length;
+          }
+          console.log(
+            `[Worker LONG] Delayed Sell Executed: ${executedShares}@${tradePrice} on ${dates[i]}`,
+          );
         }
         pendingNextDayTrade = null;
       }
@@ -11116,9 +11250,13 @@ function runStrategy(data, params, options = {}) {
         if (sellSignal || slTrig || tpTrig || priceRallyTrigger) {
           tradePrice = null;
           tradeDate = dates[i];
+          let isPending = false;
+
           if (tradeTiming === "close") {
             tradePrice = curC;
           } else if (canTradeOpen) {
+            // LB-STAGED-EXIT-FIX-20251209A: 隔日開盤交易改為 pending
+            isPending = true;
             tradePrice = nextO;
             tradeDate = dates[i + 1];
           } else if (tradeTiming === "open" && i === n - 1) {
@@ -11126,6 +11264,7 @@ function runStrategy(data, params, options = {}) {
             tradeDate = dates[i];
           }
 
+          // check(tradePrice) 在 pending 時檢查 nextO，在當日成交時檢查 curC
           if (check(tradePrice) && tradePrice > 0 && longShares > 0) {
             let riskExit = false;
             let exitTriggerLabel = null;
@@ -11165,158 +11304,181 @@ function runStrategy(data, params, options = {}) {
                 priceRallyTrigger && !sellSignal ? "price_rally" : "signal";
             }
 
-            const consumption = consumeEntryForShares(sharesToSell);
-            const executedShares =
-              consumption && Number.isFinite(consumption.shares)
-                ? consumption.shares
-                : 0;
-            if (executedShares > 0) {
-              const revenue =
-                executedShares * tradePrice * (1 - sellFee / 100);
-              const entryCostWithFee = Number.isFinite(consumption.cost)
-                ? consumption.cost
-                : 0;
-              const entryCostWithoutFee = Number.isFinite(
-                consumption.costWithoutFee,
-              )
-                ? consumption.costWithoutFee
-                : 0;
-              const stageAverageEntryPrice =
-                executedShares > 0
-                  ? entryCostWithoutFee / executedShares
-                  : 0;
-              const profit = revenue - entryCostWithFee;
-              const profitPercent =
-                entryCostWithFee > 0 ? (profit / entryCostWithFee) * 100 : 0;
-
-              longCap += revenue;
-              longPositionCostWithFee = Math.max(
-                0,
-                longPositionCostWithFee - entryCostWithFee,
-              );
-              longPositionCostWithoutFee = Math.max(
-                0,
-                longPositionCostWithoutFee - entryCostWithoutFee,
-              );
-              longShares -= executedShares;
-              if (longShares < 0) longShares = 0;
-
-              if (longShares > 0 && longPositionCostWithoutFee > 0) {
-                longAverageEntryPrice = longPositionCostWithoutFee / longShares;
-                longPos = 1;
-                lastBuyP = longAverageEntryPrice;
-              } else {
-                longAverageEntryPrice = 0;
-              }
-
-              const stagePercent =
-                exitStagePercents[
-                Math.min(
-                  stageIndexForPlan,
-                  exitStagePercents.length - 1,
-                )
-                ] || 0;
-              const cumulativePercent = exitStagePercents
-                .slice(0, stageIndexForPlan + 1)
-                .reduce(
-                  (sum, value) =>
-                    sum + (Number.isFinite(value) ? value : 0),
-                  0,
-                );
-
-              const tradeData = {
+            if (isPending) {
+              // 建立 Pending 交易
+              pendingNextDayTrade = {
                 type: "sell",
-                date: tradeDate,
-                price: tradePrice,
-                shares: executedShares,
-                revenue,
-                profit,
-                profitPercent,
-                capital_after: longCap,
-                triggeredByStopLoss: slTrig,
-                triggeredByTakeProfit: tpTrig,
-                triggeringStrategy: exitStrategy,
-                simType: "long",
-                entryCost: entryCostWithFee,
-                entryAveragePrice: stageAverageEntryPrice,
-                stageCount: currentLongEntryBreakdown.length,
-                positionId: currentLongPositionId,
+                executeOnDate: tradeDate,
+                sharesToSell: sharesToSell,
+                strategy: exitStrategy,
+                slTrig: slTrig,
+                tpTrig: tpTrig,
                 stageTrigger: exitTriggerLabel,
                 stageIndex: stageIndexForPlan,
-                allocationPercent: stagePercent,
-                cumulativeStagePercent: cumulativePercent,
+                riskExit: riskExit,
                 plannedShares:
                   Array.isArray(currentLongExitPlan) &&
                     stageIndexForPlan < currentLongExitPlan.length
                     ? currentLongExitPlan[stageIndexForPlan]
-                    : executedShares,
-                consumedEntryStages: Array.isArray(consumption?.stages)
-                  ? consumption.stages
-                  : [],
+                    : sharesToSell,
+                kdValues: exitKDValues,
+                macdValues: exitMACDValues,
+                indicatorValues: exitIndicatorValues,
               };
-              if (exitKDValues) tradeData.kdValues = exitKDValues;
-              if (exitMACDValues) tradeData.macdValues = exitMACDValues;
-              if (exitIndicatorValues)
-                tradeData.indicatorValues = exitIndicatorValues;
-              longTrades.push(tradeData);
-              if (tradeTiming === "close" || !canTradeOpen) {
-                sellSigs.push({ date: dates[i], index: i });
-              } else if (canTradeOpen) {
-                sellSigs.push({ date: dates[i + 1], index: i + 1 });
-              }
-              executedSell = true;
-              lastLongExitStagePrice = tradePrice;
-              lastExitStageTrigger = exitTriggerLabel;
-              if (!riskExit) {
-                filledExitStages = Math.min(
-                  filledExitStages + 1,
-                  exitStagePercents.length,
-                );
-              } else {
-                filledExitStages = exitStagePercents.length;
-                currentLongExitPlan = null;
-              }
+              console.log(`[Worker LONG] Pending Sell Created for ${tradeDate}`);
+            } else {
+              // 立即執行交易 (原邏輯)
+              const consumption = consumeEntryForShares(sharesToSell);
+              const executedShares =
+                consumption && Number.isFinite(consumption.shares)
+                  ? consumption.shares
+                  : 0;
+              if (executedShares > 0) {
+                const revenue =
+                  executedShares * tradePrice * (1 - sellFee / 100);
+                const entryCostWithFee = Number.isFinite(consumption.cost)
+                  ? consumption.cost
+                  : 0;
+                const entryCostWithoutFee = Number.isFinite(
+                  consumption.costWithoutFee,
+                )
+                  ? consumption.costWithoutFee
+                  : 0;
+                const stageAverageEntryPrice =
+                  executedShares > 0
+                    ? entryCostWithoutFee / executedShares
+                    : 0;
+                const profit = revenue - entryCostWithFee;
+                const profitPercent =
+                  entryCostWithFee > 0 ? (profit / entryCostWithFee) * 100 : 0;
 
-              let aggregatedEntry = null;
-              if (longShares === 0) {
-                aggregatedEntry = buildAggregatedLongEntry();
-              }
-              if (aggregatedEntry && longShares === 0) {
-                longCompletedTrades.push({
-                  entry: aggregatedEntry,
-                  exit: tradeData,
+                longCap += revenue;
+                longPositionCostWithFee = Math.max(
+                  0,
+                  longPositionCostWithFee - entryCostWithFee,
+                );
+                longPositionCostWithoutFee = Math.max(
+                  0,
+                  longPositionCostWithoutFee - entryCostWithoutFee,
+                );
+                longShares -= executedShares;
+                if (longShares < 0) longShares = 0;
+
+                if (longShares > 0 && longPositionCostWithoutFee > 0) {
+                  longAverageEntryPrice =
+                    longPositionCostWithoutFee / longShares;
+                  longPos = 1;
+                  lastBuyP = longAverageEntryPrice;
+                } else {
+                  longAverageEntryPrice = 0;
+                }
+
+                const stagePercent =
+                  exitStagePercents[
+                  Math.min(stageIndexForPlan, exitStagePercents.length - 1)
+                  ] || 0;
+                const cumulativePercent = exitStagePercents
+                  .slice(0, stageIndexForPlan + 1)
+                  .reduce(
+                    (sum, value) =>
+                      sum + (Number.isFinite(value) ? value : 0),
+                    0,
+                  );
+
+                const tradeData = {
+                  type: "sell",
+                  date: tradeDate,
+                  price: tradePrice,
+                  shares: executedShares,
+                  revenue,
                   profit,
                   profitPercent,
-                });
-              } else if (longShares === 0 && !aggregatedEntry) {
+                  capital_after: longCap,
+                  triggeredByStopLoss: slTrig,
+                  triggeredByTakeProfit: tpTrig,
+                  triggeringStrategy: exitStrategy,
+                  simType: "long",
+                  entryCost: entryCostWithFee,
+                  entryAveragePrice: stageAverageEntryPrice,
+                  stageCount: currentLongEntryBreakdown.length,
+                  positionId: currentLongPositionId,
+                  stageTrigger: exitTriggerLabel,
+                  stageIndex: stageIndexForPlan,
+                  allocationPercent: stagePercent,
+                  cumulativeStagePercent: cumulativePercent,
+                  plannedShares:
+                    Array.isArray(currentLongExitPlan) &&
+                      stageIndexForPlan < currentLongExitPlan.length
+                      ? currentLongExitPlan[stageIndexForPlan]
+                      : executedShares,
+                  consumedEntryStages: Array.isArray(consumption?.stages)
+                    ? consumption.stages
+                    : [],
+                };
+                if (exitKDValues) tradeData.kdValues = exitKDValues;
+                if (exitMACDValues) tradeData.macdValues = exitMACDValues;
+                if (exitIndicatorValues)
+                  tradeData.indicatorValues = exitIndicatorValues;
+                longTrades.push(tradeData);
+                if (tradeTiming === "close" || !canTradeOpen) {
+                  sellSigs.push({ date: dates[i], index: i });
+                } else if (canTradeOpen) {
+                  sellSigs.push({ date: dates[i + 1], index: i + 1 });
+                }
+                executedSell = true;
+                lastLongExitStagePrice = tradePrice;
+                lastExitStageTrigger = exitTriggerLabel;
+                if (!riskExit) {
+                  filledExitStages = Math.min(
+                    filledExitStages + 1,
+                    exitStagePercents.length,
+                  );
+                } else {
+                  filledExitStages = exitStagePercents.length;
+                  currentLongExitPlan = null;
+                }
+
+                let aggregatedEntry = null;
+                if (longShares === 0) {
+                  aggregatedEntry = buildAggregatedLongEntry();
+                }
+                if (aggregatedEntry && longShares === 0) {
+                  longCompletedTrades.push({
+                    entry: aggregatedEntry,
+                    exit: tradeData,
+                    profit,
+                    profitPercent,
+                  });
+                } else if (longShares === 0 && !aggregatedEntry) {
+                  console.warn(
+                    `[Worker LONG] Sell @ ${tradeDate} could not rebuild aggregated entry.`,
+                  );
+                }
+
+                if (longShares === 0) {
+                  longPos = 0;
+                  lastBuyP = 0;
+                  curPeakP = 0;
+                  longPositionCostWithFee = 0;
+                  longPositionCostWithoutFee = 0;
+                  currentLongEntryBreakdown = [];
+                  currentLongPositionId = null;
+                  currentLongExitPlan = null;
+                  filledEntryStages = 0;
+                  lastLongStagePrice = null;
+                  lastEntryStageTrigger = null;
+                  resetExitPlanAfterCapture = true;
+                  filledExitStages = exitStagePercents.length;
+                }
+
+                console.log(
+                  `[Worker LONG] Stage Sell Executed: ${executedShares}@${tradePrice} on ${tradeDate}, Profit: ${profit.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
+                );
+              } else {
                 console.warn(
-                  `[Worker LONG] Sell @ ${tradeDate} could not rebuild aggregated entry.`,
+                  `[Worker LONG] Exit stage computed 0 shares on ${dates[i]} (requested ${sharesToSell}).`,
                 );
               }
-
-              if (longShares === 0) {
-                longPos = 0;
-                lastBuyP = 0;
-                curPeakP = 0;
-                longPositionCostWithFee = 0;
-                longPositionCostWithoutFee = 0;
-                currentLongEntryBreakdown = [];
-                currentLongPositionId = null;
-                currentLongExitPlan = null;
-                filledEntryStages = 0;
-                lastLongStagePrice = null;
-                lastEntryStageTrigger = null;
-                resetExitPlanAfterCapture = true;
-                filledExitStages = exitStagePercents.length;
-              }
-
-              console.log(
-                `[Worker LONG] Stage Sell Executed: ${executedShares}@${tradePrice} on ${tradeDate}, Profit: ${profit.toFixed(0)}, Cap After: ${longCap.toFixed(0)}`,
-              );
-            } else {
-              console.warn(
-                `[Worker LONG] Exit stage computed 0 shares on ${dates[i]} (requested ${sharesToSell}).`,
-              );
             }
           } else {
             console.warn(
