@@ -6813,7 +6813,7 @@ function buildPriceInspectorTableModel(context = {}) {
             }
         }
         // 解析價格來源：分離 Proxy 來源與快取來源
-        // LB-PRICE-SOURCE-DISPLAY-20251209A：根據市場推斷預設 API 來源
+        // LB-PRICE-SOURCE-DISPLAY-20251209C：詳細快取來源 + 市場推斷標註
         const parseSourceLabel = (rawSource, market) => {
             // Proxy 來源關鍵字
             const proxyPatterns = [
@@ -6824,16 +6824,18 @@ function buildPriceInspectorTableModel(context = {}) {
                 { pattern: /Netlify/i, label: 'Netlify' },
             ];
 
-            // 快取來源關鍵字
+            // 快取來源關鍵字（按優先級排序：最具體的在前）
             const cachePatterns = [
+                { pattern: /Superset/i, label: 'Superset' },
                 { pattern: /IndexedDB/i, label: 'IndexedDB' },
                 { pattern: /Blob/i, label: 'Blob' },
-                { pattern: /Memory|記憶體/i, label: 'Memory' },
-                { pattern: /Superset/i, label: 'Superset' },
-                { pattern: /快取|cache/i, label: '快取' },
+                { pattern: /Memory|記憶體/i, label: '記憶體' },
+                { pattern: /Session/i, label: 'Session' },
+                { pattern: /Local/i, label: 'Local' },
             ];
 
             let proxySource = null;
+            let isInferred = false;
             if (rawSource && typeof rawSource === 'string') {
                 for (const { pattern, label } of proxyPatterns) {
                     if (pattern.test(rawSource)) {
@@ -6843,29 +6845,39 @@ function buildPriceInspectorTableModel(context = {}) {
                 }
             }
 
-            // 若無法從字串識別 API 來源，根據市場推斷預設來源
+            // 若無法從字串識別 API 來源，根據市場推斷預設來源（並標註）
             if (!proxySource && market) {
                 const upperMarket = market.toUpperCase();
                 if (upperMarket === 'TWSE') proxySource = 'TWSE';
                 else if (upperMarket === 'TPEX' || upperMarket === 'OTC') proxySource = 'FinMind';
                 else if (upperMarket === 'US') proxySource = 'FinMind';
                 else if (upperMarket === 'INDEX') proxySource = 'Yahoo';
+                if (proxySource) isInferred = true;
             }
 
-            const cacheMatches = [];
+            // 收集所有匹配的快取來源（按優先級取第一個匹配）
+            let cacheSource = null;
             if (rawSource && typeof rawSource === 'string') {
                 for (const { pattern, label } of cachePatterns) {
-                    if (pattern.test(rawSource) && !cacheMatches.includes(label)) {
-                        cacheMatches.push(label);
+                    if (pattern.test(rawSource)) {
+                        cacheSource = label;
+                        break;
                     }
                 }
             }
 
+            // 組合價格來源標籤
+            let proxyLabel = proxySource || '—';
+            if (isInferred && proxySource) {
+                proxyLabel = `${proxySource}(未識別到API來源)`;
+            }
+
             return {
-                proxy: proxySource || '—',
-                cache: cacheMatches.length > 0 ? cacheMatches[cacheMatches.length - 1] : '—',
+                proxy: proxyLabel,
+                cache: cacheSource || '—',
             };
         };
+
 
         const rawSourceText =
             typeof row?.priceSource === 'string' && row.priceSource.trim().length > 0
