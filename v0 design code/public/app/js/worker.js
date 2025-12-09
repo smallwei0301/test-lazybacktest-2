@@ -3235,7 +3235,7 @@ function setYearSupersetEntry(
   });
 }
 
-function mergeYearSupersetRows(existingEntry, rows) {
+function mergeYearSupersetRows(existingEntry, rows, dataSource = null) {
   if (!existingEntry) return;
   if (!Array.isArray(existingEntry.data)) {
     existingEntry.data = [];
@@ -3251,6 +3251,16 @@ function mergeYearSupersetRows(existingEntry, rows) {
   );
   rebuildCoverageFromData(existingEntry);
   existingEntry.lastUpdated = Date.now();
+
+  // LB-PRICE-SOURCE-TRACK-20251209A: 保留資料來源
+  if (dataSource) {
+    if (!existingEntry.sources) {
+      existingEntry.sources = [];
+    }
+    if (!existingEntry.sources.includes(dataSource)) {
+      existingEntry.sources.push(dataSource);
+    }
+  }
 }
 
 async function recordYearSupersetSlices({
@@ -3259,6 +3269,7 @@ async function recordYearSupersetSlices({
   priceModeKey,
   split = false,
   rows,
+  dataSource = null,
 }) {
   if (!marketKey || !stockNo || !Array.isArray(rows) || rows.length === 0) {
     return;
@@ -3305,8 +3316,8 @@ async function recordYearSupersetSlices({
         lastUpdated: 0,
       };
 
-    // mergeYearSupersetRows 會自動更新 entry.lastUpdated
-    mergeYearSupersetRows(entry, yearRows);
+    // mergeYearSupersetRows 會自動更新 entry.lastUpdated 並保留 dataSource
+    mergeYearSupersetRows(entry, yearRows, dataSource);
 
     // 更新記憶體快取並觸發 IDB 寫入
     setYearSupersetEntry(
@@ -6629,6 +6640,7 @@ async function tryFetchRangeFromBlob({
     priceModeKey: getPriceModeKey(false),
     split,
     rows: deduped,
+    dataSource: dataSourceLabel,
   });
   const cacheEntry = {
     data: deduped,
@@ -7036,6 +7048,7 @@ async function fetchStockData(
             priceModeKey: getPriceModeKey(false),
             split,
             rows: patchedData,  // 只寫入新補抓的資料
+            dataSource: 'Netlify Blob (年度補抓)',
           });
         }
       }
@@ -7890,6 +7903,7 @@ async function fetchStockData(
     priceModeKey: getPriceModeKey(adjusted),
     split,
     rows: deduped,
+    dataSource: dataSourceLabel,
   });
   setWorkerCacheEntry(marketKey, cacheKey, {
     data: deduped,
