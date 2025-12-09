@@ -10,14 +10,14 @@ const strategyDescriptions = {
     defaultParams: { shortPeriod: 5, longPeriod: 20 },
     optimizeTargets: [
       { name: "shortPeriod", label: "短期SMA", range: { from: 3, to: 50, step: 1 } },
-      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 100, step: 2 } },
+      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 250, step: 2 } },
     ],
   },
   ma_above: {
     name: "價格突破均線",
     desc: "收盤價從下方突破SMA。\n參數: SMA週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 250, step: 2 } }],
   },
   rsi_oversold: {
     name: "RSI超賣",
@@ -69,7 +69,7 @@ const strategyDescriptions = {
     name: "價格突破前高",
     desc: "價格突破前 N 日最高。\n參數: 觀察週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 250, step: 2 } }],
   },
   williams_oversold: {
     name: "威廉指標超賣",
@@ -92,14 +92,14 @@ const strategyDescriptions = {
     defaultParams: { shortPeriod: 5, longPeriod: 20 },
     optimizeTargets: [
       { name: "shortPeriod", label: "短期SMA", range: { from: 3, to: 50, step: 1 } },
-      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 100, step: 2 } },
+      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 250, step: 2 } },
     ],
   },
   ma_below: {
     name: "價格跌破均線",
     desc: "收盤價從上方跌破SMA。\n參數: SMA週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 250, step: 2 } }],
   },
   rsi_overbought: {
     name: "RSI超買",
@@ -148,7 +148,7 @@ const strategyDescriptions = {
     name: "價格跌破前低",
     desc: "價格跌破前 N 日最低。\n參數: 觀察週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 250, step: 2 } }],
   },
   williams_overbought: {
     name: "威廉指標超買",
@@ -172,14 +172,14 @@ const strategyDescriptions = {
     defaultParams: { shortPeriod: 5, longPeriod: 20 },
     optimizeTargets: [
       { name: "shortPeriod", label: "短期SMA", range: { from: 3, to: 50, step: 1 } },
-      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 100, step: 2 } },
+      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 250, step: 2 } },
     ],
   },
   short_ma_below: {
     name: "價格跌破均線 (做空)",
     desc: "收盤價從上方跌破SMA。\n參數: SMA週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 250, step: 2 } }],
   },
   short_rsi_overbought: {
     name: "RSI超買 (做空)",
@@ -222,7 +222,7 @@ const strategyDescriptions = {
     name: "價格跌破前低 (做空)",
     desc: "價格跌破前 N 日最低。\n參數: 觀察週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 250, step: 2 } }],
   },
   short_williams_overbought: {
     name: "威廉指標超買 (做空)",
@@ -245,14 +245,14 @@ const strategyDescriptions = {
     defaultParams: { shortPeriod: 5, longPeriod: 20 },
     optimizeTargets: [
       { name: "shortPeriod", label: "短期SMA", range: { from: 3, to: 50, step: 1 } },
-      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 100, step: 2 } },
+      { name: "longPeriod", label: "長期SMA", range: { from: 10, to: 250, step: 2 } },
     ],
   },
   cover_ma_above: {
     name: "價格突破均線 (回補)",
     desc: "收盤價從下方突破SMA。\n參數: SMA週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "SMA週期", range: { from: 5, to: 250, step: 2 } }],
   },
   cover_rsi_oversold: {
     name: "RSI超賣 (回補)",
@@ -295,7 +295,7 @@ const strategyDescriptions = {
     name: "價格突破前高 (回補)",
     desc: "價格突破前 N 日最高。\n參數: 觀察週期",
     defaultParams: { period: 20 },
-    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 100, step: 2 } }],
+    optimizeTargets: [{ name: "period", label: "觀察週期", range: { from: 5, to: 250, step: 2 } }],
   },
   cover_williams_oversold: {
     name: "威廉指標超賣 (回補)",
