@@ -5121,7 +5121,10 @@ function runBacktestInternal() {
         // Unified Worker Message Handler
         backtestWorker.onmessage = e => {
             const { type, data, progress, message, stockName, dataSource } = e.data;
-            console.log("[Main] Received message from worker:", type, data); // Debug log
+            // Only log non-progress messages to reduce console noise
+            if (type !== 'progress') {
+                console.log("[Main] Received message from worker:", type, data);
+            }
 
             if (type === 'progress') {
                 updateProgress(progress);
