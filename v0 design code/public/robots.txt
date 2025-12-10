@@ -1,0 +1,14 @@
+# Robots.txt for Lazybacktest
+# Production Ready Phase 1 - SEO Optimization
+
+User-agent: *
+Allow: /
+
+# Disallow API paths to prevent unnecessary API quota consumption
+Disallow: /api/
+
+# Disallow Next.js system paths
+Disallow: /_next/
+
+# Disallow admin paths
+Disallow: /admin/
