@@ -1,5 +1,7 @@
-// netlify/functions/price-inspector-download.js
+// netlify/functions/price-inspector-download.js (v1.1 - with GA4 tracking)
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 import { getStore } from '@netlify/blobs';
+import { sendToGA4 } from './utils/ga4.js';
 
 const STORE_NAME = 'price_inspector_downloads';
 const STATS_KEY = 'price-inspector-download-stats';
@@ -147,6 +149,16 @@ async function handlePost(store, request) {
     const previous = await readStats(store);
     const updated = recordEvent(previous, event);
     await writeStats(store, updated);
+
+    // GA4 追蹤
+    await sendToGA4('proxy_usage', {
+        proxy_name: 'price_download',
+        stock_no: event.stockNo || 'N/A',
+        market: event.market || 'TWSE',
+        format: event.format,
+        source: 'backend_proxy'
+    });
+
     return respondJson({ ok: true, stats: updated });
 }
 

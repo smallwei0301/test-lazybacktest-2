@@ -1,13 +1,14 @@
-// netlify/functions/taiwan-directory.js (v1.0 - Taiwan directory cache)
-// Patch Tag: LB-TW-DIRECTORY-20250620A
+// netlify/functions/taiwan-directory.js (v1.1 - Taiwan directory cache with GA4 & 30-day Header Cache)
+// Patch Tag: LB-TW-DIRECTORY-20251210-GA4
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
 const DIRECTORY_STORE_NAME = 'taiwan_directory_store_v1';
 const DIRECTORY_CACHE_KEY = 'directory-cache.json';
-const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20250620A';
-const DIRECTORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
+const DIRECTORY_VERSION = 'LB-TW-DIRECTORY-20251210-GA4';
+const DIRECTORY_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 天
 const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data';
 const FINMIND_DATASET = 'TaiwanStockInfo';
 
@@ -166,6 +167,14 @@ export const handler = async (event) => {
     const forceRefresh = params.force === '1' || params.refresh === '1';
     const stockId = params.stockId ? params.stockId.trim().toUpperCase() : null;
 
+    // GA4 追蹤
+    await sendToGA4('proxy_usage', {
+        proxy_name: 'taiwan_directory',
+        stock_no: stockId || 'ALL',
+        source: 'backend_proxy',
+        action: forceRefresh ? 'refresh' : 'read'
+    });
+
     const store = obtainStore(DIRECTORY_STORE_NAME);
     let cached = await readCache(store, DIRECTORY_CACHE_KEY);
     let cacheHit = false;
@@ -216,9 +225,16 @@ export const handler = async (event) => {
         cacheHit,
     });
 
+    // 30 天 HTTP Cache Header
+    const cacheSeconds = 2592000;
+
     return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': `public, max-age=${cacheSeconds}, s-maxage=${cacheSeconds}, immutable`,
+            'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheSeconds}`
+        },
         body: JSON.stringify(body),
     };
 };

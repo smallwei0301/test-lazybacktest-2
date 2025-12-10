@@ -27,9 +27,11 @@
 // Patch Tag: LB-ADJ-COMPOSER-20250522A
 // Patch Tag: LB-ADJ-COMPOSER-20250527A
 // Patch Tag: LB-ADJ-COMPOSER-20250704A
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
-const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20250704A';
+const FUNCTION_VERSION = 'LB-ADJ-COMPOSER-20251210-GA4';
 
 let fetchImpl = fetch;
 
@@ -851,8 +853,8 @@ function normaliseDividendResultRecord(raw) {
   );
   const dividendTotal = parseNumber(
     readField(raw, 'stock_and_cache_dividend') ??
-      readField(raw, 'stock_and_cash_dividend') ??
-      readField(raw, 'dividend_total'),
+    readField(raw, 'stock_and_cash_dividend') ??
+    readField(raw, 'dividend_total'),
   );
 
   if (!Number.isFinite(afterPrice) || afterPrice <= 0) {
@@ -1457,8 +1459,7 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              error.message || error
+            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${error.message || error
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -1480,8 +1481,7 @@ async function fetchFinMindPrice(stockNo, startISO, endISO, { label } = {}) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              payloadError.message || payloadError
+            `[FinMind 價格段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${payloadError.message || payloadError
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -1884,8 +1884,7 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              error.message || error
+            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${error.message || error
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -1915,8 +1914,7 @@ async function fetchFinMindAdjustedPriceSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              payloadError.message || payloadError
+            `[FinMind 還原序列拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${payloadError.message || payloadError
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -2379,8 +2377,7 @@ async function fetchDividendResultSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              error.message || error
+            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${error.message || error
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -2412,8 +2409,7 @@ async function fetchDividendResultSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              payloadError.message || payloadError
+            `[FinMind 配息結果段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${payloadError.message || payloadError
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -2537,8 +2533,7 @@ async function fetchStockSplitSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              error.message || error
+            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${error.message || error
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -2547,8 +2542,7 @@ async function fetchStockSplitSeries(stockNo, startISO, endISO) {
         }
       }
       const enriched = new Error(
-        `[FinMind 股票拆分段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${
-          error.message || error
+        `[FinMind 股票拆分段錯誤] ${stockNo} ${span.startISO}~${span.endISO}: ${error.message || error
         }`,
       );
       enriched.original = error;
@@ -2580,8 +2574,7 @@ async function fetchStockSplitSeries(stockNo, startISO, endISO) {
         const split = splitSpan(span);
         if (split && split.length === 2) {
           console.warn(
-            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${
-              payloadError.message || payloadError
+            `[FinMind 股票拆分段拆分] ${stockNo} ${span.startISO}~${span.endISO} (${spanDays}d) -> ${split[0].startISO}~${split[0].endISO} + ${split[1].startISO}~${split[1].endISO}; 原因: ${payloadError.message || payloadError
             }`,
           );
           await delay(FINMIND_SEGMENT_COOLDOWN_MS + 140);
@@ -2708,9 +2701,9 @@ function buildAdjustmentApplicationChecks(adjustments = [], adjustedRows = []) {
       : null;
     const rawClose = Number(
       firstRow?.rawClose ??
-        firstRow?.raw_close ??
-        adjustment?.rawCloseBefore ??
-        null,
+      firstRow?.raw_close ??
+      adjustment?.rawCloseBefore ??
+      null,
     );
     const adjustedClose = Number(firstRow?.close ?? null);
     const expectedAdjustedClose = Number(
@@ -2831,10 +2824,9 @@ function buildAdjustmentDebugEntries(checks = [], options = {}) {
         `套用檢查：${check?.firstAffectedDate || '—'} 因子 ${formatNumberForLog(
           factorForComparison,
           6,
-        )} ・ 預期 ${formatNumberForLog(check?.expectedFactor, 6)} ・ 差異 ${
-          Number.isFinite(check?.relativeDiff)
-            ? formatPercentForLog(check.relativeDiff, 3)
-            : '—'
+        )} ・ 預期 ${formatNumberForLog(check?.expectedFactor, 6)} ・ 差異 ${Number.isFinite(check?.relativeDiff)
+          ? formatPercentForLog(check.relativeDiff, 3)
+          : '—'
         }`,
       );
       if (
@@ -3138,8 +3130,11 @@ export const handler = async (event) => {
     })();
 
     if (!stockNo) {
-      return jsonResponse(400, { error: '缺少股票代號' });
+      return jsonResponse(400, { error: '缺少 stockNo' });
     }
+
+    // GA4 追蹤
+    await sendToGA4('proxy_usage', { proxy_name: 'adjusted_price', stock_no: stockNo, market, source: 'backend_proxy' });
     if (!startISO || !endISO) {
       return jsonResponse(400, { error: '日期格式無效' });
     }
@@ -3345,6 +3340,17 @@ export const handler = async (event) => {
 
     const dividendResultOutcome = allowDividendAdjustments && priceRows.length
       ? await deriveAdjustedSeriesFromDividendResult({
+        stockNo,
+        startISO,
+        endISO,
+        priceRows,
+        priceRangeStartISO,
+        priceRangeEndISO,
+      })
+      : null;
+    const splitResultOutcome =
+      enableSplitAdjustment && priceRows.length
+        ? await deriveAdjustedSeriesFromSplitPrice({
           stockNo,
           startISO,
           endISO,
@@ -3352,17 +3358,6 @@ export const handler = async (event) => {
           priceRangeStartISO,
           priceRangeEndISO,
         })
-      : null;
-    const splitResultOutcome =
-      enableSplitAdjustment && priceRows.length
-        ? await deriveAdjustedSeriesFromSplitPrice({
-            stockNo,
-            startISO,
-            endISO,
-            priceRows,
-            priceRangeStartISO,
-            priceRangeEndISO,
-          })
         : null;
 
     if (dividendResultOutcome) {
@@ -3657,7 +3652,7 @@ export const handler = async (event) => {
 
     const baseSourceLabel =
       priceSourceLabel || (market === 'TPEX' ? 'FinMind (原始)' : 'TWSE (原始)')
-    ;
+      ;
     const combinedSourceParts = [baseSourceLabel];
     if (hasAppliedAdjustments) {
       combinedSourceParts.push(FINMIND_DIVIDEND_LABEL);
@@ -3705,20 +3700,20 @@ export const handler = async (event) => {
 
     const splitSummaryStats = splitResultOutcome
       ? {
-          resultFilteredCount: Number.isFinite(splitDiagnostics?.splitResult?.filteredRecords)
-            ? splitDiagnostics.splitResult.filteredRecords
-            : undefined,
-          resultTotalCount: Number.isFinite(splitDiagnostics?.splitResult?.totalRecords)
-            ? splitDiagnostics.splitResult.totalRecords
-            : undefined,
-          eventCount: Number.isFinite(splitDiagnostics?.splitResult?.eventCount)
-            ? splitDiagnostics.splitResult.eventCount
-            : Array.isArray(splitResultOutcome.events)
-              ? splitResultOutcome.events.length
-              : 0,
-          fetchStartISO: splitResultOutcome?.payload?.fetchStartISO || null,
-          fetchEndISO: splitResultOutcome?.payload?.fetchEndISO || null,
-        }
+        resultFilteredCount: Number.isFinite(splitDiagnostics?.splitResult?.filteredRecords)
+          ? splitDiagnostics.splitResult.filteredRecords
+          : undefined,
+        resultTotalCount: Number.isFinite(splitDiagnostics?.splitResult?.totalRecords)
+          ? splitDiagnostics.splitResult.totalRecords
+          : undefined,
+        eventCount: Number.isFinite(splitDiagnostics?.splitResult?.eventCount)
+          ? splitDiagnostics.splitResult.eventCount
+          : Array.isArray(splitResultOutcome.events)
+            ? splitResultOutcome.events.length
+            : 0,
+        fetchStartISO: splitResultOutcome?.payload?.fetchStartISO || null,
+        fetchEndISO: splitResultOutcome?.payload?.fetchEndISO || null,
+      }
       : null;
 
     const responseBody = {

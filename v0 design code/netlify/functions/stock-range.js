@@ -1,7 +1,9 @@
-// netlify/functions/stock-range.js (v3.0 - yearly blob cache)
+// netlify/functions/stock-range.js (v3.1 - yearly blob cache with GA4 tracking)
 // Patch Tag: LB-CACHE-TIER-20250720A
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
 const TWSE_MONTH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const TPEX_PRIMARY_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -410,6 +412,9 @@ export default async (req) => {
         if (!stockNo || !startDateStr || !endDateStr) {
             return new Response(JSON.stringify({ error: 'Missing required parameters stockNo/startDate/endDate' }), { status: 400 });
         }
+
+        // GA4 追蹤
+        await sendToGA4('proxy_usage', { proxy_name: 'stock_range', stock_no: stockNo, market: marketType, source: 'backend_proxy' });
 
         const startDate = parseISODate(startDateStr);
         const endDate = parseISODate(endDateStr);

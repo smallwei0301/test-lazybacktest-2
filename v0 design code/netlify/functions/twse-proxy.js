@@ -1,10 +1,12 @@
-// netlify/functions/twse-proxy.js (v10.6 - TWSE primary with FinMind adaptive retries + request logs)
+// netlify/functions/twse-proxy.js (v10.7 - TWSE primary with GA4 tracking)
 // Patch Tag: LB-DATASOURCE-20241007A
 // Patch Tag: LB-FINMIND-RETRY-20241012A
 // Patch Tag: LB-BLOBS-LOCAL-20241007B
 // Patch Tag: LB-TWSE-PROXY-20250320A
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
 const TWSE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
 const inMemoryCache = new Map(); // Map<cacheKey, { timestamp, data }>
@@ -689,6 +691,9 @@ export default async (req) => {
         if (!stockNo) {
             return new Response(JSON.stringify({ error: '缺少股票代號' }), { status: 400 });
         }
+
+        // GA4 追蹤
+        await sendToGA4('proxy_usage', { proxy_name: 'twse', stock_no: stockNo, source: 'backend_proxy' });
 
         const monthParam = params.get('month');
         const startParam = params.get('start');

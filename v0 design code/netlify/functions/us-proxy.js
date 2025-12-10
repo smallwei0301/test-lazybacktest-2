@@ -1,10 +1,12 @@
-// netlify/functions/us-proxy.js (v1.2 - FinMind primary with Yahoo fallback)
+// netlify/functions/us-proxy.js (v1.3 - FinMind primary with GA4 tracking)
 // Patch Tag: LB-US-MARKET-20250612A
 // Patch Tag: LB-US-YAHOO-20250613A
 // Patch Tag: LB-US-NAMEFIX-20250614A
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
 const US_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 小時
 const US_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
@@ -585,6 +587,9 @@ export default async (req) => {
         if (!stockNo) {
             return new Response(JSON.stringify({ error: '缺少股票代號' }), { status: 400 });
         }
+
+        // GA4 追蹤
+        await sendToGA4('proxy_usage', { proxy_name: 'us', stock_no: stockNo, source: 'backend_proxy' });
 
         if (mode === 'info') {
             const info = await fetchUSStockInfo(stockNo);

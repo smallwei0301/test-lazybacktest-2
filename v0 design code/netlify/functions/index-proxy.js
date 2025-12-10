@@ -1,8 +1,10 @@
-// netlify/functions/index-proxy.js (v1.0 - Yahoo Finance index fetcher)
+// netlify/functions/index-proxy.js (v1.1 - Yahoo Finance index with GA4 tracking)
 // Patch Tag: LB-INDEX-YAHOO-20250726A
+// Patch Tag: LB-GA4-PROXY-TRACKING-20251210B
 
 import { getStore } from '@netlify/blobs';
 import fetch from 'node-fetch';
+import { sendToGA4 } from './utils/ga4.js';
 
 const INDEX_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 小時
 const INDEX_INFO_TTL_MS = 24 * 60 * 60 * 1000; // 24 小時
@@ -269,6 +271,9 @@ export default async (req) => {
         if (!stockNo) {
             return new Response(JSON.stringify({ error: '缺少指數代號' }), { status: 400 });
         }
+
+        // GA4 追蹤
+        await sendToGA4('proxy_usage', { proxy_name: 'index', stock_no: stockNo, source: 'backend_proxy' });
 
         if (mode === 'info') {
             const store = obtainStore('index_info_store');
