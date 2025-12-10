@@ -6552,10 +6552,10 @@ async function tryFetchRangeFromBlob({
   if (typeof payload.dataSource === "string" && payload.dataSource.trim() !== "") {
     dataSourceFlags.add(payload.dataSource);
   }
-  const blobSourceLabel = rangeFetchInfo.cacheHit
+  const blobCacheLabel = rangeFetchInfo.cacheHit
     ? "Netlify 年度快取 (Blob 命中)"
     : "Netlify 年度快取 (Blob 補抓)";
-  dataSourceFlags.add(blobSourceLabel);
+  dataSourceFlags.add(blobCacheLabel);
 
   const defaultRemoteLabel =
     marketKey === "TPEX" ? "FinMind (主來源)" : "TWSE (主來源)";
