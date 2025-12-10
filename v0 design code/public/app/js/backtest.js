@@ -8368,6 +8368,7 @@ function displayTradeResults(result) {
                                 </div>
                                 <div class="flex items-center">
                                     <span class="text-sm font-bold" style="color: ${profitColor};">${profitSign}${profitValue}元</span>
+                                    ${typeof profitPercent === 'number' ? `<span class="text-xs ml-1" style="color: ${profitColor};">(${profitPercent >= 0 ? '+' : ''}${profitPercent.toFixed(2)}%)</span>` : ''}
                                     ${trigger}
                                 </div>
                             </div>
