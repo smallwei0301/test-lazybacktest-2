@@ -233,6 +233,33 @@ async function writeInfoCache(store, symbol, payload) {
 
 export default async (req) => {
     try {
+        // [Security] Referer Check - 防止 API 盜連
+        const allowedDomains = [
+            'lazybacktest.netlify.app', // Netlify 網域
+            'test-lazybacktest.netlify.app', // 測試網域
+            'localhost',                // 本地開發
+            '127.0.0.1'                 // 本地開發
+            // 如果有自定義網域 (如 lazybacktest.com)，請補在這裡
+        ];
+
+        const referer = req.headers.get('referer') || req.headers.get('referrer');
+        if (referer) {
+            try {
+                const refererUrl = new URL(referer);
+                const isAllowed = allowedDomains.some(domain => refererUrl.hostname.includes(domain));
+
+                if (!isAllowed) {
+                    console.warn(`[Security Block] 阻擋來自非授權網域的請求: ${referer}`);
+                    return new Response(JSON.stringify({ error: 'Forbidden: Access Denied' }), {
+                        status: 403,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            } catch (e) {
+                console.warn(`[Security Block] Malformed Referer: ${referer}`);
+            }
+        }
+
         const url = new URL(req.url);
         const params = url.searchParams;
         const mode = params.get('mode') || 'price';

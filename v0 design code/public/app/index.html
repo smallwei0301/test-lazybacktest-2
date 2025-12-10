@@ -1705,7 +1705,8 @@
                                 <div class="card shadow-lg summary-card">
                                     <div
                                         class="card-header flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                                        <h3 class="card-title">淨值曲線圖</h3>
+                                        <h3 class="card-title">淨值曲線圖 <span class="text-[10px] ml-2 font-normal"
+                                                style="color: var(--muted-foreground);">(按住 Ctrl + 滾輪縮放 X 軸)</span></h3>
                                         <div class="flex items-center gap-3">
                                             <button type="button" id="chartModeToggle"
                                                 class="px-3 py-1.5 text-[11px] font-medium rounded-md border transition-colors"
@@ -1719,20 +1720,7 @@
                                             </span>
                                         </div>
                                     </div>
-                                    <div id="chartModeLegend"
-                                        class="mt-2 hidden flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
-                                        aria-hidden="true">
-                                        <div class="flex items-center gap-2">
-                                            <span class="w-3 h-3 rounded-sm border"
-                                                style="background-color: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.45);"></span>
-                                            <span>紫色：上漲段</span>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                            <span class="w-3 h-3 rounded-sm border"
-                                                style="background-color: rgba(37, 99, 235, 0.2); border-color: rgba(37, 99, 235, 0.45);"></span>
-                                            <span>藍色：下跌段</span>
-                                        </div>
-                                    </div>
+                                    <!-- LB-UI-UX-FIX-20251210: 已移除重複的圖例區塊 -->
                                     <div class="card-content">
                                         <div id="chart-container"
                                             class="h-96 bg-muted/20 rounded-lg flex items-center justify-center border-2 border-dashed relative"
@@ -1761,14 +1749,14 @@
                                                 <span>賣出</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border"
+                                                <span class="w-2 h-2 rounded-full border"
                                                     style="background-color: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.45);"></span>
-                                                <span>紫色：上漲段</span>
+                                                <span>上漲段</span>
                                             </div>
                                             <div class="flex items-center gap-2">
-                                                <span class="w-3 h-3 rounded-sm border"
+                                                <span class="w-2 h-2 rounded-full border"
                                                     style="background-color: rgba(37, 99, 235, 0.2); border-color: rgba(37, 99, 235, 0.45);"></span>
-                                                <span>藍色：下跌段</span>
+                                                <span>下跌段</span>
                                             </div>
                                         </div>
                                         <div id="priceInspectorControls"
@@ -2783,7 +2771,7 @@
                                                                     <span class="min-w-[70px]">勝率%</span>
                                                                     <input id="rolling-threshold-win" data-rolling-input
                                                                         type="number" min="0" max="100" step="0.1"
-                                                                        value="45"
+                                                                        value="40"
                                                                         class="w-full px-2 py-1 border border-border rounded-md bg-input text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                                                                         style="border-color: var(--border); background-color: var(--input);" />
                                                                 </label>
@@ -2791,7 +2779,7 @@
                                                             <p class="text-[11px]"
                                                                 style="color: var(--muted-foreground);">門檻值沿用
                                                                 QuantConnect Walkforward 指南（Sharpe ≥ 1、Sortino ≥ 1.2、勝率
-                                                                ≥ 45%、年化報酬 ≥ 8%），並採納 CME Group 管理期貨顧問對 CTA Walk-Forward
+                                                                ≥ 40%、年化報酬 ≥ 8%），並採納 CME Group 管理期貨顧問對 CTA Walk-Forward
                                                                 稽核常用的最大回撤 ≤ 25%；Walk-Forward Efficiency 以 Pardo
                                                                 (2014)《The Evaluation and Optimization of Trading
                                                                 Strategies》建議的 67% 作為合格基準。</p>

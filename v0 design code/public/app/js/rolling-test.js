@@ -33,7 +33,7 @@
         sharpeRatio: 1,
         sortinoRatio: 1.2,
         maxDrawdown: 25,
-        winRate: 45,
+        winRate: 40, // LB-UI-UX-FIX-20251210: 調整勝率門檻從 45% 降至 40%
     };
 
     const QUALITY_WEIGHTS = {
@@ -945,11 +945,29 @@
         return container;
     }
 
+    // LB-UI-UX-FIX-20251210: 重寫 WFE 說明，新增詳細解釋區塊
     function buildWfeDetail(aggregate) {
         const container = document.createElement('div');
         container.className = 'mt-1 space-y-2';
 
+        // 新增詳細解釋區塊
+        const explanation = document.createElement('div');
+        explanation.className = 'text-xs space-y-1 p-2 bg-muted/20 rounded border border-border/50';
+        explanation.style.color = 'var(--muted-foreground)';
+        explanation.innerHTML = `
+            <p><strong style="color: var(--foreground);">WFE (Walk-Forward Efficiency) 前向效率</strong>：衡量策略在「樣本外(未知)」表現與「樣本內(已知)」表現的一致性。</p>
+            <p><strong>計算公式：</strong>WFE = (樣本外年化報酬 ÷ 樣本內年化報酬) × 100%</p>
+            <ul class="list-disc pl-4 space-y-0.5 mt-1">
+                <li><strong>≥ 100%</strong>：樣本外表現優於或等於樣本內，策略極為穩健。</li>
+                <li><strong>67% ~ 99%</strong>：樣本外表現略遜於樣本內，屬正常衰退範圍 (Pardo, 2014 標準)。</li>
+                <li><strong>&lt; 67%</strong>：策略可能存在過度擬合 (Overfitting) 風險，需重新檢視參數。</li>
+            </ul>
+            <p class="mt-2"><strong>視窗比說明：</strong>指「達到特定 WFE 門檻的視窗數量」佔「總視窗數」的百分比。高視窗比代表策略在不同時期的穩定性高。</p>
+        `;
+        container.appendChild(explanation);
+
         const summary = document.createElement('p');
+        summary.className = 'font-medium mt-2';
         summary.textContent = `WFE 中位 ${formatPercent(aggregate.medianWfePercent)}，調整係數 ${Number.isFinite(aggregate.wfeAdjustment) ? trimNumber(aggregate.wfeAdjustment) : '—'}（建議 ≥ ${WALK_FORWARD_EFFICIENCY_BASELINE}%）。`;
         container.appendChild(summary);
 
@@ -959,7 +977,7 @@
             .filter((item) => item);
         if (items.length > 0) {
             const list = document.createElement('ul');
-            list.className = 'list-disc pl-4 space-y-1';
+            list.className = 'list-disc pl-4 space-y-1 text-xs text-muted-foreground';
             items.forEach((text) => {
                 const li = document.createElement('li');
                 li.textContent = text;

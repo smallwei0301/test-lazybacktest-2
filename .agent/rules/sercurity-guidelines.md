@@ -1,0 +1,101 @@
+---
+trigger: always_on
+---
+
+# 網站安全性與測試指引 (Security Guidelines)
+
+版本：1.0
+最後更新：2025-12-10
+
+本文檔詳述 LazyBacktest 網站的安全性機制與測試規範。**任何開發者在修改後端 Proxy、進行本地測試或部署前，務必閱讀本文件。**
+
+---
+
+## 1. API 防盜連機制 (Referer Check)
+
+為防止外部網站惡意盜連 API 消耗流量，我們在所有的 Netlify Functions (Proxy) 中實作了 Referer 檢查。
+
+### 🛡️ 保護範圍
+以下核心 API 檔案均已啟用防護：
+- `netlify/functions/twse-proxy.js` (台股上市)
+- `netlify/functions/tpex-proxy.js` (台股上櫃)
+- `netlify/functions/us-proxy.js` (美股)
+- `netlify/functions/index-proxy.js` (指數)
+
+### ✅ 白名單 (Allowed Domains)
+只有來自以下網域的請求會被允許，其餘將回傳 `403 Forbidden`：
+
+1.  **正式環境**: `lazybacktest.netlify.app`
+2.  **測試環境**: `test-lazybacktest.netlify.app`
+3.  **本地開發**: `localhost`
+4.  **本地開發**: `127.0.0.1`
+
+> **注意**：若未來新增自定義網域（如 `lazybacktest.com`），**必須**手動更新上述 4 個檔案中的 `allowedDomains` 列表。
+
+### 🧪 測試指南
+
+#### 瀏覽器測試
+直接使用瀏覽器操作網站功能（如回測）即可，因為瀏覽器會自動帶入正確的 Referer。
+
+#### CLI / Postman 測試
+若使用指令列工具，**必須手動加入 Referer header**：
+
+**❌ 會失敗 (403):**
+```bash
+curl -v "http://localhost:8888/.netlify/functions/twse-proxy?stockNo=2330"
+```
+*(註：目前開發階段對「完全無 Referer」的請求採寬容策略放行，但帶有錯誤 Referer 則必擋)*
+
+**❌ 會失敗 (403):**
+```bash
+curl -v -H "Referer: https://google.com" "http://localhost:8888/.netlify/functions/twse-proxy?stockNo=2330"
+```
+
+**✅ 會成功 (200):**
+```bash
+curl -v -H "Referer: http://localhost:3000" "http://localhost:8888/.netlify/functions/twse-proxy?stockNo=2330"
+```
+
+---
+
+## 2. 生產環境隱私保護 (Console Removal)
+
+為避免敏感除錯資訊洩漏及提升效能，我們在 `next.config.mjs` 設定了編譯器選項：
+
+- **Production (正式環境)**: 自動移除所有的 `console.log`, `console.info`, `console.warn`。
+    - **保留**: `console.error` (以便追蹤嚴重錯誤)。
+- **Development (開發環境)**: 保留所有 Log，方便除錯。
+
+> **開發提示**: 如果你在 Production 環境發現 Log 不見了，這是預期行為。若需輸出除錯資訊，請暫時使用 `console.error` 或回退到開發環境測試。
+
+---
+
+## 3. SEO 與爬蟲管理 (Robots.txt)
+
+檔案位置：`public/robots.txt`
+
+我們採取「允許正常索引，禁止消耗資源」的策略：
+- **允許 (Allow)**: `/` (網站內容)
+- **禁止 (Disallow)**:
+    - `/api/` (後端 API)
+    - `/_next/` (系統檔案)
+    - `/admin/` (管理後台)
+
+---
+
+## 4. 錯誤處理 (Custom Error Pages)
+
+我們提供了品牌化的錯誤頁面以優化體驗：
+- **404 Page** (`not-found.tsx`): 當用戶訪問不存在的路徑時顯示。
+- **500 Page** (`error.tsx`): 當系統發生崩潰時顯示，包含「再試一次」按鈕與錯誤代碼。
+
+---
+
+## 5. 修改檢核清單
+
+在提交任何關於 API 或安全性的修改前，請確認：
+
+- [ ] 若新增了 Proxy Function，是否已加入 Referer 檢查代碼？
+- [ ] 若新增了部署網域，是否已更新白名單？
+- [ ] 本地測試時，是否使用 `http://localhost` 進行呼叫？
+- [ ] 是否確認 `console.log` 未包含敏感 Key 或用戶個資？

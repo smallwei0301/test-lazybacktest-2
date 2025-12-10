@@ -8765,10 +8765,11 @@ function renderChart(result) {
                     },
                     zoom: {
                         wheel: {
-                            enabled: true
+                            enabled: true,
+                            modifierKey: 'ctrl', // LB-UI-UX-FIX-20251210: 需按住 Ctrl 才能縮放，防止誤觸
                         },
                         pinch: {
-                            enabled: true
+                            enabled: true, // 保持移動端雙指縮放可用
                         },
                         mode: 'x'
                     }
