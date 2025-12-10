@@ -8750,6 +8750,8 @@ function renderChart(result) {
                     position: 'top',
                     labels: {
                         usePointStyle: true,
+                        boxWidth: 6, // LB-UI-UX-FIX-20251210: 縮小圖例圓圈大小 50%
+                        boxHeight: 6,
                         filter: (legendItem) =>
                             !(legendItem && typeof legendItem.text === 'string' && legendItem.text.startsWith('trade-segment')),
                     },
