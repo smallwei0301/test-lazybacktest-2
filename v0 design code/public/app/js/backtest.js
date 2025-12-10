@@ -6828,8 +6828,14 @@ function buildPriceInspectorTableModel(context = {}) {
             ];
 
             // 快取來源關鍵字（按優先級排序：最具體的在前）
-            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 新增 Fallback, Patch, Worker 快取識別
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 識別新格式來源標籤
             const cachePatterns = [
+                { pattern: /備援補齊/i, label: '備援補齊' },
+                { pattern: /當月補抓/i, label: '當月補抓' },
+                { pattern: /年度Blob快取/i, label: '年度Blob快取' },
+                { pattern: /月度快取→Blob/i, label: '月度快取(Blob)' },
+                { pattern: /月度快取→記憶體/i, label: '月度快取(記憶體)' },
+                { pattern: /月度快取/i, label: '月度快取' },
                 { pattern: /Fallback/i, label: '備援' },
                 { pattern: /Patch/i, label: '補抓' },
                 { pattern: /Superset/i, label: 'Superset' },
@@ -6879,9 +6885,16 @@ function buildPriceInspectorTableModel(context = {}) {
                 proxyLabel = `${proxySource}(未識別到API來源)`;
             }
 
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 首次抓取時顯示「首次抓取」而非「—」
+            // 當有 API 來源但沒有快取來源時，表示這是首次從 API 抓取
+            let cacheLabel = cacheSource;
+            if (!cacheSource && proxySource && !isInferred) {
+                cacheLabel = '首次抓取';
+            }
+
             return {
                 proxy: proxyLabel,
-                cache: cacheSource || '—',
+                cache: cacheLabel || '—',
             };
         };
 

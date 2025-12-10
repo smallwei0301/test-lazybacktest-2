@@ -5342,7 +5342,9 @@ async function fetchFallbackForInvalidDates({
       const isTpex = marketKey === 'TPEX';
 
       // LB-RAW-PRICE-SOURCE-FIX-20251210A: 傳入 sourceLabel 追蹤備援來源
-      const fallbackSourceLabel = isTpex ? 'TPEX (Fallback)' : 'TWSE (Fallback)';
+      // 備援機制使用 FinMind 或 Yahoo Finance，這裡標註來源
+      const fallbackApiSource = isTpex ? 'FinMind' : (marketKey === 'US' ? 'FinMind' : 'FinMind');
+      const fallbackSourceLabel = `${fallbackApiSource} (備援補齊)`;
       const validDatesSet = new Set();
       rows.forEach(row => {
         const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, { adjusted }, fallbackSourceLabel);
@@ -6075,7 +6077,9 @@ async function fetchCurrentMonthGapPatch({
         : [];
 
     // LB-RAW-PRICE-SOURCE-FIX-20251210A: 取得來源標籤
-    const patchSourceLabel = payload?.dataSource || (isTpex ? 'TPEX (Patch)' : 'TWSE (Patch)');
+    // 補抓缺失資料，標註來源 API 和補抓機制
+    const patchApiSource = payload?.dataSource || (isTpex ? 'FinMind' : marketKey === 'US' ? 'FinMind' : 'TWSE');
+    const patchSourceLabel = `${patchApiSource} (當月補抓)`;
 
     // Patch: LB-IDB-PATCH-AFTER-HIT-20251209A — 新增診斷日誌
     const rowDates = rows.map((row) => {
@@ -6236,7 +6240,9 @@ async function tryFetchRangeFromBlob({
   }
 
   // LB-RAW-PRICE-SOURCE-FIX-20251210A: 傳入 Blob 來源標籤
-  const blobSourceLabel = marketKey === 'TPEX' ? 'TPEX (Blob)' : 'TWSE (Blob)';
+  // 年度 Blob 快取，標註原始資料來源 API
+  const blobApiSource = payload?.dataSource || (marketKey === 'TPEX' ? 'FinMind' : 'TWSE');
+  const blobSourceLabel = `${blobApiSource} (年度Blob快取)`;
   const normalizedRows = payload.aaData
     .map((row) =>
       normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj, {}, blobSourceLabel),
@@ -7629,19 +7635,14 @@ async function fetchStockData(
           }
 
           if (payload?.source === "blob") {
-            const cacheLabel = isTpex
-              ? "TPEX (快取)"
-              : isUs
-                ? "US (快取)"
-                : "TWSE (快取)";
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 改進快取來源標籤
+            const apiSource = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
+            const cacheLabel = `${apiSource} (月度快取→Blob)`;
             monthCacheFlags.add(cacheLabel);
             monthEntry.sources.add(cacheLabel);
           } else if (payload?.source === "memory") {
-            const cacheLabel = isTpex
-              ? "TPEX (記憶體快取)"
-              : isUs
-                ? "US (記憶體快取)"
-                : "TWSE (記憶體快取)";
+            const apiSource = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
+            const cacheLabel = `${apiSource} (月度快取→記憶體)`;
             monthCacheFlags.add(cacheLabel);
             monthEntry.sources.add(cacheLabel);
           }
@@ -7650,9 +7651,12 @@ async function fetchStockData(
             : Array.isArray(payload?.data)
               ? payload.data
               : [];
-          // LB-RAW-PRICE-SOURCE-FIX-20251210A: 提前取得 sourceLabel
-          const sourceLabel =
-            payload?.dataSource || (isTpex ? "TPEX" : isUs ? "FinMind" : "TWSE");
+          // LB-RAW-PRICE-SOURCE-FIX-20251210A: 改進 API 來源標籤
+          // 首次抓取時顯示 API 名稱，例如 TWSE、FinMind、Yahoo Finance
+          const apiName = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
+          const sourceLabel = payload?.source
+            ? `${apiName} (${payload.source === 'blob' ? '月度快取→Blob' : payload.source === 'memory' ? '月度快取→記憶體' : '月度快取'})`
+            : apiName;
           const normalized = [];
           rows.forEach((row) => {
             const normalizedRow = normalizeProxyRow(
