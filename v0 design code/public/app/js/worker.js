@@ -6800,6 +6800,23 @@ async function fetchStockData(
   if (finalCachedEntry) {
     // Patch: LB-IDB-PATCH-AFTER-HIT-20251208A — IDB 快取命中後仍執行當月補抓邏輯
     let cachedData = finalCachedEntry.data;
+
+    // Patch: LB-IDB-PRICESOURCE-FIX-20251210A — IDB 命中時更新每筆資料的 priceSource
+    // 確保 UI 能正確識別資料來源為 IDB 快取而非「首次抓取」
+    const isFromIDB = !cachedEntry; // 如果 cachedEntry 為空，表示來自 IDB
+    if (isFromIDB && Array.isArray(cachedData)) {
+      const idbCacheLabel = 'IDB快取';
+      cachedData = cachedData.map(row => {
+        if (!row) return row;
+        // 取得原始 API 來源（去掉括號內的快取標記）
+        const originalSource = (row.priceSource || marketKey || '').split(' (')[0];
+        return {
+          ...row,
+          priceSource: `${originalSource} (${idbCacheLabel})`,
+        };
+      });
+      finalCachedEntry.data = cachedData;
+    }
     const lastCachedDate = getLastDateFromCachedRows(cachedData);
 
     // 判斷是否需要當月補抓
@@ -7635,14 +7652,16 @@ async function fetchStockData(
           }
 
           if (payload?.source === "blob") {
-            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 改進快取來源標籤
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 根據架構文檔更新快取標籤
+            // L5: Blob Month Cache (Netlify Blobs 月度原始資料)
             const apiSource = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
-            const cacheLabel = `${apiSource} (月度快取→Blob)`;
+            const cacheLabel = `${apiSource} (Blob月度快取)`;
             monthCacheFlags.add(cacheLabel);
             monthEntry.sources.add(cacheLabel);
           } else if (payload?.source === "memory") {
+            // L1: Memory Cache (Worker 記憶體快取)
             const apiSource = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
-            const cacheLabel = `${apiSource} (月度快取→記憶體)`;
+            const cacheLabel = `${apiSource} (Worker記憶體快取)`;
             monthCacheFlags.add(cacheLabel);
             monthEntry.sources.add(cacheLabel);
           }
@@ -7651,11 +7670,10 @@ async function fetchStockData(
             : Array.isArray(payload?.data)
               ? payload.data
               : [];
-          // LB-RAW-PRICE-SOURCE-FIX-20251210A: 改進 API 來源標籤
-          // 首次抓取時顯示 API 名稱，例如 TWSE、FinMind、Yahoo Finance
+          // LB-RAW-PRICE-SOURCE-FIX-20251210A: 根據架構文檔更新 API 來源標籤
           const apiName = payload?.dataSource || (isTpex ? "FinMind" : isUs ? "FinMind" : "TWSE");
           const sourceLabel = payload?.source
-            ? `${apiName} (${payload.source === 'blob' ? '月度快取→Blob' : payload.source === 'memory' ? '月度快取→記憶體' : '月度快取'})`
+            ? `${apiName} (${payload.source === 'blob' ? 'Blob月度快取' : payload.source === 'memory' ? 'Worker記憶體快取' : '快取'})`
             : apiName;
           const normalized = [];
           rows.forEach((row) => {

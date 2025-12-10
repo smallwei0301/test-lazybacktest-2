@@ -1,650 +1,652 @@
 backtest.js:4965 [Main] runBacktestInternal called
-backtest.js:4977 [Main] Params: {stockNo: '2330', startDate: '2024-12-09', endDate: '2025-12-09', initialCapital: 100000, positionSize: 100, …}
+backtest.js:4977 [Main] Params: {stockNo: '2330', startDate: '2024-12-10', endDate: '2025-12-10', initialCapital: 100000, positionSize: 100, …}
 backtest.js:4979 [Main] Validation: true
 backtest.js:5117 [Main] WorkerUrl: js/worker.js
 backtest.js:5118 [Main] Creating worker...
 backtest.js:5493 [Main] Fetching new data for backtest.
-worker.js:15140 [Worker] Fetching new data for backtest.
+worker.js:15167 [Worker] Fetching new data for backtest.
 worker.js:545 [Worker IDB] IndexedDB 初始化成功
-worker.js:6754 [Worker IDB] 命中 IndexedDB 快取: TWSE__2330__2024-07-11__2025-12-09__RAW__NOSPLIT__...
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1110 on 2025-02-11, Cap After: 1069
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5008, Cap After: 94992
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@902 on 2025-04-29, Cap After: 147
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 4046, Cap After: 99037
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 98@1005 on 2025-06-09, Cap After: 407
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 12107, Cap After: 111145
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 85@1165 on 2025-09-01, Cap After: 11979
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 85@1160 on 2025-09-02, Profit: -1002, Cap After: 110142
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 10400
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 131457
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 31610
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-17, Cap After: 178
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 98@995 on 2025-06-06, Cap After: 979
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 13089, Cap After: 111717
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 12806
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 108660
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9399
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 131914
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 32493
-worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 90@1100 on 2025-02-12, Cap After: 859
-worker.js:11496 [Worker LONG] Stage Sell Executed: 90@1060 on 2025-02-14, Profit: -4163, Cap After: 95837
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@908 on 2025-04-30, Cap After: 361
-worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 3415, Cap After: 99251
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 94@1045 on 2025-06-10, Cap After: 881
-worker.js:11496 [Worker LONG] Stage Sell Executed: 94@1135 on 2025-08-22, Profit: 7848, Cap After: 107099
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-09-02, Cap After: 7197
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1465 on 2025-11-11, Profit: 25530, Cap After: 132630
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32783
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 88@1125 on 2025-01-06, Cap After: 859
-worker.js:11496 [Worker LONG] Stage Sell Executed: 88@1060 on 2025-02-14, Profit: -6274, Cap After: 93726
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@888 on 2025-04-25, Cap After: 353
-worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 5518, Cap After: 99244
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@998 on 2025-06-05, Cap After: 301
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12925, Cap After: 112169
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 13258
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 109112
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9851
-worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 132366
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32519
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 100@998 on 2025-06-05, Cap After: 4296
-worker.js:11496 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13056, Cap After: 117294
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18383
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114237
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14495
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135552
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 36130
-worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1450 on 2025-12-03, Cap After: 34542
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 109@908 on 2025-04-30, Cap After: 887
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 109@946 on 2025-06-02, Profit: 3545, Cap After: 103545
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 100@990 on 2025-06-04, Cap After: 4404
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13857, Cap After: 117401
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18491
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114345
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14603
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135660
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 66@1495 on 2025-12-08, Cap After: 36849
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 66@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1430 on 2025-12-02, Cap After: 34472
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138027
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38180
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1175 on 2025-08-26, Profit: 16173, Cap After: 120850
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20948
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 120266
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20524
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-12, Profit: 22141, Cap After: 142407
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 42560
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1150 on 2025-08-21, Profit: 13709, Cap After: 117948
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 18045
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 117792
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 18050
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1460 on 2025-11-07, Profit: 20902, Cap After: 138694
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38847
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116907
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17005
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 116324
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16582
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137639
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37792
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 116314
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16572
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138455
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38608
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@967 on 2025-05-29, Profit: 6538, Cap After: 106538
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 6901
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1125 on 2025-08-06, Profit: 11245, Cap After: 117783
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17881
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 117200
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 17458
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 139341
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 39494
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
+worker.js:6771 [Worker IDB] 命中 IndexedDB 快取: TWSE__2330__2024-07-12__2025-12-10__RAW__NOSPLIT__...
+worker.js:6816 [Worker IDB] 快取命中後檢查補抓: lastDate=2025-12-09, endDate=2025-12-10, shouldPatch=false, reason=before-2pm-data-not-updated-yet
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1110 on 2025-02-11, Cap After: 1069
+worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5008, Cap After: 94992
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@902 on 2025-04-29, Cap After: 147
+worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 4046, Cap After: 99037
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 98@1005 on 2025-06-09, Cap After: 407
+worker.js:11523 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 12107, Cap After: 111145
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 85@1165 on 2025-09-01, Cap After: 11979
+worker.js:11523 [Worker LONG] Stage Sell Executed: 85@1160 on 2025-09-02, Profit: -1002, Cap After: 110142
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 10400
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 131457
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 31610
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-17, Cap After: 178
+worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 98@995 on 2025-06-06, Cap After: 979
+worker.js:11523 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 13089, Cap After: 111717
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 12806
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 108660
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9399
+worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 131914
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 32493
+worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 90@1100 on 2025-02-12, Cap After: 859
+worker.js:11523 [Worker LONG] Stage Sell Executed: 90@1060 on 2025-02-14, Profit: -4163, Cap After: 95837
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@908 on 2025-04-30, Cap After: 361
+worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 3415, Cap After: 99251
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 94@1045 on 2025-06-10, Cap After: 881
+worker.js:11523 [Worker LONG] Stage Sell Executed: 94@1135 on 2025-08-22, Profit: 7848, Cap After: 107099
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-09-02, Cap After: 7197
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1465 on 2025-11-11, Profit: 25530, Cap After: 132630
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32783
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 88@1125 on 2025-01-06, Cap After: 859
+worker.js:11523 [Worker LONG] Stage Sell Executed: 88@1060 on 2025-02-14, Profit: -6274, Cap After: 93726
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@888 on 2025-04-25, Cap After: 353
+worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 5518, Cap After: 99244
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@998 on 2025-06-05, Cap After: 301
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12925, Cap After: 112169
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 13258
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 109112
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9851
+worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 132366
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32519
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 100@998 on 2025-06-05, Cap After: 4296
+worker.js:11523 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13056, Cap After: 117294
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18383
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114237
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14495
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135552
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 36130
+worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1450 on 2025-12-03, Cap After: 34542
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 109@908 on 2025-04-30, Cap After: 887
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 109@946 on 2025-06-02, Profit: 3545, Cap After: 103545
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 100@990 on 2025-06-04, Cap After: 4404
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13857, Cap After: 117401
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18491
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114345
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14603
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135660
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 66@1495 on 2025-12-08, Cap After: 36849
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 66@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1430 on 2025-12-02, Cap After: 34472
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138027
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38180
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1175 on 2025-08-26, Profit: 16173, Cap After: 120850
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20948
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 120266
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20524
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-12, Profit: 22141, Cap After: 142407
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 42560
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1150 on 2025-08-21, Profit: 13709, Cap After: 117948
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 18045
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 117792
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 18050
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1460 on 2025-11-07, Profit: 20902, Cap After: 138694
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38847
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116907
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17005
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 116324
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16582
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137639
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37792
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 116314
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16572
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138455
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38608
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@967 on 2025-05-29, Profit: 6538, Cap After: 106538
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 6901
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1125 on 2025-08-06, Profit: 11245, Cap After: 117783
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17881
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 117200
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 17458
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 139341
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 39494
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
 backtest.js:5126 [Main] Received message from worker: result {stockNo: '2330', initialCapital: 100000, finalValue: 139021.60599999997, totalProfit: 39021.60599999997, returnRate: 39.02160599999997, …}
-backtest.js:5266 [Main] Data cached/merged for TWSE|2330|RAW|NOSPLIT|2024-07-11|2024-12-09|LB90.
+backtest.js:5266 [Main] Data cached/merged for TWSE|2330|RAW|NOSPLIT|2024-07-12|2024-12-10|LB90.
 backtest.js:5384 [Main] Dataset diagnostics 2330
-backtest.js:7262 [Main] Executing latest version of handleBacktestResult (v2).
-backtest.js:7357 [Main] displayBacktestResult called.
-backtest.js:8197 [Main] displayBacktestResult finished.
-backtest.js:8262 [Main] displayTradeResults called
+backtest.js:7279 [Main] Executing latest version of handleBacktestResult (v2).
+backtest.js:7374 [Main] displayBacktestResult called.
+backtest.js:8214 [Main] displayBacktestResult finished.
+backtest.js:8279 [Main] displayTradeResults called
 main.js:5759 [Main] getSuggestion called
-worker.js:15407 [Worker] Received getSuggestion request.
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1110 on 2025-02-11, Cap After: 1069
-worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5008, Cap After: 94992
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@902 on 2025-04-29, Cap After: 147
-worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 4046, Cap After: 99037
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 98@1005 on 2025-06-09, Cap After: 407
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 12107, Cap After: 111145
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 85@1165 on 2025-09-01, Cap After: 11979
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 85@1160 on 2025-09-02, Profit: -1002, Cap After: 110142
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 10400
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 131457
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 31610
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-17, Cap After: 178
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 98@995 on 2025-06-06, Cap After: 979
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 13089, Cap After: 111717
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 12806
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 108660
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9399
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 131914
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 32493
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 90@1100 on 2025-02-12, Cap After: 859
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 90@1060 on 2025-02-14, Profit: -4163, Cap After: 95837
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@908 on 2025-04-30, Cap After: 361
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 3415, Cap After: 99251
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 94@1045 on 2025-06-10, Cap After: 881
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 94@1135 on 2025-08-22, Profit: 7848, Cap After: 107099
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-09-02, Cap After: 7197
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1465 on 2025-11-11, Profit: 25530, Cap After: 132630
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32783
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 88@1125 on 2025-01-06, Cap After: 859
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 88@1060 on 2025-02-14, Profit: -6274, Cap After: 93726
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 105@888 on 2025-04-25, Cap After: 353
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 5518, Cap After: 99244
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@998 on 2025-06-05, Cap After: 301
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12925, Cap After: 112169
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 13258
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 109112
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9851
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 132366
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32519
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 100@998 on 2025-06-05, Cap After: 4296
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13056, Cap After: 117294
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18383
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114237
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14495
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135552
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 36130
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
-worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
-worker.js:11496 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
-worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 68@1450 on 2025-12-03, Cap After: 34542
-worker.js:12859 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 109@908 on 2025-04-30, Cap After: 887
-worker.js:11496 [Worker LONG] Stage Sell Executed: 109@946 on 2025-06-02, Profit: 3545, Cap After: 103545
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 100@990 on 2025-06-04, Cap After: 4404
-worker.js:11496 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13857, Cap After: 117401
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18491
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114345
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14603
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135660
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 66@1495 on 2025-12-08, Cap After: 36849
-worker.js:12859 [Worker LONG] Final Sell Executed: 66@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
-worker.js:11496 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
-worker.js:11496 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
-worker.js:11496 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
-worker.js:11496 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1430 on 2025-12-02, Cap After: 34472
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138027
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38180
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1175 on 2025-08-26, Profit: 16173, Cap After: 120850
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20948
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 120266
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20524
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-12, Profit: 22141, Cap After: 142407
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 42560
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1150 on 2025-08-21, Profit: 13709, Cap After: 117948
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 18045
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 117792
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 18050
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1460 on 2025-11-07, Profit: 20902, Cap After: 138694
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38847
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116907
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17005
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 116324
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16582
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137639
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37792
-js/worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-js/worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-js/worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-js/worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-js/worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-js/worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-js/worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-js/worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 116314
-js/worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16572
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138455
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38608
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@967 on 2025-05-29, Profit: 6538, Cap After: 106538
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 6901
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1125 on 2025-08-06, Profit: 11245, Cap After: 117783
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17881
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 117200
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 17458
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 139341
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 39494
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
-worker.js:9879 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-05'107010801070107541293199'2024-12-06'1075108010601065320902100'2024-12-09'1070107510651075302553101'2024-12-10'1070107510601065323594102'2024-12-11'1045106010451045269495103'2024-12-12'106010651055106026574Array(6)
-worker.js:10363 [Worker] Starting simulation loop from index 100 to 344
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
-worker.js:11496 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
-worker.js:11496 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
-worker.js:11496 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
-worker.js:11496 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
-worker.js:10479 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
-worker.js:12859 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
-worker.js:13034 [Worker] Strategy date range: 2024-12-09 to 2025-12-09 (startIdx: 100, lastIdx: 344)
-worker.js:13037 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13111 [Worker] B&H date range: 2024-12-09 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 344)
-worker.js:13114 [Worker] Annualization Years (B&H): 0.9993 (from 2024-12-09 to 2025-12-09)
-worker.js:13488 [Worker] Runtime dataset diagnostics for 2330
+worker.js:15434 [Worker] Received getSuggestion request.
+worker.js:6816 [Worker IDB] 快取命中後檢查補抓: lastDate=2025-12-09, endDate=2025-12-10, shouldPatch=false, reason=before-2pm-data-not-updated-yet
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1110 on 2025-02-11, Cap After: 1069
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5008, Cap After: 94992
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@902 on 2025-04-29, Cap After: 147
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 4046, Cap After: 99037
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 98@1005 on 2025-06-09, Cap After: 407
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 12107, Cap After: 111145
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 85@1165 on 2025-09-01, Cap After: 11979
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 85@1160 on 2025-09-02, Profit: -1002, Cap After: 110142
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 10400
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 131457
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 31610
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-17, Cap After: 178
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 98@995 on 2025-06-06, Cap After: 979
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 98@1135 on 2025-08-22, Profit: 13089, Cap After: 111717
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 12806
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 108660
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9399
+worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 131914
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 32493
+worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 90@1100 on 2025-02-12, Cap After: 859
+worker.js:11523 [Worker LONG] Stage Sell Executed: 90@1060 on 2025-02-14, Profit: -4163, Cap After: 95837
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@908 on 2025-04-30, Cap After: 361
+worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 3415, Cap After: 99251
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 94@1045 on 2025-06-10, Cap After: 881
+worker.js:11523 [Worker LONG] Stage Sell Executed: 94@1135 on 2025-08-22, Profit: 7848, Cap After: 107099
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-09-02, Cap After: 7197
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1465 on 2025-11-11, Profit: 25530, Cap After: 132630
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32783
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 88@1125 on 2025-01-06, Cap After: 859
+worker.js:11523 [Worker LONG] Stage Sell Executed: 88@1060 on 2025-02-14, Profit: -6274, Cap After: 93726
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 105@888 on 2025-04-25, Cap After: 353
+worker.js:11523 [Worker LONG] Stage Sell Executed: 105@946 on 2025-06-02, Profit: 5518, Cap After: 99244
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@998 on 2025-06-05, Cap After: 301
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12925, Cap After: 112169
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 13258
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 109112
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 9851
+worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 132366
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 32519
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 100@998 on 2025-06-05, Cap After: 4296
+worker.js:11523 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13056, Cap After: 117294
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18383
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114237
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14495
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135552
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1460 on 2025-12-05, Cap After: 36130
+worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
+worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
+worker.js:11523 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
+worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 68@1450 on 2025-12-03, Cap After: 34542
+worker.js:12886 [Worker LONG] Final Sell Executed: 68@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 109@908 on 2025-04-30, Cap After: 887
+worker.js:11523 [Worker LONG] Stage Sell Executed: 109@946 on 2025-06-02, Profit: 3545, Cap After: 103545
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 100@990 on 2025-06-04, Cap After: 4404
+worker.js:11523 [Worker LONG] Stage Sell Executed: 100@1135 on 2025-08-22, Profit: 13857, Cap After: 117401
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1190 on 2025-08-27, Cap After: 18491
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1160 on 2025-09-02, Profit: -3057, Cap After: 114345
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 14603
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 135660
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 66@1495 on 2025-12-08, Cap After: 36849
+worker.js:12886 [Worker LONG] Final Sell Executed: 66@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 89@1120 on 2025-01-20, Cap After: 178
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 89@1060 on 2025-02-14, Profit: -5899, Cap After: 94101
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 104@897 on 2025-04-28, Cap After: 680
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 104@946 on 2025-06-02, Profit: 4528, Cap After: 98628
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 97@1005 on 2025-06-09, Cap After: 1004
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 97@1135 on 2025-08-22, Profit: 11984, Cap After: 110612
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-29, Cap After: 10710
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 110029
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 84@1180 on 2025-09-08, Cap After: 10767
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 84@1465 on 2025-11-11, Profit: 23254, Cap After: 133283
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1430 on 2025-12-02, Cap After: 34472
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138027
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38180
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1175 on 2025-08-26, Profit: 16173, Cap After: 120850
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20948
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 120266
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20524
+js/worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-12, Profit: 22141, Cap After: 142407
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 42560
+js/worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+js/worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+js/worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+js/worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+js/worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+js/worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+js/worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+js/worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+js/worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1150 on 2025-08-21, Profit: 13709, Cap After: 117948
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 18045
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 117792
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 18050
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1460 on 2025-11-07, Profit: 20902, Cap After: 138694
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38847
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116907
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17005
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 116324
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16582
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137639
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37792
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1165 on 2025-09-01, Profit: -155, Cap After: 116314
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16572
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 138455
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 38608
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@950 on 2025-06-03, Profit: 4676, Cap After: 104676
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 5039
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1170 on 2025-08-25, Profit: 15681, Cap After: 120357
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 20455
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-03, Profit: -584, Cap After: 119773
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 20031
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 141088
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 41241
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@967 on 2025-05-29, Profit: 6538, Cap After: 106538
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 6901
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1125 on 2025-08-06, Profit: 11245, Cap After: 117783
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 17881
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 117200
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 17458
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1475 on 2025-11-10, Profit: 22141, Cap After: 139341
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 39494
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
+worker.js:9900 (index)indexdateopenhighlowclosevolume(index)indexdateopenhighlowclosevolume098'2024-12-06'107510801060106532090199'2024-12-09'1070107510651075302552100'2024-12-10'1070107510601065323593101'2024-12-11'1045106010451045269494102'2024-12-12'1060106510551060265745103'2024-12-13'106010701055106524330Array(6)
+worker.js:10384 [Worker] Starting simulation loop from index 100 to 343
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 110@902 on 2025-04-29, Cap After: 639
+worker.js:11523 [Worker LONG] Stage Sell Executed: 110@946 on 2025-06-02, Profit: 4238, Cap After: 104238
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 99@1005 on 2025-06-09, Cap After: 4601
+worker.js:11523 [Worker LONG] Stage Sell Executed: 99@1135 on 2025-08-22, Profit: 12231, Cap After: 116469
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 86@1160 on 2025-08-28, Cap After: 16567
+worker.js:11523 [Worker LONG] Stage Sell Executed: 86@1160 on 2025-09-02, Profit: -584, Cap After: 115886
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 83@1200 on 2025-09-09, Cap After: 16144
+worker.js:11523 [Worker LONG] Stage Sell Executed: 83@1465 on 2025-11-11, Profit: 21315, Cap After: 137201
+worker.js:10500 [Worker LONG] Stage 1/1 Buy Executed: 69@1445 on 2025-12-04, Cap After: 37353
+worker.js:12886 [Worker LONG] Final Sell Executed: 69@1480 on 2025-12-09
+worker.js:13061 [Worker] Strategy date range: 2024-12-10 to 2025-12-10 (startIdx: 100, lastIdx: 343)
+worker.js:13064 [Worker] Annualization Years (Strategy): 0.9993 (from 2024-12-10 to 2025-12-10)
+worker.js:13138 [Worker] B&H date range: 2024-12-10 to 2025-12-09 (firstValidPriceIdxBH: 100, lastValidPriceIdxBH: 343)
+worker.js:13141 [Worker] Annualization Years (B&H): 0.9966 (from 2024-12-10 to 2025-12-09)
+worker.js:13515 [Worker] Runtime dataset diagnostics for 2330
 backtest.js:5126 [Main] Received message from worker: suggestionResult {status: 'ok', action: 'hold_long', label: '繼續持有多單', tone: 'bullish', latestDate: '2025-12-09', …}

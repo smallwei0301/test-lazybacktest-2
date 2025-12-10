@@ -6828,18 +6828,28 @@ function buildPriceInspectorTableModel(context = {}) {
             ];
 
             // 快取來源關鍵字（按優先級排序：最具體的在前）
-            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 識別新格式來源標籤
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 根據架構文檔更新快取標籤識別
             const cachePatterns = [
+                // 根據資料管線功能分類
                 { pattern: /備援補齊/i, label: '備援補齊' },
                 { pattern: /當月補抓/i, label: '當月補抓' },
-                { pattern: /年度Blob快取/i, label: '年度Blob快取' },
-                { pattern: /月度快取→Blob/i, label: '月度快取(Blob)' },
-                { pattern: /月度快取→記憶體/i, label: '月度快取(記憶體)' },
+                // L4: Blob Year Cache (stock_year_cache_store)
+                { pattern: /年度Blob快取/i, label: 'Blob年度快取' },
+                // L5: Blob Month Cache (twse_cache_store)
+                { pattern: /Blob月度快取/i, label: 'Blob月度快取' },
+                // L1: Memory Cache (Worker 變數)
+                { pattern: /Worker記憶體快取/i, label: 'Worker記憶體快取' },
+                // L2: IndexedDB Year Superset
+                { pattern: /Superset/i, label: 'IDB年度快取' },
+                // Patch: LB-IDB-PRICESOURCE-FIX-20251210A — IDB 命中時的快取標籤
+                { pattern: /IDB快取/i, label: 'IDB快取' },
+                { pattern: /IndexedDB|IDB/i, label: 'IndexedDB' },
+                // 舊格式相容
+                { pattern: /月度快取→Blob/i, label: 'Blob月度快取' },
+                { pattern: /月度快取→記憶體/i, label: 'Worker記憶體快取' },
                 { pattern: /月度快取/i, label: '月度快取' },
                 { pattern: /Fallback/i, label: '備援' },
                 { pattern: /Patch/i, label: '補抓' },
-                { pattern: /Superset/i, label: 'Superset' },
-                { pattern: /IndexedDB|IDB/i, label: 'IndexedDB' },
                 { pattern: /Blob/i, label: 'Blob' },
                 { pattern: /Worker.*快取|快取.*Worker/i, label: 'Worker快取' },
                 { pattern: /Memory|記憶體/i, label: '記憶體' },
