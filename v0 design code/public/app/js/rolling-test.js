@@ -956,10 +956,10 @@
         explanation.style.color = 'var(--muted-foreground)';
         explanation.innerHTML = `
             <p><strong style="color: var(--foreground);">WFE (Walk-Forward Efficiency) 前向效率</strong>：衡量策略在「樣本外(未知)」表現與「樣本內(已知)」表現的一致性。</p>
-            <p><strong>計算公式：</strong>WFE = (樣本外年化報酬 ÷ 樣本內年化報酬) × 100%</p>
+            <p><strong>計算公式：</strong>WFE = (測試期間年化報酬 ÷ 訓練期間年化報酬) × 100%</p>
             <ul class="list-disc pl-4 space-y-0.5 mt-1">
-                <li><strong>≥ 100%</strong>：樣本外表現優於或等於樣本內，策略極為穩健。</li>
-                <li><strong>67% ~ 99%</strong>：樣本外表現略遜於樣本內，屬正常衰退範圍 (Pardo, 2014 標準)。</li>
+                <li><strong>≥ 100%</strong>：測試期間表現優於或等於訓練期間，策略極為穩健。</li>
+                <li><strong>67% ~ 99%</strong>：測試期間表現略遜於訓練期間，屬正常衰退範圍 (Pardo, 2014 標準)。</li>
                 <li><strong>&lt; 67%</strong>：策略可能存在過度擬合 (Overfitting) 風險，需重新檢視參數。</li>
             </ul>
             <p class="mt-2"><strong>視窗比說明：</strong>指「達到特定 WFE 門檻的視窗數量」佔「總視窗數」的百分比。高視窗比代表策略在不同時期的穩定性高。</p>

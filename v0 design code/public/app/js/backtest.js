@@ -8558,7 +8558,7 @@ function renderChart(result) {
             data: [],
             borderColor: '#a855f7',
             backgroundColor: '#a855f7',
-            borderWidth: 4,
+            borderWidth: 2, // LB-UI-UX-FIX-20251210: 縮小圖例大小 50%
             pointRadius: 0,
             fill: false,
             yAxisID: 'y',
@@ -8569,7 +8569,7 @@ function renderChart(result) {
             data: [],
             borderColor: '#2563eb',
             backgroundColor: '#2563eb',
-            borderWidth: 4,
+            borderWidth: 2, // LB-UI-UX-FIX-20251210: 縮小圖例大小 50%
             pointRadius: 0,
             fill: false,
             yAxisID: 'y',
