@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyBacktest CDN 架構與資料流向圖</title>
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <!-- Mermaid -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --accent-dim: rgba(88, 166, 255, 0.15);
+            --border: #30363d;
+            --success: #3fb950;
+            --warning: #d29922;
+            --danger: #f85149;
+            --code-bg: #161b22;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            margin-bottom: 3rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin: 0 0 1rem 0;
+            background: linear-gradient(90deg, #58a6ff, #a371f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .meta {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-secondary);
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.75rem;
+            margin-top: 0;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        h2::before {
+            content: '#';
+            color: var(--accent);
+        }
+
+        h3 {
+            font-size: 1.2rem;
+            color: var(--text-primary);
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Mermaid Diagrams */
+        .mermaid {
+            background: var(--bg-primary);
+            padding: 1.5rem;
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            margin: 1.5rem 0;
+            border: 1px solid var(--border);
+        }
+
+        /* Tables */
+        .table-wrapper {
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background-color: var(--bg-tertiary);
+        }
+
+        /* Code Blocks */
+        pre {
+            background-color: var(--bg-primary);
+            border-radius: 6px;
+            padding: 1rem;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--accent-dim);
+            color: var(--accent);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            font-size: 1em;
+        }
+
+        /* Lists */
+        ul,
+        ol {
+            padding-left: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        strong {
+            color: var(--text-primary);
+        }
+
+        /* Status colors for table cells if needed */
+        .status-ok {
+            color: var(--success);
+        }
+
+        .status-warn {
+            color: var(--warning);
+        }
+
+        .status-err {
+            color: var(--danger);
+        }
+
+        footer {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>LazyBacktest CDN 架構與資料流向圖</h1>
+            <div class="meta">
+                版本: LB-CDN-ARCH-20251209A | 目的: 說明台股與美股的 CDN 功能架構與資料流向
+            </div>
+        </header>
+
+        <section>
+            <h2>一、系統架構總覽</h2>
+            <div class="mermaid">
+                flowchart TB
+                subgraph Client["🖥️ 客戶端 (瀏覽器)"]
+                UI["回測介面"]
+                Worker["Web Worker"]
+                IDB["IndexedDB<br>(Year Superset)"]
+                Memory["記憶體快取"]
+                end
+
+                subgraph CDN["🌐 Netlify CDN 層"]
+                CDNL["CDN Edge Cache<br>s-maxage=3600~31536000"]
+                end
+
+                subgraph Functions["⚡ Netlify Functions (Serverless)"]
+                StockRange["stock-range.js<br>(年度快取彙整)"]
+                TWSEProxy["twse-proxy.js<br>(台股 TWSE/TPEX)"]
+                USProxy["us-proxy.js<br>(美股)"]
+                TPEXProxy["tpex-proxy.js<br>(上櫃)"]
+                end
+
+                subgraph Blob["💾 Netlify Blobs Storage"]
+                YearCache["Year Cache Store<br>(stock_year_cache_store)"]
+                TWSECache["TWSE Cache Store<br>(twse_cache_store)"]
+                TPEXCache["TPEX Cache Store<br>(tpex_cache_store)"]
+                USCache["US Price Store<br>(us_price_store)"]
+                end
+
+                subgraph External["🌍 外部資料來源"]
+                TWSE["證交所 TWSE API"]
+                TPEX["櫃買中心 TPEX API"]
+                FinMind["FinMind API"]
+                Yahoo["Yahoo Finance API"]
+                end
+
+                UI --> Worker
+                Worker --> Memory
+                Worker --> IDB
+                Worker --> CDNL
+                CDNL --> StockRange
+                CDNL --> TWSEProxy
+                CDNL --> USProxy
+                CDNL --> TPEXProxy
+
+                StockRange --> YearCache
+                TWSEProxy --> TWSECache
+                TPEXProxy --> TPEXCache
+                USProxy --> USCache
+
+                TWSEProxy --> TWSE
+                TWSEProxy --> FinMind
+                TWSEProxy --> Yahoo
+                TPEXProxy --> Yahoo
+                TPEXProxy --> FinMind
+                USProxy --> FinMind
+                USProxy --> Yahoo
+            </div>
+        </section>
+
+        <section>
+            <h2>二、台股資料流向圖</h2>
+
+            <h3>2.1 台股完整流程圖</h3>
+            <div class="mermaid">
+                flowchart TD
+                subgraph 請求階段
+                A["用戶發起回測請求<br>(股號、日期範圍)"]
+                B["Worker 計算查詢範圍"]
+                C{"IndexedDB<br>Year Superset<br>命中?"}
+                end
+
+                subgraph 本地快取層
+                D["使用本地快取資料"]
+                E["計算缺口範圍"]
+                end
+
+                subgraph CDN層["CDN 層"]
+                F["Worker 呼叫 stock-range.js"]
+                G{"Netlify CDN<br>Edge Cache<br>命中?"}
+                H["CDN 回傳快取<br>TTL: 歷史=1年, 當前=1小時"]
+                end
+
+                subgraph Blob層["Netlify Blob 層"]
+                I["stock-range 讀取<br>Year Cache Store"]
+                J{"Blob Year Cache<br>命中?"}
+                K["Blob 回傳年度資料"]
+                end
+
+                subgraph Proxy層["Proxy 層"]
+                L["呼叫 twse-proxy.js"]
+                M["讀取 TWSE Cache Store"]
+                N{"月度快取<br>命中?"}
+                O["TWSE 月度快取命中"]
+                end
+
+                subgraph 外部API["外部 API 層"]
+                P["呼叫證交所 TWSE API"]
+                Q{"TWSE 成功?"}
+                R["FinMind 備援"]
+                S["Yahoo Finance 備援"]
+                end
+
+                subgraph 回存階段
+                T["寫入月度快取"]
+                U["觸發 Year Cache 重建"]
+                V["回存 IndexedDB"]
+                W["回傳給 Worker"]
+                end
+
+                A --> B --> C
+                C -->|是| D
+                C -->|否| E --> F --> G
+                G -->|是| H --> W
+                G -->|否| I --> J
+                J -->|是| K --> W
+                J -->|否| L --> M --> N
+                N -->|是| O --> W
+                N -->|否| P --> Q
+                Q -->|是| T --> U --> W
+                Q -->|否| R --> T
+                R -.->|失敗| S --> T
+                W --> V
+            </div>
+
+            <h3>2.2 台股資料來源優先級</h3>
+            <div class="mermaid">
+                flowchart LR
+                subgraph Primary["主要來源"]
+                A["1️⃣ TWSE 證交所<br>(上市股票)"]
+                end
+
+                subgraph Fallback["備援來源"]
+                B["2️⃣ FinMind API<br>(TWSE 失敗時)"]
+                C["3️⃣ Yahoo Finance<br>(僅限還原價格)"]
+                end
+
+                A -->|失敗| B
+                B -->|失敗| C
+            </div>
+
+            <h3>2.3 台股快取層級與 TTL</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>快取層級</th>
+                            <th>儲存位置</th>
+                            <th>TTL (存活時間)</th>
+                            <th>說明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>L1: 記憶體快取</strong></td>
+                            <td>Worker 變數</td>
+                            <td>單次回測</td>
+                            <td>最快存取，單次請求內有效</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L2: IndexedDB</strong></td>
+                            <td>瀏覽器本地</td>
+                            <td>永久 (帶版本)</td>
+                            <td>Year Superset，跨回測持久化</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L3: CDN Edge</strong></td>
+                            <td>Netlify CDN</td>
+                            <td>歷史=1年, 當前=1hr</td>
+                            <td>CDN 邊緣快取</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L4: Blob Year Cache</strong></td>
+                            <td>Netlify Blobs</td>
+                            <td>2-3 天</td>
+                            <td>年度彙總資料</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L5: Blob Month Cache</strong></td>
+                            <td>Netlify Blobs</td>
+                            <td>24 小時</td>
+                            <td>月度原始資料</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>三、美股資料流向圖</h2>
+
+            <h3>3.1 美股完整流程圖</h3>
+            <div class="mermaid">
+                flowchart TD
+                subgraph 請求階段["請求階段"]
+                A["用戶發起美股回測<br>(如 AAPL、MSFT)"]
+                B["Worker 識別美股代號"]
+                C["呼叫 us-proxy.js"]
+                end
+
+                subgraph CDN層["CDN 層"]
+                D{"Netlify CDN<br>Edge Cache<br>命中?"}
+                E["CDN 回傳快取"]
+                end
+
+                subgraph Cache層["Netlify Blob 層"]
+                F["讀取 us_price_store"]
+                G{"Memory Cache<br>命中?"}
+                H["記憶體快取回傳"]
+                I{"Blob Cache<br>命中?"}
+                J["Blob 快取回傳"]
+                end
+
+                subgraph API層["外部 API 層"]
+                K["呼叫 FinMind<br>USStockPrice"]
+                L{"FinMind 成功且<br>有資料?"}
+                M["回傳 FinMind 資料"]
+                N["呼叫 Yahoo Finance<br>備援"]
+                O{"Yahoo 成功?"}
+                P["回傳 Yahoo 資料"]
+                Q["雙來源皆失敗<br>回傳錯誤"]
+                end
+
+                subgraph 回存階段["回存階段"]
+                R["寫入 Memory + Blob"]
+                S["設定 CDN Header<br>s-maxage"]
+                end
+
+                A --> B --> C --> D
+                D -->|是| E
+                D -->|否| F --> G
+                G -->|是| H
+                G -->|否| I
+                I -->|是| J
+                I -->|否| K --> L
+                L -->|是| M --> R --> S
+                L -->|否| N --> O
+                O -->|是| P --> R
+                O -->|否| Q
+            </div>
+
+            <h3>3.2 美股資料來源優先級</h3>
+            <div class="mermaid">
+                flowchart LR
+                subgraph Primary["主要來源"]
+                A["1️⃣ FinMind API<br>(USStockPrice)"]
+                end
+
+                subgraph Fallback["備援來源"]
+                B["2️⃣ Yahoo Finance<br>(FinMind 無資料或失敗)"]
+                end
+
+                A -->|失敗或無資料| B
+            </div>
+
+            <h3>3.3 美股快取層級與 TTL</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>快取層級</th>
+                            <th>儲存位置</th>
+                            <th>TTL (存活時間)</th>
+                            <th>說明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>L1: 記憶體快取</strong></td>
+                            <td>Function 變數</td>
+                            <td>12 小時</td>
+                            <td>Netlify Function 記憶體</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L2: CDN Edge</strong></td>
+                            <td>Netlify CDN</td>
+                            <td>歷史=1年, 當前=1hr</td>
+                            <td>CDN 邊緣快取</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L3: Blob Cache</strong></td>
+                            <td>us_price_store</td>
+                            <td>12 小時</td>
+                            <td>價格資料快取</td>
+                        </tr>
+                        <tr>
+                            <td><strong>L4: Info Cache</strong></td>
+                            <td>us_info_store</td>
+                            <td>7 天</td>
+                            <td>股票基本資訊快取</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>四、CDN 快取策略詳解</h2>
+
+            <h3>4.1 動態快取策略</h3>
+            <div class="mermaid">
+                flowchart TD
+                A["判斷請求日期範圍"]
+                B{"結束日期 小於 今日?"}
+                C["歷史資料模式"]
+                D["當前資料模式"]
+                E["Cache-Control:<br>max-age=31536000<br>immutable"]
+                F["Cache-Control:<br>max-age=3600"]
+                G["Netlify-CDN-Cache-Control:<br>s-maxage=31536000"]
+                H["Netlify-CDN-Cache-Control:<br>s-maxage=3600"]
+
+                A --> B
+                B -->|是| C --> E --> G
+                B -->|否| D --> F --> H
+            </div>
+
+            <h3>4.2 CDN Header 設定</h3>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>資料類型</th>
+                            <th>Cache-Control</th>
+                            <th>CDN s-maxage</th>
+                            <th>說明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>歷史資料</strong></td>
+                            <td><code>public, max-age=31536000, immutable</code></td>
+                            <td>1 年 (31536000s)</td>
+                            <td>歷史不變，極長快取</td>
+                        </tr>
+                        <tr>
+                            <td><strong>當前資料</strong></td>
+                            <td><code>public, max-age=3600</code></td>
+                            <td>1 小時 (3600s)</td>
+                            <td>需要定期更新</td>
+                        </tr>
+                        <tr>
+                            <td><strong>股票資訊</strong></td>
+                            <td><code>public, max-age=604800</code></td>
+                            <td>1 週 (604800s)</td>
+                            <td>基本資料變動少</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>五、台股 vs 美股 對比</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>特徵</th>
+                            <th>台股 (TWSE/TPEX)</th>
+                            <th>美股 (US)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>主要來源</strong></td>
+                            <td>TWSE 證交所 API</td>
+                            <td>FinMind USStockPrice</td>
+                        </tr>
+                        <tr>
+                            <td><strong>備援來源 1</strong></td>
+                            <td>FinMind</td>
+                            <td>Yahoo Finance</td>
+                        </tr>
+                        <tr>
+                            <td><strong>備援來源 2</strong></td>
+                            <td>Yahoo Finance (還原價)</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Proxy 函式</strong></td>
+                            <td><code>twse-proxy.js</code>, <code>tpex-proxy.js</code></td>
+                            <td><code>us-proxy.js</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>年度快取</strong></td>
+                            <td><span class="status-ok">✅</span> <code>stock_year_cache_store</code></td>
+                            <td><span class="status-err">❌</span> 無年度彙總</td>
+                        </tr>
+                        <tr>
+                            <td><strong>月度快取</strong></td>
+                            <td><span class="status-ok">✅</span> <code>twse_cache_store</code></td>
+                            <td><span class="status-err">❌</span> 無月度分割</td>
+                        </tr>
+                        <tr>
+                            <td><strong>範圍快取</strong></td>
+                            <td><span class="status-err">❌</span></td>
+                            <td><span class="status-ok">✅</span> <code>us_price_store</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>CDN TTL (歷史)</strong></td>
+                            <td>1 年</td>
+                            <td>1 年</td>
+                        </tr>
+                        <tr>
+                            <td><strong>CDN TTL (當前)</strong></td>
+                            <td>1 小時</td>
+                            <td>1 小時</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Blob TTL</strong></td>
+                            <td>24-72 小時</td>
+                            <td>12 小時</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>六、關鍵函式路徑</h2>
+
+            <h3>6.1 台股資料獲取路徑</h3>
+            <pre><code>Worker (fetchStockData)
+    ↓
+tryFetchRangeFromBlob()        → stock-range.js → Year Cache
+    ↓ (缺口或失敗)
+fetchMissingRanges()           → twse-proxy.js → Month Cache → TWSE/FinMind/Yahoo
+    ↓
+recordYearSupersetSlices()     → 寫入 IndexedDB</code></pre>
+
+            <h3>6.2 美股資料獲取路徑</h3>
+            <pre><code>Worker (fetchUSStockData)
+    ↓
+us-proxy.js
+    ↓
+readCache()                    → Memory/Blob Cache
+    ↓ (未命中)
+fetchUSPriceRange()            → FinMind → Yahoo (備援)
+    ↓
+writeCache()                   → Memory + Blob</code></pre>
+        </section>
+
+        <section>
+            <h2>七、快取失效與更新機制</h2>
+            <div class="mermaid">
+                flowchart TD
+                A["月快取寫入成功"]
+                B["triggerYearCacheRefresh()"]
+                C["非同步呼叫 stock-range.js"]
+                D["stock-range 重讀月快取"]
+                E["更新 Year Cache Blob"]
+                F["下次請求命中 Year Cache"]
+
+                A --> B --> C --> D --> E --> F
+            </div>
+
+            <h3>快取失效觸發條件</h3>
+            <ul>
+                <li><strong>TTL 過期</strong>: 超過設定的存活時間自動失效</li>
+                <li><strong>月快取更新</strong>: 月度資料更新後觸發年度快取重建</li>
+                <li><strong>手動 cacheBust</strong>: URL 參數可強制繞過快取</li>
+                <li><strong>當日資料策略</strong>: 台灣時間 14:00 後檢查當日資料</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>八、設計優勢</h2>
+            <ul>
+                <li><strong>多層快取極致優化</strong>
+                    <ul>
+                        <li>瀏覽器本地 → CDN 邊緣 → Blob 儲存 → 外部 API</li>
+                        <li>歷史資料幾乎零流量消耗</li>
+                    </ul>
+                </li>
+                <li><strong>智能備援機制</strong>
+                    <ul>
+                        <li>台股: TWSE → FinMind → Yahoo</li>
+                        <li>美股: FinMind → Yahoo</li>
+                        <li>任一來源失敗自動切換</li>
+                    </ul>
+                </li>
+                <li><strong>動態 TTL 策略</strong>
+                    <ul>
+                        <li>歷史資料設定 <code>immutable</code>，CDN 極長快取</li>
+                        <li>當前資料 1 小時更新，平衡新鮮度與流量</li>
+                    </ul>
+                </li>
+                <li><strong>Year Cache 聚合</strong>
+                    <ul>
+                        <li>將月度資料聚合為年度，減少 API 呼叫次數</li>
+                        <li>一次請求獲取整年資料</li>
+                    </ul>
+                </li>
+            </ul>
+        </section>
+
+        <footer>
+            <p>Generated by LazyBacktest AI • 2025</p>
+        </footer>
+    </div>
+
+    <script>
+        // Init Mermaid
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            securityLevel: 'loose',
+            fontFamily: 'Inter',
+        });
+    </script>
+</body>
+
+</html>

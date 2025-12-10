@@ -10782,8 +10782,14 @@ function runStrategy(data, params, options = {}) {
           // 計算營收與損益
           const revenue = executedShares * tradePrice * (1 - sellFee / 100);
           const consumption = consumeEntryForShares(executedShares);
-          const entryCostWithFee = consumption.costWithFee;
-          const entryCostWithoutFee = consumption.costWithoutFee;
+          const entryCostWithFee =
+            consumption && Number.isFinite(consumption.cost)
+              ? consumption.cost
+              : 0;
+          const entryCostWithoutFee =
+            consumption && Number.isFinite(consumption.costWithoutFee)
+              ? consumption.costWithoutFee
+              : 0;
           const stageAverageEntryPrice =
             executedShares > 0 ? entryCostWithoutFee / executedShares : 0;
           const profit = revenue - entryCostWithFee;
