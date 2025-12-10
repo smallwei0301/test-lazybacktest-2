@@ -4932,9 +4932,10 @@ async function fetchAdjustedPriceRange(
   };
 }
 
-function normalizeProxyRow(item, isTpex, startDateObj, endDateObj, options = {}) {
+function normalizeProxyRow(item, isTpex, startDateObj, endDateObj, options = {}, sourceLabel = null) {
   try {
     const adjusted = options.adjusted || false; // Patch: LB-INVALID-DATA-FALLBACK-20251202E
+    const rowSourceLabel = sourceLabel || null; // LB-RAW-PRICE-SOURCE-FIX-20251210A
     let dateStr = null;
     let open = null,
       high = null,
@@ -5083,6 +5084,7 @@ function normalizeProxyRow(item, isTpex, startDateObj, endDateObj, options = {})
       low: clean(low),
       close: clean(close),
       volume: Math.round(volNumber / 1000),
+      priceSource: rowSourceLabel, // LB-RAW-PRICE-SOURCE-FIX-20251210A
     };
   } catch (error) {
     return null;
@@ -5339,9 +5341,11 @@ async function fetchFallbackForInvalidDates({
       const endDateObj = new Date(endDate);
       const isTpex = marketKey === 'TPEX';
 
+      // LB-RAW-PRICE-SOURCE-FIX-20251210A: 傳入 sourceLabel 追蹤備援來源
+      const fallbackSourceLabel = isTpex ? 'TPEX (Fallback)' : 'TWSE (Fallback)';
       const validDatesSet = new Set();
       rows.forEach(row => {
-        const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, { adjusted });
+        const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, { adjusted }, fallbackSourceLabel);
         if (normalized && normalized.date && normalized.close > 0) {
           // Patch: LB-INVALID-DATA-FALLBACK-20251202E - 正規化日期
           normalized.date = normalizeISODate(normalized.date);
@@ -6070,9 +6074,12 @@ async function fetchCurrentMonthGapPatch({
         ? payload.data
         : [];
 
+    // LB-RAW-PRICE-SOURCE-FIX-20251210A: 取得來源標籤
+    const patchSourceLabel = payload?.dataSource || (isTpex ? 'TPEX (Patch)' : 'TWSE (Patch)');
+
     // Patch: LB-IDB-PATCH-AFTER-HIT-20251209A — 新增診斷日誌
     const rowDates = rows.map((row) => {
-      const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj);
+      const normalized = normalizeProxyRow(row, isTpex, startDateObj, endDateObj, {}, patchSourceLabel);
       return normalized?.date || null;
     }).filter(Boolean);
     console.log(`[Worker Patch Debug] Proxy 回傳 ${rows.length} 筆, 日期範圍: ${rowDates[0] || 'N/A'} ~ ${rowDates[rowDates.length - 1] || 'N/A'}, 篩選範圍: ${gapStartISO} ~ ${gapEndISO}`);
@@ -6083,6 +6090,8 @@ async function fetchCurrentMonthGapPatch({
         isTpex,
         startDateObj,
         endDateObj,
+        {},
+        patchSourceLabel // LB-RAW-PRICE-SOURCE-FIX-20251210A
       );
       if (
         normalized &&
@@ -6226,9 +6235,11 @@ async function tryFetchRangeFromBlob({
     return null;
   }
 
+  // LB-RAW-PRICE-SOURCE-FIX-20251210A: 傳入 Blob 來源標籤
+  const blobSourceLabel = marketKey === 'TPEX' ? 'TPEX (Blob)' : 'TWSE (Blob)';
   const normalizedRows = payload.aaData
     .map((row) =>
-      normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj),
+      normalizeProxyRow(row, marketKey === "TPEX", startDateObj, endDateObj, {}, blobSourceLabel),
     )
     .filter(Boolean);
   if (normalizedRows.length === 0) {
@@ -7639,6 +7650,9 @@ async function fetchStockData(
             : Array.isArray(payload?.data)
               ? payload.data
               : [];
+          // LB-RAW-PRICE-SOURCE-FIX-20251210A: 提前取得 sourceLabel
+          const sourceLabel =
+            payload?.dataSource || (isTpex ? "TPEX" : isUs ? "FinMind" : "TWSE");
           const normalized = [];
           rows.forEach((row) => {
             const normalizedRow = normalizeProxyRow(
@@ -7646,14 +7660,14 @@ async function fetchStockData(
               isTpex,
               startDateObj,
               endDateObj,
+              {},
+              sourceLabel // LB-RAW-PRICE-SOURCE-FIX-20251210A
             );
             if (normalizedRow) normalized.push(normalizedRow);
           });
           if (payload?.stockName) {
             monthStockName = payload.stockName;
           }
-          const sourceLabel =
-            payload?.dataSource || (isTpex ? "TPEX" : "TWSE");
           if (sourceLabel) {
             monthSourceFlags.add(sourceLabel);
             monthEntry.sources.add(sourceLabel);
@@ -7800,11 +7814,14 @@ async function fetchStockData(
       }
     }
     (res.rows || []).forEach((row) => {
+      // LB-RAW-PRICE-SOURCE-FIX-20251210A: 保留 row 的 priceSource
       const normalized = normalizeProxyRow(
         row,
         isTpex,
         startDateObj,
         endDateObj,
+        {},
+        row.priceSource || null
       );
       if (normalized) normalizedRows.push(normalized);
     });

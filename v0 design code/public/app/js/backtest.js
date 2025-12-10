@@ -6828,10 +6828,14 @@ function buildPriceInspectorTableModel(context = {}) {
             ];
 
             // 快取來源關鍵字（按優先級排序：最具體的在前）
+            // LB-RAW-PRICE-SOURCE-FIX-20251210A: 新增 Fallback, Patch, Worker 快取識別
             const cachePatterns = [
+                { pattern: /Fallback/i, label: '備援' },
+                { pattern: /Patch/i, label: '補抓' },
                 { pattern: /Superset/i, label: 'Superset' },
-                { pattern: /IndexedDB/i, label: 'IndexedDB' },
+                { pattern: /IndexedDB|IDB/i, label: 'IndexedDB' },
                 { pattern: /Blob/i, label: 'Blob' },
+                { pattern: /Worker.*快取|快取.*Worker/i, label: 'Worker快取' },
                 { pattern: /Memory|記憶體/i, label: '記憶體' },
                 { pattern: /Session/i, label: 'Session' },
                 { pattern: /Local/i, label: 'Local' },
