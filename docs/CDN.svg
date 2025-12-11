@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 650" style="background-color: #f9f9f9; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <style>
+      .lifeline { stroke: #888; stroke-width: 2; stroke-dasharray: 5,5; }
+      .actor-box { fill: #eef; stroke: #336; stroke-width: 2; }
+      .actor-text { font-size: 14px; font-weight: bold; text-anchor: middle; fill: #336; }
+      .message-arrow { stroke: #333; stroke-width: 2; marker-end: url(#arrowhead); }
+      .response-arrow { stroke: #555; stroke-width: 1.5; stroke-dasharray: 4,2; marker-end: url(#arrowhead); }
+      .note-box { fill: #fffde7; stroke: #d4c82c; stroke-width: 1; }
+      .note-text { font-size: 12px; fill: #555; }
+      .time-marker { font-size: 14px; font-weight: bold; fill: #b71c1c; }
+      .failure-zone { fill: rgba(255, 0, 0, 0.1); stroke: #ff0000; stroke-width: 2; stroke-dasharray: 8,4; }
+      .shield { fill: #ff4444; stroke: #b71c1c; stroke-width: 2; }
+      .sleep-icon { font-size: 24px; fill: #888; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+
+  <text x="400" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#333">系統失效場景：CDN 攔截導致的更新失敗</text>
+
+  <g transform="translate(0, 50)">
+    <rect x="50" y="0" width="100" height="40" rx="5" class="actor-box" />
+    <text x="100" y="25" class="actor-text">👤 用戶</text>
+    <line x1="100" y1="40" x2="100" y2="550" class="lifeline" />
+
+    <rect x="200" y="0" width="120" height="40" rx="5" class="actor-box" style="fill:#e6f7ff; stroke:#0050b3;" />
+    <text x="260" y="25" class="actor-text" style="fill:#0050b3;">🛡️ CDN (Edge)</text>
+    <line x1="260" y1="40" x2="260" y2="550" class="lifeline" />
+
+    <rect x="370" y="0" width="120" height="40" rx="5" class="actor-box" style="fill:#f6ffed; stroke:#389e0d;" />
+    <text x="430" y="25" class="actor-text" style="fill:#389e0d;">🤖 twse-proxy</text>
+    <line x1="430" y1="40" x2="430" y2="550" class="lifeline" />
+
+    <rect x="540" y="0" width="120" height="40" rx="5" class="actor-box" style="fill:#fff7e6; stroke:#d46b08;" />
+    <text x="600" y="25" class="actor-text" style="fill:#d46b08;">👨‍🍳 stock-range</text>
+    <line x1="600" y1="40" x2="600" y2="550" class="lifeline" />
+
+    <rect x="690" y="0" width="80" height="40" rx="5" class="actor-box" style="fill:#eee; stroke:#666;" />
+    <text x="730" y="25" class="actor-text" style="fill:#666;">💾 DB (Blob)</text>
+    <line x1="730" y1="40" x2="730" y2="550" class="lifeline" />
+  </g>
+
+  <g transform="translate(0, 110)">
+    <text x="30" y="0" class="time-marker">🕒 13:58 (準備)</text>
+    <rect x="255" y="10" width="10" height="60" fill="#b3e0ff" opacity="0.5"/>
+    <rect x="595" y="25" width="10" height="30" fill="#ffe7ba" opacity="0.5"/>
+
+    <line x1="100" y1="15" x2="255" y2="15" class="message-arrow" />
+    <text x="177" y="12" font-size="12" text-anchor="middle">請求 K 線圖</text>
+    
+    <line x1="265" y1="30" x2="595" y2="30" class="message-arrow" />
+    <text x="430" y="27" font-size="12" text-anchor="middle">請求穿透 (無快取)</text>
+    
+    <line x1="595" y1="60" x2="265" y2="60" class="response-arrow" />
+    <text x="430" y="57" font-size="12" text-anchor="middle">回傳舊資料 (並建立 5min 快取)</text>
+    
+    <rect x="270" y="70" width="130" height="25" rx="3" class="note-box" />
+    <text x="335" y="87" class="note-text" text-anchor="middle">✅ CDN 快取建立 (至 14:03)</text>
+  </g>
+
+  <g transform="translate(0, 230)">
+    <text x="30" y="0" class="time-marker" style="fill:#d32f2f;">🕒 14:05 (關鍵失敗時刻)</text>
+    <rect x="425" y="20" width="10" height="100" fill="#d9f7be" opacity="0.8"/>
+
+    <line x1="100" y1="25" x2="425" y2="25" class="message-arrow" />
+    <text x="262" y="22" font-size="12" text-anchor="middle">看盤請求 (觸發更新判定)</text>
+
+    <text x="480" y="50" font-size="12" fill="#389e0d">判定: >14:00, 發出觸發請求!</text>
+
+    <line x1="435" y1="70" x2="265" y2="70" class="message-arrow" style="stroke: #d32f2f; stroke-width: 3;" />
+    <text x="350" y="65" font-size="12" text-anchor="middle" font-weight="bold" fill="#d32f2f">GET /stock-range (無 cacheBust!)</text>
+
+    <path d="M 260 55 L 280 55 L 280 110 L 260 110 Z" class="shield" />
+    <text x="220" y="85" font-size="16" text-anchor="middle">🛡️ 攔截!</text>
+
+    <line x1="265" y1="100" x2="425" y2="100" class="response-arrow" />
+    <text x="350" y="95" font-size="12" text-anchor="middle" fill="#0050b3">回傳 CDN 快取 (200 OK)</text>
+    
+    <text x="490" y="115" font-size="12" fill="#389e0d">Proxy 收到 OK, 以為成功...</text>
+
+    <rect x="520" y="40" width="230" height="90" rx="5" class="failure-zone" />
+    <text x="665" y="70" text-anchor="middle" font-size="14" font-weight="bold" fill="#d32f2f">❌ 更新失敗區域 ❌</text>
+    
+    <text x="600" y="100" text-anchor="middle" class="sleep-icon">😴</text>
+    <text x="600" y="120" text-anchor="middle" font-size="12" fill="#666">Function 未啟動</text>
+    
+    <text x="730" y="100" text-anchor="middle" class="sleep-icon">💤</text>
+    <text x="730" y="120" text-anchor="middle" font-size="12" fill="#666">DB 未寫入</text>
+  </g>
+
+  <g transform="translate(0, 420)">
+    <text x="30" y="0" class="time-marker">🕒 14:10 (後果)</text>
+    <rect x="255" y="10" width="10" height="60" fill="#b3e0ff" opacity="0.5"/>
+    <rect x="595" y="25" width="10" height="30" fill="#ffe7ba" opacity="0.5"/>
+    <rect x="725" y="30" width="10" height="20" fill="#eee" opacity="0.5"/>
+
+    <line x1="100" y1="15" x2="255" y2="15" class="message-arrow" />
+    <text x="177" y="12" font-size="12" text-anchor="middle">用戶想看新 K 線圖</text>
+
+    <line x1="265" y1="30" x2="595" y2="30" class="message-arrow" />
+    <text x="430" y="27" font-size="12" text-anchor="middle">快取過期, 請求穿透</text>
+    
+    <line x1="605" y1="40" x2="725" y2="40" class="message-arrow" />
+    <text x="665" y="37" font-size="12" text-anchor="middle">讀取 DB</text>
+    
+    <line x1="725" y1="60" x2="100" y2="60" class="response-arrow" />
+    <text x="415" y="57" font-size="12" text-anchor="middle" font-weight="bold" fill="#d32f2f">最終回傳：昨天的舊資料 (缺少今日 K 線)</text>
+
+    <text x="100" y="85" font-size="20" text-anchor="middle">😱</text>
+  </g>
+</svg>

@@ -331,11 +331,14 @@ async function persistYearSlice(store, cacheKey, payload, telemetry) {
     }
 }
 
-async function fetchYearDataset({ store, stockNo, marketType, year, telemetry }) {
+async function fetchYearDataset({ store, stockNo, marketType, year, telemetry, forceRefresh = false }) {
     const yearKey = getYearCacheKey(marketType, stockNo, year);
     telemetry.yearKeys.push(yearKey);
     let cached = null;
-    if (store) {
+
+    // Patch: LB-STOCK-RANGE-FORCE-REFRESH-20251211A
+    // 只有非強制刷新時才讀取快取
+    if (store && !forceRefresh) {
         try {
             telemetry.readOps += 1;
             cached = await store.get(yearKey, { type: 'json' });
@@ -354,6 +357,8 @@ async function fetchYearDataset({ store, stockNo, marketType, year, telemetry })
                 console.warn('[Year Cache] Read failed', yearKey, error);
             }
         }
+    } else if (forceRefresh) {
+        console.log(`[Stock Range] ${yearKey} 強制更新模式：跳過 Blob 快取讀取`);
     }
 
     telemetry.cacheMisses += 1;
@@ -409,6 +414,13 @@ export default async (req) => {
         const endDateStr = params.get('endDate');
         const marketType = normalizeMarketType(params.get('marketType') || params.get('market'));
 
+        // Patch: LB-STOCK-RANGE-FORCE-REFRESH-20251211A
+        // 解析強制刷新參數：來自 twse-proxy 的 cacheBust 或明確的 forceRefresh
+        const isForceRefresh = params.has('cacheBust') || params.get('forceRefresh') === 'true';
+        if (isForceRefresh) {
+            console.log(`[Stock Range] 收到強制更新請求 (cacheBust/forceRefresh)，將忽略 Blob Year Cache。`);
+        }
+
         if (!stockNo || !startDateStr || !endDateStr) {
             return new Response(JSON.stringify({ error: 'Missing required parameters stockNo/startDate/endDate' }), { status: 400 });
         }
@@ -447,6 +459,7 @@ export default async (req) => {
                 marketType,
                 year,
                 telemetry,
+                forceRefresh: isForceRefresh,  // Patch: LB-STOCK-RANGE-FORCE-REFRESH-20251211A
             });
             if (result.stockName) resolvedStockName = result.stockName;
             if (Array.isArray(result.aaData)) {
