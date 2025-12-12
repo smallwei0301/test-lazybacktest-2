@@ -3397,11 +3397,42 @@ function rebuildCoverageFromData(entry) {
 }
 
 function getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted = false, split = false) {
+  let entry = null;
+
+  // 1. 嘗試從月度快取取得
   const marketCache = workerMonthlyCache.get(marketKey);
-  if (!marketCache) return null;
-  const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted, split));
-  if (!stockCache) return null;
-  const entry = stockCache.get(monthKey);
+  if (marketCache) {
+    const stockCache = marketCache.get(getMonthlyStockKey(stockNo, adjusted, split));
+    if (stockCache) {
+      entry = stockCache.get(monthKey);
+    }
+  }
+
+  // 2. 嘗試從年度 Superset 快取取得 (Fallback lookup)
+  // 僅在請求原始數據 (raw) 時嘗試，因為 Superset 儲存的是原始數據
+  if (!entry && adjusted === false && split === false) {
+    const year = monthKey.substring(0, 4);
+    const supersetEntry = getYearSupersetEntry(stockNo, year);
+
+    if (supersetEntry && supersetEntry.data && supersetEntry.data.length > 0) {
+      const targetMonthPrefix = monthKey.replace(/^(\d{4})(\d{2})$/, "$1-$2"); // YYYYMM -> YYYY-MM
+      // 假設數據已按日期排序
+      const monthSlice = supersetEntry.data.filter(row => row.date.startsWith(targetMonthPrefix));
+
+      if (monthSlice.length > 0) {
+        if (DEBUG_SUPERSET) {
+          console.log(`[Worker Cache] Monthly Cache Miss hit via Superset: ${stockNo} ${monthKey} (${monthSlice.length} rows)`);
+        }
+        // 建構相容的 cache entry
+        entry = {
+          data: monthSlice,
+          // coverage 將由下方的 rebuildCoverageFromData 重建
+          sources: new Set(['YearSuperset_Sliced'])
+        };
+      }
+    }
+  }
+
   if (!entry) return null;
   if (!(entry.sources instanceof Set)) {
     entry.sources = new Set(entry.sources || []);
@@ -16115,6 +16146,59 @@ self.onmessage = async function (e) {
           writeResults,
           queryResults,
           message: '測試完成，請檢查 Console 日誌'
+        }
+      });
+    }
+    // Patch: LB-SUPESET-FALLBACK-TEST-20251212A - 驗證 Superset Fallback 機制
+    else if (type === "testSupersetFallback") {
+      console.log('[Worker Test] Received testSupersetFallback request.');
+      // 1. 清除月度快取以強迫 fallback
+      workerMonthlyCache.clear();
+
+      // 2. 注入 Mock 資料到 Superset
+      const mockStockNo = "TEST_9999";
+      const mockYear = "2024";
+      const mockData = [
+        { date: "2024-01-01", close: 100 },
+        { date: "2024-01-02", close: 101 },
+      ];
+
+      const marketKey = "TWSE";
+      const priceModeKey = "RAW";
+      const yearEntry = {
+        data: mockData,
+        lastUpdated: new Date().toISOString()
+      };
+
+      // 直接操作 workerYearSupersetCache
+      let marketMap = workerYearSupersetCache.get(marketKey);
+      if (!marketMap) {
+        marketMap = new Map();
+        workerYearSupersetCache.set(marketKey, marketMap);
+      }
+      // getYearSupersetStockKey(stockNo, priceModeKey, split)
+      const stockKey = getYearSupersetStockKey(mockStockNo, priceModeKey, false);
+      let stockMap = marketMap.get(stockKey);
+      if (!stockMap) {
+        stockMap = new Map();
+        marketMap.set(stockKey, stockMap);
+      }
+      stockMap.set(Number(mockYear), yearEntry);
+
+      console.log('[Worker Test] Setup Superset Cache done.');
+
+      // 3. 呼叫 getMonthlyCacheEntry
+      // 預期它會因為 Monthly miss 而去 Superset 抓取
+      // getMonthlyCacheEntry(marketKey, stockNo, monthKey, adjusted, split)
+      const result = getMonthlyCacheEntry(marketKey, mockStockNo, "202401", false, false);
+
+      // 4. 回報結果
+      self.postMessage({
+        type: "testSupersetFallbackResult",
+        data: {
+          success: !!result,
+          resultDataLength: result ? result.data.length : 0,
+          sources: result ? Array.from(result.sources || []) : []
         }
       });
     }
