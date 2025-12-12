@@ -5716,6 +5716,7 @@ function tryResolveRangeFromYearSuperset({
   const currentYear = new Date().getUTCFullYear();
   const combinedRows = [];
   const missingYears = [];
+  const allMissingRanges = []; // Patch: LB-SUPERSET-V3-20251213A - 收集所有缺口
   const years = [];
 
   // 迴圈檢查每個年份
@@ -5833,7 +5834,11 @@ function tryResolveRangeFromYearSuperset({
       validRows.forEach(row => combinedRows.push(row));
 
       years.push(year);  // ✅ 加入已命中年份
-      missingYears.push(year);  // ✅ 標記需補抓
+
+      // Patch: LB-SUPERSET-V3-20251213A - 收集具體缺口範圍，而非標記整年缺失
+      missingInRange.forEach(gap => {
+        allMissingRanges.push(gap);
+      });
       continue;
     }
 
@@ -5853,18 +5858,23 @@ function tryResolveRangeFromYearSuperset({
     years.push(year);
   }
 
+  // 合併並轉換所有缺口為 ISO 範圍
+  const mergedMissingRanges = mergeRangeBounds(allMissingRanges);
+  const missingRangesISO = mergedMissingRanges.map(range => rangeBoundsToISO(range));
+
   // 🔥 部分命中邏輯
-  if (missingYears.length > 0) {
+  if (missingRangesISO.length > 0) {
     if (combinedRows.length > 0) {
       // Patch: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A - 有部分資料，回傳 partial hit
-      console.log(`[Worker Superset] 部分命中: 已有 ${years.length} 年資料 (${combinedRows.length} 筆)，需補抓 ${missingYears.length} 年 (${missingYears.join(', ')})`);
+      console.log(`[Worker Superset] 部分命中: 已有 ${years.length} 年資料 (${combinedRows.length} 筆)，需補抓 ${missingRangesISO.length} 個區段`);
 
       const deduped = dedupeAndSortData(combinedRows);
 
       return {
         partial: true,
         data: deduped,
-        missingYears,
+        missingRanges: missingRangesISO, // Patch: LB-SUPERSET-V3-20251213A - 回傳具體缺口
+        missingYears, // 保留以相容舊邏輯 (可選)
         years,
         stockNo,
         startDate,
@@ -7060,7 +7070,6 @@ async function fetchStockData(
       }
     }
 
-    // 原有的 tryResolveRangeFromYearSuperset 邏輯
     const supersetResult = tryResolveRangeFromYearSuperset({
       stockNo,
       startDate,
@@ -7074,95 +7083,65 @@ async function fetchStockData(
     });
     if (supersetResult) {
       // Patch: LB-SUPERSET-V2-20251203B — 處理部分命中
-      if (supersetResult.partial && Array.isArray(supersetResult.missingYears) && supersetResult.missingYears.length > 0) {
-        console.log(`[Worker Superset] 處理部分命中，補抓缺失年份: ${supersetResult.missingYears.join(', ')}`);
-
-        self.postMessage({
-          type: "progress",
-          progress: 7,
-          message: `補抓缺失資料 (${supersetResult.missingYears.length} 年)...`,
-        });
-
+      if (supersetResult.partial) {
         const patchedData = [];
 
-        // [Patch: LB-WORKER-BATCH-FETCH-20251212A] 批量補抓連續年份 (含 Fallback 降級機制)
-        const missingRanges = groupConsecutiveYears(supersetResult.missingYears);
-        const requestStartYear = parseInt(startDate.slice(0, 4), 10);
-        const requestEndYear = parseInt(endDate.slice(0, 4), 10);
+        // Patch: LB-SUPERSET-V3-20251213A — 區分 MissingRanges 與 MissingYears
+        let rangesToFetch = [];
 
-        console.log(`[Worker Superset] 合併缺失年份為 ${missingRanges.length} 個區段:`,
-          missingRanges.map(r => `${r.start}~${r.end}`).join(', '));
+        // 優先使用具體缺口範圍
+        if (Array.isArray(supersetResult.missingRanges) && supersetResult.missingRanges.length > 0) {
+          console.log(`[Worker Superset] 處理部分命中，補抓缺失區段: ${supersetResult.missingRanges.map(r => `${r.startISO}~${r.endISO}`).join(', ')}`);
+          rangesToFetch = supersetResult.missingRanges;
+        }
+        // 兼容舊邏輯 (若無 missingRanges 但有 missingYears)
+        else if (Array.isArray(supersetResult.missingYears) && supersetResult.missingYears.length > 0) {
+          console.log(`[Worker Superset] 處理部分命中，補抓缺失年份: ${supersetResult.missingYears.join(', ')}`);
+          // 轉換 missingYears 為整年範圍
+          const missingYearRanges = groupConsecutiveYears(supersetResult.missingYears).map(range => {
+            // ... rebuild full logic if needed, but since we modified callee, we assume missingRanges is mostly there
+            const reqStart = range.start === parseInt(startDate.slice(0, 4)) ? startDate : `${range.start}-01-01`;
+            const reqEnd = range.end === parseInt(endDate.slice(0, 4)) ? endDate : `${range.end}-12-31`;
+            return { startISO: reqStart, endISO: reqEnd };
+          });
+          rangesToFetch = missingYearRanges;
+        }
 
-        for (const range of missingRanges) {
-          const rangeStartYear = range.start;
-          const rangeEndYear = range.end;
+        if (rangesToFetch.length > 0) {
+          self.postMessage({
+            type: "progress",
+            progress: 7,
+            message: `補抓缺失資料 (${rangesToFetch.length} 個區段)...`,
+          });
 
-          // 計算該區段的起始與結束日期 (ISO 格式)
-          const reqStartISO = rangeStartYear === requestStartYear
-            ? startDate
-            : `${rangeStartYear}-01-01`;
-          const reqEndISO = rangeEndYear === requestEndYear
-            ? endDate
-            : `${rangeEndYear}-12-31`;
+          for (const range of rangesToFetch) {
+            const reqStartISO = range.startISO;
+            const reqEndISO = range.endISO;
 
-          console.log(`[Worker Superset] 批量補抓年份 ${rangeStartYear}~${rangeEndYear}: ${reqStartISO} ~ ${reqEndISO}`);
+            console.log(`[Worker Superset] 補抓區段: ${reqStartISO} ~ ${reqEndISO}`);
 
-          try {
-            // [嘗試] 發送合併後的請求
-            const patchResult = await fetchStockData(
-              stockNo,
-              reqStartISO,
-              reqEndISO,
-              marketKey,
-              {
-                effectiveStartDate: optionEffectiveStart,
-                lookbackDays: optionLookbackDays,
-                adjusted: false,
-                splitAdjustment: split,
-                skipCoverageGapRepair: true,  // 防止遞迴
-                useYearSuperset: false,        // 強制走 Blob Range / Proxy 邏輯
-              }
-            );
-
-            if (patchResult && Array.isArray(patchResult.data) && patchResult.data.length > 0) {
-              console.log(`[Worker Superset] 成功批量補抓 ${rangeStartYear}~${rangeEndYear}: ${patchResult.data.length} 筆`);
-              patchedData.push(...patchResult.data);
-            } else {
-              throw new Error('Batch fetch returned empty data'); // 拋出錯誤以觸發降級重試
-            }
-
-          } catch (error) {
-            console.warn(`[Worker Superset] 批量補抓失敗 (${rangeStartYear}~${rangeEndYear})，啟動降級機制改為逐年補抓:`, error);
-
-            // [Fallback 降級機制] 批量失敗時，退回逐年抓取，避免全部陣亡
-            for (let year = rangeStartYear; year <= rangeEndYear; year++) {
-              const fallbackStartISO = year === requestStartYear ? startDate : `${year}-01-01`;
-              const fallbackEndISO = year === requestEndYear ? endDate : `${year}-12-31`;
-
-              console.log(`[Worker Superset Fallback] 降級補抓年份 ${year}: ${fallbackStartISO} ~ ${fallbackEndISO}`);
-
-              try {
-                const singleResult = await fetchStockData(
-                  stockNo,
-                  fallbackStartISO,
-                  fallbackEndISO,
-                  marketKey,
-                  {
-                    effectiveStartDate: optionEffectiveStart,
-                    lookbackDays: optionLookbackDays,
-                    adjusted: false,
-                    splitAdjustment: split,
-                    skipCoverageGapRepair: true,
-                    useYearSuperset: false,
-                  }
-                );
-                if (singleResult && Array.isArray(singleResult.data) && singleResult.data.length > 0) {
-                  console.log(`[Worker Superset Fallback] 成功補抓年份 ${year}: ${singleResult.data.length} 筆`);
-                  patchedData.push(...singleResult.data);
+            try {
+              const patchResult = await fetchStockData(
+                stockNo,
+                reqStartISO,
+                reqEndISO,
+                marketKey,
+                {
+                  effectiveStartDate: optionEffectiveStart,
+                  lookbackDays: optionLookbackDays,
+                  adjusted: false,
+                  splitAdjustment: split,
+                  skipCoverageGapRepair: true,
+                  useYearSuperset: false,
                 }
-              } catch (innerError) {
-                console.error(`[Worker Superset Fallback] 年份 ${year} 補抓仍然失敗:`, innerError);
+              );
+
+              if (patchResult && Array.isArray(patchResult.data)) {
+                console.log(`[Worker Superset] 成功補抓區段 ${reqStartISO}~${reqEndISO}: ${patchResult.data.length} 筆`);
+                patchedData.push(...patchResult.data);
               }
+            } catch (error) {
+              console.warn(`[Worker Superset] 補抓失敗 (${reqStartISO}~${reqEndISO}):`, error);
             }
           }
         }
