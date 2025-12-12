@@ -62,7 +62,7 @@ function obtainStore(name) {
 
 // ==========================================
 // Lazybacktest 統一 Smart TTL 策略
-// Patch Tag: LB-SMART-TTL-UNIFIED-20251212A
+// Patch Tag: LB-SMART-TTL-UNIFIED-20251212B
 // ==========================================
 
 /**
@@ -71,6 +71,18 @@ function obtainStore(name) {
 function getTaiwanTime() {
     const now = new Date();
     return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+
+/**
+ * 取得台灣今日日期字串 (YYYY-MM-DD 格式)
+ * 用於 isHistorical 判斷，避免 UTC 時區誤判
+ */
+function getTaiwanDateString() {
+    const nowTW = getTaiwanTime();
+    const year = nowTW.getFullYear();
+    const month = String(nowTW.getMonth() + 1).padStart(2, '0');
+    const day = String(nowTW.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 /**
@@ -83,6 +95,33 @@ function calculateSecondsUntil(targetHour, targetMinute, targetSecond) {
 
     const diffSeconds = Math.floor((targetTime - nowTW) / 1000);
     return diffSeconds > 0 ? diffSeconds : 0;
+}
+
+/**
+ * 計算距離下週一 14:00 還有多少秒 (用於週末快取)
+ */
+function calculateSecondsUntilNextMonday1400() {
+    const nowTW = getTaiwanTime();
+    const dayOfWeek = nowTW.getDay(); // 0=週日, 6=週六
+
+    // 計算到下週一的天數
+    let daysUntilMonday;
+    if (dayOfWeek === 0) {
+        daysUntilMonday = 1; // 週日 -> 1 天
+    } else if (dayOfWeek === 6) {
+        daysUntilMonday = 2; // 週六 -> 2 天
+    } else {
+        daysUntilMonday = (8 - dayOfWeek) % 7 || 7; // 其他情況
+    }
+
+    // 計算目標時間：下週一 14:00:00
+    const targetTime = new Date(nowTW);
+    targetTime.setDate(targetTime.getDate() + daysUntilMonday);
+    targetTime.setHours(14, 0, 0, 0);
+
+    const diffSeconds = Math.floor((targetTime - nowTW) / 1000);
+    // 確保至少 60 秒，最多 3 天 (約 259200 秒)
+    return Math.max(60, Math.min(diffSeconds, 259200));
 }
 
 /**
@@ -104,8 +143,9 @@ function calculateSmartHeaders(isHistoricalData = false) {
         console.log('[Smart TTL] 模式: 歷史資料 (1年)');
     }
     else if (dayOfWeek === 0 || dayOfWeek === 6) {
-        sMaxAge = 86400;
-        console.log('[Smart TTL] 模式: 假日封印 (24h)');
+        // 週末：倒數至下週一 14:00
+        sMaxAge = calculateSecondsUntilNextMonday1400();
+        console.log(`[Smart TTL] 模式: 週末倒數 (${sMaxAge}s 至下週一 14:00)`);
     }
     else {
         if (timeValue < 1400) {
@@ -125,6 +165,7 @@ function calculateSmartHeaders(isHistoricalData = false) {
         'Netlify-CDN-Cache-Control': `${commonDirectives}, s-maxage=${sMaxAge}`
     };
 }
+
 
 function normaliseFinMindErrorMessage(message) {
     if (!message) return 'FinMind 未預期錯誤';
@@ -1022,10 +1063,11 @@ export default async (req) => {
         };
 
         // [Dynamic Caching Strategy] - Smart TTL
-        // Patch Tag: LB-SMART-TTL-UNIFIED-20251212A
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const isHistorical = endDate < today;
+        // Patch Tag: LB-SMART-TTL-UNIFIED-20251212B
+        // 使用台灣時區判斷 isHistorical，避免 UTC 在 00:00~08:00 誤判
+        const todayTW = getTaiwanTime();
+        todayTW.setHours(0, 0, 0, 0);
+        const isHistorical = endDate < todayTW;
 
         const smartHeaders = calculateSmartHeaders(isHistorical);
 
