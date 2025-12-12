@@ -1,3 +1,13 @@
+## 2025-12-12 — Patch LB-GA4-FRONTEND-DOWNLOAD-20251212A
+- **Scope**: 移除 `price-inspector-download` Netlify Function，改用 GA4 前端事件追蹤。
+- **Updates**:
+  - 刪除 `netlify/functions/price-inspector-download.js`，不再使用 Netlify Blobs 儲存下載統計。
+  - `public/app/js/backtest.js` 新增 GA4 事件追蹤工具（含 `isGtagAvailable` 環境檢查、批次佇列上限 500 筆、`beforeunload`/`visibilitychange` 綁定）。
+  - `reportPriceInspectorDownloadUsage` 改為呼叫 `gtag('event', 'price_download', {...})`，預設單筆模式（`GA4_DOWNLOAD_MODE='single'`）。
+  - 開發者區域「下載用量追蹤」改為提示至 GA4 查看。
+- **Known Limitations**: 若使用者封鎖 GA/gtag，該使用者下載不會被統計；批次模式在瀏覽器崩潰時可能遺失部分事件。
+- **Testing**: 驗證 `price-inspector-download.js` 已刪除、全專案無殘留引用；需於瀏覽器實測下載功能與 GA4 Realtime。
+
 ## 2025-10-30 — Patch LB-SW-RECOVERY-20251030A
 - **Issue recap**: 使用者在瀏覽器主控台遇到 `cnm-sw.js` 產生 `Response with null body status cannot have body` 的錯誤，影響回測流程觀察；同時 Netlify `cache-warmer` 定時任務仍維持舊的 UTC 05:40，與預期的台灣時間 14:00 不符。
 - **Fix**:
