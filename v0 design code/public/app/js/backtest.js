@@ -7049,101 +7049,108 @@ function closePriceInspectorModal() {
     document.body.classList.remove('overflow-hidden');
 }
 
-const PRICE_INSPECTOR_DOWNLOAD_STATS_TTL = 60 * 1000;
-let priceInspectorDownloadStatsCache = null;
-let priceInspectorDownloadStatsLastFetch = 0;
+// ===== GA4 前端事件追蹤（價格下載）=====
+// Patch Tag: LB-GA4-FRONTEND-DOWNLOAD-20251212A
+// 注意：此邏輯僅在瀏覽器環境使用，不支援 SSR / Node 執行
 
-async function refreshPriceInspectorDownloadStats(force = false) {
-    const now = Date.now();
-    if (!force && priceInspectorDownloadStatsCache && (now - priceInspectorDownloadStatsLastFetch) < PRICE_INSPECTOR_DOWNLOAD_STATS_TTL) {
-        return priceInspectorDownloadStatsCache;
-    }
-    try {
-        const response = await fetch('/.netlify/functions/price-inspector-download', {
-            method: 'GET',
-            cache: 'no-cache',
-        });
-        if (response.ok) {
-            const payload = await response.json().catch(() => null);
-            const stats = payload?.stats || payload || null;
-            if (stats) {
-                priceInspectorDownloadStatsCache = stats;
-                priceInspectorDownloadStatsLastFetch = now;
-            }
-        }
-    } catch (error) {
-        console.warn('[PriceInspector] 下載統計讀取失敗:', error);
-    }
-    return priceInspectorDownloadStatsCache;
+/**
+ * 判斷是否在瀏覽器環境且 GA4 gtag 可用
+ */
+function isGtagAvailable() {
+    return typeof window !== 'undefined' && typeof window.gtag === 'function';
 }
 
-function buildPriceInspectorDownloadStatsHtml(stats) {
-    if (!stats) {
-        return '下載統計載入中⋯';
+/**
+ * 單筆 GA4 事件回報 - 價格下載
+ * @param {Object} params - { stock_no, market, format, size_bytes }
+ */
+function sendPriceDownloadEvent(params) {
+    if (!isGtagAvailable()) {
+        console.warn('[GA4] gtag 不可用，略過事件回報');
+        return;
     }
-    const total = Number(stats.totalDownloads || stats.total || 0);
-    const csvCount = Number(stats.byFormat?.csv || 0);
-    const jsonCount = Number(stats.byFormat?.json || 0);
-    const totalBytes = Number(stats.totalBytes || 0);
-    const updatedAt = stats.updatedAt ? new Date(stats.updatedAt).toLocaleString('zh-TW') : '—';
-    const lastEvent = Array.isArray(stats.lastEvents) && stats.lastEvents.length > 0 ? stats.lastEvents[0] : null;
-    const lastEventLabel = lastEvent
-        ? `${(lastEvent.format || 'UNK').toUpperCase()} ・ ${lastEvent.stockNo || lastEvent.market || '未知'} ・ ${new Date(lastEvent.timestamp).toLocaleTimeString('zh-TW', { hour12: false })}`
-        : '尚無下載紀錄';
-    const resourceLabel = totalBytes > 0 ? `${(totalBytes / 1024).toFixed(1)} KB` : '尚未紀錄資源';
-    const maxCount = Math.max(csvCount, jsonCount, 1);
-    const buildBar = (label, count, color) => {
-        const width = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
-        const safeWidth = count > 0 ? Math.max(6, width) : 0;
-        return `<div class="space-y-1" role="group" aria-label="${escapeHtml(label)} 下載：${count} 次">
-                <div class="flex items-center justify-between text-[11px]"><span style="color: var(--foreground);">${escapeHtml(label)}</span><span style="color: var(--muted-foreground);">${count} 次</span></div>
-                <div class="h-2 rounded-full bg-muted/40 overflow-hidden" style="background-color: color-mix(in srgb, var(--muted) 60%, transparent);">
-                    <div class="h-2 rounded-full" style="width: ${safeWidth}%; background-color: ${color}; transition: width 200ms ease;"></div>
-                </div>
-            </div>`;
-    };
-    const chartSection = `<div class="space-y-2 mt-1" aria-label="下載格式分布">
-            ${buildBar('CSV', csvCount, 'color-mix(in srgb, var(--primary) 90%, black)')}
-            ${buildBar('JSON', jsonCount, 'color-mix(in srgb, var(--accent) 90%, black)')}
-        </div>`;
-    return `<div class="space-y-2">
-                <div class="text-[11px]" style="color: var(--muted-foreground);">下載總數：${total} 次 ・ CSV：${csvCount} 次 ・ JSON：${jsonCount} 次</div>
-                <div class="text-[11px]" style="color: var(--muted-foreground);">資源耗用：${resourceLabel} ・ 最近更新：${updatedAt}</div>
-                ${chartSection}
-                <div class="text-[11px]" style="color: var(--muted-foreground);">最近事件：${escapeHtml(lastEventLabel)}</div>
-            </div>`;
-}
-
-function updatePriceInspectorStatsSection(panel, force = false) {
-    if (!panel) return;
-    const placeholder = panel.querySelector('[data-download-stats]');
-    if (!placeholder) return;
-    refreshPriceInspectorDownloadStats(force).then((stats) => {
-        placeholder.innerHTML = buildPriceInspectorDownloadStatsHtml(stats);
+    window.gtag('event', 'price_download', {
+        stock_no: params.stock_no || 'N/A',
+        market: params.market || 'TWSE',
+        format: params.format || 'csv',
+        size_bytes: params.size_bytes || 0,
     });
 }
 
-function updateDeveloperDownloadUsage(force = false) {
+// 批次事件佇列（備用功能，預設使用單筆模式）
+const GA4_DOWNLOAD_QUEUE_MAX = 500; // 佇列上限，避免無限增長
+let priceDownloadEventQueue = [];
+let priceDownloadFlushScheduled = false;
+
+/**
+ * 將事件加入批次佇列，於頁面卸載前統一發送
+ * @param {Object} params - { stock_no, market, format, size_bytes }
+ */
+function enqueuePriceDownloadEvent(params) {
+    if (priceDownloadEventQueue.length >= GA4_DOWNLOAD_QUEUE_MAX) {
+        console.warn('[GA4] 下載事件佇列已滿，略過此筆');
+        return;
+    }
+    priceDownloadEventQueue.push({
+        stock_no: params.stock_no || 'N/A',
+        market: params.market || 'TWSE',
+        format: params.format || 'csv',
+        size_bytes: params.size_bytes || 0,
+        timestamp: Date.now(),
+    });
+    schedulePriceDownloadFlush();
+}
+
+function schedulePriceDownloadFlush() {
+    if (priceDownloadFlushScheduled) return;
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    priceDownloadFlushScheduled = true;
+    window.addEventListener('beforeunload', flushPriceDownloadEvents, { once: true });
+    document.addEventListener('visibilitychange', handleDownloadVisibilityChange);
+}
+
+function handleDownloadVisibilityChange() {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        flushPriceDownloadEvents();
+    }
+}
+
+function flushPriceDownloadEvents() {
+    if (!isGtagAvailable() || priceDownloadEventQueue.length === 0) {
+        priceDownloadEventQueue = [];
+        return;
+    }
+    priceDownloadEventQueue.forEach((params) => {
+        window.gtag('event', 'price_download', {
+            stock_no: params.stock_no,
+            market: params.market,
+            format: params.format,
+            size_bytes: params.size_bytes,
+        });
+    });
+    console.log(`[GA4] 批次下載事件已發送: ${priceDownloadEventQueue.length} 筆`);
+    priceDownloadEventQueue = [];
+}
+
+// 選項：預設使用單筆模式
+const GA4_DOWNLOAD_MODE = 'single'; // 'single' 或 'batch'
+
+// ===== 開發者下載統計區塊（已遷移至 GA4）=====
+
+function updateDeveloperDownloadUsage() {
     const statsEl = document.getElementById('developerDownloadUsageStats');
     if (!statsEl) return;
-    statsEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">下載統計載入中⋯</div>';
-    refreshPriceInspectorDownloadStats(force).then((stats) => {
-        if (!stats) {
-            statsEl.innerHTML = '<div class="text-[11px]" style="color: var(--muted-foreground);">下載統計載入中⋯</div>';
-            return;
-        }
-        const intro = '<div class="text-[11px]" style="color: var(--muted-foreground);">此資料顯示全部網站使用者的價格下載次數與伺服器傳輸量。</div>';
-        const statsHtml = buildPriceInspectorDownloadStatsHtml(stats);
-        statsEl.innerHTML = `<div class="space-y-2">${intro}${statsHtml}</div>`;
-    });
+    statsEl.innerHTML = `<div class="text-[11px]" style="color: var(--muted-foreground);">
+        下載事件已透過 <strong>GA4</strong> 追蹤。<br>
+        請至 <a href="https://analytics.google.com/" target="_blank" class="underline text-primary">Google Analytics</a> 查看「<code>price_download</code>」事件。
+    </div>`;
 }
 
 function initDeveloperDownloadUsageControls() {
     const refreshBtn = document.getElementById('developerDownloadUsageRefreshBtn');
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', () => {
-            updateDeveloperDownloadUsage(true);
-        });
+        // 刷新按鈕不再需要，但保留結構避免 JS 錯誤
+        refreshBtn.style.display = 'none';
     }
     updateDeveloperDownloadUsage();
 }
@@ -7205,27 +7212,24 @@ function downloadPriceInspectorTable(format) {
     anchor.click();
     URL.revokeObjectURL(url);
     reportPriceInspectorDownloadUsage(format, blob.size, payload.context);
-    const panel = document.getElementById('priceInspectorDebugPanel');
-    updatePriceInspectorStatsSection(panel, true);
+    // 注：統計區塊已遷移至 GA4，不再需要刷新
 }
 
-async function reportPriceInspectorDownloadUsage(format, sizeBytes, context = {}) {
-    if (typeof fetch !== 'function') return;
-    const payload = {
-        format,
-        sizeBytes: Number(sizeBytes) || 0,
-        stockNo: context.stockNo || null,
+/**
+ * 回報價格下載事件至 GA4
+ * Patch Tag: LB-GA4-FRONTEND-DOWNLOAD-20251212A
+ */
+function reportPriceInspectorDownloadUsage(format, sizeBytes, context = {}) {
+    const params = {
+        stock_no: context.stockNo || 'N/A',
         market: context.market || currentMarket || 'TWSE',
-        timestamp: Date.now(),
+        format: format || 'csv',
+        size_bytes: Number(sizeBytes) || 0,
     };
-    try {
-        await fetch('/.netlify/functions/price-inspector-download', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-    } catch (error) {
-        console.warn('[PriceInspector] 下載事件上報失敗:', error);
+    if (GA4_DOWNLOAD_MODE === 'batch') {
+        enqueuePriceDownloadEvent(params);
+    } else {
+        sendPriceDownloadEvent(params);
     }
 }
 
