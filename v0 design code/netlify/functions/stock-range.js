@@ -14,6 +14,72 @@ const inFlightTwseMonthCache = new Map();
 
 const isQuotaError = (error) => Boolean(error && (error.status === 402 || error.status === 429));
 
+// ==========================================
+// Lazybacktest 統一 Smart TTL 策略
+// Patch Tag: LB-SMART-TTL-UNIFIED-20251212A
+// ==========================================
+
+/**
+ * 取得台灣目前時間物件
+ */
+function getTaiwanTime() {
+    const now = new Date();
+    return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+
+/**
+ * 計算距離當日目標時間還有多少秒
+ */
+function calculateSecondsUntil(targetHour, targetMinute, targetSecond) {
+    const nowTW = getTaiwanTime();
+    const targetTime = new Date(nowTW);
+    targetTime.setHours(targetHour, targetMinute, targetSecond, 0);
+
+    const diffSeconds = Math.floor((targetTime - nowTW) / 1000);
+    return diffSeconds > 0 ? diffSeconds : 0;
+}
+
+/**
+ * 計算 Smart TTL Headers
+ * @param {boolean} isHistoricalData - 是否為純歷史資料查詢
+ */
+function calculateSmartHeaders(isHistoricalData = false) {
+    const SWR_SECONDS = 60;
+    let sMaxAge = 3600;
+
+    const nowTW = getTaiwanTime();
+    const dayOfWeek = nowTW.getDay();
+    const timeValue = nowTW.getHours() * 100 + nowTW.getMinutes();
+
+    console.log(`[Smart TTL] 台灣時間: ${nowTW.toLocaleTimeString()}, 週${dayOfWeek}, 歷史: ${isHistoricalData}`);
+
+    if (isHistoricalData) {
+        sMaxAge = 31536000;
+        console.log('[Smart TTL] 模式: 歷史資料 (1年)');
+    }
+    else if (dayOfWeek === 0 || dayOfWeek === 6) {
+        sMaxAge = 86400;
+        console.log('[Smart TTL] 模式: 假日封印 (24h)');
+    }
+    else {
+        if (timeValue < 1400) {
+            const secondsUntil1400 = calculateSecondsUntil(14, 0, 0);
+            sMaxAge = secondsUntil1400 > 60 ? secondsUntil1400 : 60;
+            console.log(`[Smart TTL] 模式: 平日倒數 (${sMaxAge}s 至 14:00)`);
+        } else {
+            sMaxAge = 3600;
+            console.log('[Smart TTL] 模式: 平日盤後 (1h)');
+        }
+    }
+
+    const commonDirectives = `public, stale-while-revalidate=${SWR_SECONDS}`;
+
+    return {
+        'Cache-Control': `${commonDirectives}, max-age=${sMaxAge}, s-maxage=${sMaxAge}`,
+        'Netlify-CDN-Cache-Control': `${commonDirectives}, s-maxage=${sMaxAge}`
+    };
+}
+
 function normalizeMarketType(marketType = 'TWSE') {
     const upper = String(marketType).toUpperCase();
     if (upper.includes('TPEX') || upper.includes('OTC') || upper.includes('TWO')) return 'TPEX';
@@ -492,19 +558,18 @@ export default async (req) => {
             }
         };
 
-        // [Dynamic Caching Strategy]
+        // [Dynamic Caching Strategy] - Smart TTL
+        // Patch Tag: LB-SMART-TTL-UNIFIED-20251212A
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-
         const isHistorical = endDate < today;
-        const cacheTTL = isHistorical ? 31536000 : 3600;
-        const cacheControlHeader = `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}${isHistorical ? ', immutable' : ''}`;
+
+        const smartHeaders = calculateSmartHeaders(isHistorical);
 
         return new Response(JSON.stringify(responsePayload), {
             headers: {
                 'Content-Type': 'application/json',
-                'Cache-Control': cacheControlHeader,
-                'Netlify-CDN-Cache-Control': `public, s-maxage=${cacheTTL}`,
+                ...smartHeaders
             }
         });
     } catch (error) {
