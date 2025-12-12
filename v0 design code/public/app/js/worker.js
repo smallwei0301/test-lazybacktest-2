@@ -6481,8 +6481,9 @@ async function tryFetchRangeFromBlob({
             : null;
 
           // 補齊成功後，非同步觸發後端重建/持久化 year-cache（best-effort）
+          // Patch: LB-PERSIST-TRIGGER-FIX-20251212A — 使用 lastDate 而非 endDate，確保持久化範圍為實際資料範圍
           try {
-            const persistUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&marketType=${encodeURIComponent(marketKey)}&cacheBust=${Date.now()}`;
+            const persistUrl = `/.netlify/functions/stock-range?stockNo=${encodeURIComponent(stockNo)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(lastDate)}&marketType=${encodeURIComponent(marketKey)}&cacheBust=${Date.now()}`;
             fetch(persistUrl, { method: 'GET' }).then(() => {
               /* persisted trigger sent */
             }).catch(() => {
