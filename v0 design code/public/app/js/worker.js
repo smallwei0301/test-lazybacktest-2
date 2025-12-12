@@ -46,7 +46,7 @@ const CLASSIFICATION_MODES = {
 
 // Patch Tag: LB-SUPERSET-V2-20251203B — Debug flag for Year Superset cache
 // Patch Tag: LB-SUPERSET-PARTIAL-HIT-FIX-20251204A — 智能缺口過濾與精確覆蓋檢查，修復部分命中失效
-const DEBUG_SUPERSET = false; // Set to true for detailed Superset cache logs
+const DEBUG_SUPERSET = true; // Set to true for detailed Superset cache logs
 
 
 const legacyRuleResultNormaliser =
